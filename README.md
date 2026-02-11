@@ -1,4 +1,4 @@
- 
+A lightweight online chat alternative in just two files! 
 
 ### Features:
  - Room creation
