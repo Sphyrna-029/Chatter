@@ -10,3 +10,6 @@
  - @Mentions
  - Notifications
  - Link previews 
+
+
+![](https://github.com/Sphyrna-029/Chatter/blob/main/Screenshot_20260211_110841-1.png?raw=true)
