@@ -1508,6 +1508,15 @@
         let screenStream = null;
         let activeScreenSharers = new Set();
         let selectedScreenShare = null; // Track which screen share is currently selected for main view
+        let screenPublisherPc = null;
+        let screenSubscriberPcs = new Map(); // sharer_user_id -> RTCPeerConnection
+        let incomingScreenStreams = new Map(); // sharer_user_id -> MediaStream
+        let pendingScreenSubscriptions = new Set();
+        let subscriptionRetryTimers = new Map();
+        const SCREEN_SUBSCRIBE_RETRY_MS = 750;
+        const WEBRTC_CONFIG = {
+            iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
+        };
 
         // Message reactions
         let messageReactions = {}; // event_id -> {emoji: count}
@@ -1720,6 +1729,209 @@
             }
         }
 
+        function scheduleScreenSubscriptionRetry(sharerUserId, delayMs = SCREEN_SUBSCRIBE_RETRY_MS) {
+            if (subscriptionRetryTimers.has(sharerUserId)) {
+                return;
+            }
+
+            const timer = setTimeout(() => {
+                subscriptionRetryTimers.delete(sharerUserId);
+                if (inVoiceChannel && activeScreenSharers.has(sharerUserId) && sharerUserId !== userId) {
+                    ensureScreenSubscriber(sharerUserId);
+                }
+            }, delayMs);
+
+            subscriptionRetryTimers.set(sharerUserId, timer);
+        }
+
+        function cancelScreenSubscriptionRetry(sharerUserId) {
+            const timer = subscriptionRetryTimers.get(sharerUserId);
+            if (timer) {
+                clearTimeout(timer);
+                subscriptionRetryTimers.delete(sharerUserId);
+            }
+        }
+
+        function clearAllScreenSubscriptionRetries() {
+            subscriptionRetryTimers.forEach(timer => clearTimeout(timer));
+            subscriptionRetryTimers.clear();
+        }
+
+        function canSignalOverWebSocket() {
+            return ws && ws.readyState === WebSocket.OPEN;
+        }
+
+        async function closeScreenPublisherPeer() {
+            if (screenPublisherPc) {
+                try {
+                    await screenPublisherPc.close();
+                } catch (error) {
+                    console.error('Error closing screen publisher peer:', error);
+                }
+                screenPublisherPc = null;
+            }
+        }
+
+        async function closeScreenSubscriberPeer(sharerUserId, sendUnsubscribe = true) {
+            cancelScreenSubscriptionRetry(sharerUserId);
+            pendingScreenSubscriptions.delete(sharerUserId);
+
+            const pc = screenSubscriberPcs.get(sharerUserId);
+            if (pc) {
+                screenSubscriberPcs.delete(sharerUserId);
+                try {
+                    await pc.close();
+                } catch (error) {
+                    console.error('Error closing screen subscriber peer:', error);
+                }
+            }
+
+            incomingScreenStreams.delete(sharerUserId);
+
+            if (sendUnsubscribe && canSignalOverWebSocket() && currentRoomId) {
+                ws.send(JSON.stringify({
+                    type: 'screen_webrtc_unsubscribe',
+                    room_id: currentRoomId,
+                    sharer_user_id: sharerUserId
+                }));
+            }
+        }
+
+        async function closeAllScreenSubscriberPeers(sendUnsubscribe = true) {
+            const sharers = Array.from(screenSubscriberPcs.keys());
+            for (const sharerUserId of sharers) {
+                await closeScreenSubscriberPeer(sharerUserId, sendUnsubscribe);
+            }
+        }
+
+        async function syncScreenSubscriptions() {
+            if (!inVoiceChannel || !currentRoomId) {
+                await closeAllScreenSubscriberPeers(false);
+                return;
+            }
+
+            for (const sharerUserId of Array.from(activeScreenSharers)) {
+                if (sharerUserId !== userId) {
+                    await ensureScreenSubscriber(sharerUserId);
+                }
+            }
+
+            for (const sharerUserId of Array.from(screenSubscriberPcs.keys())) {
+                if (sharerUserId === userId || !activeScreenSharers.has(sharerUserId)) {
+                    await closeScreenSubscriberPeer(sharerUserId);
+                }
+            }
+        }
+
+        async function ensureScreenSubscriber(sharerUserId) {
+            if (!inVoiceChannel || !currentRoomId || sharerUserId === userId) return;
+            if (!activeScreenSharers.has(sharerUserId)) return;
+            if (screenSubscriberPcs.has(sharerUserId) || pendingScreenSubscriptions.has(sharerUserId)) return;
+
+            if (!canSignalOverWebSocket()) {
+                scheduleScreenSubscriptionRetry(sharerUserId);
+                return;
+            }
+
+            const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+            screenSubscriberPcs.set(sharerUserId, pc);
+            pendingScreenSubscriptions.add(sharerUserId);
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate || !canSignalOverWebSocket()) return;
+                ws.send(JSON.stringify({
+                    type: 'screen_webrtc_subscribe_candidate',
+                    room_id: currentRoomId,
+                    sharer_user_id: sharerUserId,
+                    candidate: event.candidate.toJSON()
+                }));
+            };
+
+            pc.ontrack = (event) => {
+                const incomingStream = event.streams && event.streams[0]
+                    ? event.streams[0]
+                    : new MediaStream([event.track]);
+
+                incomingScreenStreams.set(sharerUserId, incomingStream);
+                displayScreenShare(incomingStream, sharerUserId);
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (['failed', 'disconnected', 'closed'].includes(pc.connectionState)) {
+                    closeScreenSubscriberPeer(sharerUserId, false);
+                    if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
+                        scheduleScreenSubscriptionRetry(sharerUserId);
+                    }
+                }
+            };
+
+            try {
+                pc.addTransceiver('video', { direction: 'recvonly' });
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                if (!canSignalOverWebSocket()) {
+                    throw new Error('WebSocket disconnected before subscribe offer could be sent');
+                }
+
+                ws.send(JSON.stringify({
+                    type: 'screen_webrtc_subscribe_offer',
+                    room_id: currentRoomId,
+                    sharer_user_id: sharerUserId,
+                    sdp: offer.sdp
+                }));
+            } catch (error) {
+                console.error(`Failed creating subscribe peer for ${sharerUserId}:`, error);
+                await closeScreenSubscriberPeer(sharerUserId, false);
+                if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
+                    scheduleScreenSubscriptionRetry(sharerUserId);
+                }
+            }
+        }
+
+        async function startScreenPublisherPeer() {
+            if (!screenStream) {
+                throw new Error('Missing screen stream');
+            }
+
+            if (!canSignalOverWebSocket()) {
+                throw new Error('WebSocket is not connected');
+            }
+
+            await closeScreenPublisherPeer();
+
+            const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+            screenPublisherPc = pc;
+
+            screenStream.getVideoTracks().forEach(track => {
+                pc.addTrack(track, screenStream);
+            });
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate || !canSignalOverWebSocket()) return;
+                ws.send(JSON.stringify({
+                    type: 'screen_webrtc_publish_candidate',
+                    room_id: currentRoomId,
+                    candidate: event.candidate.toJSON()
+                }));
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (['failed', 'disconnected', 'closed'].includes(pc.connectionState) && isScreenSharing) {
+                    stopScreenShare();
+                }
+            };
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            ws.send(JSON.stringify({
+                type: 'screen_webrtc_publish_offer',
+                room_id: currentRoomId,
+                sdp: offer.sdp
+            }));
+        }
+
         async function startScreenShare() {
             try {
                 // Get screen stream
@@ -1750,29 +1962,52 @@
                     stopScreenShare();
                 };
 
-                // Capture and send frames
-                startScreenCapture();
+                // Publish screen via WebRTC to the server SFU
+                await startScreenPublisherPeer();
 
             } catch (error) {
                 console.error('Error starting screen share:', error);
+                await closeScreenPublisherPeer();
+                if (screenStream) {
+                    screenStream.getTracks().forEach(track => {
+                        track.onended = null;
+                        track.stop();
+                    });
+                    screenStream = null;
+                }
+                isScreenSharing = false;
+                document.getElementById('screenShareBtn').textContent = '🖥️ Share Screen';
+                document.getElementById('screenShareBtn').classList.remove('active');
+                if (canSignalOverWebSocket() && currentRoomId) {
+                    ws.send(JSON.stringify({
+                        type: 'screen_share_stop',
+                        room_id: currentRoomId
+                    }));
+                }
                 alert('Could not start screen sharing. Please check permissions.');
             }
         }
 
         async function stopScreenShare() {
+            const wasScreenSharing = isScreenSharing;
+            isScreenSharing = false;
+
+            await closeScreenPublisherPeer();
+
             if (screenStream) {
-                screenStream.getTracks().forEach(track => track.stop());
+                screenStream.getTracks().forEach(track => {
+                    track.onended = null;
+                    track.stop();
+                });
                 screenStream = null;
             }
-
-            isScreenSharing = false;
 
             // Update UI
             document.getElementById('screenShareBtn').textContent = '🖥️ Share Screen';
             document.getElementById('screenShareBtn').classList.remove('active');
 
             // Notify server
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            if (wasScreenSharing && canSignalOverWebSocket() && currentRoomId) {
                 ws.send(JSON.stringify({
                     type: 'screen_share_stop',
                     room_id: currentRoomId
@@ -1780,46 +2015,9 @@
             }
         }
 
-        function startScreenCapture() {
-            const video = document.createElement('video');
-            video.srcObject = screenStream;
-            video.play();
-
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-
-            // Send frames at ~10 FPS for reasonable performance
-            const captureInterval = setInterval(() => {
-                if (!isScreenSharing || !screenStream) {
-                    clearInterval(captureInterval);
-                    return;
-                }
-
-                // Set canvas size to match video
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-
-                // Draw current frame
-                ctx.drawImage(video, 0, 0);
-
-                // Convert to JPEG and send
-                canvas.toBlob((blob) => {
-                    if (blob && ws && ws.readyState === WebSocket.OPEN) {
-                        blob.arrayBuffer().then(buffer => {
-                            // Send screen frame with header
-                            const header = new TextEncoder().encode('SCREEN:');
-                            const combined = new Uint8Array(header.length + buffer.byteLength);
-                            combined.set(header, 0);
-                            combined.set(new Uint8Array(buffer), header.length);
-                            ws.send(combined.buffer);
-                        });
-                    }
-                }, 'image/jpeg', 0.7);
-            }, 100); // 10 FPS
-        }
-
-        function displayScreenShare(imageData, sharerUserId) {
+        function displayScreenShare(stream, sharerUserId) {
             activeScreenSharers.add(sharerUserId);
+            incomingScreenStreams.set(sharerUserId, stream);
             const wrapper = document.getElementById('screenShareWrapper');
             
             // Auto-select first screen share if none selected
@@ -1839,7 +2037,6 @@
                         <h4 class="screen-share-main-title" id="screenShareMainTitle"></h4>
                     </div>
                     <video class="screen-share-main-video" id="screenShareMainVideo" autoplay playsinline muted></video>
-                    <canvas id="screenShareMainCanvas" style="display: none;"></canvas>
                 `;
                 wrapper.insertBefore(mainContainer, wrapper.firstChild);
             }
@@ -1868,7 +2065,6 @@
                 const sharerName = sharerUserId.split(':')[0].substring(1);
                 preview.innerHTML = `
                     <video class="screen-share-preview-video" autoplay playsinline muted></video>
-                    <canvas style="display: none;"></canvas>
                     <div class="screen-share-preview-label">${escapeHtml(sharerName)}</div>
                 `;
 
@@ -1878,10 +2074,11 @@
                 gridContainer.appendChild(preview);
             }
 
-            // Update the preview video (always update previews)
-            const previewCanvas = preview.querySelector('canvas');
             const previewVideo = preview.querySelector('video');
-            updateScreenShareVideo(imageData, previewCanvas, previewVideo);
+            if (previewVideo && previewVideo.srcObject !== stream) {
+                previewVideo.srcObject = stream;
+                previewVideo.play().catch(() => {});
+            }
 
             // Update main view ONLY if this is the selected sharer
             if (sharerUserId === selectedScreenShare) {
@@ -1889,44 +2086,12 @@
                 const mainTitle = document.getElementById('screenShareMainTitle');
                 const sharerName = sharerUserId.split(':')[0].substring(1);
                 mainTitle.textContent = `${sharerName}'s screen`;
-                
-                // Update main view with its own canvas for smoother rendering
-                const mainCanvas = document.getElementById('screenShareMainCanvas');
                 const mainVideo = document.getElementById('screenShareMainVideo');
-                updateScreenShareVideo(imageData, mainCanvas, mainVideo);
+                if (mainVideo && mainVideo.srcObject !== stream) {
+                    mainVideo.srcObject = stream;
+                    mainVideo.play().catch(() => {});
+                }
             }
-        }
-
-        function updateScreenShareVideo(imageData, canvas, video) {
-            // Convert array buffer to blob URL
-            const blob = new Blob([imageData], { type: 'image/jpeg' });
-            const url = URL.createObjectURL(blob);
-
-            // Load and draw the image
-            const img = new Image();
-            img.onload = () => {
-                // Only resize canvas if dimensions changed
-                if (canvas.width !== img.width || canvas.height !== img.height) {
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                }
-
-                const ctx = canvas.getContext('2d', { alpha: false });
-                ctx.drawImage(img, 0, 0);
-
-                // Create stream only once
-                if (!video.srcObject) {
-                    const stream = canvas.captureStream(30);
-                    video.srcObject = stream;
-                    video.play();
-                }
-
-                URL.revokeObjectURL(url);
-            };
-            
-            // Set crossOrigin to avoid potential CORS issues
-            img.crossOrigin = 'anonymous';
-            img.src = url;
         }
 
         function selectScreenShare(sharerUserId) {
@@ -1955,9 +2120,12 @@
                 const mainTitle = document.getElementById('screenShareMainTitle');
                 const sharerName = sharerUserId.split(':')[0].substring(1);
                 mainTitle.textContent = `${sharerName}'s screen`;
-                
-                // Note: The main view will be updated on the next frame received for this user
-                // The displayScreenShare function handles rendering to both preview and main view
+                const mainVideo = document.getElementById('screenShareMainVideo');
+                const stream = incomingScreenStreams.get(sharerUserId);
+                if (mainVideo && stream && mainVideo.srcObject !== stream) {
+                    mainVideo.srcObject = stream;
+                    mainVideo.play().catch(() => {});
+                }
             }
         }
 
@@ -1996,9 +2164,13 @@
             }
         }
 
-        function hideScreenShare(sharerUserId) {
+        async function hideScreenShare(sharerUserId) {
             if (sharerUserId) {
                 activeScreenSharers.delete(sharerUserId);
+                cancelScreenSubscriptionRetry(sharerUserId);
+                pendingScreenSubscriptions.delete(sharerUserId);
+                await closeScreenSubscriberPeer(sharerUserId);
+                incomingScreenStreams.delete(sharerUserId);
                 
                 // Remove preview tile
                 const previewId = 'screenPreview_' + CSS.escape(sharerUserId);
@@ -2006,7 +2178,6 @@
                 if (preview) {
                     const video = preview.querySelector('video');
                     if (video && video.srcObject) {
-                        video.srcObject.getTracks().forEach(track => track.stop());
                         video.srcObject = null;
                     }
                     preview.remove();
@@ -2047,15 +2218,16 @@
                 // Hide all screen shares
                 activeScreenSharers.clear();
                 selectedScreenShare = null;
-                
-                const wrapper = document.getElementById('screenShareWrapper');
+                clearAllScreenSubscriptionRetries();
+                pendingScreenSubscriptions.clear();
+                incomingScreenStreams.clear();
+                await closeAllScreenSubscriberPeers();
                 
                 // Clean up all preview videos
                 const gridContainer = document.getElementById('screenShareGrid');
                 if (gridContainer) {
                     gridContainer.querySelectorAll('video').forEach(video => {
                         if (video.srcObject) {
-                            video.srcObject.getTracks().forEach(track => track.stop());
                             video.srcObject = null;
                         }
                     });
@@ -2153,7 +2325,7 @@
             }
 
             // Hide all incoming screen shares
-            hideScreenShare();
+            await hideScreenShare();
 
             // Stop audio processing
             if (scriptProcessor) {
@@ -2261,6 +2433,7 @@
                     });
 
                     updateVoiceMembersList();
+                    await syncScreenSubscriptions();
                 }
             } catch (error) {
                 console.error('Error loading voice members:', error);
@@ -2454,23 +2627,11 @@
 
             ws.onmessage = async (event) => {
                 if (event.data instanceof ArrayBuffer) {
-                    // Check if it's a screen share frame or audio
+                    // Audio binary path
                     const view = new Uint8Array(event.data);
-                    const headerText = new TextDecoder().decode(view.slice(0, 7));
-                    
-                    if (headerText === 'SCREEN:') {
-                        // Screen share frame: SCREEN:<user_id>\n<jpeg_data>
-                        const payload = view.slice(7);
-                        // Find the newline delimiter separating user_id from jpeg data
-                        const newlineIdx = payload.indexOf(10); // 10 = '\n'
-                        if (newlineIdx !== -1) {
-                            const sharerUserId = new TextDecoder().decode(payload.slice(0, newlineIdx));
-                            const imageData = payload.slice(newlineIdx + 1);
-                            if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
-                                displayScreenShare(imageData, sharerUserId);
-                            }
-                        }
-                    } else if (headerText.startsWith('AUDIO:')) {
+                    const headerText = new TextDecoder().decode(view.slice(0, 6));
+
+                    if (headerText === 'AUDIO:') {
                         // Audio data - only play if in voice
                         const audioData = view.slice(6);
                         if (inVoiceChannel) {
@@ -2485,7 +2646,7 @@
                 } else {
                     // JSON message
                     const message = JSON.parse(event.data);
-                    handleWebSocketMessage(message);
+                    await handleWebSocketMessage(message);
                 }
             };
 
@@ -2495,11 +2656,16 @@
 
             ws.onclose = () => {
                 console.log('WebSocket closed');
+                closeScreenPublisherPeer();
+                closeAllScreenSubscriberPeers(false);
+                clearAllScreenSubscriptionRetries();
+                pendingScreenSubscriptions.clear();
+                incomingScreenStreams.clear();
                 setTimeout(connectWebSocket, 3000);
             };
         }
 
-        function handleWebSocketMessage(message) {
+        async function handleWebSocketMessage(message) {
             if (message.type === 'connected') {
                 console.log('WebSocket connected');
             } else if (message.type === 'm.room.message') {
@@ -2560,7 +2726,7 @@
                     
                     // If the person who left was screen sharing, hide their stream
                     if (activeScreenSharers.has(message.user_id)) {
-                        hideScreenShare(message.user_id);
+                        await hideScreenShare(message.user_id);
                     }
                 }
             } else if (message.type === 'voice_user_muted') {
@@ -2578,19 +2744,91 @@
                 }
             } else if (message.type === 'screen_share_started') {
                 if (message.room_id === currentRoomId) {
-                    activeScreenSharers.add(message.user_id);
+                    if (message.user_id !== userId) {
+                        activeScreenSharers.add(message.user_id);
+                    }
                     if (voiceMemberStates[message.user_id]) {
                         voiceMemberStates[message.user_id].screen_sharing = true;
+                    } else {
+                        voiceMemberStates[message.user_id] = {
+                            muted: false,
+                            screen_sharing: true
+                        };
                     }
                     updateVoiceMembersList();
+                    if (inVoiceChannel && message.user_id !== userId) {
+                        await ensureScreenSubscriber(message.user_id);
+                    }
                 }
             } else if (message.type === 'screen_share_stopped') {
                 if (message.room_id === currentRoomId) {
-                    hideScreenShare(message.user_id);
+                    await hideScreenShare(message.user_id);
                     if (voiceMemberStates[message.user_id]) {
                         voiceMemberStates[message.user_id].screen_sharing = false;
                     }
                     updateVoiceMembersList();
+                }
+            } else if (message.type === 'screen_webrtc_publish_answer') {
+                if (screenPublisherPc && message.sdp) {
+                    try {
+                        await screenPublisherPc.setRemoteDescription({
+                            type: 'answer',
+                            sdp: message.sdp
+                        });
+                    } catch (error) {
+                        console.error('Failed applying publisher answer:', error);
+                        if (isScreenSharing) {
+                            await stopScreenShare();
+                        }
+                    }
+                }
+            } else if (message.type === 'screen_webrtc_publish_candidate') {
+                if (screenPublisherPc && message.candidate) {
+                    try {
+                        await screenPublisherPc.addIceCandidate(message.candidate);
+                    } catch (error) {
+                        console.error('Failed adding publisher ICE candidate:', error);
+                    }
+                }
+            } else if (message.type === 'screen_webrtc_subscribe_answer') {
+                const sharerUserId = message.sharer_user_id;
+                const pc = sharerUserId ? screenSubscriberPcs.get(sharerUserId) : null;
+                if (pc && message.sdp) {
+                    try {
+                        await pc.setRemoteDescription({
+                            type: 'answer',
+                            sdp: message.sdp
+                        });
+                        pendingScreenSubscriptions.delete(sharerUserId);
+                        cancelScreenSubscriptionRetry(sharerUserId);
+                    } catch (error) {
+                        console.error(`Failed applying subscribe answer for ${sharerUserId}:`, error);
+                        await closeScreenSubscriberPeer(sharerUserId, false);
+                        if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
+                            scheduleScreenSubscriptionRetry(sharerUserId);
+                        }
+                    }
+                }
+            } else if (message.type === 'screen_webrtc_subscribe_candidate') {
+                const sharerUserId = message.sharer_user_id;
+                const pc = sharerUserId ? screenSubscriberPcs.get(sharerUserId) : null;
+                if (pc && message.candidate) {
+                    try {
+                        await pc.addIceCandidate(message.candidate);
+                    } catch (error) {
+                        console.error(`Failed adding subscribe ICE candidate for ${sharerUserId}:`, error);
+                    }
+                }
+            } else if (message.type === 'screen_webrtc_error') {
+                console.warn('Screen WebRTC error:', message.detail || message);
+                if (message.scope === 'publish' && isScreenSharing) {
+                    await stopScreenShare();
+                } else if (message.scope === 'subscribe' && message.sharer_user_id) {
+                    const sharerUserId = message.sharer_user_id;
+                    await closeScreenSubscriberPeer(sharerUserId, false);
+                    if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
+                        scheduleScreenSubscriptionRetry(sharerUserId);
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 use axum::{
-    extract::{Path, Query, State, WebSocketUpgrade},
     extract::ws::{Message, WebSocket},
+    extract::{Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json},
     routing::{delete, get, post, put},
@@ -9,8 +9,29 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::SystemTime,
+};
 use tokio::sync::{mpsc, RwLock};
+use webrtc::{
+    api::{
+        interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder,
+        API,
+    },
+    ice_transport::{ice_candidate::RTCIceCandidateInit, ice_server::RTCIceServer},
+    interceptor::registry::Registry,
+    peer_connection::{
+        configuration::RTCConfiguration, peer_connection_state::RTCPeerConnectionState,
+        sdp::session_description::RTCSessionDescription, RTCPeerConnection,
+    },
+    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    track::{
+        track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter},
+        track_remote::TrackRemote,
+    },
+};
 
 // ---------------------------------------------------------------------------
 // State types
@@ -28,6 +49,9 @@ struct AppState {
     active_websockets: RwLock<HashMap<String, WsSender>>,
     voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     user_presence: RwLock<HashMap<String, PresenceRecord>>,
+    webrtc_api: Arc<API>,
+    screen_publishers: RwLock<HashMap<String, ScreenPublisherState>>,
+    screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     client_html: String,
 }
 
@@ -54,6 +78,20 @@ struct PresenceRecord {
     last_active: f64,
     last_typing: f64,
     connected: bool,
+}
+
+#[derive(Clone)]
+struct ScreenPublisherState {
+    room_id: String,
+    peer_connection: Arc<RTCPeerConnection>,
+    relay_track: Option<Arc<TrackLocalStaticRTP>>,
+}
+
+#[derive(Clone)]
+struct ScreenSubscriberState {
+    viewer_user_id: String,
+    sharer_user_id: String,
+    peer_connection: Arc<RTCPeerConnection>,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,13 +148,20 @@ struct ReactionRequest {
 fn generate_token() -> String {
     use rand::Rng;
     let bytes: [u8; 32] = rand::thread_rng().gen();
-    format!("syt_{}", base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+    format!(
+        "syt_{}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    )
 }
 
 fn generate_id(prefix: &str) -> String {
     use rand::Rng;
     let bytes: [u8; 16] = rand::thread_rng().gen();
-    format!("{}_{}", prefix, base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
+    format!(
+        "{}_{}",
+        prefix,
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    )
 }
 
 fn format_user_id(username: &str) -> String {
@@ -152,7 +197,10 @@ async fn get_user_from_token(state: &AppState, token: &str) -> Option<String> {
 }
 
 fn error_response(status: StatusCode, detail: &str) -> (StatusCode, Json<Value>) {
-    (status, Json(json!({"errcode": "M_UNKNOWN", "error": detail})))
+    (
+        status,
+        Json(json!({"errcode": "M_UNKNOWN", "error": detail})),
+    )
 }
 
 /// Broadcast a JSON value to all WebSocket-connected members of a room.
@@ -174,6 +222,86 @@ async fn broadcast_to_room(state: &AppState, room_id: &str, message: &Value) {
     }
 }
 
+/// Send a JSON message to a single WebSocket-connected user.
+async fn send_to_user(state: &AppState, user_id: &str, message: &Value) {
+    let ws_map = state.active_websockets.read().await;
+    if let Some(tx) = ws_map.get(user_id) {
+        let _ = tx.send(Message::Text(message.to_string().into()));
+    }
+}
+
+fn subscriber_key(viewer_user_id: &str, sharer_user_id: &str) -> String {
+    format!("{}|{}", viewer_user_id, sharer_user_id)
+}
+
+fn parse_ice_candidate(value: &Value) -> Option<RTCIceCandidateInit> {
+    let candidate = value.get("candidate")?.as_str()?.to_string();
+    let sdp_mid = value
+        .get("sdpMid")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let sdp_mline_index = value
+        .get("sdpMLineIndex")
+        .and_then(|v| v.as_u64())
+        .and_then(|n| u16::try_from(n).ok());
+    let username_fragment = value
+        .get("usernameFragment")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Some(RTCIceCandidateInit {
+        candidate,
+        sdp_mid,
+        sdp_mline_index,
+        username_fragment,
+    })
+}
+
+fn ice_candidate_to_json(candidate: &RTCIceCandidateInit) -> Value {
+    json!({
+        "candidate": candidate.candidate,
+        "sdpMid": candidate.sdp_mid,
+        "sdpMLineIndex": candidate.sdp_mline_index,
+        "usernameFragment": candidate.username_fragment
+    })
+}
+
+fn build_webrtc_api() -> Arc<API> {
+    let mut media_engine = MediaEngine::default();
+    media_engine
+        .register_default_codecs()
+        .expect("register_default_codecs failed");
+
+    let mut registry = Registry::new();
+    registry = register_default_interceptors(registry, &mut media_engine)
+        .expect("register_default_interceptors failed");
+
+    Arc::new(
+        APIBuilder::new()
+            .with_media_engine(media_engine)
+            .with_interceptor_registry(registry)
+            .build(),
+    )
+}
+
+fn default_webrtc_config() -> RTCConfiguration {
+    RTCConfiguration {
+        ice_servers: vec![RTCIceServer {
+            urls: vec!["stun:stun.l.google.com:19302".to_string()],
+            ..Default::default()
+        }],
+        ..Default::default()
+    }
+}
+
+async fn create_peer_connection(state: &AppState) -> Result<Arc<RTCPeerConnection>, webrtc::Error> {
+    state
+        .webrtc_api
+        .new_peer_connection(default_webrtc_config())
+        .await
+        .map(Arc::new)
+}
+
 // ---------------------------------------------------------------------------
 // Auth endpoints
 // ---------------------------------------------------------------------------
@@ -186,16 +314,28 @@ async fn register(
 
     let mut users = state.users.write().await;
     if users.contains_key(&user_id) {
-        return Err(error_response(StatusCode::BAD_REQUEST, "User already exists"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "User already exists",
+        ));
     }
 
     let token = generate_token();
     let device_id = req.device_id.unwrap_or_else(|| generate_id("DEVICE"));
 
-    users.insert(user_id.clone(), UserRecord { password: req.password });
+    users.insert(
+        user_id.clone(),
+        UserRecord {
+            password: req.password,
+        },
+    );
     drop(users);
 
-    state.access_tokens.write().await.insert(token.clone(), user_id.clone());
+    state
+        .access_tokens
+        .write()
+        .await
+        .insert(token.clone(), user_id.clone());
 
     Ok(Json(json!({
         "user_id": user_id,
@@ -220,7 +360,11 @@ async fn login(
     let token = generate_token();
     let device_id = req.device_id.unwrap_or_else(|| generate_id("DEVICE"));
 
-    state.access_tokens.write().await.insert(token.clone(), user_id.clone());
+    state
+        .access_tokens
+        .write()
+        .await
+        .insert(token.clone(), user_id.clone());
 
     Ok(Json(json!({
         "user_id": user_id,
@@ -261,18 +405,24 @@ async fn create_room(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let room_id = generate_id("!");
     let room_count = state.rooms.read().await.len();
-    let room_name = req.name.unwrap_or_else(|| format!("Room {}", room_count + 1));
+    let room_name = req
+        .name
+        .unwrap_or_else(|| format!("Room {}", room_count + 1));
 
-    state.rooms.write().await.insert(room_id.clone(), RoomRecord {
-        name: room_name,
-        topic: req.topic.unwrap_or_default(),
-        creator: user_id.clone(),
-    });
+    state.rooms.write().await.insert(
+        room_id.clone(),
+        RoomRecord {
+            name: room_name,
+            topic: req.topic.unwrap_or_default(),
+            creator: user_id.clone(),
+        },
+    );
 
     let mut members = vec![user_id.clone()];
 
@@ -286,8 +436,16 @@ async fn create_room(
         }
     }
 
-    state.room_members.write().await.insert(room_id.clone(), members);
-    state.messages.write().await.insert(room_id.clone(), Vec::new());
+    state
+        .room_members
+        .write()
+        .await
+        .insert(room_id.clone(), members);
+    state
+        .messages
+        .write()
+        .await
+        .insert(room_id.clone(), Vec::new());
 
     Ok(Json(json!({"room_id": room_id})))
 }
@@ -299,7 +457,8 @@ async fn join_room(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -337,7 +496,8 @@ async fn leave_room(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -387,7 +547,8 @@ async fn joined_rooms(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rm = state.room_members.read().await;
@@ -400,9 +561,7 @@ async fn joined_rooms(
     Ok(Json(json!({"joined_rooms": joined})))
 }
 
-async fn list_all_rooms(
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
     let rooms = state.rooms.read().await;
     let rm = state.room_members.read().await;
 
@@ -434,7 +593,8 @@ async fn send_message(
     let _ = txn_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -443,8 +603,15 @@ async fn send_message(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -463,7 +630,10 @@ async fn send_message(
         "origin_server_ts": timestamp
     });
 
-    state.messages.write().await
+    state
+        .messages
+        .write()
+        .await
         .entry(room_id.clone())
         .or_insert_with(Vec::new)
         .push(event.clone());
@@ -481,7 +651,8 @@ async fn get_room_messages(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -490,15 +661,29 @@ async fn get_room_messages(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
     let limit = query.limit.unwrap_or(50);
     let msgs = state.messages.read().await;
     let room_msgs = msgs.get(&room_id).cloned().unwrap_or_default();
-    let chunk: Vec<Value> = room_msgs.into_iter().rev().take(limit).collect::<Vec<_>>().into_iter().rev().collect();
+    let chunk: Vec<Value> = room_msgs
+        .into_iter()
+        .rev()
+        .take(limit)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
 
     Ok(Json(json!({
         "start": "t0",
@@ -515,7 +700,8 @@ async fn redact_message(
     let _ = txn_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -524,8 +710,15 @@ async fn redact_message(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -534,7 +727,10 @@ async fn redact_message(
         for msg in room_msgs.iter_mut() {
             if msg.get("event_id").and_then(|v| v.as_str()) == Some(&event_id) {
                 if msg.get("sender").and_then(|v| v.as_str()) != Some(&user_id) {
-                    return Err(error_response(StatusCode::FORBIDDEN, "Can only delete your own messages"));
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "Can only delete your own messages",
+                    ));
                 }
 
                 msg["content"] = json!({"msgtype": "m.text", "body": "[deleted]"});
@@ -574,7 +770,8 @@ async fn sync(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rm = state.room_members.read().await;
@@ -594,7 +791,14 @@ async fn sync(
         };
 
         let room_msgs = msgs.get(room_id).cloned().unwrap_or_default();
-        let last_msgs: Vec<Value> = room_msgs.into_iter().rev().take(10).collect::<Vec<_>>().into_iter().rev().collect();
+        let last_msgs: Vec<Value> = room_msgs
+            .into_iter()
+            .rev()
+            .take(10)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
 
         let member_events: Vec<Value> = members
             .iter()
@@ -628,14 +832,17 @@ async fn sync(
         ];
         state_events.extend(member_events);
 
-        joined_rooms_data.insert(room_id.clone(), json!({
-            "state": {"events": state_events},
-            "timeline": {
-                "events": last_msgs,
-                "limited": false,
-                "prev_batch": "t0"
-            }
-        }));
+        joined_rooms_data.insert(
+            room_id.clone(),
+            json!({
+                "state": {"events": state_events},
+                "timeline": {
+                    "events": last_msgs,
+                    "limited": false,
+                    "prev_batch": "t0"
+                }
+            }),
+        );
     }
 
     let ts = SystemTime::now()
@@ -663,7 +870,8 @@ async fn add_reaction(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token).await
+    let user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -672,18 +880,30 @@ async fn add_reaction(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
-    let emoji = req.emoji
+    let emoji = req
+        .emoji
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "Emoji required"))?;
 
     let (action, reactions_snapshot) = {
         let mut reactions = state.message_reactions.write().await;
-        let event_reactions = reactions.entry(event_id.clone()).or_insert_with(HashMap::new);
-        let emoji_users = event_reactions.entry(emoji.clone()).or_insert_with(Vec::new);
+        let event_reactions = reactions
+            .entry(event_id.clone())
+            .or_insert_with(HashMap::new);
+        let emoji_users = event_reactions
+            .entry(emoji.clone())
+            .or_insert_with(Vec::new);
 
         let action = if let Some(pos) = emoji_users.iter().position(|u| u == &user_id) {
             emoji_users.remove(pos);
@@ -697,7 +917,8 @@ async fn add_reaction(
         };
 
         // Clone the current reactions for broadcast
-        let snap: HashMap<String, Vec<String>> = reactions.get(&event_id).cloned().unwrap_or_default();
+        let snap: HashMap<String, Vec<String>> =
+            reactions.get(&event_id).cloned().unwrap_or_default();
         (action.to_string(), snap)
     };
 
@@ -729,7 +950,8 @@ async fn get_reactions(
     let _ = room_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let _user_id = get_user_from_token(&state, &token).await
+    let _user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let reactions = state.message_reactions.read().await;
@@ -752,7 +974,8 @@ async fn get_voice_channel_status(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let _user_id = get_user_from_token(&state, &token).await
+    let _user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -793,7 +1016,8 @@ async fn get_room_presence(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let _user_id = get_user_from_token(&state, &token).await
+    let _user_id = get_user_from_token(&state, &token)
+        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if !state.rooms.read().await.contains_key(&room_id) {
@@ -818,17 +1042,23 @@ async fn get_room_presence(
                     "idle"
                 };
 
-                presence_data.insert(member_id.clone(), json!({
-                    "status": status,
-                    "last_active": presence.last_active,
-                    "last_typing": presence.last_typing
-                }));
+                presence_data.insert(
+                    member_id.clone(),
+                    json!({
+                        "status": status,
+                        "last_active": presence.last_active,
+                        "last_typing": presence.last_typing
+                    }),
+                );
             } else {
-                presence_data.insert(member_id.clone(), json!({
-                    "status": "offline",
-                    "last_active": 0,
-                    "last_typing": 0
-                }));
+                presence_data.insert(
+                    member_id.clone(),
+                    json!({
+                        "status": "offline",
+                        "last_active": 0,
+                        "last_typing": 0
+                    }),
+                );
             }
         }
     }
@@ -843,10 +1073,7 @@ async fn get_room_presence(
 // WebSocket
 // ---------------------------------------------------------------------------
 
-async fn ws_upgrade(
-    State(state): State<Arc<AppState>>,
-    ws: WebSocketUpgrade,
-) -> impl IntoResponse {
+async fn ws_upgrade(State(state): State<Arc<AppState>>, ws: WebSocketUpgrade) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_websocket(state, socket))
 }
 
@@ -855,9 +1082,7 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
 
     // First message must be auth
     let auth_msg = match ws_stream.next().await {
-        Some(Ok(Message::Text(text))) => {
-            serde_json::from_str::<Value>(&text).ok()
-        }
+        Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(&text).ok(),
         _ => None,
     };
 
@@ -876,7 +1101,9 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         Some(uid) => uid,
         None => {
             let _ = ws_sink
-                .send(Message::Text(json!({"error": "Invalid token"}).to_string().into()))
+                .send(Message::Text(
+                    json!({"error": "Invalid token"}).to_string().into(),
+                ))
                 .await;
             let _ = ws_sink.close().await;
             return;
@@ -886,18 +1113,29 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     // Set up mpsc channel for this user
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
 
-    state.active_websockets.write().await.insert(user_id.clone(), tx);
+    state
+        .active_websockets
+        .write()
+        .await
+        .insert(user_id.clone(), tx);
 
     // Update presence
-    state.user_presence.write().await.insert(user_id.clone(), PresenceRecord {
-        last_active: now_secs(),
-        last_typing: 0.0,
-        connected: true,
-    });
+    state.user_presence.write().await.insert(
+        user_id.clone(),
+        PresenceRecord {
+            last_active: now_secs(),
+            last_typing: 0.0,
+            connected: true,
+        },
+    );
 
     // Send connected ack
     let _ = ws_sink
-        .send(Message::Text(json!({"type": "connected", "user_id": user_id}).to_string().into()))
+        .send(Message::Text(
+            json!({"type": "connected", "user_id": user_id})
+                .to_string()
+                .into(),
+        ))
         .await;
 
     // Spawn task to forward from mpsc channel -> ws sink
@@ -916,7 +1154,7 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     while let Some(Ok(msg)) = ws_stream.next().await {
         match msg {
             Message::Text(text) => {
-                handle_ws_text(&recv_state, &recv_user_id, &text).await;
+                handle_ws_text(recv_state.clone(), &recv_user_id, &text).await;
             }
             Message::Binary(data) => {
                 handle_ws_binary(&recv_state, &recv_user_id, &data).await;
@@ -931,7 +1169,7 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     sink_task.abort();
 }
 
-async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
+async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &str) {
     let msg: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return,
@@ -961,16 +1199,19 @@ async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
                 "room_id": room_id,
                 "user_id": user_id
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_join" => {
             let voice_members = {
                 let mut vc = state.voice_channels.write().await;
                 let room_vc = vc.entry(room_id.to_string()).or_insert_with(HashMap::new);
-                room_vc.insert(user_id.to_string(), VoiceMemberState {
-                    muted: false,
-                    screen_sharing: false,
-                });
+                room_vc.insert(
+                    user_id.to_string(),
+                    VoiceMemberState {
+                        muted: false,
+                        screen_sharing: false,
+                    },
+                );
                 room_vc.keys().cloned().collect::<Vec<_>>()
             };
             let event = json!({
@@ -979,25 +1220,51 @@ async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
                 "user_id": user_id,
                 "voice_members": voice_members
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_leave" => {
-            let voice_members = {
+            let (voice_members, was_screen_sharing) = {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(room_vc) = vc.get_mut(room_id) {
-                    room_vc.remove(user_id);
-                    room_vc.keys().cloned().collect::<Vec<_>>()
+                    if let Some(member) = room_vc.remove(user_id) {
+                        (
+                            room_vc.keys().cloned().collect::<Vec<_>>(),
+                            member.screen_sharing,
+                        )
+                    } else {
+                        (room_vc.keys().cloned().collect::<Vec<_>>(), false)
+                    }
                 } else {
-                    vec![]
+                    (vec![], false)
                 }
             };
+
+            teardown_screen_subscriptions_for_viewer(&state, user_id).await;
+            let publisher_room = teardown_screen_publisher(&state, user_id).await;
+
             let event = json!({
                 "type": "voice_user_left",
                 "room_id": room_id,
                 "user_id": user_id,
                 "voice_members": voice_members
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
+
+            if was_screen_sharing {
+                let event = json!({
+                    "type": "screen_share_stopped",
+                    "room_id": room_id,
+                    "user_id": user_id
+                });
+                broadcast_to_room(&state, room_id, &event).await;
+            } else if let Some(published_room_id) = publisher_room {
+                let event = json!({
+                    "type": "screen_share_stopped",
+                    "room_id": published_room_id,
+                    "user_id": user_id
+                });
+                broadcast_to_room(&state, &published_room_id, &event).await;
+            }
         }
         "voice_mute" => {
             let muted = msg.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1015,7 +1282,7 @@ async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
                 "user_id": user_id,
                 "muted": muted
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_start" => {
             {
@@ -1031,7 +1298,7 @@ async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
                 "room_id": room_id,
                 "user_id": user_id
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_stop" => {
             {
@@ -1042,57 +1309,731 @@ async fn handle_ws_text(state: &AppState, user_id: &str, text: &str) {
                     }
                 }
             }
+            let _ = teardown_screen_publisher(&state, user_id).await;
             let event = json!({
                 "type": "screen_share_stopped",
                 "room_id": room_id,
                 "user_id": user_id
             });
-            broadcast_to_room(state, room_id, &event).await;
+            broadcast_to_room(&state, room_id, &event).await;
+        }
+        "screen_webrtc_publish_offer" => {
+            let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
+            handle_screen_webrtc_publish_offer(state.clone(), user_id, room_id, sdp).await;
+        }
+        "screen_webrtc_publish_candidate" => {
+            if let Some(candidate_value) = msg.get("candidate") {
+                handle_screen_webrtc_publish_candidate(&state, user_id, candidate_value).await;
+            }
+        }
+        "screen_webrtc_subscribe_offer" => {
+            let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            handle_screen_webrtc_subscribe_offer(
+                state.clone(),
+                user_id,
+                room_id,
+                sharer_user_id,
+                sdp,
+            )
+            .await;
+        }
+        "screen_webrtc_subscribe_candidate" => {
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if let Some(candidate_value) = msg.get("candidate") {
+                handle_screen_webrtc_subscribe_candidate(
+                    &state,
+                    user_id,
+                    sharer_user_id,
+                    candidate_value,
+                )
+                .await;
+            }
+        }
+        "screen_webrtc_unsubscribe" => {
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !sharer_user_id.is_empty() {
+                teardown_screen_subscriber_pair(&state, user_id, sharer_user_id).await;
+            }
         }
         _ => {}
     }
 }
 
 async fn handle_ws_binary(state: &AppState, user_id: &str, data: &[u8]) {
-    if data.len() >= 7 && &data[..7] == b"SCREEN:" {
-        // Screen share frame
-        let screen_frame = &data[7..];
-
-        // Find which room this user is in and broadcasting screen
-        let vc = state.voice_channels.read().await;
-        for (_room_id, members) in vc.iter() {
-            if let Some(member) = members.get(user_id) {
-                if member.screen_sharing {
-                    // Tag: SCREEN:<user_id>\n<jpeg_data>
-                    let mut tagged = Vec::with_capacity(7 + user_id.len() + 1 + screen_frame.len());
-                    tagged.extend_from_slice(b"SCREEN:");
-                    tagged.extend_from_slice(user_id.as_bytes());
-                    tagged.push(b'\n');
-                    tagged.extend_from_slice(screen_frame);
-
-                    let targets: Vec<String> = members
-                        .keys()
-                        .filter(|mid| mid.as_str() != user_id)
-                        .cloned()
-                        .collect();
-                    drop(vc);
-
-                    let ws_map = state.active_websockets.read().await;
-                    for mid in &targets {
-                        if let Some(tx) = ws_map.get(mid) {
-                            let _ = tx.send(Message::Binary(tagged.clone().into()));
-                        }
-                    }
-                    return;
-                }
-            }
-        }
-    } else if data.len() >= 6 && &data[..6] == b"AUDIO:" {
+    if data.len() >= 6 && &data[..6] == b"AUDIO:" {
         // Audio with header
         relay_audio(state, user_id, data).await;
     } else {
         // Legacy audio without header
         relay_audio(state, user_id, data).await;
+    }
+}
+
+async fn user_in_voice_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    let vc = state.voice_channels.read().await;
+    vc.get(room_id)
+        .and_then(|members| members.get(user_id))
+        .is_some()
+}
+
+async fn user_is_sharing_screen(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    let vc = state.voice_channels.read().await;
+    vc.get(room_id)
+        .and_then(|members| members.get(user_id))
+        .map(|member| member.screen_sharing)
+        .unwrap_or(false)
+}
+
+async fn set_user_screen_sharing(state: &AppState, room_id: &str, user_id: &str, sharing: bool) {
+    let mut vc = state.voice_channels.write().await;
+    if let Some(room_vc) = vc.get_mut(room_id) {
+        if let Some(member) = room_vc.get_mut(user_id) {
+            member.screen_sharing = sharing;
+        }
+    }
+}
+
+async fn teardown_screen_subscriber_pair(
+    state: &AppState,
+    viewer_user_id: &str,
+    sharer_user_id: &str,
+) {
+    let key = subscriber_key(viewer_user_id, sharer_user_id);
+    let peer_connection = {
+        let mut subs = state.screen_subscribers.write().await;
+        subs.remove(&key).map(|entry| entry.peer_connection)
+    };
+
+    if let Some(pc) = peer_connection {
+        let _ = pc.close().await;
+    }
+}
+
+async fn teardown_screen_subscriptions_for_viewer(state: &AppState, viewer_user_id: &str) {
+    let peer_connections = {
+        let mut subs = state.screen_subscribers.write().await;
+        let keys: Vec<String> = subs
+            .iter()
+            .filter(|(_, entry)| entry.viewer_user_id == viewer_user_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+
+        let mut pcs = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(entry) = subs.remove(&key) {
+                pcs.push(entry.peer_connection);
+            }
+        }
+        pcs
+    };
+
+    for pc in peer_connections {
+        let _ = pc.close().await;
+    }
+}
+
+async fn teardown_screen_subscriptions_for_sharer(state: &AppState, sharer_user_id: &str) {
+    let peer_connections = {
+        let mut subs = state.screen_subscribers.write().await;
+        let keys: Vec<String> = subs
+            .iter()
+            .filter(|(_, entry)| entry.sharer_user_id == sharer_user_id)
+            .map(|(key, _)| key.clone())
+            .collect();
+
+        let mut pcs = Vec::with_capacity(keys.len());
+        for key in keys {
+            if let Some(entry) = subs.remove(&key) {
+                pcs.push(entry.peer_connection);
+            }
+        }
+        pcs
+    };
+
+    for pc in peer_connections {
+        let _ = pc.close().await;
+    }
+}
+
+async fn teardown_screen_publisher(state: &AppState, sharer_user_id: &str) -> Option<String> {
+    let publisher = {
+        let mut publishers = state.screen_publishers.write().await;
+        publishers.remove(sharer_user_id)
+    };
+
+    let publisher = match publisher {
+        Some(p) => p,
+        None => return None,
+    };
+
+    teardown_screen_subscriptions_for_sharer(state, sharer_user_id).await;
+    let _ = publisher.peer_connection.close().await;
+    Some(publisher.room_id)
+}
+
+async fn handle_screen_webrtc_publish_offer(
+    state: Arc<AppState>,
+    user_id: &str,
+    room_id: &str,
+    sdp: &str,
+) {
+    if room_id.is_empty() || sdp.is_empty() {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": "Missing room_id or sdp"
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
+    if !user_in_voice_room(&state, room_id, user_id).await {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": "You must be in the room voice channel before publishing screen share"
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
+    let _ = teardown_screen_publisher(&state, user_id).await;
+
+    let peer_connection = match create_peer_connection(&state).await {
+        Ok(pc) => pc,
+        Err(err) => {
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "publish",
+                "room_id": room_id,
+                "detail": format!("Failed creating peer connection: {}", err)
+            });
+            send_to_user(&state, user_id, &error).await;
+            return;
+        }
+    };
+
+    {
+        let mut publishers = state.screen_publishers.write().await;
+        publishers.insert(
+            user_id.to_string(),
+            ScreenPublisherState {
+                room_id: room_id.to_string(),
+                peer_connection: peer_connection.clone(),
+                relay_track: None,
+            },
+        );
+    }
+
+    {
+        let state_clone = state.clone();
+        let room_id = room_id.to_string();
+        let user_id = user_id.to_string();
+        peer_connection.on_ice_candidate(Box::new(move |candidate| {
+            let state = state_clone.clone();
+            let room_id = room_id.clone();
+            let user_id = user_id.clone();
+            Box::pin(async move {
+                let Some(candidate) = candidate else {
+                    return;
+                };
+                let Ok(candidate_init) = candidate.to_json() else {
+                    return;
+                };
+                let response = json!({
+                    "type": "screen_webrtc_publish_candidate",
+                    "room_id": room_id,
+                    "candidate": ice_candidate_to_json(&candidate_init)
+                });
+                send_to_user(&state, &user_id, &response).await;
+            })
+        }));
+    }
+
+    {
+        let state_clone = state.clone();
+        let room_id = room_id.to_string();
+        let user_id = user_id.to_string();
+        peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
+            let state = state_clone.clone();
+            let room_id = room_id.clone();
+            let user_id = user_id.clone();
+            Box::pin(async move {
+                if matches!(
+                    pc_state,
+                    RTCPeerConnectionState::Failed
+                        | RTCPeerConnectionState::Disconnected
+                        | RTCPeerConnectionState::Closed
+                ) {
+                    if teardown_screen_publisher(&state, &user_id).await.is_some() {
+                        set_user_screen_sharing(&state, &room_id, &user_id, false).await;
+                        let event = json!({
+                            "type": "screen_share_stopped",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        });
+                        broadcast_to_room(&state, &room_id, &event).await;
+                    }
+                }
+            })
+        }));
+    }
+
+    {
+        let state_clone = state.clone();
+        let user_id = user_id.to_string();
+        peer_connection.on_track(Box::new(move |track: Arc<TrackRemote>, _, _| {
+            let state = state_clone.clone();
+            let user_id = user_id.clone();
+            Box::pin(async move {
+                let codec = track.codec();
+                let relay_track = Arc::new(TrackLocalStaticRTP::new(
+                    RTCRtpCodecCapability {
+                        mime_type: codec.capability.mime_type.clone(),
+                        clock_rate: codec.capability.clock_rate,
+                        channels: codec.capability.channels,
+                        sdp_fmtp_line: codec.capability.sdp_fmtp_line.clone(),
+                        rtcp_feedback: codec.capability.rtcp_feedback.clone(),
+                    },
+                    format!("screen-{}", user_id),
+                    "chatter-sfu".to_string(),
+                ));
+
+                {
+                    let mut publishers = state.screen_publishers.write().await;
+                    if let Some(publisher) = publishers.get_mut(&user_id) {
+                        publisher.relay_track = Some(relay_track.clone());
+                    } else {
+                        return;
+                    }
+                }
+
+                tokio::spawn(async move {
+                    while let Ok((rtp_packet, _)) = track.read_rtp().await {
+                        if relay_track.write_rtp(&rtp_packet).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            })
+        }));
+    }
+
+    let offer = match RTCSessionDescription::offer(sdp.to_string()) {
+        Ok(offer) => offer,
+        Err(err) => {
+            let _ = teardown_screen_publisher(&state, user_id).await;
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "publish",
+                "room_id": room_id,
+                "detail": format!("Invalid offer SDP: {}", err)
+            });
+            send_to_user(&state, user_id, &error).await;
+            return;
+        }
+    };
+
+    if let Err(err) = peer_connection.set_remote_description(offer).await {
+        let _ = teardown_screen_publisher(&state, user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": format!("Failed setting remote description: {}", err)
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
+    let answer = match peer_connection.create_answer(None).await {
+        Ok(answer) => answer,
+        Err(err) => {
+            let _ = teardown_screen_publisher(&state, user_id).await;
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "publish",
+                "room_id": room_id,
+                "detail": format!("Failed creating answer: {}", err)
+            });
+            send_to_user(&state, user_id, &error).await;
+            return;
+        }
+    };
+
+    if let Err(err) = peer_connection.set_local_description(answer).await {
+        let _ = teardown_screen_publisher(&state, user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": format!("Failed setting local description: {}", err)
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
+    if let Some(local_desc) = peer_connection.local_description().await {
+        let response = json!({
+            "type": "screen_webrtc_publish_answer",
+            "room_id": room_id,
+            "sdp": local_desc.sdp
+        });
+        send_to_user(&state, user_id, &response).await;
+    } else {
+        let _ = teardown_screen_publisher(&state, user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": "Missing local description for publisher"
+        });
+        send_to_user(&state, user_id, &error).await;
+    }
+}
+
+async fn handle_screen_webrtc_publish_candidate(
+    state: &AppState,
+    user_id: &str,
+    candidate_value: &Value,
+) {
+    let peer_connection = {
+        let publishers = state.screen_publishers.read().await;
+        publishers
+            .get(user_id)
+            .map(|publisher| publisher.peer_connection.clone())
+    };
+
+    let Some(peer_connection) = peer_connection else {
+        return;
+    };
+
+    let Some(candidate) = parse_ice_candidate(candidate_value) else {
+        return;
+    };
+
+    if let Err(err) = peer_connection.add_ice_candidate(candidate).await {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "publish",
+            "detail": format!("Failed adding ICE candidate: {}", err)
+        });
+        send_to_user(state, user_id, &error).await;
+    }
+}
+
+async fn handle_screen_webrtc_subscribe_offer(
+    state: Arc<AppState>,
+    viewer_user_id: &str,
+    room_id: &str,
+    sharer_user_id: &str,
+    sdp: &str,
+) {
+    if room_id.is_empty() || sharer_user_id.is_empty() || sdp.is_empty() {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Missing room_id, sharer_user_id, or sdp"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    if viewer_user_id == sharer_user_id {
+        return;
+    }
+
+    if !user_in_voice_room(&state, room_id, viewer_user_id).await {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "You must be in the room voice channel before subscribing"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    if !user_is_sharing_screen(&state, room_id, sharer_user_id).await {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "The requested sharer is not currently screen sharing"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    let publisher_state = {
+        let publishers = state.screen_publishers.read().await;
+        publishers.get(sharer_user_id).cloned()
+    };
+
+    let Some(publisher_state) = publisher_state else {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Sharer WebRTC publisher is not connected yet"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    };
+
+    if publisher_state.room_id != room_id {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Sharer is publishing in a different room"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    let Some(relay_track) = publisher_state.relay_track else {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Sharer track not ready yet; retry shortly"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    };
+
+    teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+
+    let peer_connection = match create_peer_connection(&state).await {
+        Ok(pc) => pc,
+        Err(err) => {
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "subscribe",
+                "room_id": room_id,
+                "sharer_user_id": sharer_user_id,
+                "detail": format!("Failed creating peer connection: {}", err)
+            });
+            send_to_user(&state, viewer_user_id, &error).await;
+            return;
+        }
+    };
+
+    {
+        let state_clone = state.clone();
+        let room_id = room_id.to_string();
+        let viewer_user_id = viewer_user_id.to_string();
+        let sharer_user_id = sharer_user_id.to_string();
+        peer_connection.on_ice_candidate(Box::new(move |candidate| {
+            let state = state_clone.clone();
+            let room_id = room_id.clone();
+            let viewer_user_id = viewer_user_id.clone();
+            let sharer_user_id = sharer_user_id.clone();
+            Box::pin(async move {
+                let Some(candidate) = candidate else {
+                    return;
+                };
+                let Ok(candidate_init) = candidate.to_json() else {
+                    return;
+                };
+                let response = json!({
+                    "type": "screen_webrtc_subscribe_candidate",
+                    "room_id": room_id,
+                    "sharer_user_id": sharer_user_id,
+                    "candidate": ice_candidate_to_json(&candidate_init)
+                });
+                send_to_user(&state, &viewer_user_id, &response).await;
+            })
+        }));
+    }
+
+    {
+        let state_clone = state.clone();
+        let viewer_user_id = viewer_user_id.to_string();
+        let sharer_user_id = sharer_user_id.to_string();
+        peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
+            let state = state_clone.clone();
+            let viewer_user_id = viewer_user_id.clone();
+            let sharer_user_id = sharer_user_id.clone();
+            Box::pin(async move {
+                if matches!(
+                    pc_state,
+                    RTCPeerConnectionState::Failed
+                        | RTCPeerConnectionState::Disconnected
+                        | RTCPeerConnectionState::Closed
+                ) {
+                    teardown_screen_subscriber_pair(&state, &viewer_user_id, &sharer_user_id).await;
+                }
+            })
+        }));
+    }
+
+    let relay_track: Arc<dyn TrackLocal + Send + Sync> = relay_track;
+    let rtp_sender = match peer_connection.add_track(relay_track).await {
+        Ok(sender) => sender,
+        Err(err) => {
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "subscribe",
+                "room_id": room_id,
+                "sharer_user_id": sharer_user_id,
+                "detail": format!("Failed adding relay track: {}", err)
+            });
+            send_to_user(&state, viewer_user_id, &error).await;
+            let _ = peer_connection.close().await;
+            return;
+        }
+    };
+
+    tokio::spawn(async move {
+        let mut rtcp_buffer = vec![0_u8; 1500];
+        while rtp_sender.read(&mut rtcp_buffer).await.is_ok() {}
+    });
+
+    {
+        let key = subscriber_key(viewer_user_id, sharer_user_id);
+        let mut subs = state.screen_subscribers.write().await;
+        subs.insert(
+            key,
+            ScreenSubscriberState {
+                viewer_user_id: viewer_user_id.to_string(),
+                sharer_user_id: sharer_user_id.to_string(),
+                peer_connection: peer_connection.clone(),
+            },
+        );
+    }
+
+    let offer = match RTCSessionDescription::offer(sdp.to_string()) {
+        Ok(offer) => offer,
+        Err(err) => {
+            teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "subscribe",
+                "room_id": room_id,
+                "sharer_user_id": sharer_user_id,
+                "detail": format!("Invalid offer SDP: {}", err)
+            });
+            send_to_user(&state, viewer_user_id, &error).await;
+            return;
+        }
+    };
+
+    if let Err(err) = peer_connection.set_remote_description(offer).await {
+        teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": format!("Failed setting remote description: {}", err)
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    let answer = match peer_connection.create_answer(None).await {
+        Ok(answer) => answer,
+        Err(err) => {
+            teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+            let error = json!({
+                "type": "screen_webrtc_error",
+                "scope": "subscribe",
+                "room_id": room_id,
+                "sharer_user_id": sharer_user_id,
+                "detail": format!("Failed creating answer: {}", err)
+            });
+            send_to_user(&state, viewer_user_id, &error).await;
+            return;
+        }
+    };
+
+    if let Err(err) = peer_connection.set_local_description(answer).await {
+        teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": format!("Failed setting local description: {}", err)
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    }
+
+    if let Some(local_desc) = peer_connection.local_description().await {
+        let response = json!({
+            "type": "screen_webrtc_subscribe_answer",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "sdp": local_desc.sdp
+        });
+        send_to_user(&state, viewer_user_id, &response).await;
+    } else {
+        teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Missing local description for subscriber"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+    }
+}
+
+async fn handle_screen_webrtc_subscribe_candidate(
+    state: &AppState,
+    viewer_user_id: &str,
+    sharer_user_id: &str,
+    candidate_value: &Value,
+) {
+    if sharer_user_id.is_empty() {
+        return;
+    }
+
+    let key = subscriber_key(viewer_user_id, sharer_user_id);
+    let peer_connection = {
+        let subs = state.screen_subscribers.read().await;
+        subs.get(&key).map(|entry| entry.peer_connection.clone())
+    };
+
+    let Some(peer_connection) = peer_connection else {
+        return;
+    };
+
+    let Some(candidate) = parse_ice_candidate(candidate_value) else {
+        return;
+    };
+
+    if let Err(err) = peer_connection.add_ice_candidate(candidate).await {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "sharer_user_id": sharer_user_id,
+            "detail": format!("Failed adding ICE candidate: {}", err)
+        });
+        send_to_user(state, viewer_user_id, &error).await;
     }
 }
 
@@ -1121,6 +2062,9 @@ async fn relay_audio(state: &AppState, user_id: &str, data: &[u8]) {
 }
 
 async fn cleanup_disconnect(state: &AppState, user_id: &str) {
+    teardown_screen_subscriptions_for_viewer(state, user_id).await;
+    let publisher_room = teardown_screen_publisher(state, user_id).await;
+
     // Remove from voice channels and broadcast leaves
     let voice_rooms: Vec<(String, bool, Vec<String>)> = {
         let mut vc = state.voice_channels.write().await;
@@ -1134,6 +2078,8 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
         results
     };
 
+    let mut stopped_screen_rooms = HashSet::new();
+
     for (room_id, was_screen_sharing, voice_members) in voice_rooms {
         let event = json!({
             "type": "voice_user_left",
@@ -1144,6 +2090,18 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
         broadcast_to_room(state, &room_id, &event).await;
 
         if was_screen_sharing {
+            let event = json!({
+                "type": "screen_share_stopped",
+                "room_id": room_id,
+                "user_id": user_id
+            });
+            broadcast_to_room(state, &room_id, &event).await;
+            stopped_screen_rooms.insert(room_id);
+        }
+    }
+
+    if let Some(room_id) = publisher_room {
+        if !stopped_screen_rooms.contains(&room_id) {
             let event = json!({
                 "type": "screen_share_stopped",
                 "room_id": room_id,
@@ -1189,6 +2147,7 @@ async fn main() {
     // Load client.html at startup
     let client_html = std::fs::read_to_string("client.html")
         .unwrap_or_else(|_| "<h1>client.html not found</h1>".to_string());
+    let webrtc_api = build_webrtc_api();
 
     let state = Arc::new(AppState {
         users: RwLock::new(HashMap::new()),
@@ -1200,6 +2159,9 @@ async fn main() {
         active_websockets: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
         user_presence: RwLock::new(HashMap::new()),
+        webrtc_api,
+        screen_publishers: RwLock::new(HashMap::new()),
+        screen_subscribers: RwLock::new(HashMap::new()),
         client_html,
     });
 
@@ -1219,14 +2181,29 @@ async fn main() {
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
         // Messages
-        .route("/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}", put(send_message))
-        .route("/_matrix/client/r0/rooms/{room_id}/messages", get(get_room_messages))
-        .route("/_matrix/client/r0/rooms/{room_id}/redact/{event_id}/{txn_id}", delete(redact_message))
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",
+            put(send_message),
+        )
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/messages",
+            get(get_room_messages),
+        )
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/redact/{event_id}/{txn_id}",
+            delete(redact_message),
+        )
         // Sync
         .route("/_matrix/client/r0/sync", get(sync))
         // Reactions
-        .route("/_matrix/client/r0/rooms/{room_id}/send/m.reaction/{event_id}", put(add_reaction))
-        .route("/_matrix/client/r0/rooms/{room_id}/event/{event_id}/reactions", get(get_reactions))
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/send/m.reaction/{event_id}",
+            put(add_reaction),
+        )
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/event/{event_id}/reactions",
+            get(get_reactions),
+        )
         // Voice & Presence
         .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
         .route("/api/rooms/{room_id}/presence", get(get_room_presence))
