@@ -1,22 +1,27 @@
-FROM python:3.14-slim
+# Build stage
+FROM rust:1.84-slim AS builder
 
-# Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+# Install build dependencies
+RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Copy manifests first for dependency caching
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release && rm -rf src
 
-# Install dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy actual source and rebuild
+COPY src/ src/
+RUN touch src/main.rs && cargo build --release
 
-# Copy application files
-COPY server.py .
+# Runtime stage
+FROM debian:bookworm-slim
+
+WORKDIR /app
+
+# Copy binary and client
+COPY --from=builder /app/target/release/chatter .
 COPY client.html .
 
 # Expose port
@@ -24,7 +29,7 @@ EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/_matrix/client/versions')" || exit 1
+    CMD curl -f http://localhost:8000/_matrix/client/versions || exit 1
 
 # Run the application
-CMD ["python", "server.py"]
+CMD ["./chatter"]
