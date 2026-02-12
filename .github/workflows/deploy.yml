@@ -1,0 +1,40 @@
+name: Deploy Noodle Bot
+
+on:
+  push:
+    branches:
+      - main  # Change this to your default branch if different
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Deploy to server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT }}  # Default is 22
+          script: |
+            # Navigate to the container directory
+            cd /home/mok/containers/zgaf-matrix-rust
+            
+            rm -rf Chatter
+            
+            # Clone the repository
+            git clone https://github.com/Sphyrna-029/Chatter
+
+            cd Chatter
+            
+            # Checkout rust branch
+            git checkout feature/rust-rewrite
+
+            cp ../control.sh .
+            
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh build
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh stop
+            echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh start
+            

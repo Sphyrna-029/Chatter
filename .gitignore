@@ -1,0 +1,14 @@
+# Rust build artifacts
+/target/
+
+# Python
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Tests
+test_server.py
+
+# Claude Code
+CLAUDE.md
+.claude/
