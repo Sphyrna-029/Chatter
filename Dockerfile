@@ -18,6 +18,9 @@ RUN touch src/main.rs && cargo build --release
 # Runtime stage
 FROM debian:bookworm-slim
 
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Copy binary and client
@@ -28,7 +31,7 @@ COPY client.html .
 EXPOSE 8000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/_matrix/client/versions || exit 1
 
 # Run the application
