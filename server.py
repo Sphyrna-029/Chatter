@@ -24,7 +24,8 @@ messages: Dict[str, List[dict]] = {}  # room_id -> list of messages
 message_reactions: Dict[str, Dict[str, List[str]]] = {}  # event_id -> {emoji: [user_ids]}
 access_tokens: Dict[str, str] = {}  # token -> user_id
 active_websockets: Dict[str, WebSocket] = {}  # user_id -> websocket
-voice_channels: Dict[str, Dict[str, dict]] = {}  # room_id -> {user_id: {muted: bool, stream_active: bool}}
+voice_channels: Dict[str, Dict[str, dict]] = {}  # room_id -> {user_id: {muted: bool, screen_sharing: bool}}
+user_presence: Dict[str, dict] = {}  # user_id -> {last_active: timestamp, last_typing: timestamp}
 
 
 # Pydantic Models
@@ -517,6 +518,14 @@ async def websocket_endpoint(websocket: WebSocket):
             return
         
         active_websockets[user_id] = websocket
+        
+        # Update user presence
+        user_presence[user_id] = {
+            "last_active": time.time(),
+            "last_typing": 0,
+            "connected": True
+        }
+        
         await websocket.send_json({"type": "connected", "user_id": user_id})
         
         # Keep connection alive and handle incoming messages
@@ -525,25 +534,76 @@ async def websocket_endpoint(websocket: WebSocket):
             
             # Handle binary audio data
             if "bytes" in data:
-                audio_data = data["bytes"]
+                binary_data = data["bytes"]
                 
-                # Find which room this user is in voice chat
-                for room_id, members in voice_channels.items():
-                    if user_id in members and not members[user_id].get("muted", False):
-                        # Broadcast audio to all other users in the voice channel
-                        for member_id, member_data in members.items():
-                            if member_id != user_id and member_id in active_websockets:
-                                try:
-                                    await active_websockets[member_id].send_bytes(audio_data)
-                                except:
-                                    pass
-                        break
+                # Check if it's screen share or audio based on header
+                if binary_data[:7] == b'SCREEN:':
+                    # Screen share frame - only to voice members
+                    screen_frame = binary_data[7:]
+                    
+                    # Find which room this user is in and broadcasting screen
+                    for room_id, members in voice_channels.items():
+                        if user_id in members and members[user_id].get("screen_sharing", False):
+                            # Broadcast screen frame to all other users in the voice channel
+                            for member_id in members:
+                                if member_id != user_id and member_id in active_websockets:
+                                    try:
+                                        await active_websockets[member_id].send_bytes(binary_data)
+                                    except:
+                                        pass
+                            break
+                
+                elif binary_data[:6] == b'AUDIO:':
+                    # Audio data with header - only to voice members
+                    audio_data = binary_data[6:]
+                    
+                    # Find which room this user is in voice chat
+                    for room_id, members in voice_channels.items():
+                        if user_id in members and not members[user_id].get("muted", False):
+                            # Broadcast audio to all other users in the voice channel
+                            for member_id in members:
+                                if member_id != user_id and member_id in active_websockets:
+                                    try:
+                                        await active_websockets[member_id].send_bytes(binary_data)
+                                    except:
+                                        pass
+                            break
+                else:
+                    # Legacy audio without header - only to voice members
+                    # Find which room this user is in voice chat
+                    for room_id, members in voice_channels.items():
+                        if user_id in members and not members[user_id].get("muted", False):
+                            # Broadcast audio to all other users in the voice channel
+                            for member_id in members:
+                                if member_id != user_id and member_id in active_websockets:
+                                    try:
+                                        await active_websockets[member_id].send_bytes(binary_data)
+                                    except:
+                                        pass
+                            break
             
             # Handle JSON messages
             elif "text" in data:
                 msg = json.loads(data["text"])
                 
-                if msg.get("type") == "voice_join":
+                # Update last active time for any message
+                if user_id in user_presence:
+                    user_presence[user_id]["last_active"] = time.time()
+                
+                if msg.get("type") == "typing":
+                    # User is typing
+                    room_id = msg.get("room_id")
+                    if user_id in user_presence:
+                        user_presence[user_id]["last_typing"] = time.time()
+                    
+                    # Broadcast typing indicator to room
+                    await broadcast_to_room(room_id, {
+                        "type": "user_typing",
+                        "room_id": room_id,
+                        "user_id": user_id
+                    })
+                
+                elif msg.get("type") == "voice_join":
                     # User joining voice channel
                     room_id = msg.get("room_id")
                     if room_id not in voice_channels:
@@ -590,22 +650,63 @@ async def websocket_endpoint(websocket: WebSocket):
                             "user_id": user_id,
                             "muted": muted
                         })
+                
+                elif msg.get("type") == "screen_share_start":
+                    # User started screen sharing
+                    room_id = msg.get("room_id")
+                    if room_id in voice_channels and user_id in voice_channels[room_id]:
+                        voice_channels[room_id][user_id]["screen_sharing"] = True
+                        
+                        # Notify all room members
+                        await broadcast_to_room(room_id, {
+                            "type": "screen_share_started",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        })
+                
+                elif msg.get("type") == "screen_share_stop":
+                    # User stopped screen sharing
+                    room_id = msg.get("room_id")
+                    if room_id in voice_channels and user_id in voice_channels[room_id]:
+                        voice_channels[room_id][user_id]["screen_sharing"] = False
+                        
+                        # Notify all room members
+                        await broadcast_to_room(room_id, {
+                            "type": "screen_share_stopped",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        })
             
     except WebSocketDisconnect:
         if user_id:
             # Remove from voice channels
             for room_id in list(voice_channels.keys()):
                 if user_id in voice_channels[room_id]:
+                    was_screen_sharing = voice_channels[room_id][user_id].get("screen_sharing", False)
                     del voice_channels[room_id][user_id]
+                    
                     await broadcast_to_room(room_id, {
                         "type": "voice_user_left",
                         "room_id": room_id,
                         "user_id": user_id,
                         "voice_members": list(voice_channels[room_id].keys())
                     })
+                    
+                    # Notify about screen share stopping if they were sharing
+                    if was_screen_sharing:
+                        await broadcast_to_room(room_id, {
+                            "type": "screen_share_stopped",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        })
             
             if user_id in active_websockets:
                 del active_websockets[user_id]
+            
+            # Mark user as disconnected
+            if user_id in user_presence:
+                user_presence[user_id]["connected"] = False
+                user_presence[user_id]["last_active"] = time.time()
     except Exception as e:
         print(f"WebSocket error: {e}")
         if user_id and user_id in active_websockets:
@@ -647,12 +748,64 @@ async def get_voice_channel_status(room_id: str, request: Request):
         for member_id, member_data in voice_channels[room_id].items():
             voice_members.append({
                 "user_id": member_id,
-                "muted": member_data.get("muted", False)
+                "muted": member_data.get("muted", False),
+                "screen_sharing": member_data.get("screen_sharing", False)
             })
     
     return {
         "room_id": room_id,
         "voice_members": voice_members
+    }
+
+
+@app.get("/api/rooms/{room_id}/presence")
+async def get_room_presence(room_id: str, request: Request):
+    """Get presence information for all members in a room"""
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing token")
+    
+    token = auth_header.split("Bearer ")[1]
+    user_id = get_user_from_token(token)
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    if room_id not in rooms:
+        raise HTTPException(status_code=404, detail="Room not found")
+    
+    current_time = time.time()
+    presence_data = {}
+    
+    if room_id in room_members:
+        for member_id in room_members[room_id]:
+            if member_id in user_presence:
+                presence = user_presence[member_id]
+                time_since_typing = current_time - presence.get("last_typing", 0)
+                
+                # Determine status
+                if not presence.get("connected", False):
+                    status = "offline"
+                elif time_since_typing < 300:  # 5 minutes
+                    status = "active"
+                else:
+                    status = "idle"
+                
+                presence_data[member_id] = {
+                    "status": status,
+                    "last_active": presence.get("last_active", 0),
+                    "last_typing": presence.get("last_typing", 0)
+                }
+            else:
+                presence_data[member_id] = {
+                    "status": "offline",
+                    "last_active": 0,
+                    "last_typing": 0
+                }
+    
+    return {
+        "room_id": room_id,
+        "presence": presence_data
     }
 
 
