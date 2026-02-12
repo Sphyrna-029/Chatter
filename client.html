@@ -417,6 +417,66 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .view-toggle-tabs {
+            display: none;
+            gap: 8px;
+            margin-top: 10px;
+            width: 100%;
+        }
+
+        .view-toggle-tabs.active {
+            display: flex;
+        }
+
+        .view-toggle-tab {
+            flex: 1;
+            padding: 8px 16px;
+            background: rgba(10, 14, 26, 0.7);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+
+        .view-toggle-tab:hover {
+            border-color: var(--primary-glow);
+            color: var(--primary-glow);
+        }
+
+        .view-toggle-tab.active {
+            background: linear-gradient(135deg, var(--primary-glow), var(--secondary-glow));
+            border-color: transparent;
+            color: white;
+        }
+
+        .chat-view-container,
+        .voice-view-container {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .chat-view-container.hidden,
+        .voice-view-container.hidden {
+            display: none;
+        }
+
+        .voice-view-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
         }
 
         .chat-header-info {
@@ -1309,34 +1369,57 @@
                         <button class="btn-mute" id="muteBtn" onclick="toggleMute()">🎤 Mute</button>
                         <button class="btn-voice" id="voiceBtn" onclick="toggleVoice()">🔊 Join Voice</button>
                     </div>
-                </div>
-
-                <div id="screenShareWrapper"></div>
-
-                <div class="voice-members-list" id="voiceMembersList">
-                    <div class="voice-members-title">In Voice Channel</div>
-                    <div id="voiceMembersContainer"></div>
-                </div>
-
-                <div class="messages-container" id="messagesContainer">
-                    <div class="empty-state">
-                        <div class="empty-state-icon">💬</div>
-                        <p>Select a room to start chatting</p>
+                    
+                    <!-- View Toggle Tabs (only shown when in voice) -->
+                    <div class="view-toggle-tabs" id="viewToggleTabs">
+                        <button class="view-toggle-tab active" onclick="switchView('chat')">
+                            💬 Text Chat
+                        </button>
+                        <button class="view-toggle-tab" onclick="switchView('voice')">
+                            🎙️ Voice & Screen Share
+                        </button>
                     </div>
                 </div>
 
-                <div class="message-input-container">
-                    <div class="message-input-wrapper">
-                        <input type="text" class="form-control message-input" id="messageInput" 
-                               placeholder="Type your message..." 
-                               onkeypress="handleMessageKeyPress(event)"
-                               onkeyup="handleMentionAutocomplete(event); sendTypingIndicator();"
-                               onkeydown="handleMentionKeydown(event)">
-                        <div class="mention-autocomplete" id="mentionAutocomplete"></div>
-                        <button class="emoji-picker-btn" onclick="toggleEmojiPicker(event)">😊</button>
-                        <div class="emoji-picker" id="emojiPicker"></div>
+                <!-- Chat View -->
+                <div class="chat-view-container" id="chatViewContainer">
+                    <div class="voice-members-list" id="voiceMembersList">
+                        <div class="voice-members-title">In Voice Channel</div>
+                        <div id="voiceMembersContainer"></div>
                     </div>
-                    <button class="btn btn-send" onclick="sendMessage()">Send</button>
+
+                    <div class="messages-container" id="messagesContainer">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">💬</div>
+                            <p>Select a room to start chatting</p>
+                        </div>
+                    </div>
+
+                    <div class="message-input-container">
+                        <div class="message-input-wrapper">
+                            <input type="text" class="form-control message-input" id="messageInput" 
+                                   placeholder="Type your message..." 
+                                   onkeypress="handleMessageKeyPress(event)"
+                                   onkeyup="handleMentionAutocomplete(event); sendTypingIndicator();"
+                                   onkeydown="handleMentionKeydown(event)">
+                            <div class="mention-autocomplete" id="mentionAutocomplete"></div>
+                            <button class="emoji-picker-btn" onclick="toggleEmojiPicker(event)">😊</button>
+                            <div class="emoji-picker" id="emojiPicker"></div>
+                        </div>
+                        <button class="btn btn-send" onclick="sendMessage()">Send</button>
+                    </div>
+                </div>
+
+                <!-- Voice & Screen Share View -->
+                <div class="voice-view-container hidden" id="voiceViewContainer">
+                    <div class="voice-view-content">
+                        <div class="voice-members-list active">
+                            <div class="voice-members-title">In Voice Channel</div>
+                            <div id="voiceMembersContainerAlt"></div>
+                        </div>
+                        
+                        <div id="screenShareWrapper"></div>
+                    </div>
                 </div>
             </div>
 
@@ -1878,6 +1961,41 @@
             }
         }
 
+        // View switching between chat and voice/screenshare
+        let currentView = 'chat'; // 'chat' or 'voice'
+
+        function switchView(view) {
+            currentView = view;
+            
+            const chatView = document.getElementById('chatViewContainer');
+            const voiceView = document.getElementById('voiceViewContainer');
+            const tabs = document.querySelectorAll('.view-toggle-tab');
+            
+            if (view === 'chat') {
+                chatView.classList.remove('hidden');
+                voiceView.classList.add('hidden');
+                tabs[0].classList.add('active');
+                tabs[1].classList.remove('active');
+            } else {
+                chatView.classList.add('hidden');
+                voiceView.classList.remove('hidden');
+                tabs[0].classList.remove('active');
+                tabs[1].classList.add('active');
+                
+                // Update voice members in the voice view
+                syncVoiceMembersToAltView();
+            }
+        }
+
+        function syncVoiceMembersToAltView() {
+            // Copy voice members list to the alternate view
+            const source = document.getElementById('voiceMembersContainer');
+            const dest = document.getElementById('voiceMembersContainerAlt');
+            if (source && dest) {
+                dest.innerHTML = source.innerHTML;
+            }
+        }
+
         function hideScreenShare(sharerUserId) {
             if (sharerUserId) {
                 activeScreenSharers.delete(sharerUserId);
@@ -2067,6 +2185,12 @@
             document.getElementById('muteBtn').textContent = '🎤 Mute';
             document.getElementById('screenShareBtn').classList.remove('visible', 'active');
             document.getElementById('voiceIndicator').classList.remove('active');
+            document.getElementById('viewToggleTabs').classList.remove('active');
+            
+            // Switch back to chat view when leaving voice
+            if (currentView === 'voice') {
+                switchView('chat');
+            }
             
             // Don't hide voice members list - let updateVoiceMembersList decide based on if anyone is in voice
 
@@ -2146,16 +2270,21 @@
         function updateVoiceMembersList() {
             const container = document.getElementById('voiceMembersContainer');
             const listElement = document.getElementById('voiceMembersList');
+            const toggleTabs = document.getElementById('viewToggleTabs');
             container.innerHTML = '';
 
-            // Show the list if there are any voice members, regardless of whether we're in voice
+            // Show/hide toggle tabs based on voice channel status
             if (voiceMembers.size === 0) {
                 listElement.classList.remove('active');
+                toggleTabs.classList.remove('active');
                 return;
             }
 
-            // Show the voice members list
+            // Show the voice members list and toggle tabs when someone is in voice
             listElement.classList.add('active');
+            if (inVoiceChannel) {
+                toggleTabs.classList.add('active');
+            }
 
             voiceMembers.forEach(memberId => {
                 const memberName = memberId.split(':')[0].substring(1);
@@ -2179,6 +2308,9 @@
                 
                 container.appendChild(memberDiv);
             });
+
+            // Sync to the alternate voice view
+            syncVoiceMembersToAltView();
         }
 
         // Set up audio playback from server
