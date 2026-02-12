@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chatter</title>
+    <title>Matrix Protocol Chat</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
@@ -456,6 +456,35 @@
             box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
         }
 
+        .btn-screen-share {
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            border: none;
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: none;
+        }
+
+        .btn-screen-share.visible {
+            display: block;
+        }
+
+        .btn-screen-share.active {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+
+        .btn-screen-share:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(139, 92, 246, 0.4);
+        }
+
+        .btn-screen-share.active:hover {
+            box-shadow: 0 5px 20px rgba(239, 68, 68, 0.4);
+        }
+
         .btn-mute {
             background: rgba(100, 100, 100, 0.3);
             border: 1px solid var(--border-color);
@@ -482,45 +511,37 @@
             background: rgba(100, 100, 100, 0.5);
         }
 
-        .voice-indicator {
+        .screen-share-container {
+            margin-bottom: 15px;
+            background: rgba(10, 14, 26, 0.7);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 15px;
             display: none;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: rgba(16, 185, 129, 0.2);
-            border: 1px solid rgba(16, 185, 129, 0.5);
-            border-radius: 8px;
-            font-size: 0.85rem;
-            color: #10b981;
         }
 
-        .voice-indicator.active {
+        .screen-share-container.active {
+            display: block;
+        }
+
+        .screen-share-header {
             display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
         }
 
-        .voice-wave {
-            width: 4px;
-            height: 16px;
-            background: #10b981;
-            border-radius: 2px;
-            animation: voiceWave 1s ease-in-out infinite;
+        .screen-share-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #8b5cf6;
         }
 
-        .voice-wave:nth-child(2) {
-            animation-delay: 0.1s;
-        }
-
-        .voice-wave:nth-child(3) {
-            animation-delay: 0.2s;
-        }
-
-        @keyframes voiceWave {
-            0%, 100% {
-                transform: scaleY(0.5);
-            }
-            50% {
-                transform: scaleY(1);
-            }
+        .screen-share-video {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+            max-height: 500px;
         }
 
         .voice-members-list {
@@ -559,6 +580,12 @@
 
         .voice-member-name {
             flex: 1;
+        }
+
+        .voice-member-sharing {
+            color: #8b5cf6;
+            font-size: 0.75rem;
+            font-weight: 600;
         }
 
         .voice-member-muted {
@@ -952,10 +979,19 @@
             background: rgba(19, 24, 43, 0.5);
             border-radius: 8px;
             transition: all 0.2s ease;
+            position: relative;
         }
 
         .member-item:hover {
             background: rgba(19, 24, 43, 0.8);
+        }
+
+        .member-item.offline {
+            opacity: 0.5;
+        }
+
+        .member-item.offline .member-name {
+            color: #6b7c9e;
         }
 
         .member-avatar {
@@ -969,6 +1005,32 @@
             font-size: 0.85rem;
             font-weight: 600;
             flex-shrink: 0;
+            position: relative;
+        }
+
+        .presence-indicator {
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid var(--bg-card);
+            background: #6b7c9e;
+        }
+
+        .presence-indicator.active {
+            background: #00ff9d;
+            box-shadow: 0 0 6px rgba(0, 255, 157, 0.5);
+        }
+
+        .presence-indicator.idle {
+            background: #fbbf24;
+            box-shadow: 0 0 6px rgba(251, 191, 36, 0.5);
+        }
+
+        .presence-indicator.offline {
+            background: #6b7c9e;
         }
 
         .member-name {
@@ -1101,13 +1163,13 @@
 <body>
     <div class="app-container">
         <div class="app-header">
-            <h1>Chatter</h1>
+            <h1>⚡ MATRIX CHAT</h1>
             <div class="app-subtitle">Decentralized Communication Protocol</div>
         </div>
 
         <!-- Login Screen -->
         <div id="loginScreen" class="login-card">
-            <h3 class="mb-4 text-center">Connect to Chatter</h3>
+            <h3 class="mb-4 text-center">Connect to Matrix</h3>
             <div class="mb-3">
                 <label class="form-label">Username</label>
                 <input type="text" class="form-control" id="loginUsername" placeholder="Enter your username">
@@ -1169,9 +1231,17 @@
                             <div class="voice-wave"></div>
                             <span>In Voice</span>
                         </div>
+                        <button class="btn-screen-share" id="screenShareBtn" onclick="toggleScreenShare()">🖥️ Share Screen</button>
                         <button class="btn-mute" id="muteBtn" onclick="toggleMute()">🎤 Mute</button>
                         <button class="btn-voice" id="voiceBtn" onclick="toggleVoice()">🔊 Join Voice</button>
                     </div>
+                </div>
+
+                <div class="screen-share-container" id="screenShareContainer">
+                    <div class="screen-share-header">
+                        <div class="screen-share-title" id="screenShareTitle">Screen Share</div>
+                    </div>
+                    <video class="screen-share-video" id="screenShareVideo" autoplay playsinline></video>
                 </div>
 
                 <div class="voice-members-list" id="voiceMembersList">
@@ -1191,7 +1261,7 @@
                         <input type="text" class="form-control message-input" id="messageInput" 
                                placeholder="Type your message..." 
                                onkeypress="handleMessageKeyPress(event)"
-                               onkeyup="handleMentionAutocomplete(event)"
+                               onkeyup="handleMentionAutocomplete(event); sendTypingIndicator();"
                                onkeydown="handleMentionKeydown(event)">
                         <div class="mention-autocomplete" id="mentionAutocomplete"></div>
                         <button class="emoji-picker-btn" onclick="toggleEmojiPicker(event)">😊</button>
@@ -1267,6 +1337,10 @@
         let joinedRooms = [];
         let currentRoomMembers = [];
 
+        // User presence tracking
+        let userPresence = {}; // user_id -> {status: 'active'|'idle'|'offline', last_typing: timestamp}
+        let typingTimeout = null;
+
         // Voice chat state (client-server audio)
         let inVoiceChannel = false;
         let isMuted = false;
@@ -1275,6 +1349,12 @@
         let mediaStreamSource = null;
         let scriptProcessor = null;
         let voiceMembers = new Set();
+        let voiceMemberStates = {}; // user_id -> {muted: bool, screen_sharing: bool}
+
+        // Screen share state
+        let isScreenSharing = false;
+        let screenStream = null;
+        let currentScreenSharer = null;
 
         // Message reactions
         let messageReactions = {}; // event_id -> {emoji: count}
@@ -1474,6 +1554,182 @@
             }
         }
 
+        async function toggleScreenShare() {
+            if (!inVoiceChannel) {
+                alert('Please join voice chat first');
+                return;
+            }
+
+            if (isScreenSharing) {
+                await stopScreenShare();
+            } else {
+                await startScreenShare();
+            }
+        }
+
+        async function startScreenShare() {
+            try {
+                // Get screen stream
+                screenStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: 'always',
+                        displaySurface: 'monitor'
+                    },
+                    audio: false
+                });
+
+                isScreenSharing = true;
+
+                // Update UI
+                document.getElementById('screenShareBtn').textContent = '🖥️ Stop Sharing';
+                document.getElementById('screenShareBtn').classList.add('active');
+
+                // Notify server
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'screen_share_start',
+                        room_id: currentRoomId
+                    }));
+                }
+
+                // Handle stream end (user clicks browser's stop sharing button)
+                screenStream.getVideoTracks()[0].onended = () => {
+                    stopScreenShare();
+                };
+
+                // Capture and send frames
+                startScreenCapture();
+
+            } catch (error) {
+                console.error('Error starting screen share:', error);
+                alert('Could not start screen sharing. Please check permissions.');
+            }
+        }
+
+        async function stopScreenShare() {
+            if (screenStream) {
+                screenStream.getTracks().forEach(track => track.stop());
+                screenStream = null;
+            }
+
+            isScreenSharing = false;
+
+            // Update UI
+            document.getElementById('screenShareBtn').textContent = '🖥️ Share Screen';
+            document.getElementById('screenShareBtn').classList.remove('active');
+
+            // Notify server
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'screen_share_stop',
+                    room_id: currentRoomId
+                }));
+            }
+        }
+
+        function startScreenCapture() {
+            const video = document.createElement('video');
+            video.srcObject = screenStream;
+            video.play();
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            // Send frames at ~10 FPS for reasonable performance
+            const captureInterval = setInterval(() => {
+                if (!isScreenSharing || !screenStream) {
+                    clearInterval(captureInterval);
+                    return;
+                }
+
+                // Set canvas size to match video
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+
+                // Draw current frame
+                ctx.drawImage(video, 0, 0);
+
+                // Convert to JPEG and send
+                canvas.toBlob((blob) => {
+                    if (blob && ws && ws.readyState === WebSocket.OPEN) {
+                        blob.arrayBuffer().then(buffer => {
+                            // Send screen frame with header
+                            const header = new TextEncoder().encode('SCREEN:');
+                            const combined = new Uint8Array(header.length + buffer.byteLength);
+                            combined.set(header, 0);
+                            combined.set(new Uint8Array(buffer), header.length);
+                            ws.send(combined.buffer);
+                        });
+                    }
+                }, 'image/jpeg', 0.7);
+            }, 100); // 10 FPS
+        }
+
+        function displayScreenShare(imageData, sharerUserId) {
+            currentScreenSharer = sharerUserId;
+            
+            const container = document.getElementById('screenShareContainer');
+            const video = document.getElementById('screenShareVideo');
+            const title = document.getElementById('screenShareTitle');
+            
+            const sharerName = sharerUserId.split(':')[0].substring(1);
+            title.textContent = `${sharerName} is sharing their screen`;
+            
+            // Convert array buffer to blob URL
+            const blob = new Blob([imageData], { type: 'image/jpeg' });
+            const url = URL.createObjectURL(blob);
+            
+            // Create or reuse canvas for streaming
+            let canvas = document.getElementById('screenShareCanvas');
+            if (!canvas) {
+                canvas = document.createElement('canvas');
+                canvas.id = 'screenShareCanvas';
+                canvas.style.display = 'none';
+                document.body.appendChild(canvas);
+            }
+            
+            // Load and draw the image
+            const img = new Image();
+            img.onload = () => {
+                // Set canvas size to match image
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                
+                // Create or update stream
+                if (!video.srcObject) {
+                    const stream = canvas.captureStream(30); // 30 FPS for smooth playback
+                    video.srcObject = stream;
+                    video.play();
+                }
+                
+                URL.revokeObjectURL(url);
+            };
+            img.src = url;
+            
+            container.classList.add('active');
+        }
+
+        function hideScreenShare() {
+            currentScreenSharer = null;
+            const container = document.getElementById('screenShareContainer');
+            const video = document.getElementById('screenShareVideo');
+            
+            container.classList.remove('active');
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+            }
+            
+            // Clean up canvas
+            const canvas = document.getElementById('screenShareCanvas');
+            if (canvas) {
+                canvas.remove();
+            }
+        }
+
         async function joinVoice() {
             try {
                 // Request microphone access
@@ -1506,9 +1762,13 @@
                         int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                     }
                     
-                    // Send audio data as binary
+                    // Send audio data as binary with AUDIO: prefix
                     if (ws.readyState === WebSocket.OPEN) {
-                        ws.send(int16Data.buffer);
+                        const header = new TextEncoder().encode('AUDIO:');
+                        const combined = new Uint8Array(header.length + int16Data.byteLength);
+                        combined.set(header, 0);
+                        combined.set(new Uint8Array(int16Data.buffer), header.length);
+                        ws.send(combined.buffer);
                     }
                 };
 
@@ -1521,6 +1781,7 @@
                 document.getElementById('voiceBtn').textContent = '🔇 Leave Voice';
                 document.getElementById('voiceBtn').classList.add('active');
                 document.getElementById('muteBtn').classList.add('visible');
+                document.getElementById('screenShareBtn').classList.add('visible');
                 document.getElementById('voiceIndicator').classList.add('active');
                 document.getElementById('voiceMembersList').classList.add('active');
 
@@ -1542,6 +1803,11 @@
         }
 
         async function leaveVoice() {
+            // Stop screen sharing if active
+            if (isScreenSharing) {
+                await stopScreenShare();
+            }
+
             // Stop audio processing
             if (scriptProcessor) {
                 scriptProcessor.disconnect();
@@ -1570,8 +1836,10 @@
             document.getElementById('voiceBtn').classList.remove('active');
             document.getElementById('muteBtn').classList.remove('visible', 'muted');
             document.getElementById('muteBtn').textContent = '🎤 Mute';
+            document.getElementById('screenShareBtn').classList.remove('visible', 'active');
             document.getElementById('voiceIndicator').classList.remove('active');
-            document.getElementById('voiceMembersList').classList.remove('active');
+            
+            // Don't hide voice members list - let updateVoiceMembersList decide based on if anyone is in voice
 
             // Notify server
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1581,8 +1849,8 @@
                 }));
             }
 
-            voiceMembers.clear();
-            updateVoiceMembersList();
+            // Reload voice members to see who's still in voice
+            await loadVoiceMembers();
         }
 
         function toggleMute() {
@@ -1624,6 +1892,16 @@
                 if (response.ok) {
                     const data = await response.json();
                     voiceMembers = new Set(data.voice_members.map(m => m.user_id));
+                    
+                    // Update member states
+                    voiceMemberStates = {};
+                    data.voice_members.forEach(member => {
+                        voiceMemberStates[member.user_id] = {
+                            muted: member.muted,
+                            screen_sharing: member.screen_sharing
+                        };
+                    });
+                    
                     updateVoiceMembersList();
                 }
             } catch (error) {
@@ -1633,22 +1911,36 @@
 
         function updateVoiceMembersList() {
             const container = document.getElementById('voiceMembersContainer');
+            const listElement = document.getElementById('voiceMembersList');
             container.innerHTML = '';
 
+            // Show the list if there are any voice members, regardless of whether we're in voice
             if (voiceMembers.size === 0) {
-                container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.85rem;">No one in voice</div>';
+                listElement.classList.remove('active');
                 return;
             }
+
+            // Show the voice members list
+            listElement.classList.add('active');
 
             voiceMembers.forEach(memberId => {
                 const memberName = memberId.split(':')[0].substring(1);
                 const isSelf = memberId === userId;
+                const memberState = voiceMemberStates[memberId] || {};
+                const isSharing = memberState.screen_sharing || currentScreenSharer === memberId;
+                const isMutedMember = memberState.muted || (isSelf && isMuted);
+                
                 const memberDiv = document.createElement('div');
                 memberDiv.className = 'voice-member-item';
                 
+                const sharingIndicator = isSharing ? '<span class="voice-member-sharing">📺 Sharing</span>' : '';
+                const muteIcon = isMutedMember ? '🔇' : '🎤';
+                const muteClass = isMutedMember ? 'voice-member-muted' : '';
+                
                 memberDiv.innerHTML = `
-                    <span class="voice-member-icon">🎤</span>
+                    <span class="voice-member-icon ${muteClass}">${muteIcon}</span>
                     <span class="voice-member-name">${escapeHtml(memberName)}${isSelf ? ' (You)' : ''}</span>
+                    ${sharingIndicator}
                 `;
                 
                 container.appendChild(memberDiv);
@@ -1796,9 +2088,27 @@
 
             ws.onmessage = async (event) => {
                 if (event.data instanceof ArrayBuffer) {
-                    // Binary audio data from server
-                    if (inVoiceChannel) {
-                        await playAudioChunk(event.data);
+                    // Check if it's a screen share frame or audio
+                    const view = new Uint8Array(event.data);
+                    const headerText = new TextDecoder().decode(view.slice(0, 7));
+                    
+                    if (headerText === 'SCREEN:') {
+                        // Screen share frame - only show if in voice and not sharing yourself
+                        const imageData = view.slice(7);
+                        if (inVoiceChannel && !isScreenSharing && currentScreenSharer) {
+                            displayScreenShare(imageData, currentScreenSharer);
+                        }
+                    } else if (headerText.startsWith('AUDIO:')) {
+                        // Audio data - only play if in voice
+                        const audioData = view.slice(6);
+                        if (inVoiceChannel) {
+                            await playAudioChunk(audioData.buffer);
+                        }
+                    } else {
+                        // Legacy audio without header - only play if in voice
+                        if (inVoiceChannel) {
+                            await playAudioChunk(event.data);
+                        }
                     }
                 } else {
                     // JSON message
@@ -1845,22 +2155,84 @@
                     messageReactions[message.event_id] = message.reactions;
                     updateMessageReactions(message.event_id, message.reactions);
                 }
+            } else if (message.type === 'user_typing') {
+                // Update typing status
+                if (message.room_id === currentRoomId && message.user_id !== userId) {
+                    if (userPresence[message.user_id]) {
+                        userPresence[message.user_id].status = 'active';
+                        userPresence[message.user_id].last_typing = Date.now() / 1000;
+                    } else {
+                        userPresence[message.user_id] = {
+                            status: 'active',
+                            last_typing: Date.now() / 1000
+                        };
+                    }
+                    displayMembers();
+                }
             } else if (message.type === 'voice_user_joined') {
                 if (message.room_id === currentRoomId) {
                     voiceMembers.add(message.user_id);
+                    if (!voiceMemberStates[message.user_id]) {
+                        voiceMemberStates[message.user_id] = {
+                            muted: false,
+                            screen_sharing: false
+                        };
+                    }
                     updateVoiceMembersList();
                 }
             } else if (message.type === 'voice_user_left') {
                 if (message.room_id === currentRoomId) {
                     voiceMembers.delete(message.user_id);
+                    delete voiceMemberStates[message.user_id];
                     updateVoiceMembersList();
+                    
+                    // If the person who left was screen sharing, hide it
+                    if (currentScreenSharer === message.user_id) {
+                        hideScreenShare();
+                    }
                 }
             } else if (message.type === 'voice_user_muted') {
                 if (message.room_id === currentRoomId) {
+                    // Update member state
+                    if (voiceMemberStates[message.user_id]) {
+                        voiceMemberStates[message.user_id].muted = message.muted;
+                    } else {
+                        voiceMemberStates[message.user_id] = {
+                            muted: message.muted,
+                            screen_sharing: false
+                        };
+                    }
+                    updateVoiceMembersList();
+                }
+            } else if (message.type === 'screen_share_started') {
+                if (message.room_id === currentRoomId) {
+                    currentScreenSharer = message.user_id;
+                    if (voiceMemberStates[message.user_id]) {
+                        voiceMemberStates[message.user_id].screen_sharing = true;
+                    }
+                    updateVoiceMembersList();
+                }
+            } else if (message.type === 'screen_share_stopped') {
+                if (message.room_id === currentRoomId) {
+                    if (currentScreenSharer === message.user_id) {
+                        hideScreenShare();
+                        currentScreenSharer = null;
+                    }
+                    if (voiceMemberStates[message.user_id]) {
+                        voiceMemberStates[message.user_id].screen_sharing = false;
+                    }
                     updateVoiceMembersList();
                 }
             }
         }
+
+        // Periodically refresh presence data
+        setInterval(async () => {
+            if (currentRoomId) {
+                await loadPresence(currentRoomId);
+                displayMembers();
+            }
+        }, 10000); // Refresh every 10 seconds
 
         // Room management
         async function loadRooms() {
@@ -1955,7 +2327,7 @@
             await loadMessages(roomId);
             await loadRoomMembers(roomId);
             
-            // Load voice channel status
+            // Load voice channel status (even if not in voice)
             voiceMembers.clear();
             await loadVoiceMembers();
         }
@@ -2017,11 +2389,29 @@
                             displayName: e.content.displayname || e.state_key.split(':')[0].substring(1)
                         }));
                         
+                        // Load presence data
+                        await loadPresence(roomId);
+                        
                         displayMembers();
                     }
                 }
             } catch (error) {
                 console.error('Error loading room members:', error);
+            }
+        }
+
+        async function loadPresence(roomId) {
+            try {
+                const response = await fetch(`/api/rooms/${roomId}/presence`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    userPresence = data.presence;
+                }
+            } catch (error) {
+                console.error('Error loading presence:', error);
             }
         }
 
@@ -2033,13 +2423,19 @@
             membersList.innerHTML = '';
 
             currentRoomMembers.forEach(member => {
+                const presence = userPresence[member.userId] || { status: 'offline' };
+                const statusClass = presence.status;
+                
                 const memberDiv = document.createElement('div');
-                memberDiv.className = 'member-item';
+                memberDiv.className = `member-item ${statusClass === 'offline' ? 'offline' : ''}`;
                 
                 const initial = member.displayName.substring(0, 1).toUpperCase();
                 
                 memberDiv.innerHTML = `
-                    <div class="member-avatar">${initial}</div>
+                    <div class="member-avatar">
+                        ${initial}
+                        <div class="presence-indicator ${statusClass}"></div>
+                    </div>
                     <div class="member-name">${escapeHtml(member.displayName)}</div>
                 `;
                 
@@ -2205,6 +2601,27 @@
             if (event.key === 'Enter') {
                 sendMessage();
             }
+        }
+
+        // Send typing indicator
+        function sendTypingIndicator() {
+            if (!currentRoomId || !ws || ws.readyState !== WebSocket.OPEN) return;
+            
+            // Clear existing timeout
+            if (typingTimeout) {
+                clearTimeout(typingTimeout);
+            }
+            
+            // Send typing event
+            ws.send(JSON.stringify({
+                type: 'typing',
+                room_id: currentRoomId
+            }));
+            
+            // Set timeout to prevent spamming
+            typingTimeout = setTimeout(() => {
+                typingTimeout = null;
+            }, 1000);
         }
 
         // Mention autocomplete
