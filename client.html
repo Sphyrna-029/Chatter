@@ -1237,12 +1237,7 @@
                     </div>
                 </div>
 
-                <div class="screen-share-container" id="screenShareContainer">
-                    <div class="screen-share-header">
-                        <div class="screen-share-title" id="screenShareTitle">Screen Share</div>
-                    </div>
-                    <video class="screen-share-video" id="screenShareVideo" autoplay playsinline></video>
-                </div>
+                <div id="screenShareWrapper"></div>
 
                 <div class="voice-members-list" id="voiceMembersList">
                     <div class="voice-members-title">In Voice Channel</div>
@@ -1354,7 +1349,7 @@
         // Screen share state
         let isScreenSharing = false;
         let screenStream = null;
-        let currentScreenSharer = null;
+        let activeScreenSharers = new Set();
 
         // Message reactions
         let messageReactions = {}; // event_id -> {emoji: count}
@@ -1666,67 +1661,87 @@
         }
 
         function displayScreenShare(imageData, sharerUserId) {
-            currentScreenSharer = sharerUserId;
-            
-            const container = document.getElementById('screenShareContainer');
-            const video = document.getElementById('screenShareVideo');
-            const title = document.getElementById('screenShareTitle');
-            
-            const sharerName = sharerUserId.split(':')[0].substring(1);
-            title.textContent = `${sharerName} is sharing their screen`;
-            
+            activeScreenSharers.add(sharerUserId);
+            const wrapper = document.getElementById('screenShareWrapper');
+            const containerId = 'screenShare_' + CSS.escape(sharerUserId);
+
+            // Create per-sharer container if it doesn't exist yet
+            let container = document.getElementById(containerId);
+            if (!container) {
+                container = document.createElement('div');
+                container.id = containerId;
+                container.className = 'screen-share-container active';
+
+                const sharerName = sharerUserId.split(':')[0].substring(1);
+                container.innerHTML = `
+                    <div class="screen-share-header">
+                        <div class="screen-share-title">${escapeHtml(sharerName)} is sharing their screen</div>
+                    </div>
+                    <video class="screen-share-video" autoplay playsinline></video>
+                `;
+
+                // Create hidden canvas for this sharer
+                const canvas = document.createElement('canvas');
+                canvas.style.display = 'none';
+                canvas.dataset.sharer = sharerUserId;
+                container.appendChild(canvas);
+
+                wrapper.appendChild(container);
+            }
+
+            const canvas = container.querySelector('canvas');
+            const video = container.querySelector('video');
+
             // Convert array buffer to blob URL
             const blob = new Blob([imageData], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
-            
-            // Create or reuse canvas for streaming
-            let canvas = document.getElementById('screenShareCanvas');
-            if (!canvas) {
-                canvas = document.createElement('canvas');
-                canvas.id = 'screenShareCanvas';
-                canvas.style.display = 'none';
-                document.body.appendChild(canvas);
-            }
-            
+
             // Load and draw the image
             const img = new Image();
             img.onload = () => {
-                // Set canvas size to match image
                 canvas.width = img.width;
                 canvas.height = img.height;
-                
+
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(img, 0, 0);
-                
+
                 // Create or update stream
                 if (!video.srcObject) {
-                    const stream = canvas.captureStream(30); // 30 FPS for smooth playback
+                    const stream = canvas.captureStream(30);
                     video.srcObject = stream;
                     video.play();
                 }
-                
+
                 URL.revokeObjectURL(url);
             };
             img.src = url;
-            
-            container.classList.add('active');
         }
 
-        function hideScreenShare() {
-            currentScreenSharer = null;
-            const container = document.getElementById('screenShareContainer');
-            const video = document.getElementById('screenShareVideo');
-            
-            container.classList.remove('active');
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
-            }
-            
-            // Clean up canvas
-            const canvas = document.getElementById('screenShareCanvas');
-            if (canvas) {
-                canvas.remove();
+        function hideScreenShare(sharerUserId) {
+            if (sharerUserId) {
+                activeScreenSharers.delete(sharerUserId);
+                const containerId = 'screenShare_' + CSS.escape(sharerUserId);
+                const container = document.getElementById(containerId);
+                if (container) {
+                    const video = container.querySelector('video');
+                    if (video && video.srcObject) {
+                        video.srcObject.getTracks().forEach(track => track.stop());
+                        video.srcObject = null;
+                    }
+                    container.remove();
+                }
+            } else {
+                // Hide all screen shares
+                activeScreenSharers.clear();
+                const wrapper = document.getElementById('screenShareWrapper');
+                wrapper.querySelectorAll('.screen-share-container').forEach(container => {
+                    const video = container.querySelector('video');
+                    if (video && video.srcObject) {
+                        video.srcObject.getTracks().forEach(track => track.stop());
+                        video.srcObject = null;
+                    }
+                    container.remove();
+                });
             }
         }
 
@@ -1807,6 +1822,9 @@
             if (isScreenSharing) {
                 await stopScreenShare();
             }
+
+            // Hide all incoming screen shares
+            hideScreenShare();
 
             // Stop audio processing
             if (scriptProcessor) {
@@ -1893,15 +1911,20 @@
                     const data = await response.json();
                     voiceMembers = new Set(data.voice_members.map(m => m.user_id));
                     
-                    // Update member states
+                    // Update member states and rebuild active screen sharers
                     voiceMemberStates = {};
+                    activeScreenSharers.clear();
                     data.voice_members.forEach(member => {
                         voiceMemberStates[member.user_id] = {
                             muted: member.muted,
                             screen_sharing: member.screen_sharing
                         };
+                        // Track all active screen sharers so late joiners see their streams
+                        if (member.screen_sharing && member.user_id !== userId) {
+                            activeScreenSharers.add(member.user_id);
+                        }
                     });
-                    
+
                     updateVoiceMembersList();
                 }
             } catch (error) {
@@ -1927,7 +1950,7 @@
                 const memberName = memberId.split(':')[0].substring(1);
                 const isSelf = memberId === userId;
                 const memberState = voiceMemberStates[memberId] || {};
-                const isSharing = memberState.screen_sharing || currentScreenSharer === memberId;
+                const isSharing = memberState.screen_sharing || activeScreenSharers.has(memberId);
                 const isMutedMember = memberState.muted || (isSelf && isMuted);
                 
                 const memberDiv = document.createElement('div');
@@ -2093,10 +2116,16 @@
                     const headerText = new TextDecoder().decode(view.slice(0, 7));
                     
                     if (headerText === 'SCREEN:') {
-                        // Screen share frame - only show if in voice and not sharing yourself
-                        const imageData = view.slice(7);
-                        if (inVoiceChannel && !isScreenSharing && currentScreenSharer) {
-                            displayScreenShare(imageData, currentScreenSharer);
+                        // Screen share frame: SCREEN:<user_id>\n<jpeg_data>
+                        const payload = view.slice(7);
+                        // Find the newline delimiter separating user_id from jpeg data
+                        const newlineIdx = payload.indexOf(10); // 10 = '\n'
+                        if (newlineIdx !== -1) {
+                            const sharerUserId = new TextDecoder().decode(payload.slice(0, newlineIdx));
+                            const imageData = payload.slice(newlineIdx + 1);
+                            if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
+                                displayScreenShare(imageData, sharerUserId);
+                            }
                         }
                     } else if (headerText.startsWith('AUDIO:')) {
                         // Audio data - only play if in voice
@@ -2186,9 +2215,9 @@
                     delete voiceMemberStates[message.user_id];
                     updateVoiceMembersList();
                     
-                    // If the person who left was screen sharing, hide it
-                    if (currentScreenSharer === message.user_id) {
-                        hideScreenShare();
+                    // If the person who left was screen sharing, hide their stream
+                    if (activeScreenSharers.has(message.user_id)) {
+                        hideScreenShare(message.user_id);
                     }
                 }
             } else if (message.type === 'voice_user_muted') {
@@ -2206,7 +2235,7 @@
                 }
             } else if (message.type === 'screen_share_started') {
                 if (message.room_id === currentRoomId) {
-                    currentScreenSharer = message.user_id;
+                    activeScreenSharers.add(message.user_id);
                     if (voiceMemberStates[message.user_id]) {
                         voiceMemberStates[message.user_id].screen_sharing = true;
                     }
@@ -2214,10 +2243,7 @@
                 }
             } else if (message.type === 'screen_share_stopped') {
                 if (message.room_id === currentRoomId) {
-                    if (currentScreenSharer === message.user_id) {
-                        hideScreenShare();
-                        currentScreenSharer = null;
-                    }
+                    hideScreenShare(message.user_id);
                     if (voiceMemberStates[message.user_id]) {
                         voiceMemberStates[message.user_id].screen_sharing = false;
                     }
