@@ -524,24 +524,98 @@
             display: block;
         }
 
-        .screen-share-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
+        .screen-share-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+            padding: 0;
         }
 
-        .screen-share-title {
-            font-size: 0.9rem;
+        .screen-share-preview {
+            position: relative;
+            background: rgba(10, 14, 26, 0.9);
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+            height: 0;
+        }
+
+        .screen-share-preview > * {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .screen-share-preview:hover {
+            border-color: #8b5cf6;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(139, 92, 246, 0.3);
+        }
+
+        .screen-share-preview.selected {
+            border-color: #8b5cf6;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+        }
+
+        .screen-share-preview-video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background: #000;
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            will-change: transform;
+        }
+
+        .screen-share-preview-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 8px 12px;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.9), transparent);
+            color: #8b5cf6;
+            font-size: 0.85rem;
+            font-weight: 600;
+            pointer-events: none;
+        }
+
+        .screen-share-main {
+            background: rgba(10, 14, 26, 0.9);
+            border: 2px solid #8b5cf6;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        .screen-share-main-header {
+            padding: 12px 16px;
+            background: rgba(139, 92, 246, 0.1);
+            border-bottom: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .screen-share-main-title {
+            font-size: 0.95rem;
             font-weight: 600;
             color: #8b5cf6;
+            margin: 0;
         }
 
-        .screen-share-video {
+        .screen-share-main-video {
             width: 100%;
-            border-radius: 8px;
+            max-height: 600px;
             background: #000;
-            max-height: 500px;
+            display: block;
+            backface-visibility: hidden;
+            transform: translateZ(0);
+            will-change: transform;
         }
 
         .voice-members-list {
@@ -1350,6 +1424,7 @@
         let isScreenSharing = false;
         let screenStream = null;
         let activeScreenSharers = new Set();
+        let selectedScreenShare = null; // Track which screen share is currently selected for main view
 
         // Message reactions
         let messageReactions = {}; // event_id -> {emoji: count}
@@ -1663,35 +1738,83 @@
         function displayScreenShare(imageData, sharerUserId) {
             activeScreenSharers.add(sharerUserId);
             const wrapper = document.getElementById('screenShareWrapper');
-            const containerId = 'screenShare_' + CSS.escape(sharerUserId);
-
-            // Create per-sharer container if it doesn't exist yet
-            let container = document.getElementById(containerId);
-            if (!container) {
-                container = document.createElement('div');
-                container.id = containerId;
-                container.className = 'screen-share-container active';
-
-                const sharerName = sharerUserId.split(':')[0].substring(1);
-                container.innerHTML = `
-                    <div class="screen-share-header">
-                        <div class="screen-share-title">${escapeHtml(sharerName)} is sharing their screen</div>
-                    </div>
-                    <video class="screen-share-video" autoplay playsinline></video>
-                `;
-
-                // Create hidden canvas for this sharer
-                const canvas = document.createElement('canvas');
-                canvas.style.display = 'none';
-                canvas.dataset.sharer = sharerUserId;
-                container.appendChild(canvas);
-
-                wrapper.appendChild(container);
+            
+            // Auto-select first screen share if none selected
+            if (!selectedScreenShare && activeScreenSharers.size === 1) {
+                selectedScreenShare = sharerUserId;
             }
 
-            const canvas = container.querySelector('canvas');
-            const video = container.querySelector('video');
+            // Create main container if it doesn't exist
+            let mainContainer = document.getElementById('screenShareMain');
+            if (!mainContainer) {
+                mainContainer = document.createElement('div');
+                mainContainer.id = 'screenShareMain';
+                mainContainer.className = 'screen-share-main';
+                mainContainer.style.display = 'none';
+                mainContainer.innerHTML = `
+                    <div class="screen-share-main-header">
+                        <h4 class="screen-share-main-title" id="screenShareMainTitle"></h4>
+                    </div>
+                    <video class="screen-share-main-video" id="screenShareMainVideo" autoplay playsinline muted></video>
+                    <canvas id="screenShareMainCanvas" style="display: none;"></canvas>
+                `;
+                wrapper.insertBefore(mainContainer, wrapper.firstChild);
+            }
 
+            // Create preview grid container if it doesn't exist
+            let gridContainer = document.getElementById('screenShareGrid');
+            if (!gridContainer) {
+                gridContainer = document.createElement('div');
+                gridContainer.id = 'screenShareGrid';
+                gridContainer.className = 'screen-share-grid';
+                wrapper.appendChild(gridContainer);
+            }
+
+            // Create or update preview tile for this sharer
+            const previewId = 'screenPreview_' + CSS.escape(sharerUserId);
+            let preview = document.getElementById(previewId);
+            
+            if (!preview) {
+                preview = document.createElement('div');
+                preview.id = previewId;
+                preview.className = 'screen-share-preview';
+                if (sharerUserId === selectedScreenShare) {
+                    preview.classList.add('selected');
+                }
+                
+                const sharerName = sharerUserId.split(':')[0].substring(1);
+                preview.innerHTML = `
+                    <video class="screen-share-preview-video" autoplay playsinline muted></video>
+                    <canvas style="display: none;"></canvas>
+                    <div class="screen-share-preview-label">${escapeHtml(sharerName)}</div>
+                `;
+
+                // Click handler to select this screen share
+                preview.onclick = () => selectScreenShare(sharerUserId);
+                
+                gridContainer.appendChild(preview);
+            }
+
+            // Update the preview video (always update previews)
+            const previewCanvas = preview.querySelector('canvas');
+            const previewVideo = preview.querySelector('video');
+            updateScreenShareVideo(imageData, previewCanvas, previewVideo);
+
+            // Update main view ONLY if this is the selected sharer
+            if (sharerUserId === selectedScreenShare) {
+                mainContainer.style.display = 'block';
+                const mainTitle = document.getElementById('screenShareMainTitle');
+                const sharerName = sharerUserId.split(':')[0].substring(1);
+                mainTitle.textContent = `${sharerName}'s screen`;
+                
+                // Update main view with its own canvas for smoother rendering
+                const mainCanvas = document.getElementById('screenShareMainCanvas');
+                const mainVideo = document.getElementById('screenShareMainVideo');
+                updateScreenShareVideo(imageData, mainCanvas, mainVideo);
+            }
+        }
+
+        function updateScreenShareVideo(imageData, canvas, video) {
             // Convert array buffer to blob URL
             const blob = new Blob([imageData], { type: 'image/jpeg' });
             const url = URL.createObjectURL(blob);
@@ -1699,13 +1822,16 @@
             // Load and draw the image
             const img = new Image();
             img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
+                // Only resize canvas if dimensions changed
+                if (canvas.width !== img.width || canvas.height !== img.height) {
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                }
 
-                const ctx = canvas.getContext('2d');
+                const ctx = canvas.getContext('2d', { alpha: false });
                 ctx.drawImage(img, 0, 0);
 
-                // Create or update stream
+                // Create stream only once
                 if (!video.srcObject) {
                     const stream = canvas.captureStream(30);
                     video.srcObject = stream;
@@ -1714,34 +1840,119 @@
 
                 URL.revokeObjectURL(url);
             };
+            
+            // Set crossOrigin to avoid potential CORS issues
+            img.crossOrigin = 'anonymous';
             img.src = url;
+        }
+
+        function selectScreenShare(sharerUserId) {
+            // Update selection
+            const previousSelection = selectedScreenShare;
+            selectedScreenShare = sharerUserId;
+
+            // Update preview tile visual states
+            if (previousSelection) {
+                const prevPreview = document.getElementById('screenPreview_' + CSS.escape(previousSelection));
+                if (prevPreview) {
+                    prevPreview.classList.remove('selected');
+                }
+            }
+
+            const newPreview = document.getElementById('screenPreview_' + CSS.escape(sharerUserId));
+            if (newPreview) {
+                newPreview.classList.add('selected');
+            }
+
+            // Update main view
+            const mainContainer = document.getElementById('screenShareMain');
+            
+            if (mainContainer && newPreview) {
+                mainContainer.style.display = 'block';
+                const mainTitle = document.getElementById('screenShareMainTitle');
+                const sharerName = sharerUserId.split(':')[0].substring(1);
+                mainTitle.textContent = `${sharerName}'s screen`;
+                
+                // Note: The main view will be updated on the next frame received for this user
+                // The displayScreenShare function handles rendering to both preview and main view
+            }
         }
 
         function hideScreenShare(sharerUserId) {
             if (sharerUserId) {
                 activeScreenSharers.delete(sharerUserId);
-                const containerId = 'screenShare_' + CSS.escape(sharerUserId);
-                const container = document.getElementById(containerId);
-                if (container) {
-                    const video = container.querySelector('video');
+                
+                // Remove preview tile
+                const previewId = 'screenPreview_' + CSS.escape(sharerUserId);
+                const preview = document.getElementById(previewId);
+                if (preview) {
+                    const video = preview.querySelector('video');
                     if (video && video.srcObject) {
                         video.srcObject.getTracks().forEach(track => track.stop());
                         video.srcObject = null;
                     }
-                    container.remove();
+                    preview.remove();
+                }
+
+                // If this was the selected screen share, select another or hide main view
+                if (selectedScreenShare === sharerUserId) {
+                    const remaining = Array.from(activeScreenSharers);
+                    if (remaining.length > 0) {
+                        // Auto-select the first remaining screen share
+                        selectScreenShare(remaining[0]);
+                    } else {
+                        // No more screen shares, hide main view
+                        selectedScreenShare = null;
+                        const mainContainer = document.getElementById('screenShareMain');
+                        if (mainContainer) {
+                            mainContainer.style.display = 'none';
+                            const mainVideo = document.getElementById('screenShareMainVideo');
+                            if (mainVideo) {
+                                mainVideo.srcObject = null;
+                            }
+                        }
+                    }
+                }
+
+                // Clean up grid and main containers if no screen shares remain
+                if (activeScreenSharers.size === 0) {
+                    const gridContainer = document.getElementById('screenShareGrid');
+                    if (gridContainer) {
+                        gridContainer.remove();
+                    }
+                    const mainContainer = document.getElementById('screenShareMain');
+                    if (mainContainer) {
+                        mainContainer.remove();
+                    }
                 }
             } else {
                 // Hide all screen shares
                 activeScreenSharers.clear();
+                selectedScreenShare = null;
+                
                 const wrapper = document.getElementById('screenShareWrapper');
-                wrapper.querySelectorAll('.screen-share-container').forEach(container => {
-                    const video = container.querySelector('video');
-                    if (video && video.srcObject) {
-                        video.srcObject.getTracks().forEach(track => track.stop());
-                        video.srcObject = null;
+                
+                // Clean up all preview videos
+                const gridContainer = document.getElementById('screenShareGrid');
+                if (gridContainer) {
+                    gridContainer.querySelectorAll('video').forEach(video => {
+                        if (video.srcObject) {
+                            video.srcObject.getTracks().forEach(track => track.stop());
+                            video.srcObject = null;
+                        }
+                    });
+                    gridContainer.remove();
+                }
+
+                // Clean up main view
+                const mainContainer = document.getElementById('screenShareMain');
+                if (mainContainer) {
+                    const mainVideo = document.getElementById('screenShareMainVideo');
+                    if (mainVideo) {
+                        mainVideo.srcObject = null;
                     }
-                    container.remove();
-                });
+                    mainContainer.remove();
+                }
             }
         }
 
