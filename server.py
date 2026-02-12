@@ -540,15 +540,17 @@ async def websocket_endpoint(websocket: WebSocket):
                 if binary_data[:7] == b'SCREEN:':
                     # Screen share frame - only to voice members
                     screen_frame = binary_data[7:]
-                    
+
                     # Find which room this user is in and broadcasting screen
                     for room_id, members in voice_channels.items():
                         if user_id in members and members[user_id].get("screen_sharing", False):
+                            # Inject sender identity: SCREEN:<user_id>\n<jpeg_data>
+                            tagged_frame = b'SCREEN:' + user_id.encode('utf-8') + b'\n' + screen_frame
                             # Broadcast screen frame to all other users in the voice channel
                             for member_id in members:
                                 if member_id != user_id and member_id in active_websockets:
                                     try:
-                                        await active_websockets[member_id].send_bytes(binary_data)
+                                        await active_websockets[member_id].send_bytes(tagged_frame)
                                     except:
                                         pass
                             break
