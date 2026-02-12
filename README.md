@@ -4,6 +4,7 @@ A lightweight online chat alternative in just two files!
  - Room creation
  - Room join/leave
  - Voice chat
+ - Screen share
  - Message delete
  - Emoji react
  - Emoji Palette
