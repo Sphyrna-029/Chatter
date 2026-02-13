@@ -394,6 +394,14 @@
         .room-name {
             font-weight: 600;
             margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .room-dm-icon {
+            font-size: 0.8rem;
+            opacity: 0.7;
         }
 
         .room-topic {
@@ -1315,10 +1323,12 @@
             border-radius: 8px;
             transition: all 0.2s ease;
             position: relative;
+            cursor: pointer;
         }
 
         .member-item:hover {
             background: rgba(19, 24, 43, 0.8);
+            border: 1px solid var(--primary-glow);
         }
 
         .member-item.offline {
@@ -3780,15 +3790,19 @@
                         if (roomData) {
                             const nameEvent = roomData.state.events.find(e => e.type === 'm.room.name');
                             const topicEvent = roomData.state.events.find(e => e.type === 'm.room.topic');
+                            const directEvent = roomData.state.events.find(e => e.type === 'm.room.direct');
+                            const isDM = directEvent?.content.is_direct || false;
 
                             const roomDiv = document.createElement('div');
                             roomDiv.className = 'room-item';
                             if (roomId === currentRoomId) roomDiv.classList.add('active');
                             roomDiv.dataset.roomId = roomId;
                             
+                            const dmIcon = isDM ? '<span class="room-dm-icon">💬</span>' : '';
+                            
                             roomDiv.innerHTML = `
                                 <div class="room-mention-badge ${roomMentions[roomId] && roomId !== currentRoomId ? 'show' : ''}"></div>
-                                <div class="room-name">${nameEvent?.content.name || 'Unnamed Room'}</div>
+                                <div class="room-name">${dmIcon}${nameEvent?.content.name || 'Unnamed Room'}</div>
                                 <div class="room-topic">${topicEvent?.content.topic || 'No topic'}</div>
                             `;
 
@@ -3922,6 +3936,42 @@
             }
         }
 
+        async function openDM(otherUserId, otherUserName) {
+            try {
+                // Create or get existing DM room
+                const response = await fetch('/_matrix/client/r0/createRoom', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        is_direct: true,
+                        invite: [otherUserId]
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const roomId = data.room_id;
+                    
+                    // Add to joined rooms if not already there
+                    if (!joinedRooms.includes(roomId)) {
+                        joinedRooms.push(roomId);
+                    }
+                    
+                    // Select the DM room
+                    await displayRooms();
+                    await selectRoom(roomId);
+                } else {
+                    alert('Failed to create DM');
+                }
+            } catch (error) {
+                console.error('Error opening DM:', error);
+                alert('Failed to create DM');
+            }
+        }
+
         function displayMembers() {
             const membersList = document.getElementById('membersList');
             const memberCount = document.getElementById('memberCount');
@@ -3935,6 +3985,13 @@
                 
                 const memberDiv = document.createElement('div');
                 memberDiv.className = `member-item ${statusClass === 'offline' ? 'offline' : ''}`;
+                
+                // Don't make yourself clickable
+                if (member.userId !== userId) {
+                    memberDiv.style.cursor = 'pointer';
+                    memberDiv.title = 'Click to send a DM';
+                    memberDiv.onclick = () => openDM(member.userId, member.displayName);
+                }
                 
                 const initial = member.displayName.substring(0, 1).toUpperCase();
                 
