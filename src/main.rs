@@ -68,6 +68,7 @@ struct AppState {
     screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
+    dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
     client_html: String,
 }
 
@@ -81,6 +82,7 @@ struct RoomRecord {
     name: String,
     topic: String,
     creator: String,
+    is_dm: bool,
 }
 
 #[derive(Clone)]
@@ -150,6 +152,7 @@ struct CreateRoomRequest {
     name: Option<String>,
     topic: Option<String>,
     invite: Option<Vec<String>>,
+    is_direct: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -485,6 +488,65 @@ async fn create_room(
         .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    let is_dm = req.is_direct.unwrap_or(false);
+    
+    // If it's a DM, check if one already exists
+    if is_dm {
+        if let Some(invite_list) = &req.invite {
+            if invite_list.len() == 1 {
+                let other_user = &invite_list[0];
+                
+                // Create sorted key for DM lookup
+                let dm_key = if user_id < *other_user {
+                    format!("{}|{}", user_id, other_user)
+                } else {
+                    format!("{}|{}", other_user, user_id)
+                };
+                
+                // Check if DM already exists
+                let dm_rooms = state.dm_rooms.read().await;
+                if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
+                    return Ok(Json(json!({"room_id": existing_room_id.clone()})));
+                }
+                drop(dm_rooms);
+                
+                // Create new DM room
+                let room_id = generate_id("!");
+                let other_user_name = other_user.split(':').next().unwrap_or(other_user).trim_start_matches('@');
+                let room_name = format!("DM with {}", other_user_name);
+                
+                state.rooms.write().await.insert(
+                    room_id.clone(),
+                    RoomRecord {
+                        name: room_name,
+                        topic: String::from("Direct Message"),
+                        creator: user_id.clone(),
+                        is_dm: true,
+                    },
+                );
+                
+                let members = vec![user_id.clone(), other_user.clone()];
+                
+                state
+                    .room_members
+                    .write()
+                    .await
+                    .insert(room_id.clone(), members);
+                state
+                    .messages
+                    .write()
+                    .await
+                    .insert(room_id.clone(), Vec::new());
+                
+                // Store DM mapping
+                state.dm_rooms.write().await.insert(dm_key, room_id.clone());
+                
+                return Ok(Json(json!({"room_id": room_id})));
+            }
+        }
+    }
+
+    // Regular room creation
     let room_id = generate_id("!");
     let room_count = state.rooms.read().await.len();
     let room_name = req
@@ -497,6 +559,7 @@ async fn create_room(
             name: room_name,
             topic: req.topic.unwrap_or_default(),
             creator: user_id.clone(),
+            is_dm: false,
         },
     );
 
@@ -643,6 +706,7 @@ async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
 
     let room_list: Vec<Value> = rooms
         .iter()
+        .filter(|(_, room)| !room.is_dm) // Don't include DMs in public room list
         .map(|(room_id, room)| {
             json!({
                 "room_id": room_id,
@@ -903,6 +967,12 @@ async fn sync(
                 "type": "m.room.topic",
                 "state_key": "",
                 "content": {"topic": room_data.topic},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.direct",
+                "state_key": "",
+                "content": {"is_direct": room_data.is_dm},
                 "sender": room_data.creator
             }),
         ];
@@ -3082,6 +3152,7 @@ async fn main() {
         screen_subscribers: RwLock::new(HashMap::new()),
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
+        dm_rooms: RwLock::new(HashMap::new()),
         client_html,
     });
 
