@@ -12,3 +12,7 @@ test_server.py
 # Claude Code
 CLAUDE.md
 .claude/
+
+# Node/Client
+client/node_modules/
+client/dist/
