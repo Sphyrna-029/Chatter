@@ -69,7 +69,8 @@ struct AppState {
     screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
-    dm_rooms: RwLock<HashMap<String, String>>,
+    dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
+    client_html: String,
 }
 
 #[derive(Clone)]
@@ -489,31 +490,64 @@ async fn create_room(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let is_dm = req.is_direct.unwrap_or(false);
-
-    // DM dedup: if creating a DM with exactly 1 invite, check for existing DM
+    
+    // If it's a DM, check if one already exists
     if is_dm {
-        if let Some(ref invite_list) = req.invite {
+        if let Some(invite_list) = &req.invite {
             if invite_list.len() == 1 {
-                let target = &invite_list[0];
-                let mut key_parts = vec![user_id.clone(), target.clone()];
-                key_parts.sort();
-                let dm_key = key_parts.join("|");
-
+                let other_user = &invite_list[0];
+                
+                // Create sorted key for DM lookup
+                let dm_key = if user_id < *other_user {
+                    format!("{}|{}", user_id, other_user)
+                } else {
+                    format!("{}|{}", other_user, user_id)
+                };
+                
+                // Check if DM already exists
                 let dm_rooms = state.dm_rooms.read().await;
                 if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
-                    // Auto-join the user if not already a member
-                    let mut rm = state.room_members.write().await;
-                    if let Some(members) = rm.get_mut(existing_room_id) {
-                        if !members.contains(&user_id) {
-                            members.push(user_id.clone());
-                        }
-                    }
-                    return Ok(Json(json!({"room_id": existing_room_id})));
+                    return Ok(Json(json!({"room_id": existing_room_id.clone()})));
                 }
+                drop(dm_rooms);
+                
+                // Create new DM room
+                let room_id = generate_id("!");
+                let other_user_name = other_user.split(':').next().unwrap_or(other_user).trim_start_matches('@');
+                let room_name = format!("DM with {}", other_user_name);
+                
+                state.rooms.write().await.insert(
+                    room_id.clone(),
+                    RoomRecord {
+                        name: room_name,
+                        topic: String::from("Direct Message"),
+                        creator: user_id.clone(),
+                        is_dm: true,
+                    },
+                );
+                
+                let members = vec![user_id.clone(), other_user.clone()];
+                
+                state
+                    .room_members
+                    .write()
+                    .await
+                    .insert(room_id.clone(), members);
+                state
+                    .messages
+                    .write()
+                    .await
+                    .insert(room_id.clone(), Vec::new());
+                
+                // Store DM mapping
+                state.dm_rooms.write().await.insert(dm_key, room_id.clone());
+                
+                return Ok(Json(json!({"room_id": room_id})));
             }
         }
     }
 
+    // Regular room creation
     let room_id = generate_id("!");
     let room_count = state.rooms.read().await.len();
 
@@ -544,7 +578,7 @@ async fn create_room(
             name: room_name,
             topic: req.topic.unwrap_or_default(),
             creator: user_id.clone(),
-            is_dm,
+            is_dm: false,
         },
     );
 
@@ -688,7 +722,7 @@ async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
 
     let room_list: Vec<Value> = rooms
         .iter()
-        .filter(|(_, room)| !room.is_dm)
+        .filter(|(_, room)| !room.is_dm) // Don't include DMs in public room list
         .map(|(room_id, room)| {
             let voice_members = vc.get(room_id);
             let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
@@ -956,6 +990,12 @@ async fn sync(
                 "type": "m.room.topic",
                 "state_key": "",
                 "content": {"topic": room_data.topic},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.direct",
+                "state_key": "",
+                "content": {"is_direct": room_data.is_dm},
                 "sender": room_data.creator
             }),
         ];
@@ -3158,6 +3198,7 @@ async fn main() {
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
         dm_rooms: RwLock::new(HashMap::new()),
+        client_html,
     });
 
     let app = Router::new()

@@ -30,7 +30,7 @@ jobs:
             cd Chatter
             
             # Checkout rust branch
-            git checkout refactor/rust-rewrite
+            # git checkout refactor/rust-rewrite
 
             cp ../control.sh .
             

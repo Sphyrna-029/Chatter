@@ -394,11 +394,46 @@
         .room-name {
             font-weight: 600;
             margin-bottom: 3px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .room-dm-icon {
+            font-size: 0.8rem;
+            opacity: 0.7;
         }
 
         .room-topic {
             font-size: 0.8rem;
             color: var(--text-muted);
+        }
+
+        .room-user-count {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .room-item.streaming {
+            border: 2px solid #ff3b30;
+            box-shadow: 0 0 20px rgba(255, 59, 48, 0.5);
+            animation: streamingPulse 2s infinite;
+        }
+
+        @keyframes streamingPulse {
+            0%, 100% {
+                box-shadow: 0 0 20px rgba(255, 59, 48, 0.5);
+                border-color: #ff3b30;
+            }
+            50% {
+                box-shadow: 0 0 30px rgba(255, 59, 48, 0.8);
+                border-color: #ff6b66;
+            }
         }
 
         .main-chat {
@@ -1315,10 +1350,12 @@
             border-radius: 8px;
             transition: all 0.2s ease;
             position: relative;
+            cursor: pointer;
         }
 
         .member-item:hover {
             background: rgba(19, 24, 43, 0.8);
+            border: 1px solid var(--primary-glow);
         }
 
         .member-item.offline {
@@ -1754,6 +1791,10 @@
 
         // Mention tracking
         let roomMentions = {}; // room_id -> has unread mention
+        
+        // Room metadata tracking
+        let roomMemberCounts = {}; // room_id -> member count
+        let roomStreamingStatus = {}; // room_id -> has active streams
 
         // URL regex for detecting links
         const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -3588,6 +3629,8 @@
                         await ensureScreenSubscriber(message.user_id);
                     }
                 }
+                // Update room cards to show streaming status
+                updateRoomStreamingStatus(message.room_id, true);
             } else if (message.type === 'screen_share_stopped') {
                 if (message.room_id === currentRoomId) {
                     await hideScreenShare(message.user_id);
@@ -3596,6 +3639,8 @@
                     }
                     updateVoiceMembersList();
                 }
+                // Update room cards to show streaming status
+                await updateRoomStreamingStatusFromServer(message.room_id);
             } else if (message.type === 'screen_webrtc_publish_answer') {
                 if (screenPublisherPc && message.sdp) {
                     try {
@@ -3780,16 +3825,33 @@
                         if (roomData) {
                             const nameEvent = roomData.state.events.find(e => e.type === 'm.room.name');
                             const topicEvent = roomData.state.events.find(e => e.type === 'm.room.topic');
+                            const directEvent = roomData.state.events.find(e => e.type === 'm.room.direct');
+                            const isDM = directEvent?.content.is_direct || false;
+                            
+                            // Get member count
+                            const memberEvents = roomData.state.events.filter(e => 
+                                e.type === 'm.room.member' && e.content.membership === 'join'
+                            );
+                            const memberCount = memberEvents.length;
+                            roomMemberCounts[roomId] = memberCount;
+                            
+                            // Check if anyone is streaming in this room
+                            const hasStreaming = await checkRoomStreaming(roomId);
+                            roomStreamingStatus[roomId] = hasStreaming;
 
                             const roomDiv = document.createElement('div');
                             roomDiv.className = 'room-item';
                             if (roomId === currentRoomId) roomDiv.classList.add('active');
+                            if (hasStreaming) roomDiv.classList.add('streaming');
                             roomDiv.dataset.roomId = roomId;
+                            
+                            const dmIcon = isDM ? '<span class="room-dm-icon">💬</span>' : '';
                             
                             roomDiv.innerHTML = `
                                 <div class="room-mention-badge ${roomMentions[roomId] && roomId !== currentRoomId ? 'show' : ''}"></div>
-                                <div class="room-name">${nameEvent?.content.name || 'Unnamed Room'}</div>
+                                <div class="room-name">${dmIcon}${nameEvent?.content.name || 'Unnamed Room'}</div>
                                 <div class="room-topic">${topicEvent?.content.topic || 'No topic'}</div>
+                                <div class="room-user-count">👥 ${memberCount} ${memberCount === 1 ? 'user' : 'users'}</div>
                             `;
 
                             // Add click handler for room selection
@@ -3817,6 +3879,43 @@
                     console.error('Error fetching room details:', error);
                 }
             }
+        }
+        
+        async function checkRoomStreaming(roomId) {
+            try {
+                const response = await fetch(`/api/rooms/${roomId}/voice`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    // Check if any voice member is screen sharing
+                    if (data.members) {
+                        return Object.values(data.members).some(member => member.screen_sharing);
+                    }
+                }
+            } catch (error) {
+                // Silently fail - streaming status is not critical
+                console.debug('Could not check streaming status for room:', roomId);
+            }
+            return false;
+        }
+        
+        function updateRoomStreamingStatus(roomId, isStreaming) {
+            roomStreamingStatus[roomId] = isStreaming;
+            const roomDiv = document.querySelector(`[data-room-id="${roomId}"]`);
+            if (roomDiv) {
+                if (isStreaming) {
+                    roomDiv.classList.add('streaming');
+                } else {
+                    roomDiv.classList.remove('streaming');
+                }
+            }
+        }
+        
+        async function updateRoomStreamingStatusFromServer(roomId) {
+            const hasStreaming = await checkRoomStreaming(roomId);
+            updateRoomStreamingStatus(roomId, hasStreaming);
         }
 
         async function selectRoom(roomId) {
@@ -3922,6 +4021,42 @@
             }
         }
 
+        async function openDM(otherUserId, otherUserName) {
+            try {
+                // Create or get existing DM room
+                const response = await fetch('/_matrix/client/r0/createRoom', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        is_direct: true,
+                        invite: [otherUserId]
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const roomId = data.room_id;
+                    
+                    // Add to joined rooms if not already there
+                    if (!joinedRooms.includes(roomId)) {
+                        joinedRooms.push(roomId);
+                    }
+                    
+                    // Select the DM room
+                    await displayRooms();
+                    await selectRoom(roomId);
+                } else {
+                    alert('Failed to create DM');
+                }
+            } catch (error) {
+                console.error('Error opening DM:', error);
+                alert('Failed to create DM');
+            }
+        }
+
         function displayMembers() {
             const membersList = document.getElementById('membersList');
             const memberCount = document.getElementById('memberCount');
@@ -3935,6 +4070,13 @@
                 
                 const memberDiv = document.createElement('div');
                 memberDiv.className = `member-item ${statusClass === 'offline' ? 'offline' : ''}`;
+                
+                // Don't make yourself clickable
+                if (member.userId !== userId) {
+                    memberDiv.style.cursor = 'pointer';
+                    memberDiv.title = 'Click to send a DM';
+                    memberDiv.onclick = () => openDM(member.userId, member.displayName);
+                }
                 
                 const initial = member.displayName.substring(0, 1).toUpperCase();
                 
