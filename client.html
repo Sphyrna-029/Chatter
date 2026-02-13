@@ -1604,15 +1604,20 @@
         let userPresence = {}; // user_id -> {status: 'active'|'idle'|'offline', last_typing: timestamp}
         let typingTimeout = null;
 
-        // Voice chat state (client-server audio)
+        // Voice chat state
         let inVoiceChannel = false;
         let isMuted = false;
         let localStream = null;
-        let audioContext = null;
-        let mediaStreamSource = null;
-        let scriptProcessor = null;
         let voiceMembers = new Set();
         let voiceMemberStates = {}; // user_id -> {muted: bool, screen_sharing: bool}
+
+        // Voice WebRTC state
+        let voicePublisherPc = null;
+        let voiceSubscriberPcs = new Map(); // speaker_user_id -> RTCPeerConnection
+        let voiceAudioElements = new Map(); // speaker_user_id -> HTMLAudioElement
+        let pendingVoiceSubscriptions = new Set();
+        const VOICE_SUBSCRIBE_RETRY_MS = 750;
+        let voiceSubscriptionRetryTimers = new Map();
 
         // Screen share state
         let isScreenSharing = false;
@@ -2793,38 +2798,6 @@
                     video: false 
                 });
 
-                // Set up audio processing
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-                mediaStreamSource = audioContext.createMediaStreamSource(localStream);
-                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-
-                // Process and send audio data to server
-                scriptProcessor.onaudioprocess = (e) => {
-                    if (isMuted || !ws || ws.readyState !== WebSocket.OPEN) {
-                        return;
-                    }
-
-                    const inputData = e.inputBuffer.getChannelData(0);
-                    // Convert float32 to int16
-                    const int16Data = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        const s = Math.max(-1, Math.min(1, inputData[i]));
-                        int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                    }
-                    
-                    // Send audio data as binary with AUDIO: prefix
-                    if (ws.readyState === WebSocket.OPEN) {
-                        const header = new TextEncoder().encode('AUDIO:');
-                        const combined = new Uint8Array(header.length + int16Data.byteLength);
-                        combined.set(header, 0);
-                        combined.set(new Uint8Array(int16Data.buffer), header.length);
-                        ws.send(combined.buffer);
-                    }
-                };
-
-                mediaStreamSource.connect(scriptProcessor);
-                scriptProcessor.connect(audioContext.destination);
-
                 inVoiceChannel = true;
                 
                 // Update UI
@@ -2835,13 +2808,16 @@
                 document.getElementById('voiceIndicator').classList.add('active');
                 document.getElementById('voiceMembersList').classList.add('active');
 
-                // Notify server via JSON message
+                // Notify server via JSON message (triggers voice_webrtc_publishers_list response)
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.send(JSON.stringify({
                         type: 'voice_join',
                         room_id: currentRoomId
                     }));
                 }
+
+                // Create publisher peer connection to send our audio to server
+                await createVoicePublisher();
 
                 // Load current voice members
                 await loadVoiceMembers();
@@ -2850,6 +2826,176 @@
                 console.error('Error accessing microphone:', error);
                 alert('Could not access microphone. Please check permissions.');
             }
+        }
+
+        async function createVoicePublisher() {
+            if (!localStream || !canSignalOverWebSocket()) return;
+
+            await closeVoicePublisher();
+
+            const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+            voicePublisherPc = pc;
+
+            // Add audio track
+            const audioTrack = localStream.getAudioTracks()[0];
+            if (audioTrack) {
+                pc.addTrack(audioTrack, localStream);
+            }
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate || !canSignalOverWebSocket()) return;
+                ws.send(JSON.stringify({
+                    type: 'voice_webrtc_publish_candidate',
+                    room_id: currentRoomId,
+                    candidate: {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex,
+                        usernameFragment: event.candidate.usernameFragment
+                    }
+                }));
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                    console.warn('Voice publisher PC state:', pc.connectionState);
+                }
+            };
+
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                ws.send(JSON.stringify({
+                    type: 'voice_webrtc_publish_offer',
+                    room_id: currentRoomId,
+                    sdp: offer.sdp
+                }));
+            } catch (error) {
+                console.error('Failed to create voice publisher offer:', error);
+                await closeVoicePublisher();
+            }
+        }
+
+        async function closeVoicePublisher() {
+            if (voicePublisherPc) {
+                const pc = voicePublisherPc;
+                voicePublisherPc = null;
+                try { pc.close(); } catch (e) {}
+            }
+        }
+
+        async function createVoiceSubscriber(speakerUserId) {
+            if (speakerUserId === userId) return;
+            if (!inVoiceChannel || !canSignalOverWebSocket()) return;
+            if (voiceSubscriberPcs.has(speakerUserId) || pendingVoiceSubscriptions.has(speakerUserId)) return;
+
+            const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+            voiceSubscriberPcs.set(speakerUserId, pc);
+            pendingVoiceSubscriptions.add(speakerUserId);
+
+            pc.onicecandidate = (event) => {
+                if (!event.candidate || !canSignalOverWebSocket()) return;
+                ws.send(JSON.stringify({
+                    type: 'voice_webrtc_subscribe_candidate',
+                    room_id: currentRoomId,
+                    speaker_user_id: speakerUserId,
+                    candidate: {
+                        candidate: event.candidate.candidate,
+                        sdpMid: event.candidate.sdpMid,
+                        sdpMLineIndex: event.candidate.sdpMLineIndex,
+                        usernameFragment: event.candidate.usernameFragment
+                    }
+                }));
+            };
+
+            pc.ontrack = (event) => {
+                // Create an audio element for this speaker
+                let audioEl = voiceAudioElements.get(speakerUserId);
+                if (!audioEl) {
+                    audioEl = new Audio();
+                    audioEl.autoplay = true;
+                    audioEl.playsInline = true;
+                    voiceAudioElements.set(speakerUserId, audioEl);
+                }
+                audioEl.srcObject = event.streams[0] || new MediaStream([event.track]);
+                audioEl.play().catch(e => console.warn('Audio play failed:', e));
+            };
+
+            pc.onconnectionstatechange = () => {
+                if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                    closeVoiceSubscriber(speakerUserId);
+                }
+            };
+
+            // Need to add a recvonly transceiver to get audio from the server
+            pc.addTransceiver('audio', { direction: 'recvonly' });
+
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                ws.send(JSON.stringify({
+                    type: 'voice_webrtc_subscribe_offer',
+                    room_id: currentRoomId,
+                    speaker_user_id: speakerUserId,
+                    sdp: offer.sdp
+                }));
+            } catch (error) {
+                console.error(`Failed to create voice subscriber offer for ${speakerUserId}:`, error);
+                closeVoiceSubscriber(speakerUserId);
+                scheduleVoiceSubscriptionRetry(speakerUserId);
+            }
+        }
+
+        function closeVoiceSubscriber(speakerUserId) {
+            pendingVoiceSubscriptions.delete(speakerUserId);
+            cancelVoiceSubscriptionRetry(speakerUserId);
+
+            const pc = voiceSubscriberPcs.get(speakerUserId);
+            if (pc) {
+                voiceSubscriberPcs.delete(speakerUserId);
+                try { pc.close(); } catch (e) {}
+            }
+
+            const audioEl = voiceAudioElements.get(speakerUserId);
+            if (audioEl) {
+                audioEl.srcObject = null;
+                voiceAudioElements.delete(speakerUserId);
+            }
+        }
+
+        function closeAllVoiceSubscribers() {
+            const speakers = Array.from(voiceSubscriberPcs.keys());
+            for (const speakerUserId of speakers) {
+                closeVoiceSubscriber(speakerUserId);
+            }
+        }
+
+        function scheduleVoiceSubscriptionRetry(speakerUserId) {
+            cancelVoiceSubscriptionRetry(speakerUserId);
+            const timer = setTimeout(() => {
+                voiceSubscriptionRetryTimers.delete(speakerUserId);
+                if (inVoiceChannel && voiceMembers.has(speakerUserId)) {
+                    createVoiceSubscriber(speakerUserId);
+                }
+            }, VOICE_SUBSCRIBE_RETRY_MS);
+            voiceSubscriptionRetryTimers.set(speakerUserId, timer);
+        }
+
+        function cancelVoiceSubscriptionRetry(speakerUserId) {
+            const timer = voiceSubscriptionRetryTimers.get(speakerUserId);
+            if (timer) {
+                clearTimeout(timer);
+                voiceSubscriptionRetryTimers.delete(speakerUserId);
+            }
+        }
+
+        function clearAllVoiceSubscriptionRetries() {
+            for (const timer of voiceSubscriptionRetryTimers.values()) {
+                clearTimeout(timer);
+            }
+            voiceSubscriptionRetryTimers.clear();
         }
 
         async function leaveVoice() {
@@ -2861,19 +3007,10 @@
             // Hide all incoming screen shares
             await hideScreenShare();
 
-            // Stop audio processing
-            if (scriptProcessor) {
-                scriptProcessor.disconnect();
-                scriptProcessor = null;
-            }
-            if (mediaStreamSource) {
-                mediaStreamSource.disconnect();
-                mediaStreamSource = null;
-            }
-            if (audioContext) {
-                audioContext.close();
-                audioContext = null;
-            }
+            // Teardown voice WebRTC
+            await closeVoicePublisher();
+            closeAllVoiceSubscribers();
+            clearAllVoiceSubscriptionRetries();
 
             // Stop local stream
             if (localStream) {
@@ -3020,37 +3157,7 @@
             syncVoiceMembersToAltView();
         }
 
-        // Set up audio playback from server
-        let audioPlaybackContext = null;
-        let audioQueue = [];
-        let isPlaying = false;
-
-        function initAudioPlayback() {
-            if (!audioPlaybackContext) {
-                audioPlaybackContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
-            }
-        }
-
-        async function playAudioChunk(audioData) {
-            initAudioPlayback();
-            
-            // Convert Int16Array to Float32Array
-            const int16Array = new Int16Array(audioData);
-            const float32Array = new Float32Array(int16Array.length);
-            for (let i = 0; i < int16Array.length; i++) {
-                float32Array[i] = int16Array[i] / (int16Array[i] < 0 ? 0x8000 : 0x7FFF);
-            }
-            
-            // Create audio buffer
-            const audioBuffer = audioPlaybackContext.createBuffer(1, float32Array.length, 48000);
-            audioBuffer.getChannelData(0).set(float32Array);
-            
-            // Play the buffer
-            const source = audioPlaybackContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioPlaybackContext.destination);
-            source.start();
-        }
+        // Audio playback is now handled via WebRTC (voice subscriber peer connections)
 
         // Authentication
         async function login() {
@@ -3162,22 +3269,8 @@
 
             ws.onmessage = async (event) => {
                 if (event.data instanceof ArrayBuffer) {
-                    // Audio binary path
-                    const view = new Uint8Array(event.data);
-                    const headerText = new TextDecoder().decode(view.slice(0, 6));
-
-                    if (headerText === 'AUDIO:') {
-                        // Audio data - only play if in voice
-                        const audioData = view.slice(6);
-                        if (inVoiceChannel) {
-                            await playAudioChunk(audioData.buffer);
-                        }
-                    } else {
-                        // Legacy audio without header - only play if in voice
-                        if (inVoiceChannel) {
-                            await playAudioChunk(event.data);
-                        }
-                    }
+                    // Legacy binary audio path - ignored now that voice uses WebRTC
+                    return;
                 } else {
                     // JSON message
                     const message = JSON.parse(event.data);
@@ -3197,6 +3290,9 @@
                 pendingScreenSubscriptions.clear();
                 incomingScreenStreams.clear();
                 stopAllScreenSubscriberTelemetry();
+                closeVoicePublisher();
+                closeAllVoiceSubscribers();
+                clearAllVoiceSubscriptionRetries();
                 setTimeout(connectWebSocket, 3000);
             };
         }
@@ -3253,12 +3349,17 @@
                         };
                     }
                     updateVoiceMembersList();
+                    // Note: we don't subscribe yet — we wait for voice_webrtc_publisher_ready
+                    // since the new joiner's publisher track may not be ready immediately
                 }
             } else if (message.type === 'voice_user_left') {
                 if (message.room_id === currentRoomId) {
                     voiceMembers.delete(message.user_id);
                     delete voiceMemberStates[message.user_id];
                     updateVoiceMembersList();
+                    
+                    // Teardown voice subscriber for this user
+                    closeVoiceSubscriber(message.user_id);
                     
                     // If the person who left was screen sharing, hide their stream
                     if (activeScreenSharers.has(message.user_id)) {
@@ -3364,6 +3465,78 @@
                     await closeScreenSubscriberPeer(sharerUserId, false);
                     if (inVoiceChannel && activeScreenSharers.has(sharerUserId)) {
                         scheduleScreenSubscriptionRetry(sharerUserId);
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_publish_answer') {
+                if (voicePublisherPc && message.sdp) {
+                    try {
+                        await voicePublisherPc.setRemoteDescription({
+                            type: 'answer',
+                            sdp: message.sdp
+                        });
+                    } catch (error) {
+                        console.error('Failed applying voice publisher answer:', error);
+                        await closeVoicePublisher();
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_publish_candidate') {
+                if (voicePublisherPc && message.candidate) {
+                    try {
+                        await voicePublisherPc.addIceCandidate(message.candidate);
+                    } catch (error) {
+                        console.error('Failed adding voice publisher ICE candidate:', error);
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_subscribe_answer') {
+                const speakerUserId = message.speaker_user_id;
+                const pc = speakerUserId ? voiceSubscriberPcs.get(speakerUserId) : null;
+                if (pc && message.sdp) {
+                    try {
+                        await pc.setRemoteDescription({
+                            type: 'answer',
+                            sdp: message.sdp
+                        });
+                        pendingVoiceSubscriptions.delete(speakerUserId);
+                        cancelVoiceSubscriptionRetry(speakerUserId);
+                    } catch (error) {
+                        console.error(`Failed applying voice subscribe answer for ${speakerUserId}:`, error);
+                        closeVoiceSubscriber(speakerUserId);
+                        if (inVoiceChannel && voiceMembers.has(speakerUserId)) {
+                            scheduleVoiceSubscriptionRetry(speakerUserId);
+                        }
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_subscribe_candidate') {
+                const speakerUserId = message.speaker_user_id;
+                const pc = speakerUserId ? voiceSubscriberPcs.get(speakerUserId) : null;
+                if (pc && message.candidate) {
+                    try {
+                        await pc.addIceCandidate(message.candidate);
+                    } catch (error) {
+                        console.error(`Failed adding voice subscribe ICE candidate for ${speakerUserId}:`, error);
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_publishers_list') {
+                // Received on join — list of existing voice publishers to subscribe to
+                if (message.room_id === currentRoomId && inVoiceChannel && Array.isArray(message.publishers)) {
+                    for (const speakerUserId of message.publishers) {
+                        if (speakerUserId !== userId) {
+                            await createVoiceSubscriber(speakerUserId);
+                        }
+                    }
+                }
+            } else if (message.type === 'voice_webrtc_publisher_ready') {
+                // A voice member's publisher track is now ready — subscribe to them
+                if (message.room_id === currentRoomId && inVoiceChannel && message.user_id !== userId) {
+                    await createVoiceSubscriber(message.user_id);
+                }
+            } else if (message.type === 'voice_webrtc_error') {
+                console.warn('Voice WebRTC error:', message.detail || message);
+                if (message.scope === 'subscribe' && message.speaker_user_id) {
+                    const speakerUserId = message.speaker_user_id;
+                    closeVoiceSubscriber(speakerUserId);
+                    if (inVoiceChannel && voiceMembers.has(speakerUserId)) {
+                        scheduleVoiceSubscriptionRetry(speakerUserId);
                     }
                 }
             }
