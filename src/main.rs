@@ -6,6 +6,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use tower_http::services::ServeDir;
 use futures_util::{SinkExt, StreamExt};
 use rtcp::{
     packet::Packet as RtcpPacket,
@@ -68,7 +69,6 @@ struct AppState {
     screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
-    client_html: String,
 }
 
 #[derive(Clone)]
@@ -640,15 +640,18 @@ async fn joined_rooms(
 async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
     let rooms = state.rooms.read().await;
     let rm = state.room_members.read().await;
+    let vc = state.voice_channels.read().await;
 
     let room_list: Vec<Value> = rooms
         .iter()
         .map(|(room_id, room)| {
+            let voice_count = vc.get(room_id).map(|v| v.len()).unwrap_or(0);
             json!({
                 "room_id": room_id,
                 "name": room.name,
                 "topic": room.topic,
-                "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0)
+                "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0),
+                "voice_count": voice_count
             })
         })
         .collect();
@@ -1765,6 +1768,20 @@ async fn handle_screen_webrtc_publish_offer(
                     } else {
                         return;
                     }
+                }
+
+                // Notify all voice members that this screen publisher's track is now ready
+                let room_id = {
+                    let publishers = state.screen_publishers.read().await;
+                    publishers.get(&user_id).map(|p| p.room_id.clone())
+                };
+                if let Some(room_id) = room_id {
+                    let event = json!({
+                        "type": "screen_webrtc_publisher_ready",
+                        "room_id": room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, &room_id, &event).await;
                 }
 
                 tokio::spawn(async move {
@@ -3046,8 +3063,11 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
 // Static file serving
 // ---------------------------------------------------------------------------
 
-async fn serve_client(State(state): State<Arc<AppState>>) -> Html<String> {
-    Html(state.client_html.clone())
+async fn serve_client() -> Html<String> {
+    let html = std::fs::read_to_string("client/dist/index.html")
+        .or_else(|_| std::fs::read_to_string("client.html"))
+        .unwrap_or_else(|_| "<h1>No client found. Run 'npm run build' in client/</h1>".to_string());
+    Html(html)
 }
 
 async fn versions() -> Json<Value> {
@@ -3062,9 +3082,6 @@ async fn versions() -> Json<Value> {
 
 #[tokio::main]
 async fn main() {
-    // Load client.html at startup
-    let client_html = std::fs::read_to_string("client.html")
-        .unwrap_or_else(|_| "<h1>client.html not found</h1>".to_string());
     let webrtc_api = build_webrtc_api();
 
     let state = Arc::new(AppState {
@@ -3082,12 +3099,12 @@ async fn main() {
         screen_subscribers: RwLock::new(HashMap::new()),
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
-        client_html,
     });
 
     let app = Router::new()
         // Static / client
         .route("/", get(serve_client))
+        .nest_service("/assets", ServeDir::new("client/dist/assets"))
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
         // Auth
