@@ -44,7 +44,7 @@ use webrtc::{
     },
 };
 
-const SCREEN_RTP_BUFFER_SIZE: usize = 32;
+const SCREEN_RTP_BUFFER_SIZE: usize = 512;
 
 // ---------------------------------------------------------------------------
 // State types
@@ -2018,6 +2018,17 @@ async fn handle_screen_webrtc_subscribe_offer(
         }
     });
 
+    // Request an immediate keyframe so the new subscriber doesn't have to wait
+    // for the next natural IDR frame (which can be very rare in screen sharing).
+    let _ = publisher_peer_connection
+        .write_rtcp(&[Box::new(PictureLossIndication {
+            sender_ssrc: 0,
+            media_ssrc: publisher_media_ssrc,
+        }) as Box<dyn RtcpPacket + Send + Sync>])
+        .await;
+
+    let publisher_pc_for_pli = publisher_peer_connection.clone();
+    let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
         loop {
@@ -2027,8 +2038,20 @@ async fn handle_screen_webrtc_subscribe_offer(
                         break;
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(_)) => {
-                    // Skip stale packets and continue with the latest available frame.
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    // Packets were dropped — the decoder's reference frames are stale.
+                    // Request a fresh keyframe from the publisher so recovery is fast.
+                    eprintln!(
+                        "screen-fwd: subscriber lagged by {} packets, requesting keyframe",
+                        skipped
+                    );
+                    let _ = publisher_pc_for_pli
+                        .write_rtcp(&[Box::new(PictureLossIndication {
+                            sender_ssrc: 0,
+                            media_ssrc: pli_media_ssrc,
+                        })
+                            as Box<dyn RtcpPacket + Send + Sync>])
+                        .await;
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
