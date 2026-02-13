@@ -6,6 +6,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use tower_http::services::ServeDir;
 use futures_util::{SinkExt, StreamExt};
 use rtcp::{
     packet::Packet as RtcpPacket,
@@ -549,9 +550,27 @@ async fn create_room(
     // Regular room creation
     let room_id = generate_id("!");
     let room_count = state.rooms.read().await.len();
-    let room_name = req
-        .name
-        .unwrap_or_else(|| format!("Room {}", room_count + 1));
+
+    let mut members = vec![user_id.clone()];
+
+    // Add invited users
+    if let Some(ref invite_list) = req.invite {
+        let users = state.users.read().await;
+        for invited in invite_list {
+            if users.contains_key(invited) && !members.contains(invited) {
+                members.push(invited.clone());
+            }
+        }
+    }
+
+    let room_name = if is_dm && members.len() == 2 {
+        // Name DM after the other user
+        let other = if members[0] == user_id { &members[1] } else { &members[0] };
+        let other_display = other.split(':').next().unwrap_or(other).trim_start_matches('@');
+        format!("DM with {}", other_display)
+    } else {
+        req.name.unwrap_or_else(|| format!("Room {}", room_count + 1))
+    };
 
     state.rooms.write().await.insert(
         room_id.clone(),
@@ -563,16 +582,12 @@ async fn create_room(
         },
     );
 
-    let mut members = vec![user_id.clone()];
-
-    // Add invited users
-    if let Some(invite_list) = req.invite {
-        let users = state.users.read().await;
-        for invited in invite_list {
-            if users.contains_key(&invited) && !members.contains(&invited) {
-                members.push(invited);
-            }
-        }
+    // Register DM mapping
+    if is_dm && members.len() == 2 {
+        let mut key_parts = vec![members[0].clone(), members[1].clone()];
+        key_parts.sort();
+        let dm_key = key_parts.join("|");
+        state.dm_rooms.write().await.insert(dm_key, room_id.clone());
     }
 
     state
@@ -703,16 +718,24 @@ async fn joined_rooms(
 async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
     let rooms = state.rooms.read().await;
     let rm = state.room_members.read().await;
+    let vc = state.voice_channels.read().await;
 
     let room_list: Vec<Value> = rooms
         .iter()
         .filter(|(_, room)| !room.is_dm) // Don't include DMs in public room list
         .map(|(room_id, room)| {
+            let voice_members = vc.get(room_id);
+            let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
+            let screen_share_active = voice_members
+                .map(|v| v.values().any(|m| m.screen_sharing))
+                .unwrap_or(false);
             json!({
                 "room_id": room_id,
                 "name": room.name,
                 "topic": room.topic,
-                "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0)
+                "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0),
+                "voice_count": voice_count,
+                "screen_share_active": screen_share_active
             })
         })
         .collect();
@@ -976,6 +999,14 @@ async fn sync(
                 "sender": room_data.creator
             }),
         ];
+        if room_data.is_dm {
+            state_events.push(json!({
+                "type": "m.room.direct",
+                "state_key": "",
+                "content": {"is_direct": true},
+                "sender": room_data.creator
+            }));
+        }
         state_events.extend(member_events);
 
         joined_rooms_data.insert(
@@ -1835,6 +1866,20 @@ async fn handle_screen_webrtc_publish_offer(
                     } else {
                         return;
                     }
+                }
+
+                // Notify all voice members that this screen publisher's track is now ready
+                let room_id = {
+                    let publishers = state.screen_publishers.read().await;
+                    publishers.get(&user_id).map(|p| p.room_id.clone())
+                };
+                if let Some(room_id) = room_id {
+                    let event = json!({
+                        "type": "screen_webrtc_publisher_ready",
+                        "room_id": room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, &room_id, &event).await;
                 }
 
                 tokio::spawn(async move {
@@ -3116,8 +3161,11 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
 // Static file serving
 // ---------------------------------------------------------------------------
 
-async fn serve_client(State(state): State<Arc<AppState>>) -> Html<String> {
-    Html(state.client_html.clone())
+async fn serve_client() -> Html<String> {
+    let html = std::fs::read_to_string("client/dist/index.html")
+        .or_else(|_| std::fs::read_to_string("client.html"))
+        .unwrap_or_else(|_| "<h1>No client found. Run 'npm run build' in client/</h1>".to_string());
+    Html(html)
 }
 
 async fn versions() -> Json<Value> {
@@ -3132,9 +3180,6 @@ async fn versions() -> Json<Value> {
 
 #[tokio::main]
 async fn main() {
-    // Load client.html at startup
-    let client_html = std::fs::read_to_string("client.html")
-        .unwrap_or_else(|_| "<h1>client.html not found</h1>".to_string());
     let webrtc_api = build_webrtc_api();
 
     let state = Arc::new(AppState {
@@ -3159,6 +3204,7 @@ async fn main() {
     let app = Router::new()
         // Static / client
         .route("/", get(serve_client))
+        .nest_service("/assets", ServeDir::new("client/dist/assets"))
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
         // Auth
