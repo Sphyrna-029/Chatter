@@ -1627,16 +1627,10 @@
         let screenPublisherQualityTimer = null;
         let screenSubscriberTelemetryTimers = new Map();
         const SCREEN_SUBSCRIBE_RETRY_MS = 750;
-        const SCREEN_MIN_SHORT_SIDE = 720;
-        const SCREEN_MIN_LONG_SIDE = 1280;
         const SCREEN_TARGET_WIDTH = 1920;
         const SCREEN_TARGET_HEIGHT = 1080;
-        const SCREEN_MIN_FPS = 30;
         const SCREEN_TARGET_FPS = 30;
-        const SCREEN_MAX_BITRATE_BPS = 10_000_000;
         const SCREEN_QUALITY_SAMPLE_MS = 2000;
-        const SCREEN_QUALITY_FAIL_SAMPLES = 3;
-        const SCREEN_QUALITY_GRACE_MS = 8000;
         const SCREEN_TELEMETRY_SAMPLE_MS = 2000;
         const WEBRTC_CONFIG = {
             iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
@@ -1946,7 +1940,7 @@
                         <div class="screen-debug-label">Publisher (${shortenUserId(userId || '')})</div>
                         <div class="screen-debug-line">Res: ${p.width || 'n/a'}x${p.height || 'n/a'} | FPS: ${formatTelemetryNumber(p.fps, 2)}</div>
                         <div class="screen-debug-line">Bitrate: ${formatTelemetryNumber(p.bitrateMbps, 2)} Mbps | RTT: ${formatTelemetryNumber(p.rttMs, 2)} ms</div>
-                        <div class="screen-debug-line">Threshold: ${p.meetsThreshold ? 'PASS' : 'FAIL'} | Low Samples: ${p.lowQualitySamples ?? 0}</div>
+                        <div class="screen-debug-line">Quality: ${p.meetsThreshold ? '✓ Near target' : '⚠ Below target (adapting)'}</div>
                     </div>
                 `);
             } else {
@@ -1996,13 +1990,13 @@
             return { width, height, frameRate, shortSide, longSide };
         }
 
-        function isScreenQualityWithinThreshold(track, measuredFps) {
+        function isScreenQualityNearTarget(track, measuredFps) {
             const metrics = getScreenTrackMetrics(track);
             const fps = Number(measuredFps || metrics.frameRate || 0);
+            // Informational only — never gates or stops the stream
             return (
-                metrics.shortSide >= SCREEN_MIN_SHORT_SIDE &&
-                metrics.longSide >= SCREEN_MIN_LONG_SIDE &&
-                fps >= SCREEN_MIN_FPS
+                metrics.longSide >= SCREEN_TARGET_WIDTH * 0.5 &&
+                fps >= SCREEN_TARGET_FPS * 0.5
             );
         }
 
@@ -2016,11 +2010,9 @@
         function startScreenPublisherQualityMonitor(sender, screenTrack) {
             stopScreenPublisherQualityMonitor();
 
-            let lowQualitySamples = 0;
             let previousFramesSent = null;
             let previousBytesSent = null;
             let previousTimestampMs = null;
-            const monitorStartedAt = Date.now();
 
             screenPublisherQualityTimer = setInterval(async () => {
                 if (!isScreenSharing || !screenPublisherPc || !screenTrack || screenTrack.readyState !== 'live') {
@@ -2067,9 +2059,7 @@
                     console.warn('Screen quality monitor stats failed:', error);
                 }
 
-                const meetsThreshold = isScreenQualityWithinThreshold(screenTrack, measuredFps);
-                const pastGraceWindow = Date.now() - monitorStartedAt >= SCREEN_QUALITY_GRACE_MS;
-
+                const nearTarget = isScreenQualityNearTarget(screenTrack, measuredFps);
                 const metrics = getScreenTrackMetrics(screenTrack);
                 const publisherSnapshot = {
                     width: metrics.width,
@@ -2077,8 +2067,7 @@
                     fps: Number(measuredFps || metrics.frameRate || 0),
                     bitrateMbps: measuredBitrateMbps,
                     rttMs: measuredRttMs,
-                    meetsThreshold,
-                    lowQualitySamples
+                    meetsThreshold: nearTarget
                 };
                 setScreenPublisherTelemetry(publisherSnapshot);
                 console.debug('screen-publisher-telemetry', {
@@ -2087,18 +2076,6 @@
                     bitrateMbps: formatTelemetryNumber(publisherSnapshot.bitrateMbps, 2),
                     rttMs: formatTelemetryNumber(publisherSnapshot.rttMs, 2)
                 });
-
-                if (pastGraceWindow && !meetsThreshold) {
-                    lowQualitySamples += 1;
-                } else {
-                    lowQualitySamples = 0;
-                }
-
-                if (lowQualitySamples >= SCREEN_QUALITY_FAIL_SAMPLES) {
-                    stopScreenPublisherQualityMonitor();
-                    alert('Screen share dropped below required minimum (720p and 30 FPS) and was stopped.');
-                    stopScreenShare();
-                }
             }, SCREEN_QUALITY_SAMPLE_MS);
         }
 
@@ -2348,6 +2325,15 @@
                     ? event.streams[0]
                     : new MediaStream([event.track]);
 
+                // Minimize jitter buffer to reduce playout delay for near-realtime viewing
+                if (event.receiver && typeof event.receiver.jitterBufferTarget !== 'undefined') {
+                    // Target minimal jitter buffer (in seconds) — browser clamps to safe minimum
+                    event.receiver.jitterBufferTarget = 0;
+                }
+                if (event.receiver && event.receiver.playoutDelayHint !== undefined) {
+                    event.receiver.playoutDelayHint = 0;
+                }
+
                 incomingScreenStreams.set(sharerUserId, incomingStream);
                 displayScreenShare(incomingStream, sharerUserId);
             };
@@ -2416,11 +2402,10 @@
                     : [{}];
                 params.encodings = encodings.map(encoding => ({
                     ...encoding,
-                    maxBitrate: SCREEN_MAX_BITRATE_BPS,
-                    maxFramerate: SCREEN_TARGET_FPS,
                     scaleResolutionDownBy: 1.0
                 }));
-                params.degradationPreference = 'maintain-framerate';
+                // Let WebRTC congestion control adapt bitrate/framerate freely
+                params.degradationPreference = 'balanced';
                 await sender.setParameters(params);
             } catch (error) {
                 console.warn('Unable to apply screen sender parameters:', error);
@@ -2459,9 +2444,9 @@
                     video: {
                         cursor: 'always',
                         displaySurface: 'monitor',
-                        width: { min: SCREEN_MIN_LONG_SIDE, ideal: SCREEN_TARGET_WIDTH, max: SCREEN_TARGET_WIDTH },
-                        height: { min: SCREEN_MIN_SHORT_SIDE, ideal: SCREEN_TARGET_HEIGHT, max: SCREEN_TARGET_HEIGHT },
-                        frameRate: { min: SCREEN_MIN_FPS, ideal: SCREEN_TARGET_FPS, max: SCREEN_TARGET_FPS }
+                        width: { ideal: SCREEN_TARGET_WIDTH },
+                        height: { ideal: SCREEN_TARGET_HEIGHT },
+                        frameRate: { ideal: SCREEN_TARGET_FPS }
                     },
                     audio: false
                 });
@@ -2477,20 +2462,17 @@
 
                 try {
                     await screenTrack.applyConstraints({
-                        width: { min: SCREEN_MIN_LONG_SIDE, ideal: SCREEN_TARGET_WIDTH, max: SCREEN_TARGET_WIDTH },
-                        height: { min: SCREEN_MIN_SHORT_SIDE, ideal: SCREEN_TARGET_HEIGHT, max: SCREEN_TARGET_HEIGHT },
-                        frameRate: { min: SCREEN_MIN_FPS, ideal: SCREEN_TARGET_FPS, max: SCREEN_TARGET_FPS }
+                        width: { ideal: SCREEN_TARGET_WIDTH },
+                        height: { ideal: SCREEN_TARGET_HEIGHT },
+                        frameRate: { ideal: SCREEN_TARGET_FPS }
                     });
                 } catch (error) {
                     console.warn('Unable to enforce screen capture constraints:', error);
                 }
 
-                if (!isScreenQualityWithinThreshold(screenTrack, null)) {
-                    const metrics = getScreenTrackMetrics(screenTrack);
-                    throw new Error(
-                        `Captured stream below minimum quality: ${metrics.width}x${metrics.height} @ ${metrics.frameRate.toFixed(1)}fps`
-                    );
-                }
+                // Log initial track quality (FPS may read as 0 until frames start flowing)
+                const initialMetrics = getScreenTrackMetrics(screenTrack);
+                console.info(`Screen capture started: ${initialMetrics.width}x${initialMetrics.height} @ ${initialMetrics.frameRate}fps`);
 
                 isScreenSharing = true;
 
@@ -2533,7 +2515,10 @@
                         room_id: currentRoomId
                     }));
                 }
-                alert('Could not start screen sharing. Please check permissions.');
+                const errorMsg = error.name === 'NotAllowedError'
+                    ? 'Screen sharing was denied. Please check permissions.'
+                    : `Could not start screen sharing: ${error.message}`;
+                alert(errorMsg);
             }
         }
 
