@@ -69,6 +69,7 @@ struct AppState {
     screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
+    dm_rooms: RwLock<HashMap<String, String>>,
 }
 
 #[derive(Clone)]
@@ -81,6 +82,7 @@ struct RoomRecord {
     name: String,
     topic: String,
     creator: String,
+    is_dm: bool,
 }
 
 #[derive(Clone)]
@@ -150,6 +152,7 @@ struct CreateRoomRequest {
     name: Option<String>,
     topic: Option<String>,
     invite: Option<Vec<String>>,
+    is_direct: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -485,11 +488,55 @@ async fn create_room(
         .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    let is_dm = req.is_direct.unwrap_or(false);
+
+    // DM dedup: if creating a DM with exactly 1 invite, check for existing DM
+    if is_dm {
+        if let Some(ref invite_list) = req.invite {
+            if invite_list.len() == 1 {
+                let target = &invite_list[0];
+                let mut key_parts = vec![user_id.clone(), target.clone()];
+                key_parts.sort();
+                let dm_key = key_parts.join("|");
+
+                let dm_rooms = state.dm_rooms.read().await;
+                if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
+                    // Auto-join the user if not already a member
+                    let mut rm = state.room_members.write().await;
+                    if let Some(members) = rm.get_mut(existing_room_id) {
+                        if !members.contains(&user_id) {
+                            members.push(user_id.clone());
+                        }
+                    }
+                    return Ok(Json(json!({"room_id": existing_room_id})));
+                }
+            }
+        }
+    }
+
     let room_id = generate_id("!");
     let room_count = state.rooms.read().await.len();
-    let room_name = req
-        .name
-        .unwrap_or_else(|| format!("Room {}", room_count + 1));
+
+    let mut members = vec![user_id.clone()];
+
+    // Add invited users
+    if let Some(ref invite_list) = req.invite {
+        let users = state.users.read().await;
+        for invited in invite_list {
+            if users.contains_key(invited) && !members.contains(invited) {
+                members.push(invited.clone());
+            }
+        }
+    }
+
+    let room_name = if is_dm && members.len() == 2 {
+        // Name DM after the other user
+        let other = if members[0] == user_id { &members[1] } else { &members[0] };
+        let other_display = other.split(':').next().unwrap_or(other).trim_start_matches('@');
+        format!("DM with {}", other_display)
+    } else {
+        req.name.unwrap_or_else(|| format!("Room {}", room_count + 1))
+    };
 
     state.rooms.write().await.insert(
         room_id.clone(),
@@ -497,19 +544,16 @@ async fn create_room(
             name: room_name,
             topic: req.topic.unwrap_or_default(),
             creator: user_id.clone(),
+            is_dm,
         },
     );
 
-    let mut members = vec![user_id.clone()];
-
-    // Add invited users
-    if let Some(invite_list) = req.invite {
-        let users = state.users.read().await;
-        for invited in invite_list {
-            if users.contains_key(&invited) && !members.contains(&invited) {
-                members.push(invited);
-            }
-        }
+    // Register DM mapping
+    if is_dm && members.len() == 2 {
+        let mut key_parts = vec![members[0].clone(), members[1].clone()];
+        key_parts.sort();
+        let dm_key = key_parts.join("|");
+        state.dm_rooms.write().await.insert(dm_key, room_id.clone());
     }
 
     state
@@ -644,14 +688,20 @@ async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
 
     let room_list: Vec<Value> = rooms
         .iter()
+        .filter(|(_, room)| !room.is_dm)
         .map(|(room_id, room)| {
-            let voice_count = vc.get(room_id).map(|v| v.len()).unwrap_or(0);
+            let voice_members = vc.get(room_id);
+            let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
+            let screen_share_active = voice_members
+                .map(|v| v.values().any(|m| m.screen_sharing))
+                .unwrap_or(false);
             json!({
                 "room_id": room_id,
                 "name": room.name,
                 "topic": room.topic,
                 "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0),
-                "voice_count": voice_count
+                "voice_count": voice_count,
+                "screen_share_active": screen_share_active
             })
         })
         .collect();
@@ -909,6 +959,14 @@ async fn sync(
                 "sender": room_data.creator
             }),
         ];
+        if room_data.is_dm {
+            state_events.push(json!({
+                "type": "m.room.direct",
+                "state_key": "",
+                "content": {"is_direct": true},
+                "sender": room_data.creator
+            }));
+        }
         state_events.extend(member_events);
 
         joined_rooms_data.insert(
@@ -3099,6 +3157,7 @@ async fn main() {
         screen_subscribers: RwLock::new(HashMap::new()),
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
+        dm_rooms: RwLock::new(HashMap::new()),
     });
 
     let app = Router::new()

@@ -50,6 +50,135 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     return () => clearInterval(id);
   }, [state.accessToken, fetchSummaries]);
 
+  const regularRoomIds = state.joinedRoomIds.filter(
+    (id) => !state.roomInfoMap[id]?.is_direct
+  );
+  const dmRoomIds = state.joinedRoomIds.filter(
+    (id) => state.roomInfoMap[id]?.is_direct
+  );
+
+  function renderRoomCard(roomId: string, isDm: boolean) {
+    const info = state.roomInfoMap[roomId];
+    const summary = roomSummaries[roomId];
+    const isActive = roomId === state.currentRoomId;
+    const hasMention = state.roomMentions[roomId] && !isActive;
+    const memberCount = summary?.member_count ?? 0;
+    const voiceCount = summary?.voice_count ?? 0;
+    const screenShareActive = summary?.screen_share_active ?? false;
+
+    let roomName: string;
+    if (isDm && info?.name) {
+      // Strip "DM with " prefix for cleaner display
+      roomName = info.name.replace(/^DM with /, "");
+    } else {
+      roomName = info?.name || "Unnamed";
+    }
+    const roomInitial = roomName.substring(0, 1).toUpperCase();
+
+    return (
+      <button
+        key={roomId}
+        onClick={() => selectRoom(roomId)}
+        className="group relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer"
+        style={{
+          minHeight: "5.5rem",
+          borderColor: screenShareActive
+            ? "hsl(var(--chart-4))"
+            : isActive
+              ? "hsl(var(--sidebar-primary))"
+              : "hsl(var(--sidebar-border))",
+          background: isActive
+            ? "hsl(var(--sidebar-accent))"
+            : "transparent",
+          animation: screenShareActive ? "pulse-border 2s ease-in-out infinite" : undefined,
+        }}
+      >
+        {/* Mention ping */}
+        {hasMention && (
+          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+        )}
+
+        {/* Room initial */}
+        <span
+          className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-bold"
+          style={{
+            background: isActive
+              ? "hsl(var(--sidebar-primary))"
+              : "hsl(var(--sidebar-accent))",
+            color: isActive
+              ? "hsl(var(--sidebar-primary-foreground))"
+              : "hsl(var(--sidebar-foreground))",
+          }}
+        >
+          {isDm ? (
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
+            </svg>
+          ) : (
+            roomInitial
+          )}
+        </span>
+
+        {/* Room name */}
+        <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground">
+          {roomName}
+        </span>
+
+        {/* Stats row */}
+        {!isDm && (
+          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="flex items-center gap-0.5">
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 16 16"
+                fill="currentColor"
+              >
+                <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z" />
+              </svg>
+              {memberCount}
+            </span>
+            {voiceCount > 0 && (
+              <span className="flex items-center gap-0.5 text-green-500">
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                >
+                  <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3zm3-2a2 2 0 0 0-2 2v5a2 2 0 0 0 4 0V3a2 2 0 0 0-2-2z" />
+                  <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z" />
+                </svg>
+                {voiceCount}
+              </span>
+            )}
+            {screenShareActive && (
+              <span className="flex items-center gap-0.5 text-purple-500">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h13A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 10.5v-7zM1.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-13z" />
+                  <path d="M2 14h12v1H2v-1z" />
+                </svg>
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Leave button on hover */}
+        <span
+          className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm("Leave this room?")) {
+              leaveRoom(roomId);
+            }
+          }}
+        >
+          x
+        </span>
+      </button>
+    );
+  }
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
@@ -97,111 +226,34 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         <SidebarGroup>
           <SidebarGroupLabel>Rooms</SidebarGroupLabel>
           <SidebarGroupContent>
-            <ScrollArea className="h-[calc(100vh-280px)]">
-              {state.joinedRoomIds.length === 0 && (
+            <ScrollArea className={dmRoomIds.length > 0 ? "h-[calc(100vh-480px)]" : "h-[calc(100vh-280px)]"}>
+              {regularRoomIds.length === 0 && (
                 <p className="px-3 py-3 text-xs text-muted-foreground">
                   No rooms joined yet
                 </p>
               )}
               <div className="grid grid-cols-2 gap-2 px-2 pb-2">
-                {state.joinedRoomIds.map((roomId) => {
-                  const info = state.roomInfoMap[roomId];
-                  const summary = roomSummaries[roomId];
-                  const isActive = roomId === state.currentRoomId;
-                  const hasMention = state.roomMentions[roomId] && !isActive;
-                  const memberCount = summary?.member_count ?? 0;
-                  const voiceCount = summary?.voice_count ?? 0;
-                  const roomName = info?.name || "Unnamed";
-                  const roomInitial = roomName.substring(0, 1).toUpperCase();
-
-                  return (
-                    <button
-                      key={roomId}
-                      onClick={() => selectRoom(roomId)}
-                      className="group relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer"
-                      style={{
-                        minHeight: "5.5rem",
-                        borderColor: isActive
-                          ? "hsl(var(--sidebar-primary))"
-                          : "hsl(var(--sidebar-border))",
-                        background: isActive
-                          ? "hsl(var(--sidebar-accent))"
-                          : "transparent",
-                      }}
-                    >
-                      {/* Mention ping */}
-                      {hasMention && (
-                        <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                      )}
-
-                      {/* Room initial */}
-                      <span
-                        className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-bold"
-                        style={{
-                          background: isActive
-                            ? "hsl(var(--sidebar-primary))"
-                            : "hsl(var(--sidebar-accent))",
-                          color: isActive
-                            ? "hsl(var(--sidebar-primary-foreground))"
-                            : "hsl(var(--sidebar-foreground))",
-                        }}
-                      >
-                        {roomInitial}
-                      </span>
-
-                      {/* Room name */}
-                      <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground">
-                        {roomName}
-                      </span>
-
-                      {/* Stats row */}
-                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-0.5">
-                          <svg
-                            width="10"
-                            height="10"
-                            viewBox="0 0 16 16"
-                            fill="currentColor"
-                          >
-                            <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z" />
-                          </svg>
-                          {memberCount}
-                        </span>
-                        {voiceCount > 0 && (
-                          <span className="flex items-center gap-0.5 text-green-500">
-                            <svg
-                              width="10"
-                              height="10"
-                              viewBox="0 0 16 16"
-                              fill="currentColor"
-                            >
-                              <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3zm3-2a2 2 0 0 0-2 2v5a2 2 0 0 0 4 0V3a2 2 0 0 0-2-2z" />
-                              <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z" />
-                            </svg>
-                            {voiceCount}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Leave button on hover */}
-                      <span
-                        className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm("Leave this room?")) {
-                            leaveRoom(roomId);
-                          }
-                        }}
-                      >
-                        x
-                      </span>
-                    </button>
-                  );
-                })}
+                {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
               </div>
             </ScrollArea>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {dmRoomIds.length > 0 && (
+          <>
+            <Separator />
+            <SidebarGroup>
+              <SidebarGroupLabel>Direct Messages</SidebarGroupLabel>
+              <SidebarGroupContent>
+                <ScrollArea className="h-[calc(100vh-480px)]">
+                  <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                    {dmRoomIds.map((roomId) => renderRoomCard(roomId, true))}
+                  </div>
+                </ScrollArea>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-2">
@@ -214,6 +266,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           Logout
         </Button>
       </SidebarFooter>
+
+      <style>{`
+        @keyframes pulse-border {
+          0%, 100% { box-shadow: 0 0 0 0 hsl(var(--chart-4) / 0.4); }
+          50% { box-shadow: 0 0 8px 2px hsl(var(--chart-4) / 0.6); }
+        }
+      `}</style>
     </Sidebar>
   );
 }

@@ -25,6 +25,7 @@ import {
   apiGetVoiceMembers,
   apiGetPresence,
   apiGetAllRooms,
+  apiCreateDM,
   type MatrixMessage,
   type VoiceMember,
   type RoomInfo,
@@ -301,6 +302,7 @@ interface AppContextValue {
   loadVoiceMembers: () => Promise<void>;
   sendTyping: () => void;
   getAllRooms: () => Promise<{ room_id: string; name: string; member_count: number }[]>;
+  openDM: (targetUserId: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -496,10 +498,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const topicEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.topic"
         );
+        const directEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.direct"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
           topic: topicEvent?.content?.topic || "",
+          is_direct: directEvent?.content?.is_direct || false,
         };
       } else {
         roomInfoMap[roomId] = {
@@ -671,6 +677,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return data.rooms;
   }, []);
 
+  const openDM = useCallback(
+    async (targetUserId: string) => {
+      const data = await apiCreateDM(targetUserId);
+      await loadRooms();
+      await selectRoom(data.room_id);
+    },
+    [loadRooms, selectRoom]
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -691,6 +706,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadVoiceMembers,
         sendTyping,
         getAllRooms,
+        openDM,
       }}
     >
       {children}

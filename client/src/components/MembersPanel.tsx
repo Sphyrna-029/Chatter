@@ -4,7 +4,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
 export function MembersPanel() {
-  const { state } = useAppContext();
+  const { state, openDM } = useAppContext();
 
   if (!state.currentRoomId) return null;
 
@@ -25,13 +25,20 @@ export function MembersPanel() {
             const presence = state.userPresence[member.userId];
             const status = presence?.status || "offline";
             const initial = member.displayName[0]?.toUpperCase() || "?";
+            const isSelf = member.userId === state.userId;
 
             return (
               <div
                 key={member.userId}
+                onClick={() => {
+                  if (!isSelf) openDM(member.userId);
+                }}
                 className={cn(
-                  "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/50",
-                  status === "offline" && "opacity-50"
+                  "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors",
+                  status === "offline" && "opacity-50",
+                  isSelf
+                    ? "hover:bg-accent/50"
+                    : "hover:bg-accent/50 cursor-pointer"
                 )}
               >
                 <div className="relative">

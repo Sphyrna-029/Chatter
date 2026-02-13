@@ -133,6 +133,7 @@ export interface RoomSummary {
   name: string;
   member_count: number;
   voice_count: number;
+  screen_share_active?: boolean;
 }
 
 export async function apiGetAllRooms() {
@@ -244,4 +245,15 @@ export interface RoomInfo {
   room_id: string;
   name: string;
   topic: string;
+  is_direct?: boolean;
+}
+
+export async function apiCreateDM(targetUserId: string) {
+  const res = await fetch("/_matrix/client/r0/createRoom", {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ is_direct: true, invite: [targetUserId] }),
+  });
+  if (!res.ok) throw new Error("Failed to create DM");
+  return res.json() as Promise<{ room_id: string }>;
 }
