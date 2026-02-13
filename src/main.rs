@@ -7,6 +7,14 @@ use axum::{
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use rtcp::{
+    packet::Packet as RtcpPacket,
+    payload_feedbacks::{
+        full_intra_request::{FirEntry, FullIntraRequest},
+        picture_loss_indication::PictureLossIndication,
+    },
+    transport_feedbacks::transport_layer_nack::TransportLayerNack,
+};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
@@ -14,7 +22,10 @@ use std::{
     sync::Arc,
     time::SystemTime,
 };
-use tokio::sync::{mpsc, RwLock};
+use tokio::{
+    sync::{broadcast, mpsc, RwLock},
+    task::JoinHandle,
+};
 use webrtc::{
     api::{
         interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder,
@@ -32,6 +43,8 @@ use webrtc::{
         track_remote::TrackRemote,
     },
 };
+
+const SCREEN_RTP_BUFFER_SIZE: usize = 32;
 
 // ---------------------------------------------------------------------------
 // State types
@@ -84,14 +97,16 @@ struct PresenceRecord {
 struct ScreenPublisherState {
     room_id: String,
     peer_connection: Arc<RTCPeerConnection>,
-    relay_track: Option<Arc<TrackLocalStaticRTP>>,
+    media_ssrc: Option<u32>,
+    video_codec: Option<RTCRtpCodecCapability>,
+    rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
 }
 
-#[derive(Clone)]
 struct ScreenSubscriberState {
     viewer_user_id: String,
     sharer_user_id: String,
     peer_connection: Arc<RTCPeerConnection>,
+    forward_task: JoinHandle<()>,
 }
 
 // ---------------------------------------------------------------------------
@@ -300,6 +315,49 @@ async fn create_peer_connection(state: &AppState) -> Result<Arc<RTCPeerConnectio
         .new_peer_connection(default_webrtc_config())
         .await
         .map(Arc::new)
+}
+
+fn rewrite_rtcp_feedback_for_publisher(
+    packet: &(dyn RtcpPacket + Send + Sync),
+    publisher_media_ssrc: u32,
+) -> Option<Box<dyn RtcpPacket + Send + Sync>> {
+    if packet
+        .as_any()
+        .downcast_ref::<PictureLossIndication>()
+        .is_some()
+    {
+        return Some(Box::new(PictureLossIndication {
+            sender_ssrc: 0,
+            media_ssrc: publisher_media_ssrc,
+        }));
+    }
+
+    if let Some(nack) = packet.as_any().downcast_ref::<TransportLayerNack>() {
+        return Some(Box::new(TransportLayerNack {
+            sender_ssrc: 0,
+            media_ssrc: publisher_media_ssrc,
+            nacks: nack.nacks.clone(),
+        }));
+    }
+
+    if let Some(fir) = packet.as_any().downcast_ref::<FullIntraRequest>() {
+        let rewritten_fir = fir
+            .fir
+            .iter()
+            .map(|entry| FirEntry {
+                ssrc: publisher_media_ssrc,
+                sequence_number: entry.sequence_number,
+            })
+            .collect::<Vec<_>>();
+
+        return Some(Box::new(FullIntraRequest {
+            sender_ssrc: 0,
+            media_ssrc: publisher_media_ssrc,
+            fir: rewritten_fir,
+        }));
+    }
+
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1409,18 +1467,19 @@ async fn teardown_screen_subscriber_pair(
     sharer_user_id: &str,
 ) {
     let key = subscriber_key(viewer_user_id, sharer_user_id);
-    let peer_connection = {
+    let subscriber = {
         let mut subs = state.screen_subscribers.write().await;
-        subs.remove(&key).map(|entry| entry.peer_connection)
+        subs.remove(&key)
     };
 
-    if let Some(pc) = peer_connection {
-        let _ = pc.close().await;
+    if let Some(subscriber) = subscriber {
+        subscriber.forward_task.abort();
+        let _ = subscriber.peer_connection.close().await;
     }
 }
 
 async fn teardown_screen_subscriptions_for_viewer(state: &AppState, viewer_user_id: &str) {
-    let peer_connections = {
+    let subscribers = {
         let mut subs = state.screen_subscribers.write().await;
         let keys: Vec<String> = subs
             .iter()
@@ -1428,22 +1487,23 @@ async fn teardown_screen_subscriptions_for_viewer(state: &AppState, viewer_user_
             .map(|(key, _)| key.clone())
             .collect();
 
-        let mut pcs = Vec::with_capacity(keys.len());
+        let mut removed = Vec::with_capacity(keys.len());
         for key in keys {
             if let Some(entry) = subs.remove(&key) {
-                pcs.push(entry.peer_connection);
+                removed.push(entry);
             }
         }
-        pcs
+        removed
     };
 
-    for pc in peer_connections {
-        let _ = pc.close().await;
+    for subscriber in subscribers {
+        subscriber.forward_task.abort();
+        let _ = subscriber.peer_connection.close().await;
     }
 }
 
 async fn teardown_screen_subscriptions_for_sharer(state: &AppState, sharer_user_id: &str) {
-    let peer_connections = {
+    let subscribers = {
         let mut subs = state.screen_subscribers.write().await;
         let keys: Vec<String> = subs
             .iter()
@@ -1451,17 +1511,18 @@ async fn teardown_screen_subscriptions_for_sharer(state: &AppState, sharer_user_
             .map(|(key, _)| key.clone())
             .collect();
 
-        let mut pcs = Vec::with_capacity(keys.len());
+        let mut removed = Vec::with_capacity(keys.len());
         for key in keys {
             if let Some(entry) = subs.remove(&key) {
-                pcs.push(entry.peer_connection);
+                removed.push(entry);
             }
         }
-        pcs
+        removed
     };
 
-    for pc in peer_connections {
-        let _ = pc.close().await;
+    for subscriber in subscribers {
+        subscriber.forward_task.abort();
+        let _ = subscriber.peer_connection.close().await;
     }
 }
 
@@ -1532,7 +1593,9 @@ async fn handle_screen_webrtc_publish_offer(
             ScreenPublisherState {
                 room_id: room_id.to_string(),
                 peer_connection: peer_connection.clone(),
-                relay_track: None,
+                media_ssrc: None,
+                video_codec: None,
+                rtp_sender: None,
             },
         );
     }
@@ -1599,22 +1662,22 @@ async fn handle_screen_webrtc_publish_offer(
             let user_id = user_id.clone();
             Box::pin(async move {
                 let codec = track.codec();
-                let relay_track = Arc::new(TrackLocalStaticRTP::new(
-                    RTCRtpCodecCapability {
-                        mime_type: codec.capability.mime_type.clone(),
-                        clock_rate: codec.capability.clock_rate,
-                        channels: codec.capability.channels,
-                        sdp_fmtp_line: codec.capability.sdp_fmtp_line.clone(),
-                        rtcp_feedback: codec.capability.rtcp_feedback.clone(),
-                    },
-                    format!("screen-{}", user_id),
-                    "chatter-sfu".to_string(),
-                ));
+                let codec_capability = RTCRtpCodecCapability {
+                    mime_type: codec.capability.mime_type.clone(),
+                    clock_rate: codec.capability.clock_rate,
+                    channels: codec.capability.channels,
+                    sdp_fmtp_line: codec.capability.sdp_fmtp_line.clone(),
+                    rtcp_feedback: codec.capability.rtcp_feedback.clone(),
+                };
+                let (rtp_sender, _) =
+                    broadcast::channel::<rtp::packet::Packet>(SCREEN_RTP_BUFFER_SIZE);
 
                 {
                     let mut publishers = state.screen_publishers.write().await;
                     if let Some(publisher) = publishers.get_mut(&user_id) {
-                        publisher.relay_track = Some(relay_track.clone());
+                        publisher.media_ssrc = Some(track.ssrc());
+                        publisher.video_codec = Some(codec_capability);
+                        publisher.rtp_sender = Some(rtp_sender.clone());
                     } else {
                         return;
                     }
@@ -1622,9 +1685,7 @@ async fn handle_screen_webrtc_publish_offer(
 
                 tokio::spawn(async move {
                     while let Ok((rtp_packet, _)) = track.read_rtp().await {
-                        if relay_track.write_rtp(&rtp_packet).await.is_err() {
-                            break;
-                        }
+                        let _ = rtp_sender.send(rtp_packet);
                     }
                 });
             })
@@ -1810,13 +1871,39 @@ async fn handle_screen_webrtc_subscribe_offer(
         return;
     }
 
-    let Some(relay_track) = publisher_state.relay_track else {
+    let publisher_peer_connection = publisher_state.peer_connection.clone();
+
+    let Some(publisher_media_ssrc) = publisher_state.media_ssrc else {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Sharer media SSRC not ready yet; retry shortly"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    };
+
+    let Some(codec_capability) = publisher_state.video_codec.clone() else {
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
             "room_id": room_id,
             "sharer_user_id": sharer_user_id,
             "detail": "Sharer track not ready yet; retry shortly"
+        });
+        send_to_user(&state, viewer_user_id, &error).await;
+        return;
+    };
+
+    let Some(publisher_rtp_sender) = publisher_state.rtp_sender.clone() else {
+        let error = json!({
+            "type": "screen_webrtc_error",
+            "scope": "subscribe",
+            "room_id": room_id,
+            "sharer_user_id": sharer_user_id,
+            "detail": "Sharer RTP stream not ready yet; retry shortly"
         });
         send_to_user(&state, viewer_user_id, &error).await;
         return;
@@ -1888,8 +1975,14 @@ async fn handle_screen_webrtc_subscribe_offer(
         }));
     }
 
-    let relay_track: Arc<dyn TrackLocal + Send + Sync> = relay_track;
-    let rtp_sender = match peer_connection.add_track(relay_track).await {
+    let local_track = Arc::new(TrackLocalStaticRTP::new(
+        codec_capability,
+        format!("screen-{}-{}", sharer_user_id, viewer_user_id),
+        "chatter-sfu".to_string(),
+    ));
+
+    let track_for_sender: Arc<dyn TrackLocal + Send + Sync> = local_track.clone();
+    let rtp_sender = match peer_connection.add_track(track_for_sender).await {
         Ok(sender) => sender,
         Err(err) => {
             let error = json!({
@@ -1905,9 +1998,42 @@ async fn handle_screen_webrtc_subscribe_offer(
         }
     };
 
+    let publisher_peer_connection_for_feedback = publisher_peer_connection.clone();
     tokio::spawn(async move {
-        let mut rtcp_buffer = vec![0_u8; 1500];
-        while rtp_sender.read(&mut rtcp_buffer).await.is_ok() {}
+        while let Ok((rtcp_packets, _)) = rtp_sender.read_rtcp().await {
+            let rewritten_packets = rtcp_packets
+                .iter()
+                .filter_map(|packet| {
+                    rewrite_rtcp_feedback_for_publisher(packet.as_ref(), publisher_media_ssrc)
+                })
+                .collect::<Vec<_>>();
+
+            if rewritten_packets.is_empty() {
+                continue;
+            }
+
+            let _ = publisher_peer_connection_for_feedback
+                .write_rtcp(&rewritten_packets)
+                .await;
+        }
+    });
+
+    let mut rtp_receiver = publisher_rtp_sender.subscribe();
+    let forward_task = tokio::spawn(async move {
+        loop {
+            match rtp_receiver.recv().await {
+                Ok(rtp_packet) => {
+                    if local_track.write_rtp(&rtp_packet).await.is_err() {
+                        break;
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    // Skip stale packets and continue with the latest available frame.
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
     });
 
     {
@@ -1919,6 +2045,7 @@ async fn handle_screen_webrtc_subscribe_offer(
                 viewer_user_id: viewer_user_id.to_string(),
                 sharer_user_id: sharer_user_id.to_string(),
                 peer_connection: peer_connection.clone(),
+                forward_task,
             },
         );
     }
