@@ -829,6 +829,105 @@
             font-size: 0.75rem;
         }
 
+        .voice-volume-slider {
+            width: 70px;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #4b5563;
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .voice-volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #8b5cf6;
+            cursor: pointer;
+            border: none;
+        }
+
+        .voice-volume-slider::-moz-range-thumb {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #8b5cf6;
+            cursor: pointer;
+            border: none;
+        }
+
+        .voice-volume-slider::-webkit-slider-runnable-track {
+            height: 4px;
+            border-radius: 2px;
+        }
+
+        .voice-volume-label {
+            font-size: 0.7rem;
+            color: #9ca3af;
+            min-width: 30px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .btn-ptt-toggle {
+            background: rgba(100, 100, 100, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: none;
+            font-size: 0.85rem;
+        }
+
+        .btn-ptt-toggle.visible {
+            display: block;
+        }
+
+        .btn-ptt-toggle.ptt-mode {
+            background: rgba(139, 92, 246, 0.3);
+            border-color: #8b5cf6;
+            color: #c4b5fd;
+        }
+
+        .btn-ptt-toggle:hover {
+            background: rgba(100, 100, 100, 0.5);
+        }
+
+        .btn-ptt-toggle.ptt-mode:hover {
+            background: rgba(139, 92, 246, 0.5);
+        }
+
+        .ptt-active-indicator {
+            display: none;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(16, 185, 129, 0.2);
+            border: 1px solid #10b981;
+            border-radius: 8px;
+            color: #10b981;
+            font-size: 0.8rem;
+            font-weight: 600;
+            animation: pttPulse 1s ease-in-out infinite;
+        }
+
+        .ptt-active-indicator.active {
+            display: flex;
+        }
+
+        @keyframes pttPulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
         .chat-title {
             font-weight: 700;
             font-size: 1.3rem;
@@ -1470,6 +1569,8 @@
                         <button class="btn-debug" id="debugPanelToggleBtn" onclick="toggleScreenDebugPanel()">🐞 Debug</button>
                         <button class="btn-screen-share" id="screenShareBtn" onclick="toggleScreenShare()">🖥️ Share Screen</button>
                         <button class="btn-mute" id="muteBtn" onclick="toggleMute()">🎤 Mute</button>
+                        <button class="btn-ptt-toggle" id="pttToggleBtn" onclick="toggleInputMode()">🎙 Open Mic</button>
+                        <div class="ptt-active-indicator" id="pttActiveIndicator">🔊 Transmitting</div>
                         <button class="btn-voice" id="voiceBtn" onclick="toggleVoice()">🔊 Join Voice</button>
                     </div>
                     
@@ -1607,6 +1708,9 @@
         // Voice chat state
         let inVoiceChannel = false;
         let isMuted = false;
+        let voiceInputMode = 'open'; // 'open' or 'ptt'
+        let pttKeyHeld = false;
+        let pttKey = '`'; // backtick/tilde
         let localStream = null;
         let voiceMembers = new Set();
         let voiceMemberStates = {}; // user_id -> {muted: bool, screen_sharing: bool}
@@ -1615,6 +1719,7 @@
         let voicePublisherPc = null;
         let voiceSubscriberPcs = new Map(); // speaker_user_id -> RTCPeerConnection
         let voiceAudioElements = new Map(); // speaker_user_id -> HTMLAudioElement
+        let voiceUserVolumes = {}; // speaker_user_id -> 0.0-1.0, default 1.0
         let pendingVoiceSubscriptions = new Set();
         const VOICE_SUBSCRIBE_RETRY_MS = 750;
         let voiceSubscriptionRetryTimers = new Map();
@@ -2803,10 +2908,18 @@
                 // Update UI
                 document.getElementById('voiceBtn').textContent = '🔇 Leave Voice';
                 document.getElementById('voiceBtn').classList.add('active');
-                document.getElementById('muteBtn').classList.add('visible');
+                if (voiceInputMode === 'open') {
+                    document.getElementById('muteBtn').classList.add('visible');
+                }
+                document.getElementById('pttToggleBtn').classList.add('visible');
                 document.getElementById('screenShareBtn').classList.add('visible');
                 document.getElementById('voiceIndicator').classList.add('active');
                 document.getElementById('voiceMembersList').classList.add('active');
+
+                // If in PTT mode, start muted
+                if (voiceInputMode === 'ptt') {
+                    setMicEnabled(false);
+                }
 
                 // Notify server via JSON message (triggers voice_webrtc_publishers_list response)
                 if (ws && ws.readyState === WebSocket.OPEN) {
@@ -2919,6 +3032,7 @@
                     voiceAudioElements.set(speakerUserId, audioEl);
                 }
                 audioEl.srcObject = event.streams[0] || new MediaStream([event.track]);
+                audioEl.volume = voiceUserVolumes[speakerUserId] ?? 1.0;
                 audioEl.play().catch(e => console.warn('Audio play failed:', e));
             };
 
@@ -3021,11 +3135,16 @@
             inVoiceChannel = false;
             isMuted = false;
 
+            // Reset PTT state
+            pttKeyHeld = false;
+
             // Update UI
             document.getElementById('voiceBtn').textContent = '🔊 Join Voice';
             document.getElementById('voiceBtn').classList.remove('active');
             document.getElementById('muteBtn').classList.remove('visible', 'muted');
             document.getElementById('muteBtn').textContent = '🎤 Mute';
+            document.getElementById('pttToggleBtn').classList.remove('visible');
+            document.getElementById('pttActiveIndicator').classList.remove('active');
             document.getElementById('screenShareBtn').classList.remove('visible', 'active');
             document.getElementById('voiceIndicator').classList.remove('active');
             document.getElementById('viewToggleTabs').classList.remove('active');
@@ -3049,17 +3168,18 @@
             await loadVoiceMembers();
         }
 
-        function toggleMute() {
+        function setMicEnabled(enabled) {
             if (!localStream) return;
 
-            isMuted = !isMuted;
-            
+            const wasMuted = isMuted;
+            isMuted = !enabled;
+
             // Mute/unmute local audio track
             localStream.getAudioTracks().forEach(track => {
-                track.enabled = !isMuted;
+                track.enabled = enabled;
             });
 
-            // Update UI
+            // Update mute button UI
             const muteBtn = document.getElementById('muteBtn');
             if (isMuted) {
                 muteBtn.textContent = '🔇 Unmute';
@@ -3069,13 +3189,58 @@
                 muteBtn.classList.remove('muted');
             }
 
-            // Notify server
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            // Update PTT transmitting indicator
+            if (voiceInputMode === 'ptt') {
+                const pttIndicator = document.getElementById('pttActiveIndicator');
+                if (enabled) {
+                    pttIndicator.classList.add('active');
+                } else {
+                    pttIndicator.classList.remove('active');
+                }
+            }
+
+            // Notify server only if muted state actually changed
+            if (wasMuted !== isMuted && ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     type: 'voice_mute',
                     room_id: currentRoomId,
                     muted: isMuted
                 }));
+            }
+
+            // Update voice members list to reflect mute state
+            updateVoiceMembersList();
+        }
+
+        function toggleMute() {
+            if (!localStream) return;
+            setMicEnabled(isMuted); // if muted, enable; if not muted, disable
+        }
+
+        function toggleInputMode() {
+            if (voiceInputMode === 'open') {
+                voiceInputMode = 'ptt';
+                // Switching to PTT: immediately mute mic (must hold key to talk)
+                setMicEnabled(false);
+                // Update PTT toggle button
+                const pttBtn = document.getElementById('pttToggleBtn');
+                pttBtn.textContent = '🔑 Push to Talk (`)';
+                pttBtn.classList.add('ptt-mode');
+                // Hide mute button (PTT replaces it)
+                document.getElementById('muteBtn').classList.remove('visible');
+            } else {
+                voiceInputMode = 'open';
+                pttKeyHeld = false;
+                // Switching to Open Mic: unmute mic
+                setMicEnabled(true);
+                // Update PTT toggle button
+                const pttBtn = document.getElementById('pttToggleBtn');
+                pttBtn.textContent = '🎙 Open Mic';
+                pttBtn.classList.remove('ptt-mode');
+                // Show mute button again
+                document.getElementById('muteBtn').classList.add('visible');
+                // Hide transmitting indicator
+                document.getElementById('pttActiveIndicator').classList.remove('active');
             }
         }
 
@@ -3143,10 +3308,17 @@
                 const sharingIndicator = isSharing ? '<span class="voice-member-sharing">📺 Sharing</span>' : '';
                 const muteIcon = isMutedMember ? '🔇' : '🎤';
                 const muteClass = isMutedMember ? 'voice-member-muted' : '';
+                const currentVol = Math.round((voiceUserVolumes[memberId] ?? 1.0) * 100);
+                const volumeSlider = !isSelf ? `
+                    <input type="range" class="voice-volume-slider" min="0" max="100" value="${currentVol}"
+                           oninput="setUserVolume('${memberId}', this.value)">
+                    <span class="voice-volume-label" id="volLabel_${CSS.escape(memberId)}">${currentVol}%</span>
+                ` : '';
                 
                 memberDiv.innerHTML = `
                     <span class="voice-member-icon ${muteClass}">${muteIcon}</span>
                     <span class="voice-member-name">${escapeHtml(memberName)}${isSelf ? ' (You)' : ''}</span>
+                    ${volumeSlider}
                     ${sharingIndicator}
                 `;
                 
@@ -3154,6 +3326,25 @@
             });
 
             // Sync to the alternate voice view
+            syncVoiceMembersToAltView();
+        }
+
+        function setUserVolume(speakerUserId, value) {
+            const normalized = value / 100;
+            voiceUserVolumes[speakerUserId] = normalized;
+
+            // Apply to audio element if it exists
+            const audioEl = voiceAudioElements.get(speakerUserId);
+            if (audioEl) {
+                audioEl.volume = normalized;
+            }
+
+            // Update labels in both containers
+            document.querySelectorAll(`[id="volLabel_${CSS.escape(speakerUserId)}"]`).forEach(label => {
+                label.textContent = `${Math.round(value)}%`;
+            });
+
+            // Sync sliders to alt view
             syncVoiceMembersToAltView();
         }
 
@@ -4183,6 +4374,29 @@
             div.textContent = text;
             return div.innerHTML;
         }
+
+        // Push-to-Talk key event listeners
+        document.addEventListener('keydown', (e) => {
+            if (e.key === pttKey && !e.repeat && voiceInputMode === 'ptt' && inVoiceChannel) {
+                pttKeyHeld = true;
+                setMicEnabled(true);
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === pttKey && voiceInputMode === 'ptt' && inVoiceChannel) {
+                pttKeyHeld = false;
+                setMicEnabled(false);
+            }
+        });
+
+        // Release PTT when window loses focus (safety net)
+        window.addEventListener('blur', () => {
+            if (pttKeyHeld && voiceInputMode === 'ptt' && inVoiceChannel) {
+                pttKeyHeld = false;
+                setMicEnabled(false);
+            }
+        });
     </script>
 </body>
 </html>
