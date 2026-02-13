@@ -571,6 +571,108 @@
             background: rgba(100, 100, 100, 0.5);
         }
 
+        .btn-debug {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            border-radius: 8px;
+            padding: 10px 14px;
+            font-weight: 600;
+            color: #93c5fd;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-debug:hover {
+            background: rgba(59, 130, 246, 0.32);
+            border-color: rgba(59, 130, 246, 0.6);
+            color: #dbeafe;
+        }
+
+        .btn-debug.active {
+            background: rgba(59, 130, 246, 0.42);
+            border-color: rgba(96, 165, 250, 0.8);
+            color: #eff6ff;
+        }
+
+        .screen-debug-panel {
+            position: fixed;
+            right: 18px;
+            bottom: 16px;
+            width: 340px;
+            max-width: calc(100vw - 24px);
+            background: rgba(10, 14, 26, 0.95);
+            border: 1px solid rgba(59, 130, 246, 0.5);
+            border-radius: 12px;
+            box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+            padding: 10px 12px;
+            color: #dbeafe;
+            font-size: 0.78rem;
+            line-height: 1.35;
+            z-index: 2500;
+            display: none;
+        }
+
+        .screen-debug-panel.visible {
+            display: block;
+        }
+
+        .screen-debug-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #93c5fd;
+        }
+
+        .screen-debug-status {
+            font-weight: 600;
+            color: #bfdbfe;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .screen-debug-section {
+            border-top: 1px solid rgba(59, 130, 246, 0.24);
+            padding-top: 6px;
+            margin-top: 6px;
+        }
+
+        .screen-debug-section:first-child {
+            border-top: none;
+            padding-top: 0;
+            margin-top: 0;
+        }
+
+        .screen-debug-label {
+            color: #93c5fd;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .screen-debug-line {
+            color: #dbeafe;
+            margin: 2px 0;
+            word-break: break-word;
+        }
+
+        .screen-debug-empty {
+            color: #94a3b8;
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .screen-debug-panel {
+                left: 12px;
+                right: 12px;
+                width: auto;
+                bottom: 12px;
+                font-size: 0.74rem;
+            }
+        }
+
         .screen-share-container {
             margin-bottom: 15px;
             background: rgba(10, 14, 26, 0.7);
@@ -1365,6 +1467,7 @@
                             <div class="voice-wave"></div>
                             <span>In Voice</span>
                         </div>
+                        <button class="btn-debug" id="debugPanelToggleBtn" onclick="toggleScreenDebugPanel()">🐞 Debug</button>
                         <button class="btn-screen-share" id="screenShareBtn" onclick="toggleScreenShare()">🖥️ Share Screen</button>
                         <button class="btn-mute" id="muteBtn" onclick="toggleMute()">🎤 Mute</button>
                         <button class="btn-voice" id="voiceBtn" onclick="toggleVoice()">🔊 Join Voice</button>
@@ -1421,6 +1524,14 @@
                         <div id="screenShareWrapper"></div>
                     </div>
                 </div>
+            </div>
+
+            <div class="screen-debug-panel" id="screenDebugPanel">
+                <div class="screen-debug-header">
+                    <span>Screen Telemetry</span>
+                    <span class="screen-debug-status" id="screenDebugStatus">IDLE</span>
+                </div>
+                <div id="screenDebugBody" class="screen-debug-empty">No telemetry yet.</div>
             </div>
 
             <!-- Members Panel -->
@@ -1513,10 +1624,26 @@
         let incomingScreenStreams = new Map(); // sharer_user_id -> MediaStream
         let pendingScreenSubscriptions = new Set();
         let subscriptionRetryTimers = new Map();
+        let screenPublisherQualityTimer = null;
+        let screenSubscriberTelemetryTimers = new Map();
         const SCREEN_SUBSCRIBE_RETRY_MS = 750;
+        const SCREEN_MIN_SHORT_SIDE = 720;
+        const SCREEN_MIN_LONG_SIDE = 1280;
+        const SCREEN_TARGET_WIDTH = 1920;
+        const SCREEN_TARGET_HEIGHT = 1080;
+        const SCREEN_MIN_FPS = 30;
+        const SCREEN_TARGET_FPS = 30;
+        const SCREEN_MAX_BITRATE_BPS = 10_000_000;
+        const SCREEN_QUALITY_SAMPLE_MS = 2000;
+        const SCREEN_QUALITY_FAIL_SAMPLES = 3;
+        const SCREEN_QUALITY_GRACE_MS = 8000;
+        const SCREEN_TELEMETRY_SAMPLE_MS = 2000;
         const WEBRTC_CONFIG = {
             iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }]
         };
+        let screenDebugPanelVisible = false;
+        let screenPublisherTelemetry = null;
+        let screenSubscriberTelemetry = new Map(); // sharer_user_id -> latest telemetry snapshot
 
         // Message reactions
         let messageReactions = {}; // event_id -> {emoji: count}
@@ -1761,7 +1888,374 @@
             return ws && ws.readyState === WebSocket.OPEN;
         }
 
+        function shortenUserId(fullUserId) {
+            if (!fullUserId || typeof fullUserId !== 'string') return 'unknown';
+            return fullUserId.split(':')[0].replace('@', '') || fullUserId;
+        }
+
+        function formatTelemetryNumber(value, decimals = 2, fallback = 'n/a') {
+            return typeof value === 'number' && Number.isFinite(value) ? Number(value).toFixed(decimals) : fallback;
+        }
+
+        function setScreenPublisherTelemetry(snapshot) {
+            screenPublisherTelemetry = snapshot;
+            renderScreenDebugPanel();
+        }
+
+        function clearScreenPublisherTelemetry() {
+            screenPublisherTelemetry = null;
+            renderScreenDebugPanel();
+        }
+
+        function setScreenSubscriberTelemetry(sharerUserId, snapshot) {
+            screenSubscriberTelemetry.set(sharerUserId, snapshot);
+            renderScreenDebugPanel();
+        }
+
+        function clearScreenSubscriberTelemetry(sharerUserId) {
+            screenSubscriberTelemetry.delete(sharerUserId);
+            renderScreenDebugPanel();
+        }
+
+        function clearAllScreenSubscriberTelemetry() {
+            screenSubscriberTelemetry.clear();
+            renderScreenDebugPanel();
+        }
+
+        function renderScreenDebugPanel() {
+            const panel = document.getElementById('screenDebugPanel');
+            const statusEl = document.getElementById('screenDebugStatus');
+            const body = document.getElementById('screenDebugBody');
+            const toggleBtn = document.getElementById('debugPanelToggleBtn');
+            if (!panel || !statusEl || !body || !toggleBtn) return;
+
+            panel.classList.toggle('visible', screenDebugPanelVisible);
+            toggleBtn.classList.toggle('active', screenDebugPanelVisible);
+
+            const hasPublisher = !!screenPublisherTelemetry;
+            const hasSubscribers = screenSubscriberTelemetry.size > 0;
+            statusEl.textContent = hasPublisher || hasSubscribers ? 'LIVE' : 'IDLE';
+
+            if (!screenDebugPanelVisible) return;
+
+            const sections = [];
+            if (hasPublisher) {
+                const p = screenPublisherTelemetry;
+                sections.push(`
+                    <div class="screen-debug-section">
+                        <div class="screen-debug-label">Publisher (${shortenUserId(userId || '')})</div>
+                        <div class="screen-debug-line">Res: ${p.width || 'n/a'}x${p.height || 'n/a'} | FPS: ${formatTelemetryNumber(p.fps, 2)}</div>
+                        <div class="screen-debug-line">Bitrate: ${formatTelemetryNumber(p.bitrateMbps, 2)} Mbps | RTT: ${formatTelemetryNumber(p.rttMs, 2)} ms</div>
+                        <div class="screen-debug-line">Threshold: ${p.meetsThreshold ? 'PASS' : 'FAIL'} | Low Samples: ${p.lowQualitySamples ?? 0}</div>
+                    </div>
+                `);
+            } else {
+                sections.push(`
+                    <div class="screen-debug-section">
+                        <div class="screen-debug-label">Publisher</div>
+                        <div class="screen-debug-empty">No active local screen publisher.</div>
+                    </div>
+                `);
+            }
+
+            if (hasSubscribers) {
+                screenSubscriberTelemetry.forEach((s, sharerUserId) => {
+                    sections.push(`
+                        <div class="screen-debug-section">
+                            <div class="screen-debug-label">Viewer <- ${shortenUserId(sharerUserId)}</div>
+                            <div class="screen-debug-line">FPS: ${formatTelemetryNumber(s.fps, 2)} | Bitrate: ${formatTelemetryNumber(s.bitrateMbps, 2)} Mbps</div>
+                            <div class="screen-debug-line">Latency~: ${formatTelemetryNumber(s.estimatedLatencyMs, 2)} ms | JitterBuf: ${formatTelemetryNumber(s.jitterBufferMs, 2)} ms</div>
+                            <div class="screen-debug-line">RTT: ${formatTelemetryNumber(s.rttMs, 2)} ms | Lost: ${s.packetsLost ?? 'n/a'} | Path: ${s.transport || 'unknown'}</div>
+                        </div>
+                    `);
+                });
+            } else {
+                sections.push(`
+                    <div class="screen-debug-section">
+                        <div class="screen-debug-label">Subscribers</div>
+                        <div class="screen-debug-empty">No active incoming screen streams.</div>
+                    </div>
+                `);
+            }
+
+            body.innerHTML = sections.join('');
+        }
+
+        function toggleScreenDebugPanel() {
+            screenDebugPanelVisible = !screenDebugPanelVisible;
+            renderScreenDebugPanel();
+        }
+
+        function getScreenTrackMetrics(track) {
+            const settings = track && track.getSettings ? track.getSettings() : {};
+            const width = Number(settings.width || 0);
+            const height = Number(settings.height || 0);
+            const frameRate = Number(settings.frameRate || 0);
+            const shortSide = Math.min(width, height);
+            const longSide = Math.max(width, height);
+            return { width, height, frameRate, shortSide, longSide };
+        }
+
+        function isScreenQualityWithinThreshold(track, measuredFps) {
+            const metrics = getScreenTrackMetrics(track);
+            const fps = Number(measuredFps || metrics.frameRate || 0);
+            return (
+                metrics.shortSide >= SCREEN_MIN_SHORT_SIDE &&
+                metrics.longSide >= SCREEN_MIN_LONG_SIDE &&
+                fps >= SCREEN_MIN_FPS
+            );
+        }
+
+        function stopScreenPublisherQualityMonitor() {
+            if (screenPublisherQualityTimer) {
+                clearInterval(screenPublisherQualityTimer);
+                screenPublisherQualityTimer = null;
+            }
+        }
+
+        function startScreenPublisherQualityMonitor(sender, screenTrack) {
+            stopScreenPublisherQualityMonitor();
+
+            let lowQualitySamples = 0;
+            let previousFramesSent = null;
+            let previousBytesSent = null;
+            let previousTimestampMs = null;
+            const monitorStartedAt = Date.now();
+
+            screenPublisherQualityTimer = setInterval(async () => {
+                if (!isScreenSharing || !screenPublisherPc || !screenTrack || screenTrack.readyState !== 'live') {
+                    stopScreenPublisherQualityMonitor();
+                    return;
+                }
+
+                let measuredFps = null;
+                let measuredBitrateMbps = null;
+                let measuredRttMs = null;
+                try {
+                    const stats = await sender.getStats();
+                    stats.forEach((stat) => {
+                        if (stat.type === 'outbound-rtp' && stat.kind === 'video' && !stat.isRemote) {
+                            if (typeof stat.framesPerSecond === 'number') {
+                                measuredFps = stat.framesPerSecond;
+                            }
+
+                            if (typeof stat.framesSent === 'number' && typeof stat.timestamp === 'number') {
+                                if (previousFramesSent !== null && previousTimestampMs !== null) {
+                                    const framesDelta = stat.framesSent - previousFramesSent;
+                                    const secondsDelta = (stat.timestamp - previousTimestampMs) / 1000;
+                                    if (secondsDelta > 0) {
+                                        if (measuredFps === null) {
+                                            measuredFps = framesDelta / secondsDelta;
+                                        }
+                                        if (typeof stat.bytesSent === 'number' && previousBytesSent !== null) {
+                                            const bytesDelta = stat.bytesSent - previousBytesSent;
+                                            measuredBitrateMbps = (bytesDelta * 8) / secondsDelta / 1_000_000;
+                                        }
+                                    }
+                                }
+                                previousFramesSent = stat.framesSent;
+                                previousTimestampMs = stat.timestamp;
+                                if (typeof stat.bytesSent === 'number') {
+                                    previousBytesSent = stat.bytesSent;
+                                }
+                            }
+                        } else if (stat.type === 'remote-inbound-rtp' && stat.kind === 'video' && typeof stat.roundTripTime === 'number') {
+                            measuredRttMs = stat.roundTripTime * 1000;
+                        }
+                    });
+                } catch (error) {
+                    console.warn('Screen quality monitor stats failed:', error);
+                }
+
+                const meetsThreshold = isScreenQualityWithinThreshold(screenTrack, measuredFps);
+                const pastGraceWindow = Date.now() - monitorStartedAt >= SCREEN_QUALITY_GRACE_MS;
+
+                const metrics = getScreenTrackMetrics(screenTrack);
+                const publisherSnapshot = {
+                    width: metrics.width,
+                    height: metrics.height,
+                    fps: Number(measuredFps || metrics.frameRate || 0),
+                    bitrateMbps: measuredBitrateMbps,
+                    rttMs: measuredRttMs,
+                    meetsThreshold,
+                    lowQualitySamples
+                };
+                setScreenPublisherTelemetry(publisherSnapshot);
+                console.debug('screen-publisher-telemetry', {
+                    ...publisherSnapshot,
+                    fps: formatTelemetryNumber(publisherSnapshot.fps, 2),
+                    bitrateMbps: formatTelemetryNumber(publisherSnapshot.bitrateMbps, 2),
+                    rttMs: formatTelemetryNumber(publisherSnapshot.rttMs, 2)
+                });
+
+                if (pastGraceWindow && !meetsThreshold) {
+                    lowQualitySamples += 1;
+                } else {
+                    lowQualitySamples = 0;
+                }
+
+                if (lowQualitySamples >= SCREEN_QUALITY_FAIL_SAMPLES) {
+                    stopScreenPublisherQualityMonitor();
+                    alert('Screen share dropped below required minimum (720p and 30 FPS) and was stopped.');
+                    stopScreenShare();
+                }
+            }, SCREEN_QUALITY_SAMPLE_MS);
+        }
+
+        function stopScreenSubscriberTelemetry(sharerUserId) {
+            const timer = screenSubscriberTelemetryTimers.get(sharerUserId);
+            if (timer) {
+                clearInterval(timer);
+                screenSubscriberTelemetryTimers.delete(sharerUserId);
+            }
+            clearScreenSubscriberTelemetry(sharerUserId);
+        }
+
+        function stopAllScreenSubscriberTelemetry() {
+            screenSubscriberTelemetryTimers.forEach(timer => clearInterval(timer));
+            screenSubscriberTelemetryTimers.clear();
+            clearAllScreenSubscriberTelemetry();
+        }
+
+        function startScreenSubscriberTelemetry(sharerUserId, pc) {
+            stopScreenSubscriberTelemetry(sharerUserId);
+
+            let previousFramesDecoded = null;
+            let previousBytesReceived = null;
+            let previousTimestampMs = null;
+            const timer = setInterval(async () => {
+                if (!pc || ['closed', 'failed'].includes(pc.connectionState)) {
+                    stopScreenSubscriberTelemetry(sharerUserId);
+                    return;
+                }
+
+                try {
+                    const stats = await pc.getStats();
+                    let inboundVideo = null;
+                    let selectedPair = null;
+                    let selectedPairId = null;
+                    let localCandidate = null;
+                    let remoteCandidate = null;
+
+                    stats.forEach((stat) => {
+                        if (stat.type === 'transport' && stat.selectedCandidatePairId) {
+                            selectedPairId = stat.selectedCandidatePairId;
+                        }
+                    });
+
+                    stats.forEach((stat) => {
+                        if (stat.type === 'inbound-rtp' && stat.kind === 'video' && !stat.isRemote) {
+                            inboundVideo = stat;
+                        }
+
+                        if (stat.type === 'candidate-pair') {
+                            if (
+                                (selectedPairId && stat.id === selectedPairId) ||
+                                stat.selected === true ||
+                                (stat.nominated && stat.state === 'succeeded')
+                            ) {
+                                selectedPair = stat;
+                            }
+                        }
+                    });
+
+                    if (selectedPair) {
+                        stats.forEach((stat) => {
+                            if (selectedPair.localCandidateId && stat.id === selectedPair.localCandidateId) {
+                                localCandidate = stat;
+                            } else if (selectedPair.remoteCandidateId && stat.id === selectedPair.remoteCandidateId) {
+                                remoteCandidate = stat;
+                            }
+                        });
+                    }
+
+                    if (!inboundVideo) return;
+
+                    let fps = typeof inboundVideo.framesPerSecond === 'number'
+                        ? inboundVideo.framesPerSecond
+                        : null;
+                    let bitrateMbps = null;
+
+                    if (typeof inboundVideo.timestamp === 'number') {
+                        if (typeof inboundVideo.framesDecoded === 'number') {
+                            if (previousFramesDecoded !== null && previousTimestampMs !== null) {
+                                const framesDelta = inboundVideo.framesDecoded - previousFramesDecoded;
+                                const secondsDelta = (inboundVideo.timestamp - previousTimestampMs) / 1000;
+                                if (secondsDelta > 0 && fps === null) {
+                                    fps = framesDelta / secondsDelta;
+                                }
+                            }
+                            previousFramesDecoded = inboundVideo.framesDecoded;
+                        }
+
+                        if (typeof inboundVideo.bytesReceived === 'number') {
+                            if (previousBytesReceived !== null && previousTimestampMs !== null) {
+                                const bytesDelta = inboundVideo.bytesReceived - previousBytesReceived;
+                                const secondsDelta = (inboundVideo.timestamp - previousTimestampMs) / 1000;
+                                if (secondsDelta > 0) {
+                                    bitrateMbps = (bytesDelta * 8) / secondsDelta / 1_000_000;
+                                }
+                            }
+                            previousBytesReceived = inboundVideo.bytesReceived;
+                        }
+
+                        previousTimestampMs = inboundVideo.timestamp;
+                    }
+
+                    const jitterBufferAvgMs =
+                        typeof inboundVideo.jitterBufferDelay === 'number' &&
+                        typeof inboundVideo.jitterBufferEmittedCount === 'number' &&
+                        inboundVideo.jitterBufferEmittedCount > 0
+                            ? (inboundVideo.jitterBufferDelay / inboundVideo.jitterBufferEmittedCount) * 1000
+                            : 0;
+
+                    const rttMs =
+                        selectedPair && typeof selectedPair.currentRoundTripTime === 'number'
+                            ? selectedPair.currentRoundTripTime * 1000
+                            : null;
+
+                    const estimatedLatencyMs = rttMs !== null
+                        ? jitterBufferAvgMs + (rttMs / 2)
+                        : jitterBufferAvgMs;
+
+                    const transport = [
+                        localCandidate?.protocol || '',
+                        localCandidate?.candidateType || '',
+                        remoteCandidate?.candidateType || ''
+                    ].filter(Boolean).join('/');
+
+                    const subscriberSnapshot = {
+                        fps: fps !== null ? Number(fps) : null,
+                        bitrateMbps,
+                        jitterBufferMs: jitterBufferAvgMs,
+                        rttMs,
+                        estimatedLatencyMs,
+                        packetsLost: inboundVideo.packetsLost ?? null,
+                        transport: transport || null
+                    };
+                    setScreenSubscriberTelemetry(sharerUserId, subscriberSnapshot);
+
+                    console.debug('screen-subscriber-telemetry', {
+                        sharerUserId,
+                        fps: formatTelemetryNumber(subscriberSnapshot.fps, 2),
+                        bitrateMbps: formatTelemetryNumber(subscriberSnapshot.bitrateMbps, 2),
+                        jitterBufferMs: formatTelemetryNumber(subscriberSnapshot.jitterBufferMs, 2),
+                        rttMs: formatTelemetryNumber(subscriberSnapshot.rttMs, 2),
+                        estimatedLatencyMs: formatTelemetryNumber(subscriberSnapshot.estimatedLatencyMs, 2),
+                        packetsLost: subscriberSnapshot.packetsLost ?? 'n/a',
+                        transport: subscriberSnapshot.transport || 'unknown'
+                    });
+                } catch (error) {
+                    console.warn(`Screen telemetry read failed for ${sharerUserId}:`, error);
+                }
+            }, SCREEN_TELEMETRY_SAMPLE_MS);
+
+            screenSubscriberTelemetryTimers.set(sharerUserId, timer);
+        }
+
         async function closeScreenPublisherPeer() {
+            stopScreenPublisherQualityMonitor();
+            clearScreenPublisherTelemetry();
             if (screenPublisherPc) {
                 try {
                     await screenPublisherPc.close();
@@ -1775,6 +2269,7 @@
         async function closeScreenSubscriberPeer(sharerUserId, sendUnsubscribe = true) {
             cancelScreenSubscriptionRetry(sharerUserId);
             pendingScreenSubscriptions.delete(sharerUserId);
+            stopScreenSubscriberTelemetry(sharerUserId);
 
             const pc = screenSubscriberPcs.get(sharerUserId);
             if (pc) {
@@ -1836,6 +2331,7 @@
             const pc = new RTCPeerConnection(WEBRTC_CONFIG);
             screenSubscriberPcs.set(sharerUserId, pc);
             pendingScreenSubscriptions.add(sharerUserId);
+            startScreenSubscriberTelemetry(sharerUserId, pc);
 
             pc.onicecandidate = (event) => {
                 if (!event.candidate || !canSignalOverWebSocket()) return;
@@ -1903,9 +2399,33 @@
             const pc = new RTCPeerConnection(WEBRTC_CONFIG);
             screenPublisherPc = pc;
 
-            screenStream.getVideoTracks().forEach(track => {
-                pc.addTrack(track, screenStream);
-            });
+            const screenTrack = screenStream.getVideoTracks()[0];
+            if (!screenTrack) {
+                throw new Error('No screen video track available');
+            }
+
+            if ('contentHint' in screenTrack) {
+                screenTrack.contentHint = 'detail';
+            }
+
+            const sender = pc.addTrack(screenTrack, screenStream);
+            try {
+                const params = sender.getParameters() || {};
+                const encodings = (params.encodings && params.encodings.length > 0)
+                    ? params.encodings
+                    : [{}];
+                params.encodings = encodings.map(encoding => ({
+                    ...encoding,
+                    maxBitrate: SCREEN_MAX_BITRATE_BPS,
+                    maxFramerate: SCREEN_TARGET_FPS,
+                    scaleResolutionDownBy: 1.0
+                }));
+                params.degradationPreference = 'maintain-framerate';
+                await sender.setParameters(params);
+            } catch (error) {
+                console.warn('Unable to apply screen sender parameters:', error);
+            }
+            startScreenPublisherQualityMonitor(sender, screenTrack);
 
             pc.onicecandidate = (event) => {
                 if (!event.candidate || !canSignalOverWebSocket()) return;
@@ -1938,10 +2458,39 @@
                 screenStream = await navigator.mediaDevices.getDisplayMedia({
                     video: {
                         cursor: 'always',
-                        displaySurface: 'monitor'
+                        displaySurface: 'monitor',
+                        width: { min: SCREEN_MIN_LONG_SIDE, ideal: SCREEN_TARGET_WIDTH, max: SCREEN_TARGET_WIDTH },
+                        height: { min: SCREEN_MIN_SHORT_SIDE, ideal: SCREEN_TARGET_HEIGHT, max: SCREEN_TARGET_HEIGHT },
+                        frameRate: { min: SCREEN_MIN_FPS, ideal: SCREEN_TARGET_FPS, max: SCREEN_TARGET_FPS }
                     },
                     audio: false
                 });
+
+                const screenTrack = screenStream.getVideoTracks()[0];
+                if (!screenTrack) {
+                    throw new Error('No screen track received from browser');
+                }
+
+                if ('contentHint' in screenTrack) {
+                    screenTrack.contentHint = 'detail';
+                }
+
+                try {
+                    await screenTrack.applyConstraints({
+                        width: { min: SCREEN_MIN_LONG_SIDE, ideal: SCREEN_TARGET_WIDTH, max: SCREEN_TARGET_WIDTH },
+                        height: { min: SCREEN_MIN_SHORT_SIDE, ideal: SCREEN_TARGET_HEIGHT, max: SCREEN_TARGET_HEIGHT },
+                        frameRate: { min: SCREEN_MIN_FPS, ideal: SCREEN_TARGET_FPS, max: SCREEN_TARGET_FPS }
+                    });
+                } catch (error) {
+                    console.warn('Unable to enforce screen capture constraints:', error);
+                }
+
+                if (!isScreenQualityWithinThreshold(screenTrack, null)) {
+                    const metrics = getScreenTrackMetrics(screenTrack);
+                    throw new Error(
+                        `Captured stream below minimum quality: ${metrics.width}x${metrics.height} @ ${metrics.frameRate.toFixed(1)}fps`
+                    );
+                }
 
                 isScreenSharing = true;
 
@@ -1958,7 +2507,7 @@
                 }
 
                 // Handle stream end (user clicks browser's stop sharing button)
-                screenStream.getVideoTracks()[0].onended = () => {
+                screenTrack.onended = () => {
                     stopScreenShare();
                 };
 
@@ -2612,6 +3161,7 @@
             document.getElementById('userAvatar').textContent = userId.substring(1, 2).toUpperCase();
 
             initializeEmojiPicker();
+            renderScreenDebugPanel();
             connectWebSocket();
             await loadRooms();
         }
@@ -2661,6 +3211,7 @@
                 clearAllScreenSubscriptionRetries();
                 pendingScreenSubscriptions.clear();
                 incomingScreenStreams.clear();
+                stopAllScreenSubscriberTelemetry();
                 setTimeout(connectWebSocket, 3000);
             };
         }
