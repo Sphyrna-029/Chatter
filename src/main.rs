@@ -178,6 +178,11 @@ struct ReactionRequest {
     emoji: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct UpdateTopicRequest {
+    topic: String,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -977,6 +982,63 @@ async fn redact_message(
     }
 
     Err(error_response(StatusCode::NOT_FOUND, "Message not found"))
+}
+
+// ---------------------------------------------------------------------------
+// Room topic
+// ---------------------------------------------------------------------------
+
+async fn update_room_topic(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateTopicRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .await
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Check room exists and user is a member
+    {
+        let rooms = state.rooms.read().await;
+        if !rooms.contains_key(&room_id) {
+            return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
+        }
+    }
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    // Update topic
+    {
+        let mut rooms = state.rooms.write().await;
+        if let Some(room) = rooms.get_mut(&room_id) {
+            room.topic = req.topic.clone();
+        }
+    }
+
+    // Broadcast to room
+    let event = json!({
+        "type": "m.room.topic",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": { "topic": req.topic }
+    });
+    broadcast_to_room(&state, &room_id, &event).await;
+
+    Ok(Json(json!({"event_id": generate_id("$")})))
 }
 
 // ---------------------------------------------------------------------------
@@ -3219,7 +3281,7 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
 // ---------------------------------------------------------------------------
 
 async fn serve_client() -> Html<String> {
-    let html = std::fs::read_to_string("client/index.html")
+    let html = std::fs::read_to_string("client/dist/index.html")
         .unwrap_or_else(|_| "<h1>No client found.</h1>".to_string());
     Html(html)
 }
@@ -3284,6 +3346,11 @@ async fn main() {
         .route(
             "/_matrix/client/r0/rooms/{room_id}/redact/{event_id}/{txn_id}",
             delete(redact_message),
+        )
+        // Room topic
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/state/m.room.topic",
+            put(update_room_topic),
         )
         // Sync
         .route("/_matrix/client/r0/sync", get(sync))

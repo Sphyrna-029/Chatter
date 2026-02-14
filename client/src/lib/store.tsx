@@ -26,6 +26,7 @@ import {
   apiGetPresence,
   apiGetAllRooms,
   apiCreateDM,
+  apiUpdateTopic,
   type MatrixMessage,
   type VoiceMember,
   type RoomInfo,
@@ -94,7 +95,8 @@ type Action =
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
-  | { type: "UPDATE_MEMBER_EVENT"; payload: null };
+  | { type: "UPDATE_MEMBER_EVENT"; payload: null }
+  | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } };
 
 const initialState: AppState = {
   accessToken: null,
@@ -279,6 +281,17 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_REPLYING_TO":
       return { ...state, replyingTo: action.payload };
+    case "UPDATE_ROOM_TOPIC":
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: {
+            ...state.roomInfoMap[action.payload.roomId],
+            topic: action.payload.topic,
+          },
+        },
+      };
     case "UPDATE_MEMBER_EVENT":
       return state; // Trigger re-render for member loading
     default:
@@ -308,6 +321,7 @@ interface AppContextValue {
   sendTyping: () => void;
   getAllRooms: () => Promise<{ room_id: string; name: string; member_count: number }[]>;
   openDM: (targetUserId: string) => Promise<void>;
+  updateTopic: (roomId: string, topic: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -422,6 +436,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { roomId: msg.room_id, hasMention: true },
           });
         }
+      }
+      else if (msg.type === "m.room.topic") {
+        dispatch({
+          type: "UPDATE_ROOM_TOPIC",
+          payload: { roomId: msg.room_id, topic: msg.content?.topic || "" },
+        });
       }
       else if (msg.type === "m.room.created") {
         // A new DM room was created — refresh rooms list so it appears instantly
@@ -706,6 +726,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadRooms, selectRoom]
   );
 
+  const updateTopic = useCallback(
+    async (roomId: string, topic: string) => {
+      await apiUpdateTopic(roomId, topic);
+    },
+    []
+  );
+
   return (
     <AppContext.Provider
       value={{
@@ -727,6 +754,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sendTyping,
         getAllRooms,
         openDM,
+        updateTopic,
       }}
     >
       {children}

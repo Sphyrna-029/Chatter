@@ -9,7 +9,8 @@ RUN npm run build
 # Build backend
 FROM rust:1.88-slim AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config clang mold && rm -rf /var/lib/apt/lists/*
+ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 RUN cargo build --release && rm -rf src

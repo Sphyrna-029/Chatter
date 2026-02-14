@@ -20,13 +20,16 @@ const emojiCategories: Record<string, string[]> = {
 };
 
 export function ChatArea() {
-  const { state, dispatch, sendMessage, sendTyping } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
   const [selectedMentionIdx, setSelectedMentionIdx] = useState(0);
+  const [editingTopic, setEditingTopic] = useState(false);
+  const [topicDraft, setTopicDraft] = useState("");
+  const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -143,15 +146,50 @@ export function ChatArea() {
     <div className="flex flex-1 flex-col min-h-0">
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <div>
+        <div className="flex-1 min-w-0 text-center">
           <h2 className="text-sm font-semibold">
             {roomInfo?.name || "Unnamed Room"}
           </h2>
-          {roomInfo?.topic && (
-            <div className="overflow-hidden max-w-xs">
-              <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
-                {roomInfo.topic}
-              </p>
+          {editingTopic ? (
+            <input
+              ref={topicInputRef}
+              className="w-full max-w-xs mx-auto block text-xs text-center bg-transparent border-b border-primary outline-none text-muted-foreground"
+              value={topicDraft}
+              onChange={(e) => setTopicDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  setEditingTopic(false);
+                }
+              }}
+              onBlur={() => {
+                const trimmed = topicDraft.trim();
+                if (trimmed !== (roomInfo?.topic || "") && state.currentRoomId) {
+                  updateTopic(state.currentRoomId, trimmed);
+                }
+                setEditingTopic(false);
+              }}
+              autoFocus
+            />
+          ) : (
+            <div
+              className="overflow-hidden max-w-xs mx-auto cursor-pointer"
+              onClick={() => {
+                setTopicDraft(roomInfo?.topic || "");
+                setEditingTopic(true);
+              }}
+              title="Click to edit topic"
+            >
+              {roomInfo?.topic ? (
+                <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
+                  {roomInfo.topic}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground/50 italic">
+                  Click to set a topic
+                </p>
+              )}
             </div>
           )}
         </div>

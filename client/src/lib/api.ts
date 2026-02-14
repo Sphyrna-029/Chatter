@@ -255,6 +255,19 @@ export interface RoomInfo {
   is_direct?: boolean;
 }
 
+export async function apiUpdateTopic(roomId: string, topic: string) {
+  const res = await fetch(
+    `/_matrix/client/r0/rooms/${roomId}/state/m.room.topic`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({ topic }),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to update topic");
+  return res.json();
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",
