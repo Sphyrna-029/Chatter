@@ -384,25 +384,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Re-fetch members and presence for the current room
         const curRoom = stateRef.current.currentRoomId;
         if (curRoom) {
-          try {
-            const syncData = await apiSync();
-            const roomData = syncData.rooms?.join?.[curRoom];
-            if (roomData) {
-              const memberEvents = roomData.state.events.filter(
-                (e: any) => e.type === "m.room.member"
-              );
-              dispatch({
-                type: "SET_ROOM_MEMBERS",
-                payload: memberEvents.map((e: any) => ({
-                  userId: e.state_key,
-                  displayName:
-                    e.content.displayname || e.state_key.split(":")[0].substring(1),
-                })),
-              });
-            }
-            const presData = await apiGetPresence(curRoom);
-            dispatch({ type: "SET_PRESENCE", payload: presData.presence });
-          } catch {}
+          (async () => {
+            try {
+              const syncData = await apiSync();
+              const roomData = syncData.rooms?.join?.[curRoom];
+              if (roomData) {
+                const memberEvents = roomData.state.events.filter(
+                  (e: any) => e.type === "m.room.member"
+                );
+                dispatch({
+                  type: "SET_ROOM_MEMBERS",
+                  payload: memberEvents.map((e: any) => ({
+                    userId: e.state_key,
+                    displayName:
+                      e.content.displayname || e.state_key.split(":")[0].substring(1),
+                  })),
+                });
+              }
+              const presData = await apiGetPresence(curRoom);
+              dispatch({ type: "SET_PRESENCE", payload: presData.presence });
+            } catch {}
+          })();
         }
         // Refresh room list (member counts may have changed)
         loadRoomsRef.current();
