@@ -43,6 +43,12 @@ export function VoiceControls() {
   const [screenFps, setScreenFps] = useState<30 | 60>(30);
   const [connStats, setConnStats] = useState<Record<string, PeerStats>>({});
   const prevBytesRef = useRef<Record<string, number>>({});
+
+  // Refs to avoid stale closures in useCallback / timers
+  const inVoiceRef = useRef(state.inVoiceChannel);
+  const currentRoomRef = useRef(state.currentRoomId);
+  useEffect(() => { inVoiceRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
+  useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   const prevTimestampRef = useRef<Record<string, number>>({});
 
   // Speaking detection
@@ -345,7 +351,7 @@ export function VoiceControls() {
       if (!ev.candidate || !canSignal()) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_publish_candidate",
-        room_id: state.currentRoomId,
+        room_id: currentRoomRef.current,
         candidate: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex, usernameFragment: ev.candidate.usernameFragment },
       }));
     };
@@ -354,10 +360,10 @@ export function VoiceControls() {
     await pc.setLocalDescription(offer);
     wsRef.current!.send(JSON.stringify({
       type: "voice_webrtc_publish_offer",
-      room_id: state.currentRoomId,
+      room_id: currentRoomRef.current,
       sdp: offer.sdp,
     }));
-  }, [state.currentRoomId]);
+  }, []);
 
   // ─── Voice subscriber ─────────────────────────────────────────────────────
   const createVoiceSub = useCallback((speakerUserId: string) => {
@@ -372,7 +378,7 @@ export function VoiceControls() {
       if (!ev.candidate || !canSignal()) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_candidate",
-        room_id: state.currentRoomId,
+        room_id: currentRoomRef.current,
         speaker_user_id: speakerUserId,
         candidate: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex, usernameFragment: ev.candidate.usernameFragment },
       }));
@@ -420,21 +426,22 @@ export function VoiceControls() {
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_offer",
-        room_id: state.currentRoomId,
+        room_id: currentRoomRef.current,
         speaker_user_id: speakerUserId,
         sdp: offer.sdp,
       }));
     }).catch(() => {});
-  }, [state.userId, state.currentRoomId]);
+  }, [state.userId]);
 
-  const scheduleVoiceRetry = (speakerUserId: string) => {
+  const scheduleVoiceRetryRef = useRef<(speakerUserId: string) => void>(() => {});
+  scheduleVoiceRetryRef.current = (speakerUserId: string) => {
     if (voiceRetryTimersRef.current.has(speakerUserId)) return;
     if (voiceSubscriberPcsRef.current.has(speakerUserId)) return;
 
     const timer = setTimeout(() => {
       voiceRetryTimersRef.current.delete(speakerUserId);
       if (
-        state.inVoiceChannel &&
+        inVoiceRef.current &&
         speakerUserId !== state.userId &&
         !voiceSubscriberPcsRef.current.has(speakerUserId) &&
         !pendingVoiceSubsRef.current.has(speakerUserId)
@@ -446,6 +453,7 @@ export function VoiceControls() {
 
     voiceRetryTimersRef.current.set(speakerUserId, timer);
   };
+  const scheduleVoiceRetry = (speakerUserId: string) => scheduleVoiceRetryRef.current(speakerUserId);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async () => {
