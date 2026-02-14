@@ -268,6 +268,21 @@ export async function apiUpdateTopic(roomId: string, topic: string) {
   return res.json();
 }
 
+export async function apiUploadFile(file: File): Promise<{ url: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: _accessToken ? { Authorization: `Bearer ${_accessToken}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Upload failed");
+  }
+  return res.json();
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",

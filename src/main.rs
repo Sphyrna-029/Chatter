@@ -1,6 +1,6 @@
 use axum::{
     extract::ws::{Message, WebSocket},
-    extract::{Path, Query, State, WebSocketUpgrade},
+    extract::{Multipart, Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json},
     routing::{delete, get, post, put},
@@ -3293,6 +3293,64 @@ async fn versions() -> Json<Value> {
 }
 
 // ---------------------------------------------------------------------------
+// File upload
+// ---------------------------------------------------------------------------
+
+const MAX_UPLOAD_SIZE: usize = 10 * 1024 * 1024; // 10MB
+
+async fn upload_file(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    if get_user_from_token(&state, &token).await.is_none() {
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
+    }
+
+    let field = match multipart.next_field().await {
+        Ok(Some(f)) => f,
+        _ => return error_response(StatusCode::BAD_REQUEST, "No file field"),
+    };
+
+    let filename = field
+        .file_name()
+        .unwrap_or("upload")
+        .to_string()
+        .replace(['/', '\\', '\0'], "_");
+
+    let data = match field.bytes().await {
+        Ok(b) => b,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read file"),
+    };
+
+    if data.len() > MAX_UPLOAD_SIZE {
+        return error_response(StatusCode::BAD_REQUEST, "File too large (max 10MB)");
+    }
+
+    // Generate random folder name
+    use rand::Rng;
+    let bytes: [u8; 16] = rand::thread_rng().gen();
+    let folder: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+    let dir = format!("external/{}", folder);
+    if let Err(_) = tokio::fs::create_dir_all(&dir).await {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create directory");
+    }
+
+    let path = format!("{}/{}", dir, filename);
+    if let Err(_) = tokio::fs::write(&path, &data).await {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
+    }
+
+    let url = format!("/external/{}/{}", folder, filename);
+    (StatusCode::OK, Json(json!({ "url": url })))
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -3322,6 +3380,7 @@ async fn main() {
         // Static / client
         .route("/", get(serve_client))
         .nest_service("/assets", ServeDir::new("client/dist/assets"))
+        .nest_service("/external", ServeDir::new("external"))
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
         // Auth
@@ -3334,6 +3393,7 @@ async fn main() {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
+        .route("/api/upload", post(upload_file))
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
+import { apiUploadFile } from "@/lib/api";
 import { MessageItem } from "./MessageItem";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,8 @@ export function ChatArea() {
   const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -119,6 +122,25 @@ export function ChatArea() {
     setInput((prev) => prev + emoji);
     setEmojiOpen(false);
     inputRef.current?.focus();
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !state.currentRoomId) return;
+    e.target.value = "";
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File too large (max 10MB)");
+      return;
+    }
+    setUploading(true);
+    try {
+      const { url } = await apiUploadFile(file);
+      await sendMessage(url);
+    } catch (err: any) {
+      alert(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const mentionMatches = mentionOpen
@@ -250,6 +272,23 @@ export function ChatArea() {
               ))}
             </div>
           )}
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+            title="Upload file"
+          >
+            {uploading ? "…" : "+"}
+          </Button>
 
           <div className="relative flex-1">
             <Input

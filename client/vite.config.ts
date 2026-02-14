@@ -15,6 +15,7 @@ export default defineConfig({
     proxy: {
       '/_matrix': 'http://localhost:8000',
       '/api': 'http://localhost:8000',
+      '/external': 'http://localhost:8000',
       '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
