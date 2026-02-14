@@ -1,6 +1,7 @@
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
+import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ const quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
 const videoExtensions = /\.(mp4|webm|ogg|mov)(\?.*)?$/i;
+const audioExtensions = /\.(mp3|wav|flac|aac|m4a)(\?.*)?$/i;
 
 function escapeHtml(text: string) {
   const div = document.createElement("div");
@@ -46,23 +48,72 @@ function processMessageBody(body: string, currentUserId: string | null) {
 }
 
 /** Extract media URLs from body for rendering as React elements */
-function extractMediaUrls(body: string): { images: string[]; videos: string[] } {
+function extractMediaUrls(body: string): { images: string[]; videos: string[]; audios: string[]; links: string[] } {
   const images: string[] = [];
   const videos: string[] = [];
+  const audios: string[] = [];
+  const links: string[] = [];
   const matches = body.match(urlRegex);
   if (matches) {
     for (const url of matches) {
       if (imageExtensions.test(url)) images.push(url);
+      else if (audioExtensions.test(url)) audios.push(url);
       else if (videoExtensions.test(url)) videos.push(url);
+      else links.push(url);
     }
   }
-  return { images, videos };
+  return { images, videos, audios, links };
+}
+
+/** Link preview card — fetches OG metadata on mount */
+function LinkPreviewCard({ url }: { url: string }) {
+  const [preview, setPreview] = useState<LinkPreview | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGetLinkPreview(url)
+      .then((data) => { if (!cancelled) setPreview(data); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [url]);
+
+  if (failed || !preview || (!preview.title && !preview.description)) return null;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mt-2 flex overflow-hidden rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors max-w-md"
+    >
+      {preview.image && (
+        <img
+          src={preview.image}
+          alt=""
+          className="w-24 h-24 object-cover flex-shrink-0"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+      )}
+      <div className="flex flex-col justify-center px-3 py-2 min-w-0">
+        {preview.site_name && (
+          <span className="text-xs text-muted-foreground truncate">{preview.site_name}</span>
+        )}
+        {preview.title && (
+          <span className="text-sm font-medium truncate">{preview.title}</span>
+        )}
+        {preview.description && (
+          <span className="text-xs text-muted-foreground line-clamp-2">{preview.description}</span>
+        )}
+      </div>
+    </a>
+  );
 }
 
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
-  const { images, videos } = useMemo(() => extractMediaUrls(body), [body]);
-  if (images.length === 0 && videos.length === 0) return null;
+  const { images, videos, audios, links } = useMemo(() => extractMediaUrls(body), [body]);
+  if (images.length === 0 && videos.length === 0 && audios.length === 0 && links.length === 0) return null;
   return (
     <div className="mt-2 space-y-2">
       {images.map((url) => (
@@ -84,6 +135,16 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
           className="max-w-full max-h-80 rounded-md"
         />
       ))}
+      {audios.map((url) => (
+        <audio
+          key={url}
+          src={url}
+          controls
+          preload="metadata"
+          className="max-w-full"
+        />
+      ))}
+      {links.length > 0 && <LinkPreviewCard url={links[0]} />}
     </div>
   );
 });

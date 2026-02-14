@@ -73,6 +73,7 @@ struct AppState {
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
+    link_previews: RwLock<HashMap<String, CachedPreview>>,
 }
 
 #[derive(Clone)]
@@ -99,6 +100,14 @@ struct PresenceRecord {
     last_active: f64,
     last_typing: f64,
     connected: bool,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct CachedPreview {
+    title: Option<String>,
+    description: Option<String>,
+    image: Option<String>,
+    site_name: Option<String>,
 }
 
 #[derive(Clone)]
@@ -188,6 +197,11 @@ struct ReactionRequest {
 #[derive(Deserialize)]
 struct UpdateTopicRequest {
     topic: String,
+}
+
+#[derive(Deserialize)]
+struct LinkPreviewQuery {
+    url: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -3669,6 +3683,101 @@ async fn upload_file(
 }
 
 // ---------------------------------------------------------------------------
+// Link preview
+// ---------------------------------------------------------------------------
+
+fn extract_og_tag(html: &str, property: &str) -> Option<String> {
+    // Look for <meta property="og:___" content="...">
+    let pattern = format!("property=\"{}\"", property);
+    let pos = html.find(&pattern)?;
+    let snippet = &html[pos..];
+    // Find content attribute
+    let content_start = snippet.find("content=\"")? + 9;
+    let content_end = snippet[content_start..].find('"')? + content_start;
+    let value = snippet[content_start..content_end].to_string();
+    if value.is_empty() { return None; }
+    Some(value)
+}
+
+fn extract_title_tag(html: &str) -> Option<String> {
+    let start = html.find("<title")?.checked_add(6)?;
+    let rest = &html[start..];
+    let after_open = rest.find('>')? + 1;
+    let end = rest[after_open..].find("</title>")?;
+    let title = rest[after_open..after_open + end].trim().to_string();
+    if title.is_empty() { return None; }
+    Some(title)
+}
+
+async fn link_preview(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<LinkPreviewQuery>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    if get_user_from_token(&state, &token).await.is_none() {
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
+    }
+
+    let url = query.url.clone();
+
+    // Check cache
+    {
+        let cache = state.link_previews.read().await;
+        if let Some(cached) = cache.get(&url) {
+            return (StatusCode::OK, Json(serde_json::to_value(cached).unwrap()));
+        }
+    }
+
+    // Fetch the URL
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new());
+
+    let response = match client.get(&url)
+        .header("User-Agent", "Chatter/1.0 LinkPreview")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
+    };
+
+    // Limit body to 256KB
+    let body = match response.bytes().await {
+        Ok(b) if b.len() <= 256 * 1024 => String::from_utf8_lossy(&b).to_string(),
+        Ok(b) => String::from_utf8_lossy(&b[..256 * 1024]).to_string(),
+        Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
+    };
+
+    let og_title = extract_og_tag(&body, "og:title");
+    let og_description = extract_og_tag(&body, "og:description");
+    let og_image = extract_og_tag(&body, "og:image");
+    let og_site_name = extract_og_tag(&body, "og:site_name");
+
+    let title = og_title.or_else(|| extract_title_tag(&body));
+
+    let preview = CachedPreview {
+        title,
+        description: og_description,
+        image: og_image,
+        site_name: og_site_name,
+    };
+
+    // Cache it
+    {
+        let mut cache = state.link_previews.write().await;
+        cache.insert(url, preview.clone());
+    }
+
+    (StatusCode::OK, Json(serde_json::to_value(&preview).unwrap()))
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -3692,6 +3801,7 @@ async fn main() {
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
         dm_rooms: RwLock::new(HashMap::new()),
+        link_previews: RwLock::new(HashMap::new()),
     });
 
     let app = Router::new()
@@ -3747,6 +3857,7 @@ async fn main() {
         // Voice & Presence
         .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
         .route("/api/rooms/{room_id}/presence", get(get_room_presence))
+        .route("/api/link-preview", get(link_preview))
         // WebSocket
         .route("/ws", get(ws_upgrade))
         .with_state(state);

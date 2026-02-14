@@ -284,6 +284,22 @@ export async function apiUploadFile(file: File): Promise<{ url: string }> {
   return res.json();
 }
 
+// Link previews
+export interface LinkPreview {
+  title?: string;
+  description?: string;
+  image?: string;
+  site_name?: string;
+}
+
+export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
+  const res = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch link preview");
+  return res.json() as Promise<LinkPreview>;
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",
