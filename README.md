@@ -1,6 +1,6 @@
 # Chatter
 
-A lightweight, self-hosted chat application built with a Rust backend and a React frontend. Chatter implements real-time messaging, voice chat, and screen sharing with no external database -- all state is held in memory for simplicity and speed.
+A lightweight, performant, self-hosted chat application built with a Rust. Chatter implements real-time messaging, voice chat, and screen sharing. Development is moving fast, features are currently offered as is with no guarantee of functionality. 
 
 ![Chatter screenshot](Screenshot_20260211_110841-1.png)
 
@@ -8,16 +8,16 @@ A lightweight, self-hosted chat application built with a Rust backend and a Reac
 
 ## Features
 
-- **Rooms** -- Create, join, and leave chat rooms
-- **Real-time messaging** -- WebSocket-powered instant message delivery
-- **Voice chat** -- WebRTC-based voice channels with push-to-talk support
-- **Screen sharing** -- Share your screen with others in a voice channel
-- **Reactions** -- Emoji reactions on messages
-- **Mentions** -- @mention users with autocomplete
-- **Notifications** -- Visual indicators for mentions and replies
-- **Direct messages** -- Private one-on-one conversations
-- **Link previews** -- Inline previews for shared URLs
-- **Message deletion** -- Remove messages you have sent
+- **Rooms**
+- **Real-time messaging**
+- **Voice chat** 
+- **Screen sharing**
+- **File sharing**
+- **Reactions**
+- **Mentions** 
+- **Notifications** 
+- **Direct messages** 
+- **Link previews**
 
 ## Prerequisites
 

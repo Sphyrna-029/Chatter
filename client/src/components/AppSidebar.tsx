@@ -85,11 +85,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           borderColor: screenShareActive
             ? "hsl(var(--chart-4))"
             : isActive
-              ? "hsl(var(--sidebar-primary))"
+              ? "hsl(270 60% 70%)"
               : "hsl(var(--sidebar-border))",
           background: isActive
             ? "hsl(var(--sidebar-accent))"
             : "transparent",
+          boxShadow: screenShareActive
+            ? undefined
+            : isActive
+              ? "0 0 12px 2px hsl(270 60% 60% / 0.45), 0 0 4px 1px hsl(270 60% 70% / 0.3)"
+              : undefined,
           animation: screenShareActive ? "pulse-border 2s ease-in-out infinite" : undefined,
         }}
       >
