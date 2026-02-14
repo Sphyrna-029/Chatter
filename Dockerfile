@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 WORKDIR /app
 COPY --from=builder /app/target/release/chatter .
 COPY --from=frontend /app/client/dist ./client/dist/
+COPY external/ ./external/
 
 EXPOSE 8000
 
