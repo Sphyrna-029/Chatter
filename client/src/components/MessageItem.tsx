@@ -13,6 +13,7 @@ const quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
+const videoExtensions = /\.(mp4|webm|ogg|mov)(\?.*)?$/i;
 
 function escapeHtml(text: string) {
   const div = document.createElement("div");
@@ -40,6 +41,9 @@ function processMessageBody(body: string, currentUserId: string | null) {
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     if (imageExtensions.test(url)) {
       return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a><br><img src="${url}" alt="Image" loading="lazy" class="mt-2 max-w-full max-h-80 rounded-md" onerror="this.style.display='none'">`;
+    }
+    if (videoExtensions.test(url)) {
+      return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a><br><video src="${url}" controls preload="metadata" class="mt-2 max-w-full max-h-80 rounded-md"></video>`;
     }
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
