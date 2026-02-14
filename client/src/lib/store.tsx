@@ -436,7 +436,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
           if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
-            new Audio("/vc-join.wav").play().catch(() => {});
+            new Audio("/external/vc-join.wav").play().catch(() => {});
           }
         }
       } else if (msg.type === "voice_user_left") {

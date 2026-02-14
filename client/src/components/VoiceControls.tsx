@@ -524,7 +524,7 @@ export function VoiceControls() {
     const newMuted = !state.isMuted;
     localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
     dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: newMuted } });
-    new Audio(newMuted ? "/mute.wav" : "/unmute.wav").play().catch(() => {});
+    new Audio(newMuted ? "/external/mute.wav" : "/external/unmute.wav").play().catch(() => {});
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: newMuted }));
     }
@@ -557,7 +557,7 @@ export function VoiceControls() {
       if (e.key === "`" && !e.repeat) {
         localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = true; });
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: false } });
-        new Audio("/unmute.wav").play().catch(() => {});
+        new Audio("/external/unmute.wav").play().catch(() => {});
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: false }));
         }
@@ -567,7 +567,7 @@ export function VoiceControls() {
       if (e.key === "`") {
         localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = false; });
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: true } });
-        new Audio("/mute.wav").play().catch(() => {});
+        new Audio("/external/mute.wav").play().catch(() => {});
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: true }));
         }
