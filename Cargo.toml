@@ -2,6 +2,8 @@
 name = "chatter"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
+license = "GPL-3.0-or-later"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws", "multipart"] }

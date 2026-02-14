@@ -6,7 +6,6 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use tower_http::services::ServeDir;
 use futures_util::{SinkExt, StreamExt};
 use rtcp::{
     packet::Packet as RtcpPacket,
@@ -27,6 +26,7 @@ use tokio::{
     sync::{broadcast, mpsc, RwLock},
     task::JoinHandle,
 };
+use tower_http::services::ServeDir;
 use webrtc::{
     api::{
         interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder,
@@ -527,7 +527,7 @@ async fn create_room(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let is_dm = req.is_direct.unwrap_or(false);
-    
+
     // If it's a DM, check if one already exists
     if is_dm {
         if let Some(invite_list) = &req.invite {
@@ -536,16 +536,19 @@ async fn create_room(
 
                 // Prevent self-DMs
                 if *other_user == user_id {
-                    return Err(error_response(StatusCode::BAD_REQUEST, "Cannot DM yourself"));
+                    return Err(error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Cannot DM yourself",
+                    ));
                 }
-                
+
                 // Create sorted key for DM lookup
                 let dm_key = if user_id < *other_user {
                     format!("{}|{}", user_id, other_user)
                 } else {
                     format!("{}|{}", other_user, user_id)
                 };
-                
+
                 // Check if DM already exists
                 let dm_rooms = state.dm_rooms.read().await;
                 if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
@@ -559,7 +562,11 @@ async fn create_room(
                             members.push(user_id.clone());
                             drop(rm);
 
-                            let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+                            let display = user_id
+                                .split(':')
+                                .next()
+                                .unwrap_or(&user_id)
+                                .trim_start_matches('@');
                             let sys_event = json!({
                                 "type": "m.room.message",
                                 "room_id": existing_room_id,
@@ -571,8 +578,12 @@ async fn create_room(
                                 "event_id": generate_id("$"),
                                 "origin_server_ts": now_millis()
                             });
-                            state.messages.write().await
-                                .entry(existing_room_id.clone()).or_insert_with(Vec::new)
+                            state
+                                .messages
+                                .write()
+                                .await
+                                .entry(existing_room_id.clone())
+                                .or_insert_with(Vec::new)
                                 .push(sys_event.clone());
                             broadcast_to_room(&state, &existing_room_id, &sys_event).await;
 
@@ -591,12 +602,16 @@ async fn create_room(
                     return Ok(Json(json!({"room_id": existing_room_id})));
                 }
                 drop(dm_rooms);
-                
+
                 // Create new DM room
                 let room_id = generate_id("!");
-                let other_user_name = other_user.split(':').next().unwrap_or(other_user).trim_start_matches('@');
+                let other_user_name = other_user
+                    .split(':')
+                    .next()
+                    .unwrap_or(other_user)
+                    .trim_start_matches('@');
                 let room_name = format!("DM with {}", other_user_name);
-                
+
                 state.rooms.write().await.insert(
                     room_id.clone(),
                     RoomRecord {
@@ -606,9 +621,9 @@ async fn create_room(
                         is_dm: true,
                     },
                 );
-                
+
                 let members = vec![user_id.clone(), other_user.clone()];
-                
+
                 state
                     .room_members
                     .write()
@@ -619,7 +634,7 @@ async fn create_room(
                     .write()
                     .await
                     .insert(room_id.clone(), Vec::new());
-                
+
                 // Store DM mapping
                 state.dm_rooms.write().await.insert(dm_key, room_id.clone());
 
@@ -658,11 +673,20 @@ async fn create_room(
 
     let room_name = if is_dm && members.len() == 2 {
         // Name DM after the other user
-        let other = if members[0] == user_id { &members[1] } else { &members[0] };
-        let other_display = other.split(':').next().unwrap_or(other).trim_start_matches('@');
+        let other = if members[0] == user_id {
+            &members[1]
+        } else {
+            &members[0]
+        };
+        let other_display = other
+            .split(':')
+            .next()
+            .unwrap_or(other)
+            .trim_start_matches('@');
         format!("DM with {}", other_display)
     } else {
-        req.name.unwrap_or_else(|| format!("Room {}", room_count + 1))
+        req.name
+            .unwrap_or_else(|| format!("Room {}", room_count + 1))
     };
 
     state.rooms.write().await.insert(
@@ -677,7 +701,7 @@ async fn create_room(
 
     // Register DM mapping
     if is_dm && members.len() == 2 {
-        let mut key_parts = vec![members[0].clone(), members[1].clone()];
+        let mut key_parts = [members[0].clone(), members[1].clone()];
         key_parts.sort();
         let dm_key = key_parts.join("|");
         state.dm_rooms.write().await.insert(dm_key, room_id.clone());
@@ -733,7 +757,11 @@ async fn join_room(
         broadcast_to_room(&state, &room_id, &event).await;
 
         // System message for the join
-        let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let display = user_id
+            .split(':')
+            .next()
+            .unwrap_or(&user_id)
+            .trim_start_matches('@');
         let sys_event = json!({
             "type": "m.room.message",
             "room_id": room_id,
@@ -745,8 +773,12 @@ async fn join_room(
             "event_id": generate_id("$"),
             "origin_server_ts": now_millis()
         });
-        state.messages.write().await
-            .entry(room_id.clone()).or_insert_with(Vec::new)
+        state
+            .messages
+            .write()
+            .await
+            .entry(room_id.clone())
+            .or_insert_with(Vec::new)
             .push(sys_event.clone());
         broadcast_to_room(&state, &room_id, &sys_event).await;
     }
@@ -794,7 +826,11 @@ async fn leave_room(
 
         // System message for the leave (store before broadcasting member event,
         // so remaining members AND the leaving user's last fetch both include it)
-        let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let display = user_id
+            .split(':')
+            .next()
+            .unwrap_or(&user_id)
+            .trim_start_matches('@');
         let sys_event = json!({
             "type": "m.room.message",
             "room_id": room_id,
@@ -806,8 +842,12 @@ async fn leave_room(
             "event_id": generate_id("$"),
             "origin_server_ts": now_millis()
         });
-        state.messages.write().await
-            .entry(room_id.clone()).or_insert_with(Vec::new)
+        state
+            .messages
+            .write()
+            .await
+            .entry(room_id.clone())
+            .or_insert_with(Vec::new)
             .push(sys_event.clone());
         broadcast_to_room(&state, &room_id, &sys_event).await;
 
@@ -933,14 +973,19 @@ async fn send_message(
         // Look up parent message to get sender and body preview
         let msgs = state.messages.read().await;
         if let Some(room_msgs) = msgs.get(&room_id) {
-            if let Some(parent) = room_msgs.iter().find(|m| {
-                m.get("event_id").and_then(|v| v.as_str()) == Some(parent_event_id)
-            }) {
+            if let Some(parent) = room_msgs
+                .iter()
+                .find(|m| m.get("event_id").and_then(|v| v.as_str()) == Some(parent_event_id))
+            {
                 if let Some(sender) = parent.get("sender").and_then(|v| v.as_str()) {
                     content["reply_to_sender"] = json!(sender);
                     reply_to_user = Some(sender.to_string());
                 }
-                if let Some(body) = parent.get("content").and_then(|c| c.get("body")).and_then(|v| v.as_str()) {
+                if let Some(body) = parent
+                    .get("content")
+                    .and_then(|c| c.get("body"))
+                    .and_then(|v| v.as_str())
+                {
                     // Truncate to 100 chars for preview
                     let preview: String = body.chars().take(100).collect();
                     content["reply_to_body"] = json!(preview);
@@ -1219,7 +1264,11 @@ async fn sync(
         let display_name = if room_data.is_dm {
             let other = members.iter().find(|m| *m != &user_id);
             if let Some(other_id) = other {
-                let other_display = other_id.split(':').next().unwrap_or(other_id).trim_start_matches('@');
+                let other_display = other_id
+                    .split(':')
+                    .next()
+                    .unwrap_or(other_id)
+                    .trim_start_matches('@');
                 format!("DM with {}", other_display)
             } else {
                 room_data.name.clone()
@@ -2104,16 +2153,15 @@ async fn handle_screen_webrtc_publish_offer(
                     RTCPeerConnectionState::Failed
                         | RTCPeerConnectionState::Disconnected
                         | RTCPeerConnectionState::Closed
-                ) {
-                    if teardown_screen_publisher(&state, &user_id).await.is_some() {
-                        set_user_screen_sharing(&state, &room_id, &user_id, false).await;
-                        let event = json!({
-                            "type": "screen_share_stopped",
-                            "room_id": room_id,
-                            "user_id": user_id
-                        });
-                        broadcast_to_room(&state, &room_id, &event).await;
-                    }
+                ) && teardown_screen_publisher(&state, &user_id).await.is_some()
+                {
+                    set_user_screen_sharing(&state, &room_id, &user_id, false).await;
+                    let event = json!({
+                        "type": "screen_share_stopped",
+                        "room_id": room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, &room_id, &event).await;
                 }
             })
         }));
@@ -2141,8 +2189,7 @@ async fn handle_screen_webrtc_publish_offer(
                 } else {
                     SCREEN_RTP_BUFFER_SIZE
                 };
-                let (rtp_sender, _) =
-                    broadcast::channel::<rtp::packet::Packet>(buffer_size);
+                let (rtp_sender, _) = broadcast::channel::<rtp::packet::Packet>(buffer_size);
 
                 {
                     let mut publishers = state.screen_publishers.write().await;
@@ -2566,8 +2613,7 @@ async fn handle_screen_webrtc_subscribe_offer(
             "chatter-sfu".to_string(),
         ));
 
-        let audio_track_for_sender: Arc<dyn TrackLocal + Send + Sync> =
-            audio_local_track.clone();
+        let audio_track_for_sender: Arc<dyn TrackLocal + Send + Sync> = audio_local_track.clone();
         match peer_connection.add_track(audio_track_for_sender).await {
             Ok(audio_rtp_sender_rtcp) => {
                 // Forward RTCP feedback for audio back to the publisher
@@ -2577,10 +2623,7 @@ async fn handle_screen_webrtc_subscribe_offer(
                         let rewritten_packets = rtcp_packets
                             .iter()
                             .filter_map(|packet| {
-                                rewrite_rtcp_feedback_for_publisher(
-                                    packet.as_ref(),
-                                    audio_ssrc,
-                                )
+                                rewrite_rtcp_feedback_for_publisher(packet.as_ref(), audio_ssrc)
                             })
                             .collect::<Vec<_>>();
                         if !rewritten_packets.is_empty() {
@@ -3609,12 +3652,15 @@ async fn upload_file(
     let folder: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
     let dir = format!("external/{}", folder);
-    if let Err(_) = tokio::fs::create_dir_all(&dir).await {
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create directory");
+    if tokio::fs::create_dir_all(&dir).await.is_err() {
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create directory",
+        );
     }
 
     let path = format!("{}/{}", dir, filename);
-    if let Err(_) = tokio::fs::write(&path, &data).await {
+    if tokio::fs::write(&path, &data).await.is_err() {
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
 
@@ -3665,7 +3711,10 @@ async fn main() {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
-        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)))
+        .route(
+            "/api/upload",
+            post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)),
+        )
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

@@ -1,0 +1,89 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) or Codex when working with code in this repository.
+
+## What This Is
+
+Chatter is a project intended to replicate discord functionality - lightweight self-hosted chat application built with a Rust backend (`src/main.rs`) and a React + vite frontend (`client/`). It implements a subset of the Matrix Client-Server API with in-memory storage (no database).
+
+## Rules
+
+Please focus on building out one feature/request at a time and validating new features.Focus on simple functionality as if building an MVP ensuring the core features work well.
+
+## Commands
+
+```bash
+# Build the server
+cargo build
+
+# Run the server (serves both API and client at http://localhost:8000)
+cargo run
+
+# Build the React frontend (required before cargo run for production)
+cd client && npm install && npm run build
+
+# Dev mode: run Vite dev server with API proxy (hot reload)
+cd client && npm run dev
+# Then the dev client is at http://localhost:5173
+
+# Build optimized release
+cargo build --release
+
+# Run with Docker
+docker build -t chatter . && docker run -p 8000:8000 chatter
+```
+## Rust Workflow 
+
+This repository has a strict Rust workflow so contributors without Rust experience can still ship safe changes.
+
+- Toolchain is pinned in `rust-toolchain.toml` (`1.88.0` with `clippy` and `rustfmt`).
+- MSRV is declared in `Cargo.toml` via `rust-version = "1.88"`.
+- Rust analyzer defaults are in `.vscode/settings.json` (`clippy` on save + format on save).
+
+Run the main quality gate locally:
+
+```bash
+./scripts/rust-ci.sh
+```
+
+Run Rust security checks locally:
+
+```bash
+cargo install cargo-deny --locked
+cargo install cargo-audit --locked
+./scripts/rust-security.sh
+```
+
+On GitHub, the same checks run in `.github/workflows/rust-quality.yml`.
+
+## Architecture
+
+**src/main.rs** - Axum application serving the REST API and the built React frontend from `client/dist/`. Key aspects:
+- Matrix-compatible endpoints under `/_matrix/client/r0/` for auth, rooms, messages, reactions
+- Custom convenience endpoints under `/api/` for room listing, voice status, and presence
+- Single WebSocket endpoint (`/ws`) handles real-time text events, voice audio streaming, and screen sharing via WebRTC signaling
+- All state is in-memory using `Arc<AppState>` with per-field `tokio::sync::RwLock` — everything resets on restart
+- Auth uses Bearer tokens generated at register/login, validated manually in each endpoint
+- Static files served from `client/dist/` via `tower-http::services::ServeDir`
+
+**client/** - React + Vite + TypeScript frontend using shadcn/ui component library (new-york style with Lyra preset theme, JetBrains Mono font, neutral base color, dark mode). Key files:
+- `src/lib/store.tsx` - Global state management via React Context + useReducer
+- `src/lib/api.ts` - HTTP API wrapper functions
+- `src/components/LoginScreen.tsx` - Auth (login/register)
+- `src/components/ChatLayout.tsx` - Main app shell with sidebar layout
+- `src/components/AppSidebar.tsx` - Room list, user info, actions (uses shadcn Sidebar)
+- `src/components/ChatArea.tsx` - Messages list, input, emoji picker, @mention autocomplete
+- `src/components/MessageItem.tsx` - Individual message with reactions
+- `src/components/MembersPanel.tsx` - Room members with presence indicators
+- `src/components/VoiceControls.tsx` - Voice chat, PTT, screen share, WebRTC management
+- `src/components/RoomDialogs.tsx` - Create/Join room dialogs
+- Vite dev server proxies API calls to `localhost:8000` for hot-reload development
+
+## API Patterns
+
+- Auth endpoints: POST `/_matrix/client/r0/register`, `/login`, `/logout`
+- Room CRUD: POST `/createRoom`, `/{room_id}/join`, `/{room_id}/leave`; GET `/joined_rooms`
+- Messages: PUT `/{room_id}/send/m.room.message/{txn_id}`; DELETE via `/{room_id}/redact/{event_id}/{txn_id}`
+- Reactions: PUT `/{room_id}/send/m.reaction/{event_id}` (toggles on/off)
+- WebSocket messages use a `type` field: `typing`, `voice_join`, `voice_leave`, `voice_mute`, `screen_share_start`, `screen_share_stop`
+- WebRTC signaling for voice and screen share flows through the WebSocket

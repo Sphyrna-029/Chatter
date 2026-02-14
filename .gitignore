@@ -17,6 +17,6 @@ CLAUDE.md
 client/node_modules/
 client/dist/
 
-.github
 .git
-AGENTS.md
+
+.DS_Store
