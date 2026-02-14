@@ -48,6 +48,8 @@ use webrtc::{
 const SCREEN_RTP_BUFFER_SIZE: usize = 2048;
 const SCREEN_AUDIO_RTP_BUFFER_SIZE: usize = 512;
 const VOICE_RTP_BUFFER_SIZE: usize = 256;
+const MIN_USERNAME_LENGTH: usize = 3;
+const MAX_USERNAME_LENGTH: usize = 24;
 
 // ---------------------------------------------------------------------------
 // State types
@@ -213,6 +215,21 @@ fn generate_id(prefix: &str) -> String {
 
 fn format_user_id(username: &str) -> String {
     format!("@{}:localhost", username)
+}
+
+fn validate_username(username: &str) -> Result<(), &'static str> {
+    if username.len() < MIN_USERNAME_LENGTH || username.len() > MAX_USERNAME_LENGTH {
+        return Err("Username must be 3-24 characters long");
+    }
+
+    if !username
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        return Err("Username may only contain letters, numbers, and underscores");
+    }
+
+    Ok(())
 }
 
 fn now_millis() -> i64 {
@@ -400,7 +417,12 @@ async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let user_id = format_user_id(&req.username);
+    let username = req.username.trim();
+    if let Err(detail) = validate_username(username) {
+        return Err(error_response(StatusCode::BAD_REQUEST, detail));
+    }
+
+    let user_id = format_user_id(username);
 
     let mut users = state.users.write().await;
     if users.contains_key(&user_id) {
@@ -438,7 +460,12 @@ async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let user_id = format_user_id(&req.username);
+    let username = req.username.trim();
+    if let Err(detail) = validate_username(username) {
+        return Err(error_response(StatusCode::BAD_REQUEST, detail));
+    }
+
+    let user_id = format_user_id(username);
 
     let users = state.users.read().await;
     match users.get(&user_id) {

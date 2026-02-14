@@ -17,6 +17,11 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { HalftoneBackground } from "@/components/HalftoneBackground";
+import {
+  USERNAME_MAX_LENGTH,
+  USERNAME_MIN_LENGTH,
+  validateUsername,
+} from "@/lib/username";
 
 const DEV_PASSWORD = "chatter-dev-pass";
 const ACCESS_CODE = "ZGAF";
@@ -36,7 +41,7 @@ export function LoginScreen() {
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [nicknameWarning, setNicknameWarning] = useState(false);
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -53,11 +58,14 @@ export function LoginScreen() {
     async (e: FormEvent) => {
       e.preventDefault();
       const name = nickname.trim();
+      setError(null);
 
-      if (!name) {
-        setNicknameWarning(true);
+      const usernameValidationError = validateUsername(name);
+      if (usernameValidationError) {
+        setNicknameError(usernameValidationError);
         return;
       }
+      setNicknameError(null);
 
       if (password !== ACCESS_CODE) {
         setError("Invalid access code");
@@ -65,7 +73,6 @@ export function LoginScreen() {
       }
 
       setLoading(true);
-      setError(null);
       setVisibleSteps(0);
 
       // Schedule each connection step to appear
@@ -286,28 +293,37 @@ export function LoginScreen() {
                   placeholder=">"
                   value={nickname}
                   onChange={(e) => {
-                    setNickname(e.target.value);
-                    if (e.target.value.trim()) setNicknameWarning(false);
+                    const nextNickname = e.target.value;
+                    setNickname(nextNickname);
+                    if (nicknameError) {
+                      setNicknameError(validateUsername(nextNickname));
+                    }
                   }}
+                  minLength={USERNAME_MIN_LENGTH}
+                  maxLength={USERNAME_MAX_LENGTH}
+                  pattern="[A-Za-z0-9_]+"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   disabled={loading}
                   autoFocus
                   className={`rounded-none border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${
-                    nicknameWarning ? "border-destructive" : ""
+                    nicknameError ? "border-destructive" : ""
                   }`}
                   style={{
-                    borderColor: nicknameWarning
+                    borderColor: nicknameError
                       ? undefined
                       : "rgba(180, 210, 255, 0.12)",
                     color: "rgba(220, 230, 255, 0.85)",
                     caretColor: "rgba(180, 210, 255, 0.6)",
                   }}
                 />
-                {nicknameWarning && (
+                {nicknameError && (
                   <p
-                    className="text-[10px] uppercase tracking-[0.1em]"
+                    className="text-[10px] tracking-[0.08em]"
                     style={{ color: "rgba(255, 120, 100, 0.8)" }}
                   >
-                    err: nickname required
+                    err: {nicknameError}
                   </p>
                 )}
               </div>
