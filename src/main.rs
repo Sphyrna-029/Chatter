@@ -1,6 +1,6 @@
 use axum::{
     extract::ws::{Message, WebSocket},
-    extract::{Multipart, Path, Query, State, WebSocketUpgrade},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State, WebSocketUpgrade},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse, Json},
     routing::{delete, get, post, put},
@@ -3311,21 +3311,35 @@ async fn upload_file(
         return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
     }
 
-    let field = match multipart.next_field().await {
-        Ok(Some(f)) => f,
-        _ => return error_response(StatusCode::BAD_REQUEST, "No file field"),
+    let mut filename = String::new();
+    let mut data = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        if name == "filename" {
+            if let Ok(text) = field.text().await {
+                filename = text;
+            }
+        } else if name == "file" {
+            if filename.is_empty() {
+                filename = field.file_name().unwrap_or("upload").to_string();
+            }
+            match field.bytes().await {
+                Ok(b) => data = Some(b),
+                Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read file"),
+            }
+        }
+    }
+
+    let data = match data {
+        Some(d) => d,
+        None => return error_response(StatusCode::BAD_REQUEST, "No file field"),
     };
 
-    let filename = field
-        .file_name()
-        .unwrap_or("upload")
-        .to_string()
-        .replace(['/', '\\', '\0'], "_");
-
-    let data = match field.bytes().await {
-        Ok(b) => b,
-        Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read file"),
-    };
+    let filename = filename.replace(['/', '\\', '\0'], "_");
+    if filename.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "No filename provided");
+    }
 
     if data.len() > MAX_UPLOAD_SIZE {
         return error_response(StatusCode::BAD_REQUEST, "File too large (max 10MB)");
@@ -3393,7 +3407,7 @@ async fn main() {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
-        .route("/api/upload", post(upload_file))
+        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE)))
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

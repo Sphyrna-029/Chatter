@@ -270,6 +270,7 @@ export async function apiUpdateTopic(roomId: string, topic: string) {
 
 export async function apiUploadFile(file: File): Promise<{ url: string }> {
   const formData = new FormData();
+  formData.append("filename", file.name);
   formData.append("file", file);
   const res = await fetch("/api/upload", {
     method: "POST",
