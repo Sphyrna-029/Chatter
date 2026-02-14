@@ -18,6 +18,8 @@ import {
 } from "@/components/ui/tooltip";
 import { HalftoneBackground } from "@/components/HalftoneBackground";
 import {
+  hasInvalidUsernameChars,
+  sanitizeUsernameInput,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
   validateUsername,
@@ -42,6 +44,7 @@ export function LoginScreen() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [nicknameWarning, setNicknameWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
@@ -66,6 +69,7 @@ export function LoginScreen() {
         return;
       }
       setNicknameError(null);
+      setNicknameWarning(null);
 
       if (password !== ACCESS_CODE) {
         setError("Invalid access code");
@@ -293,8 +297,24 @@ export function LoginScreen() {
                   placeholder=">"
                   value={nickname}
                   onChange={(e) => {
-                    const nextNickname = e.target.value;
+                    const rawNickname = e.target.value;
+                    const hadInvalidChars = hasInvalidUsernameChars(rawNickname);
+                    const nextNickname = sanitizeUsernameInput(rawNickname);
+
                     setNickname(nextNickname);
+
+                    if (hadInvalidChars) {
+                      setNicknameWarning(
+                        "Please change your username: emojis and special characters are not allowed."
+                      );
+                    } else if (nextNickname.length === USERNAME_MAX_LENGTH) {
+                      setNicknameWarning(
+                        `Username max length reached (${USERNAME_MAX_LENGTH} characters).`
+                      );
+                    } else {
+                      setNicknameWarning(null);
+                    }
+
                     if (nicknameError) {
                       setNicknameError(validateUsername(nextNickname));
                     }
@@ -324,6 +344,14 @@ export function LoginScreen() {
                     style={{ color: "rgba(255, 120, 100, 0.8)" }}
                   >
                     err: {nicknameError}
+                  </p>
+                )}
+                {!nicknameError && nicknameWarning && (
+                  <p
+                    className="text-[10px] tracking-[0.08em]"
+                    style={{ color: "rgba(255, 190, 90, 0.85)" }}
+                  >
+                    warn: {nicknameWarning}
                   </p>
                 )}
               </div>
