@@ -3346,7 +3346,7 @@ async fn upload_file(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
 
-    let url = format!("/external/{}/{}", folder, filename);
+    let url = format!("https://chatter.zgaf.io/external/{}/{}", folder, filename);
     (StatusCode::OK, Json(json!({ "url": url })))
 }
 
