@@ -3,6 +3,7 @@ import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 interface PeerStats {
@@ -38,6 +39,7 @@ export function VoiceControls() {
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [debugOpen, setDebugOpen] = useState(false);
+  const [screenFps, setScreenFps] = useState<30 | 60>(30);
   const [connStats, setConnStats] = useState<Record<string, PeerStats>>({});
   const prevBytesRef = useRef<Record<string, number>>({});
   const prevTimestampRef = useRef<Record<string, number>>({});
@@ -398,7 +400,7 @@ export function VoiceControls() {
     if (!state.inVoiceChannel || !canSignal()) return;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: 30 } } as any,
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: screenFps } } as any,
         audio: false,
       });
       screenStreamRef.current = stream;
@@ -423,7 +425,7 @@ export function VoiceControls() {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
       if (err.name !== "NotAllowedError") alert("Could not start screen sharing: " + err.message);
     }
-  }, [state.inVoiceChannel, state.currentRoomId, dispatch]);
+  }, [state.inVoiceChannel, state.currentRoomId, screenFps, dispatch]);
 
   const stopScreenShare = useCallback(async () => {
     dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
@@ -592,14 +594,33 @@ export function VoiceControls() {
               {state.voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
             </Button>
 
-            <Button
-              size="sm"
-              variant={state.isScreenSharing ? "destructive" : "outline"}
-              onClick={state.isScreenSharing ? stopScreenShare : startScreenShare}
-              className="text-xs"
-            >
-              {state.isScreenSharing ? "🖥️ Stop Sharing" : "🖥️ Share Screen"}
-            </Button>
+            <div className="flex items-center">
+              <Button
+                size="sm"
+                variant={state.isScreenSharing ? "destructive" : "outline"}
+                onClick={state.isScreenSharing ? stopScreenShare : startScreenShare}
+                className="text-xs rounded-r-none"
+              >
+                {state.isScreenSharing ? "🖥️ Stop Sharing" : `🖥️ Share (${screenFps}fps)`}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant={state.isScreenSharing ? "destructive" : "outline"}
+                    className="text-xs rounded-l-none border-l-0 px-1.5"
+                  >
+                    ▾
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => setScreenFps(Number(v) as 30 | 60)}>
+                    <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
             {state.voiceInputMode === "ptt" && !state.isMuted && (
               <span className="text-xs text-green-500 font-semibold animate-pulse">
