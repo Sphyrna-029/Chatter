@@ -517,7 +517,28 @@ async fn create_room(
                 // Check if DM already exists
                 let dm_rooms = state.dm_rooms.read().await;
                 if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
-                    return Ok(Json(json!({"room_id": existing_room_id.clone()})));
+                    let existing_room_id = existing_room_id.clone();
+                    drop(dm_rooms);
+
+                    // Re-add the user if they left
+                    let mut rm = state.room_members.write().await;
+                    if let Some(members) = rm.get_mut(&existing_room_id) {
+                        if !members.contains(&user_id) {
+                            members.push(user_id.clone());
+                            drop(rm);
+                            let event = json!({
+                                "type": "m.room.member",
+                                "room_id": existing_room_id,
+                                "sender": user_id,
+                                "content": {"membership": "join"},
+                                "event_id": generate_id("$"),
+                                "origin_server_ts": now_millis()
+                            });
+                            broadcast_to_room(&state, &existing_room_id, &event).await;
+                        }
+                    }
+
+                    return Ok(Json(json!({"room_id": existing_room_id})));
                 }
                 drop(dm_rooms);
                 
@@ -1098,11 +1119,24 @@ async fn sync(
             })
             .collect();
 
+        // For DMs, show the other person's name relative to the viewer
+        let display_name = if room_data.is_dm {
+            let other = members.iter().find(|m| *m != &user_id);
+            if let Some(other_id) = other {
+                let other_display = other_id.split(':').next().unwrap_or(other_id).trim_start_matches('@');
+                format!("DM with {}", other_display)
+            } else {
+                room_data.name.clone()
+            }
+        } else {
+            room_data.name.clone()
+        };
+
         let mut state_events = vec![
             json!({
                 "type": "m.room.name",
                 "state_key": "",
-                "content": {"name": room_data.name},
+                "content": {"name": display_name},
                 "sender": room_data.creator
             }),
             json!({
@@ -1424,6 +1458,25 @@ async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             connected: true,
         },
     );
+
+    // Broadcast presence to all rooms this user is in
+    {
+        let rm = state.room_members.read().await;
+        let user_rooms: Vec<String> = rm
+            .iter()
+            .filter(|(_, members)| members.contains(&user_id))
+            .map(|(rid, _)| rid.clone())
+            .collect();
+        drop(rm);
+        let event = json!({
+            "type": "presence_update",
+            "user_id": user_id,
+            "status": "active"
+        });
+        for rid in user_rooms {
+            broadcast_to_room(&state, &rid, &event).await;
+        }
+    }
 
     // Send connected ack
     let _ = ws_sink
@@ -3274,6 +3327,25 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
             p.last_active = now_secs();
         }
     }
+
+    // Broadcast offline presence to all rooms this user is in
+    {
+        let rm = state.room_members.read().await;
+        let user_rooms: Vec<String> = rm
+            .iter()
+            .filter(|(_, members)| members.contains(&user_id.to_string()))
+            .map(|(rid, _)| rid.clone())
+            .collect();
+        drop(rm);
+        let event = json!({
+            "type": "presence_update",
+            "user_id": user_id,
+            "status": "offline"
+        });
+        for rid in user_rooms {
+            broadcast_to_room(state, &rid, &event).await;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3407,7 +3479,7 @@ async fn main() {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
-        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE)))
+        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 1024 * 1024)))
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

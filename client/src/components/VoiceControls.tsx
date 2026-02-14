@@ -19,6 +19,7 @@ const WEBRTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
 
+const VOICE_SUBSCRIBE_RETRY_MS = 1000;
 const SCREEN_SUBSCRIBE_RETRY_MS = 1000;
 
 export function VoiceControls() {
@@ -244,7 +245,30 @@ export function VoiceControls() {
         }
       } else if (msg.type === "voice_webrtc_publisher_ready") {
         if (state.inVoiceChannel && msg.user_id !== state.userId) {
+          // Clean up any previously failed attempt so we can retry fresh
+          const oldPc = voiceSubscriberPcsRef.current.get(msg.user_id);
+          if (oldPc) {
+            try { oldPc.close(); } catch {}
+            voiceSubscriberPcsRef.current.delete(msg.user_id);
+          }
+          pendingVoiceSubsRef.current.delete(msg.user_id);
+          const timer = voiceRetryTimersRef.current.get(msg.user_id);
+          if (timer) {
+            clearTimeout(timer);
+            voiceRetryTimersRef.current.delete(msg.user_id);
+          }
           createVoiceSub(msg.user_id);
+        }
+      } else if (msg.type === "voice_webrtc_error") {
+        console.warn("[voice] WebRTC error:", msg.detail || msg);
+        if (msg.scope === "subscribe" && msg.speaker_user_id) {
+          const failedPc = voiceSubscriberPcsRef.current.get(msg.speaker_user_id);
+          if (failedPc) {
+            try { failedPc.close(); } catch {}
+            voiceSubscriberPcsRef.current.delete(msg.speaker_user_id);
+          }
+          pendingVoiceSubsRef.current.delete(msg.speaker_user_id);
+          scheduleVoiceRetry(msg.speaker_user_id);
         }
       }
       // Screen WebRTC signaling
@@ -377,6 +401,26 @@ export function VoiceControls() {
       }));
     }).catch(() => {});
   }, [state.userId, state.currentRoomId]);
+
+  const scheduleVoiceRetry = (speakerUserId: string) => {
+    if (voiceRetryTimersRef.current.has(speakerUserId)) return;
+    if (voiceSubscriberPcsRef.current.has(speakerUserId)) return;
+
+    const timer = setTimeout(() => {
+      voiceRetryTimersRef.current.delete(speakerUserId);
+      if (
+        state.inVoiceChannel &&
+        speakerUserId !== state.userId &&
+        !voiceSubscriberPcsRef.current.has(speakerUserId) &&
+        !pendingVoiceSubsRef.current.has(speakerUserId)
+      ) {
+        console.log("[voice] Retrying subscription to", speakerUserId);
+        createVoiceSub(speakerUserId);
+      }
+    }, VOICE_SUBSCRIBE_RETRY_MS);
+
+    voiceRetryTimersRef.current.set(speakerUserId, timer);
+  };
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async () => {

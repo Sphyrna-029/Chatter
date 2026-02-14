@@ -381,7 +381,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
       } else if (msg.type === "m.room.member") {
-        dispatch({ type: "UPDATE_MEMBER_EVENT", payload: null });
+        // Re-fetch members and presence for the current room
+        const curRoom = stateRef.current.currentRoomId;
+        if (curRoom) {
+          try {
+            const syncData = await apiSync();
+            const roomData = syncData.rooms?.join?.[curRoom];
+            if (roomData) {
+              const memberEvents = roomData.state.events.filter(
+                (e: any) => e.type === "m.room.member"
+              );
+              dispatch({
+                type: "SET_ROOM_MEMBERS",
+                payload: memberEvents.map((e: any) => ({
+                  userId: e.state_key,
+                  displayName:
+                    e.content.displayname || e.state_key.split(":")[0].substring(1),
+                })),
+              });
+            }
+            const presData = await apiGetPresence(curRoom);
+            dispatch({ type: "SET_PRESENCE", payload: presData.presence });
+          } catch {}
+        }
+        // Refresh room list (member counts may have changed)
+        loadRoomsRef.current();
       } else if (msg.type === "m.room.redaction") {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });
@@ -434,6 +458,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({
             type: "SET_MENTION",
             payload: { roomId: msg.room_id, hasMention: true },
+          });
+        }
+      }
+      else if (msg.type === "presence_update") {
+        if (msg.user_id && msg.status) {
+          dispatch({
+            type: "SET_PRESENCE",
+            payload: {
+              ...stateRef.current.userPresence,
+              [msg.user_id]: { status: msg.status },
+            },
           });
         }
       }

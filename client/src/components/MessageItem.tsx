@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -65,9 +66,9 @@ export function MessageItem({ message }: MessageItemProps) {
   const isOwn = message.sender === state.userId;
 
   const reactions = state.messageReactions[message.event_id] || {};
-  const processedBody = processMessageBody(
-    message.content.body,
-    state.userId
+  const processedBody = useMemo(
+    () => processMessageBody(message.content.body, state.userId),
+    [message.content.body, state.userId]
   );
 
   const handleReply = () => {
