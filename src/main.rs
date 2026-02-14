@@ -526,6 +526,24 @@ async fn create_room(
                         if !members.contains(&user_id) {
                             members.push(user_id.clone());
                             drop(rm);
+
+                            let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+                            let sys_event = json!({
+                                "type": "m.room.message",
+                                "room_id": existing_room_id,
+                                "sender": user_id,
+                                "content": {
+                                    "msgtype": "m.system",
+                                    "body": format!("{} has joined the room", display)
+                                },
+                                "event_id": generate_id("$"),
+                                "origin_server_ts": now_millis()
+                            });
+                            state.messages.write().await
+                                .entry(existing_room_id.clone()).or_insert_with(Vec::new)
+                                .push(sys_event.clone());
+                            broadcast_to_room(&state, &existing_room_id, &sys_event).await;
+
                             let event = json!({
                                 "type": "m.room.member",
                                 "room_id": existing_room_id,
@@ -681,6 +699,24 @@ async fn join_room(
             "origin_server_ts": now_millis()
         });
         broadcast_to_room(&state, &room_id, &event).await;
+
+        // System message for the join
+        let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let sys_event = json!({
+            "type": "m.room.message",
+            "room_id": room_id,
+            "sender": user_id,
+            "content": {
+                "msgtype": "m.system",
+                "body": format!("{} has joined the room", display)
+            },
+            "event_id": generate_id("$"),
+            "origin_server_ts": now_millis()
+        });
+        state.messages.write().await
+            .entry(room_id.clone()).or_insert_with(Vec::new)
+            .push(sys_event.clone());
+        broadcast_to_room(&state, &room_id, &sys_event).await;
     }
 
     Ok(Json(json!({"room_id": room_id})))
@@ -723,6 +759,25 @@ async fn leave_room(
                 room_vc.remove(&user_id);
             }
         }
+
+        // System message for the leave (store before broadcasting member event,
+        // so remaining members AND the leaving user's last fetch both include it)
+        let display = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let sys_event = json!({
+            "type": "m.room.message",
+            "room_id": room_id,
+            "sender": user_id,
+            "content": {
+                "msgtype": "m.system",
+                "body": format!("{} has left the room", display)
+            },
+            "event_id": generate_id("$"),
+            "origin_server_ts": now_millis()
+        });
+        state.messages.write().await
+            .entry(room_id.clone()).or_insert_with(Vec::new)
+            .push(sys_event.clone());
+        broadcast_to_room(&state, &room_id, &sys_event).await;
 
         let event = json!({
             "type": "m.room.member",
@@ -3479,7 +3534,7 @@ async fn main() {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
-        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 1024 * 1024)))
+        .route("/api/upload", post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)))
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

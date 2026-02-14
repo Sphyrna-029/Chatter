@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -22,6 +22,7 @@ function escapeHtml(text: string) {
   return div.innerHTML;
 }
 
+/** Returns HTML with URLs as links and @mentions styled, but NO embedded media tags */
 function processMessageBody(body: string, currentUserId: string | null) {
   let escaped = escapeHtml(body);
 
@@ -37,18 +38,55 @@ function processMessageBody(body: string, currentUserId: string | null) {
     )}">${match}</span>`;
   });
 
-  // Convert URLs to links / images
+  // Convert URLs to links only (no inline media)
   return escaped.replace(urlRegex, (url) => {
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
-    if (imageExtensions.test(url)) {
-      return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a><br><img src="${url}" alt="Image" loading="lazy" class="mt-2 max-w-full max-h-80 rounded-md" onerror="this.style.display='none'">`;
-    }
-    if (videoExtensions.test(url)) {
-      return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a><br><video src="${url}" controls preload="metadata" class="mt-2 max-w-full max-h-80 rounded-md"></video>`;
-    }
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 }
+
+/** Extract media URLs from body for rendering as React elements */
+function extractMediaUrls(body: string): { images: string[]; videos: string[] } {
+  const images: string[] = [];
+  const videos: string[] = [];
+  const matches = body.match(urlRegex);
+  if (matches) {
+    for (const url of matches) {
+      if (imageExtensions.test(url)) images.push(url);
+      else if (videoExtensions.test(url)) videos.push(url);
+    }
+  }
+  return { images, videos };
+}
+
+/** Memoized media preview — React preserves these DOM nodes across parent re-renders */
+const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
+  const { images, videos } = useMemo(() => extractMediaUrls(body), [body]);
+  if (images.length === 0 && videos.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-2">
+      {images.map((url) => (
+        <img
+          key={url}
+          src={url}
+          alt="Image"
+          loading="lazy"
+          className="max-w-full max-h-80 rounded-md"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+      ))}
+      {videos.map((url) => (
+        <video
+          key={url}
+          src={url}
+          controls
+          preload="metadata"
+          className="max-w-full max-h-80 rounded-md"
+        />
+      ))}
+    </div>
+  );
+});
 
 interface MessageItemProps {
   message: MatrixMessage;
@@ -56,6 +94,7 @@ interface MessageItemProps {
 
 export function MessageItem({ message }: MessageItemProps) {
   const { state, dispatch, deleteMessage, addReaction } = useAppContext();
+  const isSystem = message.content.msgtype === "m.system";
   const sender = message.sender.split(":")[0].substring(1);
   const initial = sender.substring(0, 1).toUpperCase();
   const time = new Date(message.origin_server_ts).toLocaleTimeString([], {
@@ -64,6 +103,25 @@ export function MessageItem({ message }: MessageItemProps) {
   });
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
+
+  if (isSystem) {
+    const isLeave = message.content.body.includes("has left");
+    return (
+      <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+        <div className="h-px flex-1 bg-border" />
+        <span className={cn(
+          "text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap",
+          isLeave
+            ? "text-red-400/80 bg-red-500/10"
+            : "text-green-400/80 bg-green-500/10"
+        )}>
+          {message.content.body}
+        </span>
+        <span className="text-xs text-muted-foreground/50">{time}</span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+    );
+  }
 
   const reactions = state.messageReactions[message.event_id] || {};
   const processedBody = useMemo(
@@ -122,6 +180,9 @@ export function MessageItem({ message }: MessageItemProps) {
             )}
             dangerouslySetInnerHTML={{ __html: processedBody }}
           />
+
+          {/* Media rendered as stable React elements — not inside innerHTML */}
+          {!isDeleted && <MediaPreview body={message.content.body} />}
 
           {/* Reactions */}
           {Object.keys(reactions).length > 0 && (

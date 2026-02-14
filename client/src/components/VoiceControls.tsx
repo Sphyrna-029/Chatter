@@ -390,8 +390,33 @@ export function VoiceControls() {
       audioEl.play().catch(() => {});
     };
 
+    // Detect failed or stuck connections and retry
+    pc.onconnectionstatechange = () => {
+      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
+      if (pc.connectionState === "failed") {
+        try { pc.close(); } catch {}
+        voiceSubscriberPcsRef.current.delete(speakerUserId);
+        pendingVoiceSubsRef.current.delete(speakerUserId);
+        scheduleVoiceRetry(speakerUserId);
+      }
+    };
+
+    // Timeout: if still "new" after 5s, the signaling was lost — tear down and retry
+    setTimeout(() => {
+      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
+      if (pc.connectionState === "new") {
+        console.warn("[voice] Subscription to", speakerUserId, "stuck in 'new', retrying");
+        try { pc.close(); } catch {}
+        voiceSubscriberPcsRef.current.delete(speakerUserId);
+        pendingVoiceSubsRef.current.delete(speakerUserId);
+        scheduleVoiceRetry(speakerUserId);
+      }
+    }, 5000);
+
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.createOffer().then(async (offer) => {
+      // Guard: if this PC was replaced before the offer resolved, don't send a stale offer
+      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_offer",
