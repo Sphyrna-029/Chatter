@@ -154,14 +154,18 @@ export async function apiGetMessages(roomId: string, limit = 50) {
   return res.json() as Promise<{ chunk: MatrixMessage[] }>;
 }
 
-export async function apiSendMessage(roomId: string, body: string) {
+export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string) {
   const txnId = Date.now();
+  const payload: Record<string, string> = { msgtype: "m.text", body };
+  if (inReplyTo) {
+    payload.in_reply_to = inReplyTo;
+  }
   const res = await fetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.room.message/${txnId}`,
     {
       method: "PUT",
       headers: authHeaders(),
-      body: JSON.stringify({ msgtype: "m.text", body }),
+      body: JSON.stringify(payload),
     }
   );
   if (!res.ok) throw new Error("Failed to send message");
@@ -230,6 +234,9 @@ export interface MatrixMessage {
   content: {
     body: string;
     msgtype: string;
+    in_reply_to?: string;
+    reply_to_sender?: string;
+    reply_to_body?: string;
   };
   redacted?: boolean;
   reactions?: Record<string, string[]>;

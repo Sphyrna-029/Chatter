@@ -70,7 +70,6 @@ struct AppState {
     voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
-    client_html: String,
 }
 
 #[derive(Clone)]
@@ -160,6 +159,7 @@ struct CreateRoomRequest {
 struct SendMessageRequest {
     msgtype: Option<String>,
     body: String,
+    in_reply_to: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -496,6 +496,11 @@ async fn create_room(
         if let Some(invite_list) = &req.invite {
             if invite_list.len() == 1 {
                 let other_user = &invite_list[0];
+
+                // Prevent self-DMs
+                if *other_user == user_id {
+                    return Err(error_response(StatusCode::BAD_REQUEST, "Cannot DM yourself"));
+                }
                 
                 // Create sorted key for DM lookup
                 let dm_key = if user_id < *other_user {
@@ -519,7 +524,7 @@ async fn create_room(
                 state.rooms.write().await.insert(
                     room_id.clone(),
                     RoomRecord {
-                        name: room_name,
+                        name: room_name.clone(),
                         topic: String::from("Direct Message"),
                         creator: user_id.clone(),
                         is_dm: true,
@@ -541,7 +546,19 @@ async fn create_room(
                 
                 // Store DM mapping
                 state.dm_rooms.write().await.insert(dm_key, room_id.clone());
-                
+
+                // Broadcast room creation so the invited user sees it in real-time
+                let event = json!({
+                    "type": "m.room.created",
+                    "room_id": room_id,
+                    "sender": user_id,
+                    "content": {
+                        "name": room_name,
+                        "is_direct": true
+                    }
+                });
+                broadcast_to_room(&state, &room_id, &event).await;
+
                 return Ok(Json(json!({"room_id": room_id})));
             }
         }
@@ -781,14 +798,40 @@ async fn send_message(
     let event_id = generate_id("$");
     let timestamp = now_millis();
 
+    let mut content = json!({
+        "msgtype": req.msgtype.unwrap_or_else(|| "m.text".to_string()),
+        "body": req.body
+    });
+
+    // If replying to a message, look up parent and embed reply metadata
+    let mut reply_to_user: Option<String> = None;
+    if let Some(ref parent_event_id) = req.in_reply_to {
+        content["in_reply_to"] = json!(parent_event_id);
+
+        // Look up parent message to get sender and body preview
+        let msgs = state.messages.read().await;
+        if let Some(room_msgs) = msgs.get(&room_id) {
+            if let Some(parent) = room_msgs.iter().find(|m| {
+                m.get("event_id").and_then(|v| v.as_str()) == Some(parent_event_id)
+            }) {
+                if let Some(sender) = parent.get("sender").and_then(|v| v.as_str()) {
+                    content["reply_to_sender"] = json!(sender);
+                    reply_to_user = Some(sender.to_string());
+                }
+                if let Some(body) = parent.get("content").and_then(|c| c.get("body")).and_then(|v| v.as_str()) {
+                    // Truncate to 100 chars for preview
+                    let preview: String = body.chars().take(100).collect();
+                    content["reply_to_body"] = json!(preview);
+                }
+            }
+        }
+    }
+
     let event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
-        "content": {
-            "msgtype": req.msgtype.unwrap_or_else(|| "m.text".to_string()),
-            "body": req.body
-        },
+        "content": content,
         "event_id": event_id,
         "origin_server_ts": timestamp
     });
@@ -802,6 +845,20 @@ async fn send_message(
         .push(event.clone());
 
     broadcast_to_room(&state, &room_id, &event).await;
+
+    // Send reply notification to the replied-to user (if online, not self-reply)
+    if let Some(ref replied_user) = reply_to_user {
+        if replied_user != &user_id {
+            let notification = json!({
+                "type": "m.reply_notification",
+                "room_id": room_id,
+                "sender": user_id,
+                "event_id": event_id,
+                "reply_to_event_id": req.in_reply_to,
+            });
+            send_to_user(&state, replied_user, &notification).await;
+        }
+    }
 
     Ok(Json(json!({"event_id": event_id})))
 }
@@ -3162,9 +3219,8 @@ async fn cleanup_disconnect(state: &AppState, user_id: &str) {
 // ---------------------------------------------------------------------------
 
 async fn serve_client() -> Html<String> {
-    let html = std::fs::read_to_string("client/dist/index.html")
-        .or_else(|_| std::fs::read_to_string("client.html"))
-        .unwrap_or_else(|_| "<h1>No client found. Run 'npm run build' in client/</h1>".to_string());
+    let html = std::fs::read_to_string("client/index.html")
+        .unwrap_or_else(|_| "<h1>No client found.</h1>".to_string());
     Html(html)
 }
 
@@ -3198,7 +3254,6 @@ async fn main() {
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
         dm_rooms: RwLock::new(HashMap::new()),
-        client_html,
     });
 
     let app = Router::new()

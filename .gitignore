@@ -16,3 +16,6 @@ CLAUDE.md
 # Node/Client
 client/node_modules/
 client/dist/
+
+.github
+.git

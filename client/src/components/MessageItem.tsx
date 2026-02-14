@@ -37,10 +37,11 @@ function processMessageBody(body: string, currentUserId: string | null) {
 
   // Convert URLs to links / images
   return escaped.replace(urlRegex, (url) => {
+    const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     if (imageExtensions.test(url)) {
-      return `<a href="${url}" target="_blank" class="text-primary hover:underline">${url}</a><br><img src="${url}" alt="Image" loading="lazy" class="mt-2 max-w-full max-h-80 rounded-md" onerror="this.style.display='none'">`;
+      return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a><br><img src="${url}" alt="Image" loading="lazy" class="mt-2 max-w-full max-h-80 rounded-md" onerror="this.style.display='none'">`;
     }
-    return `<a href="${url}" target="_blank" class="text-primary hover:underline">${url}</a>`;
+    return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 }
 
@@ -49,7 +50,7 @@ interface MessageItemProps {
 }
 
 export function MessageItem({ message }: MessageItemProps) {
-  const { state, deleteMessage, addReaction } = useAppContext();
+  const { state, dispatch, deleteMessage, addReaction } = useAppContext();
   const sender = message.sender.split(":")[0].substring(1);
   const initial = sender.substring(0, 1).toUpperCase();
   const time = new Date(message.origin_server_ts).toLocaleTimeString([], {
@@ -65,8 +66,26 @@ export function MessageItem({ message }: MessageItemProps) {
     state.userId
   );
 
+  const handleReply = () => {
+    dispatch({ type: "SET_REPLYING_TO", payload: message });
+  };
+
+  const scrollToParent = () => {
+    if (!message.content.in_reply_to) return;
+    const el = document.querySelector(`[data-event-id="${message.content.in_reply_to}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("bg-accent");
+      setTimeout(() => el.classList.remove("bg-accent"), 1500);
+    }
+  };
+
+  const replySender = message.content.reply_to_sender
+    ? message.content.reply_to_sender.split(":")[0].substring(1)
+    : null;
+
   return (
-    <div className="group relative py-1 px-2 rounded-md hover:bg-accent/50 transition-colors">
+    <div className="group relative py-1 px-2 rounded-md hover:bg-accent/50 transition-colors" data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0">
           <AvatarFallback className="text-xs font-semibold bg-secondary">
@@ -74,7 +93,18 @@ export function MessageItem({ message }: MessageItemProps) {
           </AvatarFallback>
         </Avatar>
 
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0 overflow-hidden">
+          {/* Reply quote */}
+          {message.content.in_reply_to && replySender && (
+            <button
+              className="flex items-center gap-1.5 mb-1 pl-2 border-l-2 border-primary/50 text-xs text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+              onClick={scrollToParent}
+            >
+              <span className="font-semibold">{replySender}</span>
+              <span className="truncate max-w-xs">{message.content.reply_to_body || "..."}</span>
+            </button>
+          )}
+
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-semibold">{sender}</span>
             <span className="text-xs text-muted-foreground">{time}</span>
@@ -82,7 +112,7 @@ export function MessageItem({ message }: MessageItemProps) {
 
           <div
             className={cn(
-              "text-sm mt-0.5 break-words",
+              "text-sm mt-0.5 break-words [overflow-wrap:anywhere]",
               isDeleted && "italic text-muted-foreground opacity-60"
             )}
             dangerouslySetInnerHTML={{ __html: processedBody }}
@@ -120,6 +150,15 @@ export function MessageItem({ message }: MessageItemProps) {
         {/* Action buttons (shown on hover) */}
         {!isDeleted && (
           <div className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={handleReply}
+              title="Reply"
+            >
+              <span className="text-xs">↩</span>
+            </Button>
             <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-6 w-6">

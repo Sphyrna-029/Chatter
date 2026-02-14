@@ -64,6 +64,7 @@ export interface AppState {
   // UI
   roomMentions: Record<string, boolean>;
   currentView: "chat" | "voice";
+  replyingTo: MatrixMessage | null;
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -92,6 +93,7 @@ type Action =
   | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null } }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean } }
+  | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null };
 
 const initialState: AppState = {
@@ -115,6 +117,7 @@ const initialState: AppState = {
   selectedScreenSharer: null,
   roomMentions: {},
   currentView: "chat",
+  replyingTo: null,
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -274,6 +277,8 @@ function reducer(state: AppState, action: Action): AppState {
           [action.payload.roomId]: action.payload.hasMention,
         },
       };
+    case "SET_REPLYING_TO":
+      return { ...state, replyingTo: action.payload };
     case "UPDATE_MEMBER_EVENT":
       return state; // Trigger re-render for member loading
     default:
@@ -293,7 +298,7 @@ interface AppContextValue {
   logout: () => Promise<void>;
   loadRooms: () => Promise<void>;
   selectRoom: (roomId: string) => Promise<void>;
-  sendMessage: (body: string) => Promise<void>;
+  sendMessage: (body: string, inReplyTo?: string) => Promise<void>;
   deleteMessage: (eventId: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
   createRoom: (name: string, topic: string) => Promise<void>;
@@ -410,6 +415,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
         }
+      } else if (msg.type === "m.reply_notification") {
+        if (msg.room_id !== stateRef.current.currentRoomId) {
+          dispatch({
+            type: "SET_MENTION",
+            payload: { roomId: msg.room_id, hasMention: true },
+          });
+        }
+      }
+      else if (msg.type === "m.room.created") {
+        // A new DM room was created — refresh rooms list so it appears instantly
+        loadRoomsRef.current();
       }
       // WebRTC signaling messages are handled by the voice/screen hooks
       // by subscribing to raw WS messages via a custom event
@@ -425,6 +441,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Keep a ref to loadRooms so WS handler can call it without stale closure
+  const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   // Connect WS when logged in
   useEffect(() => {
@@ -520,6 +539,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       payload: { roomIds: data.joined_rooms, roomInfoMap },
     });
   }, []);
+  loadRoomsRef.current = loadRooms;
 
   const selectRoom = useCallback(
     async (roomId: string) => {
@@ -578,9 +598,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const sendMessage = useCallback(
-    async (body: string) => {
+    async (body: string, inReplyTo?: string) => {
       if (!stateRef.current.currentRoomId) return;
-      await apiSendMessage(stateRef.current.currentRoomId, body);
+      await apiSendMessage(stateRef.current.currentRoomId, body, inReplyTo);
     },
     []
   );

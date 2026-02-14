@@ -20,7 +20,7 @@ const emojiCategories: Record<string, string[]> = {
 };
 
 export function ChatArea() {
-  const { state, sendMessage, sendTyping } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -38,9 +38,11 @@ export function ChatArea() {
   const handleSend = useCallback(async () => {
     const body = input.trim();
     if (!body || !state.currentRoomId) return;
+    const replyEventId = state.replyingTo?.event_id;
     setInput("");
-    await sendMessage(body);
-  }, [input, state.currentRoomId, sendMessage]);
+    dispatch({ type: "SET_REPLYING_TO", payload: null });
+    await sendMessage(body, replyEventId);
+  }, [input, state.currentRoomId, state.replyingTo, sendMessage, dispatch]);
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (mentionOpen) {
@@ -66,6 +68,10 @@ export function ChatArea() {
         setMentionOpen(false);
         return;
       }
+    }
+    if (e.key === "Escape" && state.replyingTo) {
+      dispatch({ type: "SET_REPLYING_TO", payload: null });
+      return;
     }
     if (e.key === "Enter") {
       handleSend();
@@ -142,7 +148,11 @@ export function ChatArea() {
             {roomInfo?.name || "Unnamed Room"}
           </h2>
           {roomInfo?.topic && (
-            <p className="text-xs text-muted-foreground">{roomInfo.topic}</p>
+            <div className="overflow-hidden max-w-xs">
+              <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
+                {roomInfo.topic}
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -156,6 +166,26 @@ export function ChatArea() {
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
+
+      {/* Reply preview */}
+      {state.replyingTo && (
+        <div className="border-t border-l-2 border-l-primary mx-3 mt-2 px-3 py-2 bg-accent/30 rounded-sm flex items-center justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-primary">
+              Replying to {state.replyingTo.sender.split(":")[0].substring(1)}
+            </p>
+            <p className="text-xs text-muted-foreground truncate">
+              {state.replyingTo.content.body}
+            </p>
+          </div>
+          <button
+            className="text-muted-foreground hover:text-foreground text-sm flex-shrink-0 cursor-pointer"
+            onClick={() => dispatch({ type: "SET_REPLYING_TO", payload: null })}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Input */}
       <div className="border-t p-3">
