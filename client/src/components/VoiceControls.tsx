@@ -44,6 +44,12 @@ export function VoiceControls() {
   const prevBytesRef = useRef<Record<string, number>>({});
   const prevTimestampRef = useRef<Record<string, number>>({});
 
+  // Speaking detection
+  const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const localAnalyserRef = useRef<AnalyserNode | null>(null);
+  const remoteAnalysersRef = useRef<Map<string, { analyser: AnalyserNode; source: MediaStreamAudioSourceNode }>>(new Map());
+
   const canSignal = () => wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
 
   // ─── Connection stats polling ───────────────────────────────────────────────
@@ -111,6 +117,100 @@ export function VoiceControls() {
     const id = setInterval(pollStats, 2000);
     return () => clearInterval(id);
   }, [state.inVoiceChannel]);
+
+  // ─── Speaking detection via AnalyserNode ────────────────────────────────────
+  useEffect(() => {
+    if (!state.inVoiceChannel) {
+      // Clean up analysers
+      remoteAnalysersRef.current.forEach(({ source }) => { try { source.disconnect(); } catch {} });
+      remoteAnalysersRef.current.clear();
+      localAnalyserRef.current = null;
+      if (audioContextRef.current) {
+        audioContextRef.current.close().catch(() => {});
+        audioContextRef.current = null;
+      }
+      setSpeakingUsers(new Set());
+      return;
+    }
+
+    const SPEAKING_THRESHOLD = 15; // RMS threshold (0-255 range)
+    const ctx = new AudioContext();
+    audioContextRef.current = ctx;
+
+    // Set up local mic analyser
+    if (localStreamRef.current) {
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      const source = ctx.createMediaStreamSource(localStreamRef.current);
+      source.connect(analyser);
+      localAnalyserRef.current = analyser;
+    }
+
+    const dataArray = new Uint8Array(128);
+    let rafId: number;
+
+    const detect = () => {
+      const next = new Set<string>();
+
+      // Check local mic
+      if (localAnalyserRef.current && state.userId) {
+        localAnalyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        if (sum / dataArray.length > SPEAKING_THRESHOLD) {
+          next.add(state.userId);
+        }
+      }
+
+      // Check remote peers
+      remoteAnalysersRef.current.forEach(({ analyser }, uid) => {
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        if (sum / dataArray.length > SPEAKING_THRESHOLD) {
+          next.add(uid);
+        }
+      });
+
+      setSpeakingUsers((prev) => {
+        // Only update if changed to avoid re-renders
+        if (prev.size !== next.size || [...next].some((u) => !prev.has(u))) return next;
+        return prev;
+      });
+
+      rafId = requestAnimationFrame(detect);
+    };
+
+    rafId = requestAnimationFrame(detect);
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      remoteAnalysersRef.current.forEach(({ source }) => { try { source.disconnect(); } catch {} });
+      remoteAnalysersRef.current.clear();
+      localAnalyserRef.current = null;
+      ctx.close().catch(() => {});
+      audioContextRef.current = null;
+    };
+  }, [state.inVoiceChannel, state.userId]);
+
+  // Attach analysers to remote audio streams when they arrive
+  useEffect(() => {
+    if (!state.inVoiceChannel || !audioContextRef.current) return;
+
+    voiceAudioElementsRef.current.forEach((audioEl, uid) => {
+      if (remoteAnalysersRef.current.has(uid)) return;
+      const stream = audioEl.srcObject as MediaStream | null;
+      if (!stream) return;
+      try {
+        const ctx = audioContextRef.current!;
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        const source = ctx.createMediaStreamSource(stream);
+        source.connect(analyser);
+        remoteAnalysersRef.current.set(uid, { analyser, source });
+      } catch {}
+    });
+  });
 
   // ─── WS Message handler for WebRTC signaling ──────────────────────────────
   useEffect(() => {
@@ -685,9 +785,14 @@ export function VoiceControls() {
               const isSharing = memberState?.screen_sharing || state.activeScreenSharers.includes(memberId);
               const vol = volumes[memberId] ?? 1;
 
+              const isSpeaking = speakingUsers.has(memberId) && !isMutedMember;
+
               return (
-                <div key={memberId} className="flex items-center gap-2 text-sm">
-                  <span className={cn("text-xs", isMutedMember && "text-destructive")}>
+                <div key={memberId} className={cn(
+                  "flex items-center gap-2 text-sm rounded-md px-1 -mx-1 transition-shadow duration-150",
+                  isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
+                )}>
+                  <span className={cn("text-xs", isMutedMember ? "text-destructive" : isSpeaking ? "text-green-500" : "")}>
                     {isMutedMember ? "🔇" : "🎤"}
                   </span>
                   {(() => {
@@ -714,7 +819,7 @@ export function VoiceControls() {
                       </TooltipProvider>
                     );
                   })()}
-                  <span className="flex-1 truncate">
+                  <span className={cn("flex-1 truncate", isSpeaking && "text-green-400 font-semibold")}>
                     {name}{isSelf && " (You)"}
                   </span>
                   {!isSelf && (
