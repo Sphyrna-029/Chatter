@@ -2,7 +2,17 @@ import { useCallback, useRef, useEffect, useState } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+interface PeerStats {
+  rtt: number | null;
+  bitrate: number | null;
+  packetsLost: number | null;
+  framesPerSecond: number | null;
+  resolution: string | null;
+  connectionState: string;
+}
 
 const WEBRTC_CONFIG = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
@@ -27,8 +37,78 @@ export function VoiceControls() {
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
   const [volumes, setVolumes] = useState<Record<string, number>>({});
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [connStats, setConnStats] = useState<Record<string, PeerStats>>({});
+  const prevBytesRef = useRef<Record<string, number>>({});
+  const prevTimestampRef = useRef<Record<string, number>>({});
 
   const canSignal = () => wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
+
+  // ─── Connection stats polling ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!state.inVoiceChannel) {
+      setConnStats({});
+      prevBytesRef.current = {};
+      prevTimestampRef.current = {};
+      return;
+    }
+
+    const pollStats = async () => {
+      const pcs: [string, RTCPeerConnection | null][] = [
+        ["voice-pub", voicePublisherPcRef.current],
+      ];
+      voiceSubscriberPcsRef.current.forEach((pc, uid) => pcs.push([`voice-sub:${uid}`, pc]));
+      pcs.push(["screen-pub", screenPubPcRef.current]);
+      screenSubPcsRef.current.forEach((pc, uid) => pcs.push([`screen-sub:${uid}`, pc]));
+
+      const next: Record<string, PeerStats> = {};
+      const now = performance.now();
+
+      for (const [key, pc] of pcs) {
+        if (!pc) continue;
+        try {
+          const stats = await pc.getStats();
+          let rtt: number | null = null;
+          let packetsLost: number | null = null;
+          let fps: number | null = null;
+          let resolution: string | null = null;
+          let totalBytes = 0;
+
+          stats.forEach((report) => {
+            if (report.type === "candidate-pair" && report.nominated) {
+              if (report.currentRoundTripTime != null) rtt = report.currentRoundTripTime;
+            }
+            if (report.type === "inbound-rtp" || report.type === "outbound-rtp") {
+              if (report.packetsLost != null) packetsLost = report.packetsLost;
+              if (report.framesPerSecond != null) fps = report.framesPerSecond;
+              if (report.frameWidth && report.frameHeight) {
+                resolution = `${report.frameWidth}x${report.frameHeight}`;
+              }
+              const bytes = report.bytesReceived ?? report.bytesSent ?? 0;
+              totalBytes += bytes;
+            }
+          });
+
+          let bitrate: number | null = null;
+          const prevBytes = prevBytesRef.current[key];
+          const prevTs = prevTimestampRef.current[key];
+          if (prevBytes != null && prevTs != null) {
+            const dt = (now - prevTs) / 1000;
+            if (dt > 0) bitrate = (totalBytes - prevBytes) / dt;
+          }
+          prevBytesRef.current[key] = totalBytes;
+          prevTimestampRef.current[key] = now;
+
+          next[key] = { rtt, bitrate, packetsLost, framesPerSecond: fps, resolution, connectionState: pc.connectionState };
+        } catch {}
+      }
+      setConnStats(next);
+    };
+
+    pollStats();
+    const id = setInterval(pollStats, 2000);
+    return () => clearInterval(id);
+  }, [state.inVoiceChannel]);
 
   // ─── WS Message handler for WebRTC signaling ──────────────────────────────
   useEffect(() => {
@@ -526,9 +606,48 @@ export function VoiceControls() {
                 🔊 Transmitting
               </span>
             )}
+
+            <Button
+              size="sm"
+              variant={debugOpen ? "secondary" : "ghost"}
+              onClick={() => setDebugOpen((o) => !o)}
+              className="text-xs"
+            >
+              Debug
+            </Button>
           </>
         )}
       </div>
+
+      {/* Debug panel */}
+      {debugOpen && state.inVoiceChannel && Object.keys(connStats).length > 0 && (
+        <div className="border-b px-4 py-2 space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+            WebRTC Connections
+          </p>
+          <div className="grid gap-1">
+            {Object.entries(connStats).map(([key, s]) => {
+              let label = key;
+              if (key === "voice-pub") label = "Voice Pub";
+              else if (key === "screen-pub") label = "Screen Pub";
+              else if (key.startsWith("voice-sub:")) label = `Voice Sub: ${shortenId(key.replace("voice-sub:", ""))}`;
+              else if (key.startsWith("screen-sub:")) label = `Screen Sub: ${shortenId(key.replace("screen-sub:", ""))}`;
+
+              return (
+                <div key={key} className="flex flex-wrap items-center gap-3 text-xs font-mono">
+                  <span className="font-semibold min-w-[120px]">{label}</span>
+                  <span className="text-muted-foreground">{s.connectionState}</span>
+                  <span>RTT: {s.rtt != null ? `${Math.round(s.rtt * 1000)}ms` : "—"}</span>
+                  <span>↕ {s.bitrate != null ? `${Math.round(s.bitrate * 8 / 1000)}kbps` : "—"}</span>
+                  <span>Lost: {s.packetsLost ?? "—"}</span>
+                  {s.framesPerSecond != null && <span>{s.framesPerSecond}fps</span>}
+                  {s.resolution && <span>{s.resolution}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Voice members list */}
       {state.voiceMembers.length > 0 && (
@@ -550,6 +669,30 @@ export function VoiceControls() {
                   <span className={cn("text-xs", isMutedMember && "text-destructive")}>
                     {isMutedMember ? "🔇" : "🎤"}
                   </span>
+                  {(() => {
+                    const statsKey = isSelf ? "voice-pub" : `voice-sub:${memberId}`;
+                    const rtt = connStats[statsKey]?.rtt;
+                    const rttMs = rtt != null ? Math.round(rtt * 1000) : null;
+                    const dotColor = rttMs == null
+                      ? "text-muted-foreground"
+                      : rttMs < 100
+                        ? "text-green-500"
+                        : rttMs <= 300
+                          ? "text-orange-500"
+                          : "text-red-500";
+                    return (
+                      <TooltipProvider delayDuration={200}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className={cn("text-[8px] leading-none", dotColor)}>●</span>
+                          </TooltipTrigger>
+                          <TooltipContent side="top" className="text-xs">
+                            {rttMs != null ? `${rttMs}ms` : "No data"}
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    );
+                  })()}
                   <span className="flex-1 truncate">
                     {name}{isSelf && " (You)"}
                   </span>
