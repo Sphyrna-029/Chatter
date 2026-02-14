@@ -306,6 +306,8 @@ export function VoiceControls() {
             screenSubPcsRef.current.delete(sharerId);
           }
           pendingScreenSubsRef.current.delete(sharerId);
+          // Clear old stream so a fresh one is created on resubscribe
+          screenStreamsMap.delete(sharerId);
           // Cancel any pending retry timer
           const timer = screenRetryTimersRef.current.get(sharerId);
           if (timer) {
@@ -324,6 +326,7 @@ export function VoiceControls() {
             screenSubPcsRef.current.delete(msg.sharer_user_id);
           }
           pendingScreenSubsRef.current.delete(msg.sharer_user_id);
+          screenStreamsMap.delete(msg.sharer_user_id);
           // Schedule retry if the sharer is still active
           scheduleScreenRetry(msg.sharer_user_id);
         } else if (msg.scope === "publish") {
@@ -645,6 +648,9 @@ export function VoiceControls() {
 
   const ensureScreenSub = (sharerId: string) => {
     if (!canSignal() || sharerId === state.userId) return;
+    // Guard: don't create duplicate subscriptions
+    if (screenSubPcsRef.current.has(sharerId) || pendingScreenSubsRef.current.has(sharerId)) return;
+
     const pc = new RTCPeerConnection(WEBRTC_CONFIG);
     screenSubPcsRef.current.set(sharerId, pc);
     pendingScreenSubsRef.current.add(sharerId);
@@ -660,15 +666,41 @@ export function VoiceControls() {
     };
 
     pc.ontrack = (ev) => {
-      const stream = ev.streams[0] || new MediaStream([ev.track]);
-      screenStreamsMap.set(sharerId, stream);
+      // Accumulate tracks into a single stream per sharer.
+      // ontrack fires once per track (video, then audio). If we overwrite
+      // the map entry each time, the second call can replace the video
+      // stream with an audio-only stream, causing a blank screen.
+      let stream = screenStreamsMap.get(sharerId);
+      if (stream) {
+        if (ev.track && !stream.getTrackById(ev.track.id)) {
+          stream.addTrack(ev.track);
+        }
+      } else {
+        stream = ev.streams[0] || new MediaStream([ev.track]);
+        screenStreamsMap.set(sharerId, stream);
+      }
       // Notify ScreenShareViewer to re-render
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
+    };
+
+    // Detect failed or stuck connections and retry
+    pc.onconnectionstatechange = () => {
+      if (pc !== screenSubPcsRef.current.get(sharerId)) return;
+      if (pc.connectionState === "failed") {
+        try { pc.close(); } catch {}
+        screenSubPcsRef.current.delete(sharerId);
+        pendingScreenSubsRef.current.delete(sharerId);
+        screenStreamsMap.delete(sharerId);
+        window.dispatchEvent(new CustomEvent("screen-stream-update"));
+        scheduleScreenRetry(sharerId);
+      }
     };
 
     pc.addTransceiver("video", { direction: "recvonly" });
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.createOffer().then(async (offer) => {
+      // Guard: if this PC was replaced before the offer resolved, don't send a stale offer
+      if (pc !== screenSubPcsRef.current.get(sharerId)) return;
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({
         type: "screen_webrtc_subscribe_offer",

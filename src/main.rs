@@ -45,8 +45,8 @@ use webrtc::{
     },
 };
 
-const SCREEN_RTP_BUFFER_SIZE: usize = 512;
-const SCREEN_AUDIO_RTP_BUFFER_SIZE: usize = 256;
+const SCREEN_RTP_BUFFER_SIZE: usize = 2048;
+const SCREEN_AUDIO_RTP_BUFFER_SIZE: usize = 512;
 const VOICE_RTP_BUFFER_SIZE: usize = 256;
 
 // ---------------------------------------------------------------------------
