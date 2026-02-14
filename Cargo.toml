@@ -15,10 +15,13 @@ base64 = "0.22"
 chrono = "0.4"
 futures-util = "0.3"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
-reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+reqwest = { version = "0.12", features = ["rustls-tls", "json", "multipart"], default-features = false }
 webrtc = "0.11"
 rtp = "0.11"
 rtcp = "0.11"
+
+[dev-dependencies]
+tokio-tungstenite = "0.24"
 
 [profile.release]
 opt-level = 3

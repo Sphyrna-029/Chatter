@@ -1,0 +1,8 @@
+pub(crate) mod auth;
+pub(crate) mod media;
+pub(crate) mod messages;
+pub(crate) mod presence;
+pub(crate) mod reactions;
+pub(crate) mod rooms;
+pub(crate) mod static_content;
+pub(crate) mod sync;
