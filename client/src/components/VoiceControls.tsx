@@ -578,7 +578,7 @@ export function VoiceControls() {
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: screenFps } } as any,
-        audio: false,
+        audio: true,
       });
       screenStreamRef.current = stream;
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
@@ -591,6 +591,9 @@ export function VoiceControls() {
       const pc = new RTCPeerConnection(WEBRTC_CONFIG);
       screenPubPcRef.current = pc;
       pc.addTrack(screenTrack, stream);
+      // Add system audio track if available (user may decline or browser may not support it)
+      const screenAudioTrack = stream.getAudioTracks()[0];
+      if (screenAudioTrack) pc.addTrack(screenAudioTrack, stream);
       pc.onicecandidate = (ev) => {
         if (!ev.candidate || !canSignal()) return;
         wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_candidate", room_id: state.currentRoomId, candidate: ev.candidate.toJSON() }));
@@ -664,6 +667,7 @@ export function VoiceControls() {
     };
 
     pc.addTransceiver("video", { direction: "recvonly" });
+    pc.addTransceiver("audio", { direction: "recvonly" });
     pc.createOffer().then(async (offer) => {
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({

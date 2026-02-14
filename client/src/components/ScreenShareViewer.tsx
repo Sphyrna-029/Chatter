@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
 const shortenId = (id: string) =>
@@ -163,9 +164,17 @@ export function ScreenShareViewer() {
   const thumbVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const [, setStreamVersion] = useState(0);
 
+  // Per-sharer volume state (persists when switching between sharers)
+  const [screenVolumes, setScreenVolumes] = useState<Record<string, number>>({});
+  const [screenMuted, setScreenMuted] = useState<Record<string, boolean>>({});
+
   const otherSharers = state.activeScreenSharers.filter(
     (id) => id !== state.userId
   );
+
+  const currentSharer = state.selectedScreenSharer;
+  const currentVolume = currentSharer ? (screenVolumes[currentSharer] ?? 50) : 50;
+  const currentMuted = currentSharer ? (screenMuted[currentSharer] ?? false) : false;
 
   // Listen for stream updates from VoiceControls
   useEffect(() => {
@@ -174,14 +183,15 @@ export function ScreenShareViewer() {
     return () => window.removeEventListener("screen-stream-update", handler);
   }, []);
 
-  // Attach streams to video elements
+  // Attach streams to video elements and apply volume
   useEffect(() => {
-    if (state.selectedScreenSharer && mainVideoRef.current) {
-      const stream = screenStreamsMap.get(state.selectedScreenSharer);
+    if (currentSharer && mainVideoRef.current) {
+      const stream = screenStreamsMap.get(currentSharer);
       if (stream && mainVideoRef.current.srcObject !== stream) {
         mainVideoRef.current.srcObject = stream;
         mainVideoRef.current.play().catch(() => {});
       }
+      mainVideoRef.current.volume = currentMuted ? 0 : currentVolume / 100;
     }
     // Thumbnails
     screenStreamsMap.forEach((stream, sharerId) => {
@@ -192,6 +202,23 @@ export function ScreenShareViewer() {
       }
     });
   });
+
+  const setVolume = useCallback((vol: number) => {
+    if (!currentSharer) return;
+    setScreenVolumes((prev) => ({ ...prev, [currentSharer]: vol }));
+    if (mainVideoRef.current) {
+      mainVideoRef.current.volume = currentMuted ? 0 : vol / 100;
+    }
+  }, [currentSharer, currentMuted]);
+
+  const toggleMute = useCallback(() => {
+    if (!currentSharer) return;
+    const newMuted = !currentMuted;
+    setScreenMuted((prev) => ({ ...prev, [currentSharer]: newMuted }));
+    if (mainVideoRef.current) {
+      mainVideoRef.current.volume = newMuted ? 0 : currentVolume / 100;
+    }
+  }, [currentSharer, currentMuted, currentVolume]);
 
   if (
     !state.screenViewerOpen ||
@@ -211,7 +238,6 @@ export function ScreenShareViewer() {
             ref={mainVideoRef}
             autoPlay
             playsInline
-            muted
             className="object-contain w-full h-full bg-black"
           />
         ) : (
@@ -236,6 +262,43 @@ export function ScreenShareViewer() {
           </div>
         )}
       </div>
+
+      {/* Volume controls overlay */}
+      {state.selectedScreenSharer &&
+        screenStreamsMap.has(state.selectedScreenSharer) && (
+        <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-white/80 hover:text-white shrink-0"
+            onClick={toggleMute}
+            title={currentMuted ? "Unmute" : "Mute"}
+          >
+            {currentMuted || currentVolume === 0 ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <line x1="23" y1="9" x2="17" y2="15" />
+                <line x1="17" y1="9" x2="23" y2="15" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+            )}
+          </Button>
+          <Slider
+            value={[currentMuted ? 0 : currentVolume]}
+            onValueChange={([v]) => setVolume(v)}
+            max={100}
+            step={1}
+            className="w-32"
+          />
+          <span className="text-xs text-white/60 w-8 text-right tabular-nums">
+            {currentMuted ? 0 : currentVolume}%
+          </span>
+        </div>
+      )}
 
       {/* Preview thumbnails for multiple sharers */}
       {otherSharers.length > 1 && (

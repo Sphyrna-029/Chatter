@@ -46,6 +46,7 @@ use webrtc::{
 };
 
 const SCREEN_RTP_BUFFER_SIZE: usize = 512;
+const SCREEN_AUDIO_RTP_BUFFER_SIZE: usize = 256;
 const VOICE_RTP_BUFFER_SIZE: usize = 256;
 
 // ---------------------------------------------------------------------------
@@ -105,6 +106,9 @@ struct ScreenPublisherState {
     media_ssrc: Option<u32>,
     video_codec: Option<RTCRtpCodecCapability>,
     rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
+    audio_ssrc: Option<u32>,
+    audio_codec: Option<RTCRtpCodecCapability>,
+    audio_rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
 }
 
 struct ScreenSubscriberState {
@@ -112,6 +116,7 @@ struct ScreenSubscriberState {
     sharer_user_id: String,
     peer_connection: Arc<RTCPeerConnection>,
     forward_task: JoinHandle<()>,
+    audio_forward_task: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -874,6 +879,15 @@ async fn send_message(
                 "Not a member of this room",
             ));
         }
+    }
+
+    const MAX_MESSAGE_LENGTH: usize = 2000;
+    let msgtype = req.msgtype.as_deref().unwrap_or("m.text");
+    if msgtype == "m.text" && req.body.len() > MAX_MESSAGE_LENGTH {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Message exceeds maximum length of 2000 characters",
+        ));
     }
 
     let event_id = generate_id("$");
@@ -1886,6 +1900,9 @@ async fn teardown_screen_subscriber_pair(
 
     if let Some(subscriber) = subscriber {
         subscriber.forward_task.abort();
+        if let Some(audio_task) = subscriber.audio_forward_task {
+            audio_task.abort();
+        }
         let _ = subscriber.peer_connection.close().await;
     }
 }
@@ -1910,6 +1927,9 @@ async fn teardown_screen_subscriptions_for_viewer(state: &AppState, viewer_user_
 
     for subscriber in subscribers {
         subscriber.forward_task.abort();
+        if let Some(audio_task) = subscriber.audio_forward_task {
+            audio_task.abort();
+        }
         let _ = subscriber.peer_connection.close().await;
     }
 }
@@ -1934,6 +1954,9 @@ async fn teardown_screen_subscriptions_for_sharer(state: &AppState, sharer_user_
 
     for subscriber in subscribers {
         subscriber.forward_task.abort();
+        if let Some(audio_task) = subscriber.audio_forward_task {
+            audio_task.abort();
+        }
         let _ = subscriber.peer_connection.close().await;
     }
 }
@@ -2008,6 +2031,9 @@ async fn handle_screen_webrtc_publish_offer(
                 media_ssrc: None,
                 video_codec: None,
                 rtp_sender: None,
+                audio_ssrc: None,
+                audio_codec: None,
+                audio_rtp_sender: None,
             },
         );
     }
@@ -2081,32 +2107,47 @@ async fn handle_screen_webrtc_publish_offer(
                     sdp_fmtp_line: codec.capability.sdp_fmtp_line.clone(),
                     rtcp_feedback: codec.capability.rtcp_feedback.clone(),
                 };
+                let is_audio = codec.capability.mime_type.starts_with("audio/");
+
+                let buffer_size = if is_audio {
+                    SCREEN_AUDIO_RTP_BUFFER_SIZE
+                } else {
+                    SCREEN_RTP_BUFFER_SIZE
+                };
                 let (rtp_sender, _) =
-                    broadcast::channel::<rtp::packet::Packet>(SCREEN_RTP_BUFFER_SIZE);
+                    broadcast::channel::<rtp::packet::Packet>(buffer_size);
 
                 {
                     let mut publishers = state.screen_publishers.write().await;
                     if let Some(publisher) = publishers.get_mut(&user_id) {
-                        publisher.media_ssrc = Some(track.ssrc());
-                        publisher.video_codec = Some(codec_capability);
-                        publisher.rtp_sender = Some(rtp_sender.clone());
+                        if is_audio {
+                            publisher.audio_ssrc = Some(track.ssrc());
+                            publisher.audio_codec = Some(codec_capability);
+                            publisher.audio_rtp_sender = Some(rtp_sender.clone());
+                        } else {
+                            publisher.media_ssrc = Some(track.ssrc());
+                            publisher.video_codec = Some(codec_capability);
+                            publisher.rtp_sender = Some(rtp_sender.clone());
+                        }
                     } else {
                         return;
                     }
                 }
 
-                // Notify all voice members that this screen publisher's track is now ready
-                let room_id = {
-                    let publishers = state.screen_publishers.read().await;
-                    publishers.get(&user_id).map(|p| p.room_id.clone())
-                };
-                if let Some(room_id) = room_id {
-                    let event = json!({
-                        "type": "screen_webrtc_publisher_ready",
-                        "room_id": room_id,
-                        "user_id": user_id
-                    });
-                    broadcast_to_room(&state, &room_id, &event).await;
+                // Only notify for video track — audio availability is checked at subscribe time
+                if !is_audio {
+                    let room_id = {
+                        let publishers = state.screen_publishers.read().await;
+                        publishers.get(&user_id).map(|p| p.room_id.clone())
+                    };
+                    if let Some(room_id) = room_id {
+                        let event = json!({
+                            "type": "screen_webrtc_publisher_ready",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        });
+                        broadcast_to_room(&state, &room_id, &event).await;
+                    }
                 }
 
                 tokio::spawn(async move {
@@ -2485,6 +2526,68 @@ async fn handle_screen_webrtc_subscribe_offer(
         }
     });
 
+    // Forward audio track if the publisher has system audio
+    let mut audio_forward_task: Option<JoinHandle<()>> = None;
+    if let (Some(audio_codec), Some(audio_rtp_sender), Some(audio_ssrc)) = (
+        publisher_state.audio_codec.clone(),
+        publisher_state.audio_rtp_sender.clone(),
+        publisher_state.audio_ssrc,
+    ) {
+        let audio_local_track = Arc::new(TrackLocalStaticRTP::new(
+            audio_codec,
+            format!("screen-audio-{}-{}", sharer_user_id, viewer_user_id),
+            "chatter-sfu".to_string(),
+        ));
+
+        let audio_track_for_sender: Arc<dyn TrackLocal + Send + Sync> =
+            audio_local_track.clone();
+        match peer_connection.add_track(audio_track_for_sender).await {
+            Ok(audio_rtp_sender_rtcp) => {
+                // Forward RTCP feedback for audio back to the publisher
+                let pub_pc_for_audio_feedback = publisher_peer_connection.clone();
+                tokio::spawn(async move {
+                    while let Ok((rtcp_packets, _)) = audio_rtp_sender_rtcp.read_rtcp().await {
+                        let rewritten_packets = rtcp_packets
+                            .iter()
+                            .filter_map(|packet| {
+                                rewrite_rtcp_feedback_for_publisher(
+                                    packet.as_ref(),
+                                    audio_ssrc,
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        if !rewritten_packets.is_empty() {
+                            let _ = pub_pc_for_audio_feedback
+                                .write_rtcp(&rewritten_packets)
+                                .await;
+                        }
+                    }
+                });
+
+                let mut audio_rtp_receiver = audio_rtp_sender.subscribe();
+                audio_forward_task = Some(tokio::spawn(async move {
+                    loop {
+                        match audio_rtp_receiver.recv().await {
+                            Ok(rtp_packet) => {
+                                if audio_local_track.write_rtp(&rtp_packet).await.is_err() {
+                                    break;
+                                }
+                            }
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => break,
+                        }
+                    }
+                }));
+            }
+            Err(err) => {
+                eprintln!(
+                    "screen-sub: failed to add audio track for {}: {}",
+                    viewer_user_id, err
+                );
+            }
+        }
+    }
+
     {
         let key = subscriber_key(viewer_user_id, sharer_user_id);
         let mut subs = state.screen_subscribers.write().await;
@@ -2495,6 +2598,7 @@ async fn handle_screen_webrtc_subscribe_offer(
                 sharer_user_id: sharer_user_id.to_string(),
                 peer_connection: peer_connection.clone(),
                 forward_task,
+                audio_forward_task,
             },
         );
     }
