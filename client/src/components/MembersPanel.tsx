@@ -71,7 +71,7 @@ export function MembersPanel() {
                     {member.displayName}
                   </span>
                   {customStatus && (
-                    <span className="truncate text-xs text-muted-foreground block">
+                    <span className="truncate text-[0.625rem] leading-tight text-muted-foreground block">
                       {customStatus}
                     </span>
                   )}
