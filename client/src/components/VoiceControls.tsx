@@ -6,6 +6,7 @@ import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
 
 interface PeerStats {
   rtt: number | null;
@@ -44,6 +45,7 @@ export function VoiceControls() {
   const [debugOpen, setDebugOpen] = useState(false);
   const [screenFps, setScreenFps] = useState<30 | 60>(30);
   const [connStats, setConnStats] = useState<Record<string, PeerStats>>({});
+  const [voiceMembersExpanded, setVoiceMembersExpanded] = useState(true);
   const prevBytesRef = useRef<Record<string, number>>({});
 
   // Refs to avoid stale closures in useCallback / timers
@@ -904,97 +906,118 @@ export function VoiceControls() {
       {/* Voice members list */}
       {state.voiceMembers.length > 0 && (
         <div className="border-b px-4 py-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-            In Voice Channel
-          </p>
-          <div className="space-y-1">
-            {state.voiceMembers.map((memberId) => {
-              const name = shortenId(memberId);
-              const isSelf = memberId === state.userId;
-              const memberState = state.voiceMemberStates[memberId];
-              const isMutedMember = memberState?.muted || (isSelf && state.isMuted);
-              const isSharing = memberState?.screen_sharing || state.activeScreenSharers.includes(memberId);
-              const vol = volumes[memberId] ?? 1;
+          <button
+            onClick={() => setVoiceMembersExpanded((o) => !o)}
+            className="flex w-full items-center justify-between mb-2 group"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                In Voice Channel
+              </span>
+              <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                {state.voiceMembers.length}
+              </span>
+            </div>
+            <ChevronDown className={cn(
+              "h-3.5 w-3.5 text-muted-foreground/60 group-hover:text-muted-foreground transition-all duration-200",
+              !voiceMembersExpanded && "-rotate-90"
+            )} />
+          </button>
 
-              const isSpeaking = speakingUsers.has(memberId) && !isMutedMember;
+          {voiceMembersExpanded && (
+            <div className="space-y-1">
+              {state.voiceMembers.map((memberId) => {
+                const name = shortenId(memberId);
+                const isSelf = memberId === state.userId;
+                const memberState = state.voiceMemberStates[memberId];
+                const isMutedMember = memberState?.muted || (isSelf && state.isMuted);
+                const isSharing = memberState?.screen_sharing || state.activeScreenSharers.includes(memberId);
+                const vol = volumes[memberId] ?? 1;
+                const isSpeaking = speakingUsers.has(memberId) && !isMutedMember;
+                const isWatching = state.selectedScreenSharer === memberId && state.screenViewerOpen;
 
-              return (
-                <div key={memberId} className={cn(
-                  "flex items-center gap-2 text-sm rounded-md px-1 -mx-1 transition-shadow duration-150",
-                  isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
-                )}>
-                  <span className={cn("text-xs", isMutedMember ? "text-destructive" : isSpeaking ? "text-green-500" : "")}>
-                    {isMutedMember ? "🔇" : "🎤"}
-                  </span>
-                  {(() => {
-                    const statsKey = isSelf ? "voice-pub" : `voice-sub:${memberId}`;
-                    const rtt = connStats[statsKey]?.rtt;
-                    const rttMs = rtt != null ? Math.round(rtt * 1000) : null;
-                    const dotColor = rttMs == null
-                      ? "text-muted-foreground"
-                      : rttMs < 100
-                        ? "text-green-500"
-                        : rttMs <= 300
-                          ? "text-orange-500"
-                          : "text-red-500";
-                    return (
-                      <TooltipProvider delayDuration={200}>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className={cn("text-[8px] leading-none", dotColor)}>●</span>
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="text-xs">
-                            {rttMs != null ? `${rttMs}ms` : "No data"}
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    );
-                  })()}
-                  <span className={cn("flex-1 truncate", isSpeaking && "text-green-400 font-semibold")}>
-                    {name}{isSelf && " (You)"}
-                  </span>
-                  {!isSelf && (
-                    <div className="flex items-center gap-1 w-24">
-                      <Slider
-                        value={[vol * 100]}
-                        onValueChange={([v]) => setUserVolume(memberId, v / 100)}
-                        max={100}
-                        step={1}
-                        className="w-16"
-                      />
-                      <span className="text-xs text-muted-foreground w-8 text-right">
-                        {Math.round(vol * 100)}%
+                return (
+                  <div key={memberId} className={cn(
+                    "flex flex-col rounded-md px-1 -mx-1 py-0.5 transition-shadow duration-150",
+                    isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
+                  )}>
+                    {/* Top row: mute icon, latency dot, name, sharing badge */}
+                    <div className="flex items-center gap-1.5 text-sm">
+                      <span className={cn("text-xs flex-shrink-0", isMutedMember ? "text-destructive" : isSpeaking ? "text-green-500" : "")}>
+                        {isMutedMember ? "🔇" : "🎤"}
                       </span>
-                    </div>
-                  )}
-                  {isSharing && !isSelf && (
-                    <Button
-                      size="sm"
-                      variant={state.selectedScreenSharer === memberId && state.screenViewerOpen ? "secondary" : "outline"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        watchUser(memberId);
-                      }}
-                      className={cn(
-                        "h-6 px-2 text-xs font-semibold gap-1",
-                        state.selectedScreenSharer === memberId && state.screenViewerOpen
-                          ? "bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
-                          : "border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
+                      {(() => {
+                        const statsKey = isSelf ? "voice-pub" : `voice-sub:${memberId}`;
+                        const rtt = connStats[statsKey]?.rtt;
+                        const rttMs = rtt != null ? Math.round(rtt * 1000) : null;
+                        const dotColor = rttMs == null
+                          ? "text-muted-foreground"
+                          : rttMs < 100
+                            ? "text-green-500"
+                            : rttMs <= 300
+                              ? "text-orange-500"
+                              : "text-red-500";
+                        return (
+                          <TooltipProvider delayDuration={200}>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className={cn("text-[8px] leading-none flex-shrink-0", dotColor)}>●</span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top" className="text-xs">
+                                {rttMs != null ? `${rttMs}ms` : "No data"}
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        );
+                      })()}
+                      <span className={cn("flex-1 truncate min-w-0", isSpeaking && "text-green-400 font-semibold")}>
+                        {name}{isSelf && " (You)"}
+                      </span>
+                      {isSharing && isSelf && (
+                        <span className="text-xs text-purple-400 font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 flex-shrink-0">
+                          📺 Sharing
+                        </span>
                       )}
-                      title={state.selectedScreenSharer === memberId && state.screenViewerOpen ? `Stop watching ${name}'s screen` : `Watch ${name}'s screen`}
-                    >
-                      📺 {state.selectedScreenSharer === memberId && state.screenViewerOpen ? "Watching" : "Watch"}
-                    </Button>
-                  )}
-                  {isSharing && isSelf && (
-                    <span className="text-xs text-purple-400 font-semibold px-2 py-0.5 rounded-md bg-purple-500/10">
-                      📺 Sharing
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                    </div>
+                    {/* Bottom row: volume slider + watch button, indented under name */}
+                    {!isSelf && (
+                      <div className="flex items-center gap-1.5 pl-5 mt-0.5">
+                        <Slider
+                          value={[vol * 100]}
+                          onValueChange={([v]) => setUserVolume(memberId, v / 100)}
+                          max={100}
+                          step={1}
+                          className="w-16"
+                        />
+                        <span className="text-xs text-muted-foreground w-7 text-right">
+                          {Math.round(vol * 100)}%
+                        </span>
+                        {isSharing && (
+                          <Button
+                            size="sm"
+                            variant={isWatching ? "secondary" : "outline"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              watchUser(memberId);
+                            }}
+                            className={cn(
+                              "h-5 px-1.5 text-[10px] font-semibold ml-auto flex-shrink-0",
+                              isWatching
+                                ? "bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
+                                : "border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
+                            )}
+                            title={isWatching ? `Stop watching ${name}'s screen` : `Watch ${name}'s screen`}
+                          >
+                            📺 {isWatching ? "Watching" : "Watch"}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
