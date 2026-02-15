@@ -55,6 +55,7 @@ pub(crate) struct PresenceRecord {
     pub(crate) last_active: f64,
     pub(crate) last_typing: f64,
     pub(crate) connected: bool,
+    pub(crate) custom_status: String,
 }
 
 #[derive(Clone, Serialize)]

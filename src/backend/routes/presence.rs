@@ -90,7 +90,8 @@ pub(crate) async fn get_room_presence(
                     json!({
                         "status": status,
                         "last_active": presence.last_active,
-                        "last_typing": presence.last_typing
+                        "last_typing": presence.last_typing,
+                        "custom_status": presence.custom_status
                     }),
                 );
             } else {

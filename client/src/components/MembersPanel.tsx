@@ -31,6 +31,7 @@ export function MembersPanel() {
           {state.roomMembers.map((member) => {
             const presence = state.userPresence[member.userId];
             const status = presence?.status || "offline";
+            const customStatus = presence?.customStatus;
             const initial = member.displayName[0]?.toUpperCase() || "?";
 
             return (
@@ -45,7 +46,7 @@ export function MembersPanel() {
                   status === "offline" && "opacity-50"
                 )}
               >
-                <div className="relative">
+                <div className="relative flex-shrink-0">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="text-xs bg-secondary">
                       {initial}
@@ -60,14 +61,21 @@ export function MembersPanel() {
                     )}
                   />
                 </div>
-                <span
-                  className={cn(
-                    "truncate text-sm",
-                    status === "offline" && "text-muted-foreground"
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={cn(
+                      "truncate text-sm block",
+                      status === "offline" && "text-muted-foreground"
+                    )}
+                  >
+                    {member.displayName}
+                  </span>
+                  {customStatus && (
+                    <span className="truncate text-xs text-muted-foreground block">
+                      {customStatus}
+                    </span>
                   )}
-                >
-                  {member.displayName}
-                </span>
+                </div>
               </div>
             );
           })}

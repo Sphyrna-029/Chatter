@@ -84,6 +84,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             last_active: now_secs(),
             last_typing: 0.0,
             connected: true,
+            custom_status: String::new(),
         },
     );
 
@@ -96,10 +97,15 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             .map(|(rid, _)| rid.clone())
             .collect();
         drop(rm);
+        let custom_status = {
+            let up = state.user_presence.read().await;
+            up.get(&user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
+        };
         let event = json!({
             "type": "presence_update",
             "user_id": user_id,
-            "status": "active"
+            "status": "active",
+            "custom_status": custom_status
         });
         for rid in user_rooms {
             broadcast_to_room(&state, &rid, &event).await;
@@ -406,6 +412,35 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     candidate_value,
                 )
                 .await;
+            }
+        }
+        "set_custom_status" => {
+            let custom_status = msg
+                .get("custom_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            {
+                let mut up = state.user_presence.write().await;
+                if let Some(p) = up.get_mut(user_id) {
+                    p.custom_status = custom_status.clone();
+                }
+            }
+            let rm = state.room_members.read().await;
+            let user_rooms: Vec<String> = rm
+                .iter()
+                .filter(|(_, members)| members.contains(&user_id.to_string()))
+                .map(|(rid, _)| rid.clone())
+                .collect();
+            drop(rm);
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": "active",
+                "custom_status": custom_status
+            });
+            for rid in user_rooms {
+                broadcast_to_room(&state, &rid, &event).await;
             }
         }
         _ => {}

@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -23,11 +24,20 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, openDM } = useAppContext();
+  const { state, openDM, setCustomStatus } = useAppContext();
   const isSelf = userId === state.userId;
   const presence = state.userPresence[userId];
   const status = presence?.status || "offline";
+  const customStatus = presence?.customStatus || "";
   const initial = displayName[0]?.toUpperCase() || "?";
+
+  const [statusInput, setStatusInput] = useState(customStatus);
+
+  useEffect(() => {
+    if (open) {
+      setStatusInput(customStatus);
+    }
+  }, [open, customStatus]);
 
   const joinDate = useMemo(() => {
     const joinMsg = state.messages.find(
@@ -43,6 +53,15 @@ export function UserProfileDialog({
   const handleMessage = async () => {
     await openDM(userId);
     onOpenChange(false);
+  };
+
+  const handleSaveStatus = () => {
+    setCustomStatus(statusInput.trim());
+  };
+
+  const handleClearStatus = () => {
+    setStatusInput("");
+    setCustomStatus("");
   };
 
   return (
@@ -74,6 +93,38 @@ export function UserProfileDialog({
             />
             <span className="text-sm capitalize">{status}</span>
           </div>
+
+          {isSelf ? (
+            <div className="w-full space-y-2">
+              <label className="text-xs font-medium text-muted-foreground">Custom Status</label>
+              <div className="flex gap-2">
+                <Input
+                  value={statusInput}
+                  onChange={(e) => setStatusInput(e.target.value)}
+                  placeholder="Set a status..."
+                  className="text-sm"
+                  maxLength={80}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveStatus();
+                  }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" className="flex-1" onClick={handleSaveStatus}>
+                  Save
+                </Button>
+                {customStatus && (
+                  <Button size="sm" variant="outline" onClick={handleClearStatus}>
+                    Clear
+                  </Button>
+                )}
+              </div>
+            </div>
+          ) : (
+            customStatus && (
+              <p className="text-sm text-muted-foreground italic">"{customStatus}"</p>
+            )
+          )}
 
           {joinDate && (
             <p className="text-xs text-muted-foreground">

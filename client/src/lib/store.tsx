@@ -48,7 +48,7 @@ export interface AppState {
   messageReactions: Record<string, Record<string, string[]>>;
   // Members
   roomMembers: { userId: string; displayName: string }[];
-  userPresence: Record<string, { status: string }>;
+  userPresence: Record<string, { status: string; customStatus?: string }>;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;
@@ -84,7 +84,7 @@ type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
@@ -334,6 +334,7 @@ interface AppContextValue {
   getAllRooms: () => Promise<{ room_id: string; name: string; member_count: number }[]>;
   openDM: (targetUserId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
+  setCustomStatus: (status: string) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -414,7 +415,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 });
               }
               const presData = await apiGetPresence(curRoom);
-              dispatch({ type: "SET_PRESENCE", payload: presData.presence });
+              const mapped: Record<string, { status: string; customStatus?: string }> = {};
+              for (const [uid, p] of Object.entries(presData.presence)) {
+                const pAny = p as any;
+                mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+              }
+              dispatch({ type: "SET_PRESENCE", payload: mapped });
             } catch {}
           })();
         }
@@ -443,11 +449,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           msg.room_id === stateRef.current.currentRoomId &&
           msg.user_id !== stateRef.current.userId
         ) {
+          const existing = stateRef.current.userPresence[msg.user_id];
           dispatch({
             type: "SET_PRESENCE",
             payload: {
               ...stateRef.current.userPresence,
-              [msg.user_id]: { status: "active" },
+              [msg.user_id]: { status: "active", customStatus: existing?.customStatus },
             },
           });
         }
@@ -487,11 +494,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       else if (msg.type === "presence_update") {
         if (msg.user_id && msg.status) {
+          const existing = stateRef.current.userPresence[msg.user_id];
           dispatch({
             type: "SET_PRESENCE",
             payload: {
               ...stateRef.current.userPresence,
-              [msg.user_id]: { status: msg.status },
+              [msg.user_id]: {
+                status: msg.status,
+                customStatus: msg.custom_status !== undefined ? msg.custom_status : existing?.customStatus,
+              },
             },
           });
         }
@@ -544,7 +555,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(async () => {
       try {
         const data = await apiGetPresence(stateRef.current.currentRoomId!);
-        dispatch({ type: "SET_PRESENCE", payload: data.presence });
+        const mapped: Record<string, { status: string; customStatus?: string }> = {};
+        for (const [uid, p] of Object.entries(data.presence)) {
+          const pAny = p as any;
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+        }
+        dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
     }, 10000);
     return () => clearInterval(interval);
@@ -648,7 +664,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Load presence
       try {
         const presData = await apiGetPresence(roomId);
-        dispatch({ type: "SET_PRESENCE", payload: presData.presence });
+        const mapped: Record<string, { status: string; customStatus?: string }> = {};
+        for (const [uid, p] of Object.entries(presData.presence)) {
+          const pAny = p as any;
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+        }
+        dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
       // Load voice members
       try {
@@ -800,6 +821,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const setCustomStatus = useCallback((status: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "set_custom_status", custom_status: status }));
+    }
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -823,6 +851,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getAllRooms,
         openDM,
         updateTopic,
+        setCustomStatus,
       }}
     >
       {children}
