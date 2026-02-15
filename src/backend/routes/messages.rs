@@ -160,18 +160,16 @@ pub(crate) async fn get_room_messages(
     let limit = query.limit.unwrap_or(50);
     let msgs = state.messages.read().await;
     let room_msgs = msgs.get(&room_id).cloned().unwrap_or_default();
-    let chunk: Vec<Value> = room_msgs
-        .into_iter()
-        .rev()
-        .take(limit)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let total = room_msgs.len();
+    let end = query.before.unwrap_or(total).min(total);
+    let start = end.saturating_sub(limit);
+    let chunk: Vec<Value> = room_msgs[start..end].to_vec();
+    let has_more = start > 0;
 
     Ok(Json(json!({
-        "start": "t0",
-        "end": "t1",
+        "start": start,
+        "end": end,
+        "has_more": has_more,
         "chunk": chunk
     })))
 }

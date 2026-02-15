@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile } from "@/lib/api";
 import { MessageItem } from "./MessageItem";
@@ -26,7 +26,7 @@ const emojiCategories: Record<string, string[]> = {
 };
 
 export function ChatArea() {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -37,14 +37,60 @@ export function ChatArea() {
   const [topicDraft, setTopicDraft] = useState("");
   const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollWrapperRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
+  const prevScrollHeightRef = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
-  // Scroll to bottom when messages change
+  // Get the actual scrollable viewport element from ScrollArea
+  const getViewport = useCallback(() => {
+    return scrollWrapperRef.current?.querySelector<HTMLElement>(
+      "[data-slot='scroll-area-viewport']"
+    ) ?? null;
+  }, []);
+
+  // Track whether user is near bottom + trigger older message loading on scroll up
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const viewport = getViewport();
+    if (!viewport) return;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = viewport;
+      isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
+      if (scrollTop < 100) {
+        loadOlderMessages();
+      }
+    };
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", handleScroll);
+  }, [getViewport, loadOlderMessages, state.currentRoomId]);
+
+  // Auto-scroll to bottom on new messages only when already near bottom
+  useEffect(() => {
+    if (isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [state.messages]);
+
+  // Preserve scroll position after prepending older messages
+  useLayoutEffect(() => {
+    const viewport = getViewport();
+    if (!viewport) return;
+    if (prevScrollHeightRef.current > 0 && state.loadingOlderMessages === false) {
+      const newScrollHeight = viewport.scrollHeight;
+      const delta = newScrollHeight - prevScrollHeightRef.current;
+      if (delta > 0) {
+        viewport.scrollTop += delta;
+      }
+    }
+    prevScrollHeightRef.current = viewport.scrollHeight;
+  }, [state.messages, state.loadingOlderMessages, getViewport]);
+
+  // Scroll to bottom on initial room load
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView();
+  }, [state.currentRoomId]);
 
   const handleSend = useCallback(async () => {
     const body = input.trim();
@@ -225,14 +271,26 @@ export function ChatArea() {
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 overflow-hidden px-2 py-2">
-        <div className="space-y-0.5">
-          {state.messages.map((msg) => (
-            <MessageItem key={msg.event_id} message={msg} />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-      </ScrollArea>
+      <div ref={scrollWrapperRef} className="flex-1 overflow-hidden">
+        <ScrollArea className="h-full px-2 py-2">
+          <div className="space-y-0.5">
+            {state.loadingOlderMessages && (
+              <div className="text-center text-xs text-muted-foreground py-2">
+                Loading older messages...
+              </div>
+            )}
+            {!state.hasMoreMessages && state.messages.length > 0 && (
+              <div className="text-center text-xs text-muted-foreground py-2">
+                Beginning of conversation
+              </div>
+            )}
+            {state.messages.map((msg) => (
+              <MessageItem key={msg.event_id} message={msg} />
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+        </ScrollArea>
+      </div>
 
       {/* Reply preview */}
       {state.replyingTo && (

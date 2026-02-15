@@ -46,6 +46,9 @@ export interface AppState {
   // Messages
   messages: MatrixMessage[];
   messageReactions: Record<string, Record<string, string[]>>;
+  hasMoreMessages: boolean;
+  oldestMessageIndex: number | null;
+  loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string }[];
   userPresence: Record<string, { status: string; customStatus?: string }>;
@@ -78,7 +81,9 @@ type Action =
   | { type: "LOGOUT" }
   | { type: "SET_ROOMS"; payload: { roomIds: string[]; roomInfoMap: Record<string, RoomInfo> } }
   | { type: "SELECT_ROOM"; payload: string | null }
-  | { type: "SET_MESSAGES"; payload: MatrixMessage[] }
+  | { type: "SET_MESSAGES"; payload: { messages: MatrixMessage[]; start: number; hasMore: boolean } }
+  | { type: "PREPEND_MESSAGES"; payload: { messages: MatrixMessage[]; start: number; hasMore: boolean } }
+  | { type: "SET_LOADING_OLDER"; payload: boolean }
   | { type: "ADD_MESSAGE"; payload: MatrixMessage }
   | { type: "REDACT_MESSAGE"; payload: string }
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
@@ -108,6 +113,9 @@ const initialState: AppState = {
   currentRoomId: null,
   messages: [],
   messageReactions: {},
+  hasMoreMessages: false,
+  oldestMessageIndex: null,
+  loadingOlderMessages: false,
   roomMembers: [],
   userPresence: {},
   inVoiceChannel: false,
@@ -145,6 +153,9 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         currentRoomId: action.payload,
         messages: [],
+        hasMoreMessages: false,
+        oldestMessageIndex: null,
+        loadingOlderMessages: false,
         roomMembers: [],
         voiceMembers: [],
         voiceMemberStates: {},
@@ -156,7 +167,22 @@ function reducer(state: AppState, action: Action): AppState {
           : state.roomMentions,
       };
     case "SET_MESSAGES":
-      return { ...state, messages: action.payload };
+      return {
+        ...state,
+        messages: action.payload.messages,
+        oldestMessageIndex: action.payload.start,
+        hasMoreMessages: action.payload.hasMore,
+      };
+    case "PREPEND_MESSAGES":
+      return {
+        ...state,
+        messages: [...action.payload.messages, ...state.messages],
+        oldestMessageIndex: action.payload.start,
+        hasMoreMessages: action.payload.hasMore,
+        loadingOlderMessages: false,
+      };
+    case "SET_LOADING_OLDER":
+      return { ...state, loadingOlderMessages: action.payload };
     case "ADD_MESSAGE":
       return { ...state, messages: [...state.messages, action.payload] };
     case "REDACT_MESSAGE":
@@ -330,6 +356,7 @@ interface AppContextValue {
   joinRoom: (roomId: string) => Promise<void>;
   leaveRoom: (roomId: string) => Promise<void>;
   loadVoiceMembers: () => Promise<void>;
+  loadOlderMessages: () => Promise<void>;
   sendTyping: () => void;
   getAllRooms: () => Promise<{ room_id: string; name: string; member_count: number }[]>;
   openDM: (targetUserId: string) => Promise<void>;
@@ -643,7 +670,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const msgData = await apiGetMessages(roomId);
       dispatch({
         type: "SET_MESSAGES",
-        payload: msgData.chunk.filter((m) => m.type === "m.room.message"),
+        payload: {
+          messages: msgData.chunk.filter((m) => m.type === "m.room.message"),
+          start: msgData.start,
+          hasMore: msgData.has_more,
+        },
       });
       // Load members
       const syncData = await apiSync();
@@ -696,6 +727,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  const loadOlderMessages = useCallback(async () => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId || cur.loadingOlderMessages || !cur.hasMoreMessages) return;
+    if (cur.oldestMessageIndex === null || cur.oldestMessageIndex <= 0) return;
+    dispatch({ type: "SET_LOADING_OLDER", payload: true });
+    try {
+      const msgData = await apiGetMessages(cur.currentRoomId, 50, cur.oldestMessageIndex);
+      dispatch({
+        type: "PREPEND_MESSAGES",
+        payload: {
+          messages: msgData.chunk.filter((m) => m.type === "m.room.message"),
+          start: msgData.start,
+          hasMore: msgData.has_more,
+        },
+      });
+    } catch {
+      dispatch({ type: "SET_LOADING_OLDER", payload: false });
+    }
+  }, []);
 
   const sendMessage = useCallback(
     async (body: string, inReplyTo?: string) => {
@@ -839,6 +890,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         logout,
         loadRooms,
         selectRoom,
+        loadOlderMessages,
         sendMessage,
         deleteMessage,
         editMessage,

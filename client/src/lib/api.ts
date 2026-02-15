@@ -145,13 +145,17 @@ export async function apiGetAllRooms() {
 }
 
 // Messages
-export async function apiGetMessages(roomId: string, limit = 50) {
-  const res = await fetch(
-    `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`,
-    { headers: authHeaders() }
-  );
+export async function apiGetMessages(roomId: string, limit = 50, before?: number) {
+  let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
+  if (before !== undefined) url += `&before=${before}`;
+  const res = await fetch(url, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to load messages");
-  return res.json() as Promise<{ chunk: MatrixMessage[] }>;
+  return res.json() as Promise<{
+    chunk: MatrixMessage[];
+    start: number;
+    end: number;
+    has_more: boolean;
+  }>;
 }
 
 export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string) {
