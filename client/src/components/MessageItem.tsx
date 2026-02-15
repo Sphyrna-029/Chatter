@@ -47,8 +47,7 @@ function processMessageBody(body: string, currentUserId: string | null) {
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 
-  // Convert newlines to <br>
-  return escaped.replace(/\n/g, "<br>");
+  return escaped;
 }
 
 type MessageSegment =
@@ -303,7 +302,7 @@ export function MessageItem({ message }: MessageItemProps) {
 
           <div
             className={cn(
-              "text-sm mt-0.5 break-words [overflow-wrap:anywhere]",
+              "text-sm mt-0.5 break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap",
               isDeleted && "italic text-muted-foreground opacity-60"
             )}
           >
