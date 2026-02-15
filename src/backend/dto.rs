@@ -51,6 +51,11 @@ pub(crate) struct UpdateTopicRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct EditMessageRequest {
+    pub(crate) body: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct LinkPreviewQuery {
     pub(crate) url: String,
 }

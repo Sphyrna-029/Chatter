@@ -3,7 +3,7 @@ use super::{
     routes::{
         auth::{login, logout, register},
         media::{link_preview, upload_file},
-        messages::{get_room_messages, redact_message, send_message},
+        messages::{edit_message, get_room_messages, redact_message, send_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
@@ -57,6 +57,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route(
             "/_matrix/client/r0/rooms/{room_id}/redact/{event_id}/{txn_id}",
             delete(redact_message),
+        )
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/edit/{event_id}/{txn_id}",
+            put(edit_message),
         )
         // Room topic
         .route(

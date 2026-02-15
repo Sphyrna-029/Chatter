@@ -21,6 +21,7 @@ import {
   apiGetMessages,
   apiSendMessage,
   apiDeleteMessage,
+  apiEditMessage,
   apiAddReaction,
   apiGetVoiceMembers,
   apiGetPresence,
@@ -80,6 +81,7 @@ type Action =
   | { type: "SET_MESSAGES"; payload: MatrixMessage[] }
   | { type: "ADD_MESSAGE"; payload: MatrixMessage }
   | { type: "REDACT_MESSAGE"; payload: string }
+  | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string }> }
@@ -163,6 +165,15 @@ function reducer(state: AppState, action: Action): AppState {
         messages: state.messages.map((m) =>
           m.event_id === action.payload
             ? { ...m, redacted: true, content: { ...m.content, body: "[deleted]" } }
+            : m
+        ),
+      };
+    case "EDIT_MESSAGE":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody } }
             : m
         ),
       };
@@ -313,6 +324,7 @@ interface AppContextValue {
   selectRoom: (roomId: string) => Promise<void>;
   sendMessage: (body: string, inReplyTo?: string) => Promise<void>;
   deleteMessage: (eventId: string) => Promise<void>;
+  editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
   createRoom: (name: string, topic: string) => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
@@ -411,6 +423,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       } else if (msg.type === "m.room.redaction") {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });
+        }
+      } else if (msg.type === "m.room.edit") {
+        if (msg.room_id === stateRef.current.currentRoomId) {
+          dispatch({
+            type: "EDIT_MESSAGE",
+            payload: { eventId: msg.edits, newBody: msg.new_body },
+          });
         }
       } else if (msg.type === "m.reaction") {
         if (msg.room_id === stateRef.current.currentRoomId) {
@@ -673,6 +692,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const editMessage = useCallback(
+    async (eventId: string, newBody: string) => {
+      if (!stateRef.current.currentRoomId) return;
+      await apiEditMessage(stateRef.current.currentRoomId, eventId, newBody);
+    },
+    []
+  );
+
   const addReaction = useCallback(
     async (eventId: string, emoji: string) => {
       if (!stateRef.current.currentRoomId) return;
@@ -786,6 +813,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         selectRoom,
         sendMessage,
         deleteMessage,
+        editMessage,
         addReaction,
         createRoom,
         joinRoom,

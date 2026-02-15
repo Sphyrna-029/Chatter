@@ -185,6 +185,20 @@ export async function apiDeleteMessage(roomId: string, eventId: string) {
   return res.json();
 }
 
+export async function apiEditMessage(roomId: string, eventId: string, newBody: string) {
+  const txnId = Date.now();
+  const res = await fetch(
+    `/_matrix/client/r0/rooms/${roomId}/edit/${eventId}/${txnId}`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify({ body: newBody }),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to edit message");
+  return res.json();
+}
+
 export async function apiAddReaction(
   roomId: string,
   eventId: string,
@@ -239,6 +253,8 @@ export interface MatrixMessage {
     reply_to_body?: string;
   };
   redacted?: boolean;
+  edited?: boolean;
+  edited_at?: number;
   reactions?: Record<string, string[]>;
 }
 

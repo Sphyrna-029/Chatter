@@ -55,7 +55,7 @@ type MessageSegment =
   | { type: "code"; content: string; language?: string };
 
 function parseMessageSegments(body: string): MessageSegment[] {
-  const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+  const codeBlockRegex = /```(?:(\w+)\n|\n?)([\s\S]*?)```/g;
   const segments: MessageSegment[] = [];
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -220,7 +220,9 @@ interface MessageItemProps {
 }
 
 export function MessageItem({ message }: MessageItemProps) {
-  const { state, dispatch, deleteMessage, addReaction } = useAppContext();
+  const { state, dispatch, deleteMessage, editMessage, addReaction } = useAppContext();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState("");
   const isSystem = message.content.msgtype === "m.system";
   const sender = message.sender.split(":")[0].substring(1);
   const initial = sender.substring(0, 1).toUpperCase();
@@ -300,25 +302,58 @@ export function MessageItem({ message }: MessageItemProps) {
             <span className="text-xs text-muted-foreground">{time}</span>
           </div>
 
-          <div
-            className={cn(
-              "text-sm mt-0.5 break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap",
-              isDeleted && "italic text-muted-foreground opacity-60"
-            )}
-          >
-            {segments.map((segment, i) =>
-              segment.type === "code" ? (
-                <CodeBlock key={i} code={segment.content} language={segment.language} />
-              ) : (
-                <span
-                  key={i}
-                  dangerouslySetInnerHTML={{
-                    __html: processMessageBody(segment.content, state.userId),
-                  }}
-                />
-              )
-            )}
-          </div>
+          {isEditing ? (
+            <div className="mt-1">
+              <textarea
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none max-h-40 overflow-y-auto"
+                value={editDraft}
+                onChange={(e) => setEditDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    const trimmed = editDraft.trim();
+                    if (trimmed && trimmed !== message.content.body) {
+                      editMessage(message.event_id, trimmed);
+                    }
+                    setIsEditing(false);
+                  }
+                  if (e.key === "Escape") {
+                    setIsEditing(false);
+                  }
+                }}
+                rows={2}
+                style={{ fieldSizing: "content" } as React.CSSProperties}
+                autoFocus
+              />
+              <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
+                <span>Enter to save</span>
+                <span>Esc to cancel</span>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "text-sm mt-0.5 break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap",
+                isDeleted && "italic text-muted-foreground opacity-60"
+              )}
+            >
+              {segments.map((segment, i) =>
+                segment.type === "code" ? (
+                  <CodeBlock key={i} code={segment.content} language={segment.language} />
+                ) : (
+                  <span
+                    key={i}
+                    dangerouslySetInnerHTML={{
+                      __html: processMessageBody(segment.content, state.userId),
+                    }}
+                  />
+                )
+              )}
+              {message.edited && (
+                <span className="text-xs text-muted-foreground/60 italic ml-1">(edited)</span>
+              )}
+            </div>
+          )}
 
           {/* Media rendered as stable React elements — not inside innerHTML */}
           {!isDeleted && <MediaPreview body={message.content.body} />}
@@ -392,18 +427,32 @@ export function MessageItem({ message }: MessageItemProps) {
             </Popover>
 
             {isOwn && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 text-destructive hover:text-destructive"
-                onClick={() => {
-                  if (confirm("Delete this message?")) {
-                    deleteMessage(message.event_id);
-                  }
-                }}
-              >
-                <span className="text-xs">✕</span>
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => {
+                    setEditDraft(message.content.body);
+                    setIsEditing(true);
+                  }}
+                  title="Edit"
+                >
+                  <span className="text-xs">✎</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-destructive hover:text-destructive"
+                  onClick={() => {
+                    if (confirm("Delete this message?")) {
+                      deleteMessage(message.event_id);
+                    }
+                  }}
+                >
+                  <span className="text-xs">✕</span>
+                </Button>
+              </>
             )}
           </div>
         )}

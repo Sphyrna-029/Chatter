@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{MessagesQuery, SendMessageRequest},
+    dto::{EditMessageRequest, MessagesQuery, SendMessageRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         now_millis, send_to_user,
@@ -236,6 +236,97 @@ pub(crate) async fn redact_message(
 
                 broadcast_to_room(&state, &room_id, &redaction_event).await;
                 return Ok(Json(json!({"event_id": redaction_id})));
+            }
+        }
+    }
+
+    Err(error_response(StatusCode::NOT_FOUND, "Message not found"))
+}
+
+pub(crate) async fn edit_message(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, event_id, txn_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<EditMessageRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _ = txn_id;
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .await
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    if !state.rooms.read().await.contains_key(&room_id) {
+        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
+    }
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let new_body = req.body.trim().to_string();
+    if new_body.is_empty() {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Message body cannot be empty",
+        ));
+    }
+
+    let mut msgs = state.messages.write().await;
+    if let Some(room_msgs) = msgs.get_mut(&room_id) {
+        for msg in room_msgs.iter_mut() {
+            if msg.get("event_id").and_then(|v| v.as_str()) == Some(&event_id) {
+                if msg.get("sender").and_then(|v| v.as_str()) != Some(&user_id) {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "Can only edit your own messages",
+                    ));
+                }
+
+                if msg.get("redacted").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    return Err(error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Cannot edit a deleted message",
+                    ));
+                }
+
+                let original_body = msg
+                    .get("content")
+                    .and_then(|c| c.get("body"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                msg["content"]["body"] = json!(new_body);
+                msg["edited"] = json!(true);
+                msg["edited_at"] = json!(now_millis());
+
+                let edit_event = json!({
+                    "type": "m.room.edit",
+                    "room_id": room_id,
+                    "sender": user_id,
+                    "edits": event_id,
+                    "new_body": new_body,
+                    "original_body": original_body,
+                    "event_id": generate_id("$"),
+                    "origin_server_ts": now_millis()
+                });
+
+                let edit_event_id = edit_event["event_id"].as_str().unwrap().to_string();
+                drop(msgs);
+
+                broadcast_to_room(&state, &room_id, &edit_event).await;
+                return Ok(Json(json!({"event_id": edit_event_id})));
             }
         }
     }
