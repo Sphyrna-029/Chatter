@@ -1,6 +1,6 @@
 # Chatter
 
-A lightweight, performant, self-hosted chat application built with a Rust. Chatter implements real-time messaging, voice chat, and screen sharing. Development is moving fast, features are currently offered as is with no guarantee of functionality. 
+A lightweight, performant, self-hosted chat application built with Rust. Chatter implements real-time messaging, voice chat, and screen sharing. Development is moving fast, features are currently offered as is with no guarantee of functionality. 
 
 ![Chatter screenshot](Screenshot_20260211_110841-1.png)
 
@@ -13,11 +13,10 @@ A lightweight, performant, self-hosted chat application built with a Rust. Chatt
 - **Voice chat** 
 - **Screen sharing**
 - **File sharing**
+- **Code snippets with syntax highlighting**
 - **Reactions**
-- **Mentions** 
 - **Notifications** 
 - **Direct messages** 
-- **Link previews**
 
 ## Prerequisites
 
