@@ -136,7 +136,6 @@ export function VoiceSettingsDialog({
       tick();
     } catch (err) {
       console.error("Mic test failed:", err);
-      setRnnoiseActive(false);
     }
   };
 
