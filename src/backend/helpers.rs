@@ -36,7 +36,7 @@ pub(crate) fn format_user_id(username: &str) -> String {
 
 pub(crate) fn validate_username(username: &str) -> Result<(), &'static str> {
     if username.len() < MIN_USERNAME_LENGTH || username.len() > MAX_USERNAME_LENGTH {
-        return Err("Username must be 3-24 characters long");
+        return Err("Username must be 3-42 characters long");
     }
 
     if !username

@@ -44,7 +44,7 @@ export function ChatLayout() {
             <VoiceControls />
 
             {/* Main content: chat + members */}
-            <div className="flex flex-1 min-h-0">
+            <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
               {showViewer ? (
                 <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
                   {/* Header lives outside the resizable panels — always visible */}

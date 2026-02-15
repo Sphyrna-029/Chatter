@@ -45,12 +45,12 @@ pub(crate) async fn send_message(
         }
     }
 
-    const MAX_MESSAGE_LENGTH: usize = 2000;
+    const MAX_MESSAGE_LENGTH: usize = 4000;
     let msgtype = req.msgtype.as_deref().unwrap_or("m.text");
     if msgtype == "m.text" && req.body.len() > MAX_MESSAGE_LENGTH {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            "Message exceeds maximum length of 2000 characters",
+            "Message exceeds maximum length of 4000 characters",
         ));
     }
 

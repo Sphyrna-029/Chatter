@@ -10,6 +10,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import hljs from "highlight.js";
 
 const quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 
@@ -45,6 +46,69 @@ function processMessageBody(body: string, currentUserId: string | null) {
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
+}
+
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "code"; content: string; language?: string };
+
+function parseMessageSegments(body: string): MessageSegment[] {
+  const codeBlockRegex = /```(\w*)\n?([\s\S]*?)```/g;
+  const segments: MessageSegment[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockRegex.exec(body)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ type: "text", content: body.slice(lastIndex, match.index) });
+    }
+    segments.push({
+      type: "code",
+      content: match[2],
+      language: match[1] || undefined,
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < body.length) {
+    segments.push({ type: "text", content: body.slice(lastIndex) });
+  }
+
+  return segments;
+}
+
+function CodeBlock({ code, language }: { code: string; language?: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const highlighted = useMemo(() => {
+    if (language && hljs.getLanguage(language)) {
+      return hljs.highlight(code, { language }).value;
+    }
+    return hljs.highlightAuto(code).value;
+  }, [code, language]);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative group/code my-1">
+      <button
+        onClick={handleCopy}
+        className="absolute right-2 top-2 opacity-0 group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
+      >
+        {copied ? "Copied!" : "Copy"}
+      </button>
+      <pre className="rounded-md bg-[#0d1117] p-3 overflow-x-auto text-sm">
+        <code
+          className="hljs"
+          dangerouslySetInnerHTML={{ __html: highlighted }}
+        />
+      </pre>
+    </div>
+  );
 }
 
 /** Extract media URLs from body for rendering as React elements */
@@ -185,9 +249,9 @@ export function MessageItem({ message }: MessageItemProps) {
   }
 
   const reactions = state.messageReactions[message.event_id] || {};
-  const processedBody = useMemo(
-    () => processMessageBody(message.content.body, state.userId),
-    [message.content.body, state.userId]
+  const segments = useMemo(
+    () => parseMessageSegments(message.content.body),
+    [message.content.body]
   );
 
   const handleReply = () => {
@@ -239,8 +303,20 @@ export function MessageItem({ message }: MessageItemProps) {
               "text-sm mt-0.5 break-words [overflow-wrap:anywhere]",
               isDeleted && "italic text-muted-foreground opacity-60"
             )}
-            dangerouslySetInnerHTML={{ __html: processedBody }}
-          />
+          >
+            {segments.map((segment, i) =>
+              segment.type === "code" ? (
+                <CodeBlock key={i} code={segment.content} language={segment.language} />
+              ) : (
+                <span
+                  key={i}
+                  dangerouslySetInnerHTML={{
+                    __html: processMessageBody(segment.content, state.userId),
+                  }}
+                />
+              )
+            )}
+          </div>
 
           {/* Media rendered as stable React elements — not inside innerHTML */}
           {!isDeleted && <MediaPreview body={message.content.body} />}

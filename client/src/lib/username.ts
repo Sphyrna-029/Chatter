@@ -1,5 +1,5 @@
 export const USERNAME_MIN_LENGTH = 3;
-export const USERNAME_MAX_LENGTH = 24;
+export const USERNAME_MAX_LENGTH = 42;
 
 const USERNAME_PATTERN = /^[A-Za-z0-9_]+$/;
 const USERNAME_INVALID_CHAR_PATTERN = /[^A-Za-z0-9_]/;
