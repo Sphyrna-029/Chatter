@@ -42,10 +42,13 @@ function processMessageBody(body: string, currentUserId: string | null) {
   });
 
   // Convert URLs to links only (no inline media)
-  return escaped.replace(urlRegex, (url) => {
+  escaped = escaped.replace(urlRegex, (url) => {
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
+
+  // Convert newlines to <br>
+  return escaped.replace(/\n/g, "<br>");
 }
 
 type MessageSegment =

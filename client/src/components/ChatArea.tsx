@@ -3,7 +3,6 @@ import { useAppContext } from "@/lib/store";
 import { apiUploadFile } from "@/lib/api";
 import { MessageItem } from "./MessageItem";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Popover,
@@ -38,7 +37,7 @@ export function ChatArea() {
   const [topicDraft, setTopicDraft] = useState("");
   const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -86,12 +85,13 @@ export function ChatArea() {
       dispatch({ type: "SET_REPLYING_TO", payload: null });
       return;
     }
-    if (e.key === "Enter") {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
       handleSend();
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
     setInput(value);
     sendTyping();
@@ -313,19 +313,21 @@ export function ChatArea() {
           </Button>
 
           <div className="relative flex-1">
-            <Input
+            <textarea
               ref={inputRef}
               placeholder="Type your message..."
               value={input}
               onChange={handleInputChange}
               onKeyDown={handleKeyPress}
-              className={`pr-10 ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+              rows={1}
+              className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+              style={{ fieldSizing: "content" } as React.CSSProperties}
             />
 
             {/* Emoji picker */}
             <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
               <PopoverTrigger asChild>
-                <button className="absolute right-2 top-1/2 -translate-y-1/2 text-lg hover:scale-110 transition-transform cursor-pointer">
+                <button className="absolute right-2 top-3 text-lg hover:scale-110 transition-transform cursor-pointer">
                   😊
                 </button>
               </PopoverTrigger>
