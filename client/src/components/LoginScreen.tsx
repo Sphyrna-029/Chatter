@@ -1,4 +1,10 @@
-import { useState, useCallback, useEffect, useRef, type FormEvent } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type FormEvent,
+} from "react";
 import { useAppContext } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,14 +35,14 @@ const DEV_PASSWORD = "chatter-dev-pass";
 const ACCESS_CODE = "ZGAF";
 
 const CONNECTION_STEPS = [
-  { ms: 0,    text: "initializing handshake..." },
-  { ms: 900,  text: "verifying access credentials..." },
-  { ms: 1800, text: "establishing encrypted channel..." },
-  { ms: 2700, text: "routing to server endpoint..." },
-  { ms: 3600, text: "syncing session state..." },
-  { ms: 4500, text: "connection established." },
+  { ms: 0, text: "initializing handshake..." },
+  { ms: 500, text: "verifying access credentials..." },
+  { ms: 1000, text: "establishing encrypted channel..." },
+  { ms: 1500, text: "routing to server endpoint..." },
+  { ms: 2000, text: "syncing session state..." },
+  { ms: 2500, text: "connection established." },
 ];
-const TOTAL_DELAY_MS = 5000;
+const TOTAL_DELAY_MS = 3500;
 
 export function LoginScreen() {
   const { login, register } = useAppContext();
@@ -110,7 +116,7 @@ export function LoginScreen() {
         setVisibleSteps(0);
       }
     },
-    [nickname, password, login, register, clearStepTimeouts]
+    [nickname, password, login, register, clearStepTimeouts],
   );
 
   // Cleanup timeouts on unmount
@@ -155,13 +161,16 @@ export function LoginScreen() {
               color: "rgba(220, 230, 255, 0.75)",
             }}
           >
-            <p className="font-bold mb-1" style={{ color: "rgba(220, 230, 255, 0.9)" }}>
+            <p
+              className="font-bold mb-1"
+              style={{ color: "rgba(220, 230, 255, 0.9)" }}
+            >
               Chatter
             </p>
             <p>
               A lightweight self-hosted chat app. Pick a nickname, enter the
-              access code, and start talking. Voice, text, reactions — all
-              in real time.
+              access code, and start talking. Voice, text, reactions — all in
+              real time.
             </p>
           </TooltipContent>
         </Tooltip>
@@ -173,8 +182,8 @@ export function LoginScreen() {
           borderColor: loading
             ? `rgba(180, 210, 255, ${0.15 + (visibleSteps / CONNECTION_STEPS.length) * 0.45})`
             : hovered
-            ? "rgba(180, 210, 255, 0.3)"
-            : "rgba(180, 210, 255, 0.15)",
+              ? "rgba(180, 210, 255, 0.3)"
+              : "rgba(180, 210, 255, 0.15)",
           boxShadow: loading
             ? (() => {
                 const p = visibleSteps / CONNECTION_STEPS.length;
@@ -185,8 +194,8 @@ export function LoginScreen() {
                 return `0 0 ${r1}px rgba(180, 210, 255, ${a1}), 0 0 ${r2}px rgba(180, 210, 255, ${a2})`;
               })()
             : hovered
-            ? "0 0 40px rgba(180, 210, 255, 0.08), 0 0 80px rgba(180, 210, 255, 0.03), inset 0 0 30px rgba(0,0,0,0.2)"
-            : "0 0 20px rgba(180, 210, 255, 0.04), inset 0 0 30px rgba(0,0,0,0.3)",
+              ? "0 0 40px rgba(180, 210, 255, 0.08), 0 0 80px rgba(180, 210, 255, 0.03), inset 0 0 30px rgba(0,0,0,0.2)"
+              : "0 0 20px rgba(180, 210, 255, 0.04), inset 0 0 30px rgba(0,0,0,0.3)",
           background: "rgba(10, 10, 10, 0.92)",
           backdropFilter: "blur(4px)",
           transition:
@@ -241,14 +250,22 @@ export function LoginScreen() {
                       opacity: visible ? 1 : 0,
                       transform: visible ? "translateX(0)" : "translateX(-6px)",
                       transition: "opacity 0.3s ease, transform 0.3s ease",
-                      color: isLast && visible
-                        ? "rgba(120, 230, 160, 0.9)"
-                        : visible
-                        ? "rgba(200, 220, 255, 0.75)"
-                        : "transparent",
+                      color:
+                        isLast && visible
+                          ? "rgba(120, 230, 160, 0.9)"
+                          : visible
+                            ? "rgba(200, 220, 255, 0.75)"
+                            : "transparent",
                     }}
                   >
-                    <span style={{ color: isLast && visible ? "rgba(120, 230, 160, 0.6)" : "rgba(180, 210, 255, 0.3)" }}>
+                    <span
+                      style={{
+                        color:
+                          isLast && visible
+                            ? "rgba(120, 230, 160, 0.6)"
+                            : "rgba(180, 210, 255, 0.3)",
+                      }}
+                    >
                       {isLast && visible ? "✓" : ">"}
                     </span>
                     <span>{step.text}</span>
@@ -298,18 +315,19 @@ export function LoginScreen() {
                   value={nickname}
                   onChange={(e) => {
                     const rawNickname = e.target.value;
-                    const hadInvalidChars = hasInvalidUsernameChars(rawNickname);
+                    const hadInvalidChars =
+                      hasInvalidUsernameChars(rawNickname);
                     const nextNickname = sanitizeUsernameInput(rawNickname);
 
                     setNickname(nextNickname);
 
                     if (hadInvalidChars) {
                       setNicknameWarning(
-                        "Please change your username: emojis and special characters are not allowed."
+                        "Please change your username: emojis and special characters are not allowed.",
                       );
                     } else if (nextNickname.length === USERNAME_MAX_LENGTH) {
                       setNicknameWarning(
-                        `Username max length reached (${USERNAME_MAX_LENGTH} characters).`
+                        `Username max length reached (${USERNAME_MAX_LENGTH} characters).`,
                       );
                     } else {
                       setNicknameWarning(null);

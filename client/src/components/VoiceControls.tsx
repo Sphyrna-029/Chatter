@@ -1,5 +1,6 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
+import { useVoiceSettings } from "@/hooks/useVoiceSettings";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -38,6 +39,7 @@ export function VoiceControls() {
   const screenSubPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
+  const { settings } = useVoiceSettings();
   const [volumes, setVolumes] = useState<Record<string, number>>({});
   const [debugOpen, setDebugOpen] = useState(false);
   const [screenFps, setScreenFps] = useState<30 | 60>(30);
@@ -347,8 +349,8 @@ export function VoiceControls() {
     if (!localStreamRef.current || !canSignal()) return;
     const pc = new RTCPeerConnection(WEBRTC_CONFIG);
     voicePublisherPcRef.current = pc;
-    const audioTrack = localStreamRef.current.getAudioTracks()[0];
-    if (audioTrack) pc.addTrack(audioTrack, localStreamRef.current);
+    const audioTrack = localStreamRef.current?.getAudioTracks()[0];
+    if (audioTrack) pc.addTrack(audioTrack, localStreamRef.current!);
 
     pc.onicecandidate = (ev) => {
       if (!ev.candidate || !canSignal()) return;
@@ -463,10 +465,17 @@ export function VoiceControls() {
     if (!state.currentRoomId) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, sampleRate: 48000 },
+        audio: {
+          deviceId: settings.inputDeviceId !== "default" ? { exact: settings.inputDeviceId } : undefined,
+          echoCancellation: settings.echoCancellation,
+          noiseSuppression: settings.noiseSuppressionMode === "browser",
+          autoGainControl: settings.autoGainControl,
+          sampleRate: 48000,
+        },
         video: false,
       });
       localStreamRef.current = stream;
+
       dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false } });
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

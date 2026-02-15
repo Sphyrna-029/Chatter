@@ -114,7 +114,7 @@ export function HalftoneBackground() {
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) return;
 
-    const MAX_ACTIVE = 6;
+    const MAX_ACTIVE = 4;
     const SPAWN_INTERVAL_MS = 1800;
     const FONT_SIZE = 30;
     const MAX_OPACITY = 0.35;
