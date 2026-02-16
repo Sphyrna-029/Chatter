@@ -443,6 +443,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 broadcast_to_room(&state, &rid, &event).await;
             }
         }
+        "heartbeat" => {}
         _ => {}
     }
 }

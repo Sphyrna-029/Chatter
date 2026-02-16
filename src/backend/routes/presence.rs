@@ -76,10 +76,10 @@ pub(crate) async fn get_room_presence(
     if let Some(members) = rm.get(&room_id) {
         for member_id in members {
             if let Some(presence) = up.get(member_id) {
-                let time_since_typing = current_time - presence.last_typing;
+                let time_since_active = current_time - presence.last_active;
                 let status = if !presence.connected {
                     "offline"
-                } else if time_since_typing < 300.0 {
+                } else if time_since_active < 300.0 {
                     "active"
                 } else {
                     "idle"

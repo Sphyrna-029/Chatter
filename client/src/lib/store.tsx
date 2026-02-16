@@ -576,6 +576,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [state.accessToken, connectWebSocket]);
 
+  // Send periodic heartbeats to keep presence active
+  useEffect(() => {
+    if (!state.accessToken) return;
+    const interval = setInterval(() => {
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "heartbeat" }));
+      }
+    }, 60000);
+    return () => clearInterval(interval);
+  }, [state.accessToken]);
+
   // Presence polling
   useEffect(() => {
     if (!state.currentRoomId || !state.accessToken) return;
