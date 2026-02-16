@@ -70,6 +70,8 @@ export interface AppState {
   roomMentions: Record<string, boolean>;
   currentView: "chat" | "voice";
   replyingTo: MatrixMessage | null;
+  // Typing
+  typingUsers: string[];
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -103,7 +105,9 @@ type Action =
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
-  | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } };
+  | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
+  | { type: "SET_TYPING_USER"; payload: string }
+  | { type: "CLEAR_TYPING_USER"; payload: string };
 
 const initialState: AppState = {
   accessToken: null,
@@ -130,6 +134,7 @@ const initialState: AppState = {
   roomMentions: {},
   currentView: "chat",
   replyingTo: null,
+  typingUsers: [],
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -162,6 +167,7 @@ function reducer(state: AppState, action: Action): AppState {
         activeScreenSharers: [],
         screenViewerOpen: false,
         selectedScreenSharer: null,
+        typingUsers: [],
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: false }
           : state.roomMentions,
@@ -331,6 +337,18 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "UPDATE_MEMBER_EVENT":
       return state; // Trigger re-render for member loading
+    case "SET_TYPING_USER":
+      return {
+        ...state,
+        typingUsers: state.typingUsers.includes(action.payload)
+          ? state.typingUsers
+          : [...state.typingUsers, action.payload],
+      };
+    case "CLEAR_TYPING_USER":
+      return {
+        ...state,
+        typingUsers: state.typingUsers.filter((id) => id !== action.payload),
+      };
     default:
       return state;
   }
@@ -378,6 +396,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const wsRef = useRef<WebSocket | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // WebSocket connection
   const connectWebSocket = useCallback(() => {
@@ -476,6 +495,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           msg.room_id === stateRef.current.currentRoomId &&
           msg.user_id !== stateRef.current.userId
         ) {
+          // Track typing user with 3s auto-expiry
+          dispatch({ type: "SET_TYPING_USER", payload: msg.user_id });
+          if (typingTimeoutsRef.current[msg.user_id]) {
+            clearTimeout(typingTimeoutsRef.current[msg.user_id]);
+          }
+          typingTimeoutsRef.current[msg.user_id] = setTimeout(() => {
+            dispatch({ type: "CLEAR_TYPING_USER", payload: msg.user_id });
+            delete typingTimeoutsRef.current[msg.user_id];
+          }, 3000);
+
           const existing = stateRef.current.userPresence[msg.user_id];
           dispatch({
             type: "SET_PRESENCE",

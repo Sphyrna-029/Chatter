@@ -312,6 +312,34 @@ export function ChatArea() {
         </div>
       )}
 
+      {/* Typing indicator */}
+      {state.typingUsers.length > 0 && (() => {
+        const names = state.typingUsers.map((uid) => {
+          const member = state.roomMembers.find((m) => m.userId === uid);
+          return member?.displayName || uid.split(":")[0].substring(1);
+        });
+        let text: string;
+        if (names.length === 1) {
+          text = `${names[0]} is typing...`;
+        } else if (names.length === 2) {
+          text = `${names[0]} and ${names[1]} are typing...`;
+        } else if (names.length === 3) {
+          text = `${names[0]}, ${names[1]}, and ${names[2]} are typing...`;
+        } else {
+          text = "Multiple users are yapping....";
+        }
+        return (
+          <div className="px-4 pb-1 flex items-center gap-1.5">
+            <span className="flex gap-0.5">
+              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
+              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
+              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+            </span>
+            <span className="text-xs text-muted-foreground italic">{text}</span>
+          </div>
+        );
+      })()}
+
       {/* Input */}
       <div className="border-t p-3">
         {input.length > MAX_MESSAGE_LENGTH * 0.75 && (
