@@ -100,6 +100,18 @@ pub(crate) async fn sync(
                 "content": {"is_direct": room_data.is_dm},
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.tags",
+                "state_key": "",
+                "content": {"tags": room_data.tags},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.icon",
+                "state_key": "",
+                "content": {"icon_url": room_data.icon_url},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

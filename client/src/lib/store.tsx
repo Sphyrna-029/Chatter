@@ -28,6 +28,7 @@ import {
   apiGetAllRooms,
   apiCreateDM,
   apiUpdateTopic,
+  apiUpdateRoomSettings,
   type MatrixMessage,
   type VoiceMember,
   type RoomInfo,
@@ -106,6 +107,7 @@ type Action =
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[] } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string };
 
@@ -335,6 +337,22 @@ function reducer(state: AppState, action: Action): AppState {
           },
         },
       };
+    case "UPDATE_ROOM_SETTINGS": {
+      const existing = state.roomInfoMap[action.payload.roomId];
+      if (!existing) return state;
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: {
+            ...existing,
+            ...(action.payload.name !== undefined && { name: action.payload.name }),
+            ...(action.payload.icon_url !== undefined && { icon_url: action.payload.icon_url }),
+            ...(action.payload.tags !== undefined && { tags: action.payload.tags }),
+          },
+        },
+      };
+    }
     case "UPDATE_MEMBER_EVENT":
       return state; // Trigger re-render for member loading
     case "SET_TYPING_USER":
@@ -370,15 +388,16 @@ interface AppContextValue {
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
-  createRoom: (name: string, topic: string) => Promise<void>;
+  createRoom: (name: string, topic: string, tags?: string[], iconUrl?: string) => Promise<void>;
   joinRoom: (roomId: string) => Promise<void>;
   leaveRoom: (roomId: string) => Promise<void>;
   loadVoiceMembers: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
   sendTyping: () => void;
-  getAllRooms: () => Promise<{ room_id: string; name: string; member_count: number }[]>;
+  getAllRooms: () => Promise<import("./api").RoomSummary[]>;
   openDM: (targetUserId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
+  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[] }) => Promise<void>;
   setCustomStatus: (status: string) => void;
 }
 
@@ -563,6 +582,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         }
       }
+      else if (msg.type === "m.room.settings") {
+        dispatch({
+          type: "UPDATE_ROOM_SETTINGS",
+          payload: {
+            roomId: msg.room_id,
+            name: msg.content?.name,
+            icon_url: msg.content?.icon_url,
+            tags: msg.content?.tags,
+          },
+        });
+      }
       else if (msg.type === "m.room.topic") {
         dispatch({
           type: "UPDATE_ROOM_TOPIC",
@@ -683,11 +713,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const directEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.direct"
         );
+        const tagsEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.tags"
+        );
+        const iconEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.icon"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
           topic: topicEvent?.content?.topic || "",
           is_direct: directEvent?.content?.is_direct || false,
+          tags: tagsEvent?.content?.tags || [],
+          icon_url: iconEvent?.content?.icon_url || "",
+          creator: nameEvent?.sender || "",
         };
       } else {
         roomInfoMap[roomId] = {
@@ -822,8 +861,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createRoom = useCallback(
-    async (name: string, topic: string) => {
-      const data = await apiCreateRoom(name, topic);
+    async (name: string, topic: string, tags?: string[], iconUrl?: string) => {
+      const data = await apiCreateRoom(name, topic, tags, iconUrl);
       await loadRooms();
       await selectRoom(data.room_id);
     },
@@ -913,6 +952,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const updateRoomSettings = useCallback(
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[] }) => {
+      await apiUpdateRoomSettings(roomId, settings);
+    },
+    []
+  );
+
   const setCustomStatus = useCallback((status: string) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -944,6 +990,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         getAllRooms,
         openDM,
         updateTopic,
+        updateRoomSettings,
         setCustomStatus,
       }}
     >

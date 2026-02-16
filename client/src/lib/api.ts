@@ -100,11 +100,11 @@ export async function apiSync() {
   return res.json();
 }
 
-export async function apiCreateRoom(name: string, topic: string) {
+export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",
     headers: authHeaders(),
-    body: JSON.stringify({ name, topic }),
+    body: JSON.stringify({ name, topic, tags, icon_url: iconUrl }),
   });
   if (!res.ok) throw new Error("Failed to create room");
   return res.json() as Promise<{ room_id: string }>;
@@ -134,6 +134,8 @@ export interface RoomSummary {
   member_count: number;
   voice_count: number;
   screen_share_active?: boolean;
+  tags?: string[];
+  icon_url?: string;
 }
 
 export async function apiGetAllRooms() {
@@ -273,6 +275,9 @@ export interface RoomInfo {
   name: string;
   topic: string;
   is_direct?: boolean;
+  tags?: string[];
+  icon_url?: string;
+  creator?: string;
 }
 
 export async function apiUpdateTopic(roomId: string, topic: string) {
@@ -318,6 +323,25 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
   });
   if (!res.ok) throw new Error("Failed to fetch link preview");
   return res.json() as Promise<LinkPreview>;
+}
+
+export async function apiUpdateRoomSettings(
+  roomId: string,
+  settings: { name?: string; icon_url?: string; tags?: string[] }
+) {
+  const res = await fetch(
+    `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: JSON.stringify(settings),
+    }
+  );
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to update room settings");
+  }
+  return res.json();
 }
 
 export async function apiCreateDM(targetUserId: string) {

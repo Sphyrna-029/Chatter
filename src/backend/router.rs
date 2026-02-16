@@ -7,7 +7,8 @@ use super::{
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
-            create_room, join_room, joined_rooms, leave_room, list_all_rooms, update_room_topic,
+            create_room, join_room, joined_rooms, leave_room, list_all_rooms,
+            update_room_settings, update_room_topic,
         },
         static_content::{serve_client, versions},
         sync::sync,
@@ -66,6 +67,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route(
             "/_matrix/client/r0/rooms/{room_id}/state/m.room.topic",
             put(update_room_topic),
+        )
+        // Room settings (name, icon, tags)
+        .route(
+            "/_matrix/client/r0/rooms/{room_id}/state/m.room.settings",
+            put(update_room_settings),
         )
         // Sync
         .route("/_matrix/client/r0/sync", get(sync))

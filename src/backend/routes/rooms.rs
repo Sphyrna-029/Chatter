@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{CreateRoomRequest, UpdateTopicRequest},
+    dto::{CreateRoomRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         now_millis,
@@ -118,6 +118,8 @@ pub(crate) async fn create_room(
                         topic: String::from("Direct Message"),
                         creator: user_id.clone(),
                         is_dm: true,
+                        tags: vec![],
+                        icon_url: String::new(),
                     },
                 );
 
@@ -195,6 +197,8 @@ pub(crate) async fn create_room(
             topic: req.topic.unwrap_or_default(),
             creator: user_id.clone(),
             is_dm: false,
+            tags: req.tags.unwrap_or_default(),
+            icon_url: req.icon_url.unwrap_or_default(),
         },
     );
 
@@ -404,7 +408,9 @@ pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<V
                 "topic": room.topic,
                 "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0),
                 "voice_count": voice_count,
-                "screen_share_active": screen_share_active
+                "screen_share_active": screen_share_active,
+                "tags": room.tags,
+                "icon_url": room.icon_url
             })
         })
         .collect();
@@ -463,6 +469,90 @@ pub(crate) async fn update_room_topic(
         "room_id": room_id,
         "sender": user_id,
         "content": { "topic": req.topic }
+    });
+    broadcast_to_room(&state, &room_id, &event).await;
+
+    Ok(Json(json!({"event_id": generate_id("$")})))
+}
+
+pub(crate) async fn update_room_settings(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<UpdateRoomSettingsRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .await
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Check room exists and user is creator
+    {
+        let rooms = state.rooms.read().await;
+        let room = rooms
+            .get(&room_id)
+            .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+        if room.creator != user_id {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Only the room creator can edit settings",
+            ));
+        }
+    }
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    // Update fields
+    let mut updated_name = None;
+    let mut updated_icon_url = None;
+    let mut updated_tags = None;
+    {
+        let mut rooms = state.rooms.write().await;
+        if let Some(room) = rooms.get_mut(&room_id) {
+            if let Some(ref name) = req.name {
+                room.name = name.clone();
+                updated_name = Some(name.clone());
+            }
+            if let Some(ref icon_url) = req.icon_url {
+                room.icon_url = icon_url.clone();
+                updated_icon_url = Some(icon_url.clone());
+            }
+            if let Some(ref tags) = req.tags {
+                room.tags = tags.clone();
+                updated_tags = Some(tags.clone());
+            }
+        }
+    }
+
+    // Build broadcast content with only changed fields
+    let mut content = serde_json::Map::new();
+    if let Some(name) = updated_name {
+        content.insert("name".to_string(), json!(name));
+    }
+    if let Some(icon_url) = updated_icon_url {
+        content.insert("icon_url".to_string(), json!(icon_url));
+    }
+    if let Some(tags) = updated_tags {
+        content.insert("tags".to_string(), json!(tags));
+    }
+
+    let event = json!({
+        "type": "m.room.settings",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": Value::Object(content)
     });
     broadcast_to_room(&state, &room_id, &event).await;
 

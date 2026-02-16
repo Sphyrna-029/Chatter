@@ -42,6 +42,8 @@ pub(crate) struct RoomRecord {
     pub(crate) topic: String,
     pub(crate) creator: String,
     pub(crate) is_dm: bool,
+    pub(crate) tags: Vec<String>,
+    pub(crate) icon_url: String,
 }
 
 #[derive(Clone)]

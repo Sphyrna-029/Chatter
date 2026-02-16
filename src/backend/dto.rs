@@ -20,6 +20,8 @@ pub(crate) struct CreateRoomRequest {
     pub(crate) topic: Option<String>,
     pub(crate) invite: Option<Vec<String>>,
     pub(crate) is_direct: Option<bool>,
+    pub(crate) tags: Option<Vec<String>>,
+    pub(crate) icon_url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,4 +61,11 @@ pub(crate) struct EditMessageRequest {
 #[derive(Deserialize)]
 pub(crate) struct LinkPreviewQuery {
     pub(crate) url: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateRoomSettingsRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) icon_url: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
 }
