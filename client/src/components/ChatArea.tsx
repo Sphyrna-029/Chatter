@@ -196,6 +196,14 @@ export function ChatArea() {
     }
   };
 
+  // Auto-resize textarea vertically as content grows
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [input]);
+
   const mentionMatches = mentionOpen
     ? state.roomMembers
         .filter((m) =>
@@ -407,7 +415,7 @@ export function ChatArea() {
               onKeyDown={handleKeyPress}
               rows={1}
               className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
-              style={{ fieldSizing: "content" } as React.CSSProperties}
+
             />
 
             {/* Emoji picker */}
