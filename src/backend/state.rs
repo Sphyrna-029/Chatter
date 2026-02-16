@@ -34,6 +34,8 @@ pub struct AppState {
 #[derive(Clone)]
 pub(crate) struct UserRecord {
     pub(crate) password: String,
+    pub(crate) avatar_url: String,
+    pub(crate) about: String,
 }
 
 #[derive(Clone)]

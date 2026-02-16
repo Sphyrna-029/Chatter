@@ -70,11 +70,16 @@ pub(crate) async fn get_room_presence(
     let current_time = now_secs();
     let rm = state.room_members.read().await;
     let up = state.user_presence.read().await;
+    let users = state.users.read().await;
 
     let mut presence_data = serde_json::Map::new();
 
     if let Some(members) = rm.get(&room_id) {
         for member_id in members {
+            let user_record = users.get(member_id);
+            let avatar_url = user_record.map(|u| u.avatar_url.as_str()).unwrap_or("");
+            let about = user_record.map(|u| u.about.as_str()).unwrap_or("");
+
             if let Some(presence) = up.get(member_id) {
                 let time_since_active = current_time - presence.last_active;
                 let status = if !presence.connected {
@@ -91,7 +96,9 @@ pub(crate) async fn get_room_presence(
                         "status": status,
                         "last_active": presence.last_active,
                         "last_typing": presence.last_typing,
-                        "custom_status": presence.custom_status
+                        "custom_status": presence.custom_status,
+                        "avatar_url": avatar_url,
+                        "about": about
                     }),
                 );
             } else {
@@ -100,7 +107,9 @@ pub(crate) async fn get_room_presence(
                     json!({
                         "status": "offline",
                         "last_active": 0,
-                        "last_typing": 0
+                        "last_typing": 0,
+                        "avatar_url": avatar_url,
+                        "about": about
                     }),
                 );
             }

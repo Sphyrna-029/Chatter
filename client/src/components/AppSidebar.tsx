@@ -3,6 +3,7 @@ import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
+import { UserProfileDialog } from "@/components/UserProfileDialog";
 import {
   Sidebar,
   SidebarContent,
@@ -13,7 +14,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 
@@ -25,6 +26,7 @@ interface AppSidebarProps {
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const { state, selectRoom, leaveRoom, logout } = useAppContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
   const [roomSummaries, setRoomSummaries] = useState<
     Record<string, RoomSummary>
@@ -207,8 +209,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3">
+        <div
+          className="flex items-center gap-3 cursor-pointer rounded-md p-1 -m-1 hover:bg-accent/50 transition-colors"
+          onClick={() => setProfileOpen(true)}
+        >
           <Avatar className="h-9 w-9">
+            {state.userId && state.userPresence[state.userId]?.avatarUrl && (
+              <AvatarImage src={state.userPresence[state.userId].avatarUrl} />
+            )}
             <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
               {initial}
             </AvatarFallback>
@@ -305,6 +313,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           </Button>
         </div>
         <VoiceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        {state.userId && (
+          <UserProfileDialog
+            open={profileOpen}
+            onOpenChange={setProfileOpen}
+            userId={state.userId}
+            displayName={displayName}
+          />
+        )}
         {settingsRoomId && (
           <RoomSettingsDialog
             open={!!settingsRoomId}

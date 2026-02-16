@@ -40,6 +40,8 @@ pub(crate) async fn register(
         user_id.clone(),
         UserRecord {
             password: req.password,
+            avatar_url: String::new(),
+            about: String::new(),
         },
     );
     drop(users);

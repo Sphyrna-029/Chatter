@@ -52,7 +52,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string }[];
-  userPresence: Record<string, { status: string; customStatus?: string }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }>;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;
@@ -92,7 +92,7 @@ type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
@@ -399,6 +399,7 @@ interface AppContextValue {
   updateTopic: (roomId: string, topic: string) => Promise<void>;
   updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[] }) => Promise<void>;
   setCustomStatus: (status: string) => void;
+  updateProfile: (profile: { avatarUrl?: string; about?: string; customStatus?: string }) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -483,7 +484,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
               const mapped: Record<string, { status: string; customStatus?: string }> = {};
               for (const [uid, p] of Object.entries(presData.presence)) {
                 const pAny = p as any;
-                mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+                mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined };
               }
               dispatch({ type: "SET_PRESENCE", payload: mapped });
             } catch {}
@@ -529,7 +530,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             type: "SET_PRESENCE",
             payload: {
               ...stateRef.current.userPresence,
-              [msg.user_id]: { status: "active", customStatus: existing?.customStatus },
+              [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about },
             },
           });
         }
@@ -577,6 +578,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
               [msg.user_id]: {
                 status: msg.status,
                 customStatus: msg.custom_status !== undefined ? msg.custom_status : existing?.customStatus,
+                avatarUrl: msg.avatar_url !== undefined ? (msg.avatar_url || undefined) : existing?.avatarUrl,
+                about: msg.about !== undefined ? (msg.about || undefined) : existing?.about,
               },
             },
           });
@@ -656,7 +659,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const mapped: Record<string, { status: string; customStatus?: string }> = {};
         for (const [uid, p] of Object.entries(data.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
@@ -778,7 +781,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const mapped: Record<string, { status: string; customStatus?: string }> = {};
         for (const [uid, p] of Object.entries(presData.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
@@ -966,6 +969,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const updateProfile = useCallback((profile: { avatarUrl?: string; about?: string; customStatus?: string }) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      const payload: any = { type: "set_profile" };
+      if (profile.avatarUrl !== undefined) payload.avatar_url = profile.avatarUrl;
+      if (profile.about !== undefined) payload.about = profile.about;
+      if (profile.customStatus !== undefined) payload.custom_status = profile.customStatus;
+      ws.send(JSON.stringify(payload));
+    }
+  }, []);
+
   return (
     <AppContext.Provider
       value={{
@@ -992,6 +1006,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateTopic,
         updateRoomSettings,
         setCustomStatus,
+        updateProfile,
       }}
     >
       {children}

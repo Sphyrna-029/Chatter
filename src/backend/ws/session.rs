@@ -101,11 +101,17 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             let up = state.user_presence.read().await;
             up.get(&user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
         };
+        let (avatar_url, about) = {
+            let users = state.users.read().await;
+            users.get(&user_id).map(|u| (u.avatar_url.clone(), u.about.clone())).unwrap_or_default()
+        };
         let event = json!({
             "type": "presence_update",
             "user_id": user_id,
             "status": "active",
-            "custom_status": custom_status
+            "custom_status": custom_status,
+            "avatar_url": avatar_url,
+            "about": about
         });
         for rid in user_rooms {
             broadcast_to_room(&state, &rid, &event).await;
@@ -426,6 +432,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     p.custom_status = custom_status.clone();
                 }
             }
+            let (avatar_url, about) = {
+                let users = state.users.read().await;
+                users.get(user_id).map(|u| (u.avatar_url.clone(), u.about.clone())).unwrap_or_default()
+            };
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -437,7 +447,57 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "type": "presence_update",
                 "user_id": user_id,
                 "status": "active",
-                "custom_status": custom_status
+                "custom_status": custom_status,
+                "avatar_url": avatar_url,
+                "about": about
+            });
+            for rid in user_rooms {
+                broadcast_to_room(&state, &rid, &event).await;
+            }
+        }
+        "set_profile" => {
+            // Update UserRecord fields if provided
+            {
+                let mut users = state.users.write().await;
+                if let Some(user) = users.get_mut(user_id) {
+                    if let Some(avatar) = msg.get("avatar_url").and_then(|v| v.as_str()) {
+                        user.avatar_url = avatar.to_string();
+                    }
+                    if let Some(about) = msg.get("about").and_then(|v| v.as_str()) {
+                        user.about = about.to_string();
+                    }
+                }
+            }
+            // Update custom_status in PresenceRecord if provided
+            if let Some(cs) = msg.get("custom_status").and_then(|v| v.as_str()) {
+                let mut up = state.user_presence.write().await;
+                if let Some(p) = up.get_mut(user_id) {
+                    p.custom_status = cs.to_string();
+                }
+            }
+            // Read current values for broadcast
+            let (avatar_url, about) = {
+                let users = state.users.read().await;
+                users.get(user_id).map(|u| (u.avatar_url.clone(), u.about.clone())).unwrap_or_default()
+            };
+            let custom_status = {
+                let up = state.user_presence.read().await;
+                up.get(user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
+            };
+            let rm = state.room_members.read().await;
+            let user_rooms: Vec<String> = rm
+                .iter()
+                .filter(|(_, members)| members.contains(&user_id.to_string()))
+                .map(|(rid, _)| rid.clone())
+                .collect();
+            drop(rm);
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": "active",
+                "custom_status": custom_status,
+                "avatar_url": avatar_url,
+                "about": about
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
