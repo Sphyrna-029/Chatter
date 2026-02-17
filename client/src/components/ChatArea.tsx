@@ -195,10 +195,8 @@ export function ChatArea() {
     inputRef.current?.focus();
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !state.currentRoomId) return;
-    e.target.value = "";
+  const uploadFile = async (file: File) => {
+    if (!state.currentRoomId) return;
     if (file.size > 500 * 1024 * 1024) {
       alert("File too large (max 500MB)");
       return;
@@ -213,6 +211,51 @@ export function ChatArea() {
       alert(err.message || "Upload failed");
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    await uploadFile(file);
+  };
+
+  // Drag-and-drop file upload
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragging(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    dragCounter.current = 0;
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await uploadFile(file);
     }
   };
 
@@ -258,7 +301,18 @@ export function ChatArea() {
   const roomInfo = state.roomInfoMap[state.currentRoomId];
 
   return (
-    <div className="flex flex-1 flex-col min-h-0 min-w-0">
+    <div
+      className="flex flex-1 flex-col min-h-0 min-w-0 relative"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {dragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary rounded-lg pointer-events-none">
+          <p className="text-sm font-medium text-primary">Drop file to upload</p>
+        </div>
+      )}
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex-1 min-w-0 text-center">

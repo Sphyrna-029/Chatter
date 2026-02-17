@@ -938,7 +938,7 @@ export function VoiceControls() {
           </button>
 
           {voiceMembersExpanded && (
-            <div className="space-y-1">
+            <div className="flex flex-wrap gap-2">
               {state.voiceMembers.map((memberId) => {
                 const name = shortenId(memberId);
                 const isSelf = memberId === state.userId;
@@ -951,11 +951,11 @@ export function VoiceControls() {
 
                 return (
                   <div key={memberId} className={cn(
-                    "flex flex-col rounded-md px-1 -mx-1 py-0.5 transition-shadow duration-150",
+                    "flex flex-col items-center rounded-md px-2 py-1.5 transition-shadow duration-150 min-w-[80px]",
                     isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
                   )}>
-                    {/* Top row: mute icon, latency dot, name, sharing badge */}
-                    <div className="flex items-center gap-1.5 text-sm">
+                    {/* Name row: mute icon, latency dot, name */}
+                    <div className="flex items-center gap-1 text-sm">
                       <span className={cn("text-xs flex-shrink-0", isMutedMember ? "text-destructive" : isSpeaking ? "text-green-500" : "")}>
                         {isMutedMember ? "🔇" : "🎤"}
                       </span>
@@ -983,28 +983,31 @@ export function VoiceControls() {
                           </TooltipProvider>
                         );
                       })()}
-                      <span className={cn("flex-1 truncate min-w-0", isSpeaking && "text-green-400 font-semibold")}>
+                      <span className={cn("truncate max-w-[80px]", isSpeaking && "text-green-400 font-semibold")}>
                         {name}{isSelf && " (You)"}
                       </span>
-                      {isSharing && isSelf && (
-                        <span className="text-xs text-purple-400 font-semibold px-1.5 py-0.5 rounded-md bg-purple-500/10 flex-shrink-0">
-                          📺 Sharing
-                        </span>
-                      )}
                     </div>
-                    {/* Bottom row: volume slider + watch button, indented under name */}
+                    {/* Sharing badge */}
+                    {isSharing && isSelf && (
+                      <span className="text-[10px] text-purple-400 font-semibold px-1 py-0.5 rounded-md bg-purple-500/10 mt-0.5">
+                        📺 Sharing
+                      </span>
+                    )}
+                    {/* Volume slider under name */}
                     {!isSelf && (
-                      <div className="flex items-center gap-1.5 pl-5 mt-0.5">
-                        <Slider
-                          value={[vol * 100]}
-                          onValueChange={([v]) => setUserVolume(memberId, v / 100)}
-                          max={100}
-                          step={1}
-                          className="w-16"
-                        />
-                        <span className="text-xs text-muted-foreground w-7 text-right">
-                          {Math.round(vol * 100)}%
-                        </span>
+                      <div className="flex flex-col items-center gap-0.5 mt-1 w-full">
+                        <div className="flex items-center gap-1 w-full">
+                          <Slider
+                            value={[vol * 100]}
+                            onValueChange={([v]) => setUserVolume(memberId, v / 100)}
+                            max={100}
+                            step={1}
+                            className="flex-1"
+                          />
+                          <span className="text-[10px] text-muted-foreground w-6 text-right">
+                            {Math.round(vol * 100)}
+                          </span>
+                        </div>
                         {isSharing && (
                           <Button
                             size="sm"
@@ -1014,7 +1017,7 @@ export function VoiceControls() {
                               watchUser(memberId);
                             }}
                             className={cn(
-                              "h-5 px-1.5 text-[10px] font-semibold ml-auto flex-shrink-0",
+                              "h-5 px-1.5 text-[10px] font-semibold",
                               isWatching
                                 ? "bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
                                 : "border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
