@@ -30,6 +30,10 @@ export interface Command {
   execute: (args: string[], ctx: CommandContext) => Promise<CommandResult>;
 }
 
+// ─── Ephemeral message (Elden Ring style) ────────────────────────────────────
+
+let graceMessage: { text: string; author: string; appraisals: number } | null = null;
+
 // ─── Commands ────────────────────────────────────────────────────────────────
 
 const commands: Command[] = [
@@ -348,106 +352,57 @@ const commands: Command[] = [
   {
     name: "grace",
     aliases: ["tarnished", "bonfire", "rest"],
-    description: "Discover a Site of Grace",
-    usage: "/grace [area]",
-    execute: async (args) => {
+    description: "Leave or read a message at the Site of Grace",
+    usage: "/grace [message]",
+    execute: async (args, ctx) => {
       const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+      const msg = args.join(" ").trim();
 
-      const graces: { name: string; area: string; lore: string }[] = [
-        { name: "The First Step", area: "Limgrave", lore: "Where all Tarnished begin their journey anew." },
-        { name: "Church of Elleh", area: "Limgrave", lore: "A ruined church watched over by a familiar merchant." },
-        { name: "Stormveil Cliffside", area: "Stormveil Castle", lore: "The winds howl. Godrick's domain awaits." },
-        { name: "Raya Lucaria Grand Library", area: "Liurnia", lore: "Rennala sits among her amber eggs, humming softly." },
-        { name: "Erdtree-Gazing Hill", area: "Altus Plateau", lore: "The golden tree looms above. Its light feels... hollow." },
-        { name: "Beside the Great Bridge", area: "Farum Azula", lore: "Time is broken here. The Dragonlord waits." },
-        { name: "Foot of the Forge", area: "Mountaintops", lore: "The flame that would burn the Erdtree. Melina watches." },
-        { name: "Fractured Marika", area: "Erdtree", lore: "The Elden Ring lies shattered before you." },
-        { name: "Cocoon of the Empyrean", area: "Haligtree", lore: "Malenia, Blade of Miquella, has never known defeat." },
-        { name: "Dynasty Mausoleum", area: "Mohgwyn Palace", lore: "Blood and fire. The Lord of Blood schemes below." },
-        { name: "Ranni's Chamber", area: "Ranni's Rise", lore: "The witch in the tower offers a different path." },
-        { name: "Roundtable Hold", area: "The Erdtree", lore: "A place between places. The Tarnished gather here." },
-        { name: "Ensis Moongazing Grounds", area: "Shadow Realm", lore: "The DLC lands stretch before you, unknown and vast." },
-        { name: "Scorched Ruins", area: "Gravesite Plain", lore: "Messmer's flame has touched everything here." },
+      // Leave a message
+      if (msg) {
+        graceMessage = { text: msg, author: ctx.state.userId || "Tarnished", appraisals: 0 };
+        return {
+          output: [
+            "  \\`,,'/",
+            "   (o )",
+            "────╨────",
+            "",
+            `  Message left by ${graceMessage.author}:`,
+            `  "${msg}"`,
+          ].join("\n"),
+          type: "success",
+        };
+      }
+
+      // Read the current message
+      const lines: string[] = [
+        "  \\`,,'/",
+        "   (o )",
+        "────╨────",
+        "",
       ];
 
-      // Filter by area arg if provided
-      const areaQuery = args.join(" ").trim().toLowerCase();
-      const pool = areaQuery
-        ? graces.filter((g) => g.area.toLowerCase().includes(areaQuery) || g.name.toLowerCase().includes(areaQuery))
-        : graces;
-      const site = pool.length > 0 ? pick(pool) : pick(graces);
-
-      const messages: string[] = [
-        "Put these foolish ambitions to rest.",
-        "I am Malenia, Blade of Miquella.",
-        "Rise, ye Tarnished.",
-        "Someone must extinguish thy flame.",
-        "Thy strength befits a crown.",
-        "The Elden Ring... is no more.",
-        "I have given thee courtesy enough.",
-        "Maidenless, are we?",
-        "Let us learn together.",
-        "The stars move once more.",
-        "Try fingers, but hole.",
-        "Ahh, I knew you'd come.",
-        "Arise now, ye Tarnished. Ye dead, who yet live.",
-      ];
-
-      const enemies = [
-        "Soldier of Godrick", "Grafted Scion", "Crucible Knight",
-        "Runebear", "Erdtree Avatar", "Cleanrot Knight",
-        "Black Knife Assassin", "Godskin Noble", "Abductor Virgin",
-        "Revenant", "Lesser Dragonkin", "Deathbird",
-      ];
-
-      const ashes = [
-        "Mimic Tear", "Lone Wolf Ashes", "Jellyfish Spirit",
-        "Black Knife Tiche", "Lhutel the Headless", "Banished Knight Oleg",
-        "Ancestral Follower", "Stormhawk Deenh", "Latenna the Albinauric",
-      ];
-
-      const runes = (Math.floor(Math.random() * 99) + 1) * 1000;
-      const level = Math.floor(Math.random() * 300) + 1;
-
-      const lines: string[] = [];
-
-      // Grace discovered
-      lines.push("                 .");
-      lines.push("                ,|.");
-      lines.push("               ,|||.");
-      lines.push("              ,|||||.");
-      lines.push("             ,|||||||");
-      lines.push("            ,|||||||||");
-      lines.push("                |");
-      lines.push("                |");
-      lines.push("            ____|____");
-      lines.push("           /  GRACE  \\");
-      lines.push("");
-      lines.push("    ~ SITE OF GRACE DISCOVERED ~");
-      lines.push("");
-      lines.push(`    "${site.name}"`);
-      lines.push(`    ${site.area}`);
-      lines.push("");
-      lines.push(`    ${site.lore}`);
-      lines.push("");
-
-      // Tarnished status
-      lines.push("┌─ TARNISHED STATUS ────────────────┐");
-      lines.push(`│  Level: ${String(level).padEnd(6)} Runes: ${runes.toLocaleString().padEnd(8)} │`);
-      lines.push(`│  Flask: ${"█".repeat(Math.floor(Math.random() * 8) + 3)}${"░".repeat(4)}         │`);
-      lines.push(`│  Spirit Ash: ${pick(ashes).padEnd(22)}│`);
-      lines.push("└────────────────────────────────────┘");
-      lines.push("");
-
-      // Nearby threat
-      const enemy = pick(enemies);
-      const threat = pick(["roams nearby", "blocks the path ahead", "lurks in the shadows", "patrols the ruins"]);
-      lines.push(`  ! ${enemy} ${threat}`);
-      lines.push("");
-
-      // Message on the ground
-      lines.push(`  [ Message ] "${pick(messages)}"`);
-      lines.push(`              Appraisals: ${Math.floor(Math.random() * 9999)}`);
+      if (graceMessage) {
+        graceMessage.appraisals += 1;
+        lines.push(`  Message from ${graceMessage.author}:`);
+        lines.push(`  "${graceMessage.text}"`);
+        lines.push(`  Appraisals: ${graceMessage.appraisals}`);
+      } else {
+        const defaults = [
+          "Try fingers, but hole.",
+          "Could this be a dog?",
+          "Fort, night.",
+          "Behold, pickle!",
+          "Why is it always suffering?",
+          "Hidden path ahead.",
+          "No maidens?",
+          "Time for rump!",
+          "Praise the message!",
+          "Didn't expect edge.",
+        ];
+        lines.push(`  "${pick(defaults)}"`);
+        lines.push(`  Appraisals: ${Math.floor(Math.random() * 9999)}`);
+      }
 
       return { output: lines.join("\n"), type: "info" };
     },
@@ -455,148 +410,117 @@ const commands: Command[] = [
   {
     name: "skull",
     aliases: ["halo", "spartan", "chief"],
-    description: "Activate a Halo Skull",
-    usage: "/skull [skull-name]",
-    execute: async (args) => {
+    description: "Skull activated!",
+    usage: "/skull",
+    execute: async () => {
       const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-      const skulls: { name: string; effect: string; flavor: string }[] = [
-        { name: "Birthday Party", effect: "Grunts explode into confetti on headshot", flavor: "Yayyyy!" },
-        { name: "IWHBYD", effect: "Rare combat dialogue becomes common", flavor: "I Would Have Been Your Daddy..." },
-        { name: "Grunt Birthday Party", effect: "Headshot a Grunt and the whole party starts", flavor: "*confetti noises* *children cheering*" },
-        { name: "Thunderstorm", effect: "All enemies are promoted one rank", flavor: "Every Elite is now a general. Good luck." },
-        { name: "Blind", effect: "HUD elements are hidden", flavor: "Trust your instincts, Spartan." },
-        { name: "Famine", effect: "Dropped weapons have half ammo", flavor: "Ammo doesn't grow on trees. Or Halo rings." },
-        { name: "Mythic", effect: "All enemies have double health", flavor: "They just don't go down." },
-        { name: "Catch", effect: "Enemies throw more grenades. Many more grenades.", flavor: "INCOMING! INCOMING! INCOMING!" },
-        { name: "Iron", effect: "Death resets to last checkpoint (solo) or reverts save (co-op)", flavor: "No second chances." },
-        { name: "Black Eye", effect: "Shields only recharge via melee", flavor: "Get in close, Spartan." },
-        { name: "Tough Luck", effect: "Enemies always dodge grenades and vehicles", flavor: "They saw it coming." },
-        { name: "Fog", effect: "Motion tracker is disabled", flavor: "Trust your eyes, not your radar." },
-        { name: "Cowbell", effect: "Physics explosions are amplified 3x", flavor: "YEET." },
-        { name: "Scarab", effect: "All weapons fire Scarab Gun beams", flavor: "This is technically cheating." },
-        { name: "Envy", effect: "Master Chief gets permanent Active Camo", flavor: "Now you see me... no you don't." },
-        { name: "Acrophobia", effect: "Press jump to fly", flavor: "Spartans weren't meant to fly. But here we are." },
+      const moments = [
+        {
+          quote: "Wort wort wort!",
+          source: "Elite Combat Dialogue",
+          confetti: false,
+        },
+        {
+          quote: "Wort wort wort! Ahhh, wubba wubba wubba!",
+          source: "Elite Combat Dialogue",
+          confetti: false,
+        },
+        {
+          quote: "Remember Reach.",
+          source: "NOBLE Team",
+          confetti: false,
+        },
+        {
+          quote: "I'm ready. How 'bout you?",
+          source: "Emile-A239, NOBLE Four",
+          confetti: false,
+        },
+        {
+          quote: "Wake me... when you need me.",
+          source: "Master Chief, SPARTAN-117",
+          confetti: false,
+        },
+        {
+          quote: "I need a weapon.",
+          source: "Master Chief, SPARTAN-117",
+          confetti: false,
+        },
+        {
+          quote: "Were it so easy.",
+          source: "Thel 'Vadam, The Arbiter",
+          confetti: false,
+        },
+        {
+          quote: "Dear Humanity... we regret being alien bastards.",
+          source: "Sgt. Avery Johnson",
+          confetti: false,
+        },
+        {
+          quote: "Send me out... with a bang.",
+          source: "Sgt. Avery Johnson",
+          confetti: false,
+        },
+        {
+          quote: "Don't make a girl a promise you can't keep.",
+          source: "Cortana",
+          confetti: false,
+        },
+        {
+          quote: "This cave is not a natural formation.",
+          source: "Cortana",
+          confetti: false,
+        },
+        {
+          quote: "I am a monument to all your sins.",
+          source: "Gravemind",
+          confetti: false,
+        },
+        {
+          quote: "GRUNT BIRTHDAY PARTY ACTIVATED!",
+          source: "Skull Found",
+          confetti: true,
+        },
+        {
+          quote: "Thought I'd try shooting my way out. Mix things up a little.",
+          source: "Master Chief, SPARTAN-117",
+          confetti: false,
+        },
+        {
+          quote: "To give the Covenant back their bomb.",
+          source: "Master Chief, SPARTAN-117",
+          confetti: false,
+        },
+        {
+          quote: "Tell 'em to make it count.",
+          source: "Jorge-052, NOBLE Five",
+          confetti: false,
+        },
+        {
+          quote: "Spartans never die. They're just missing in action.",
+          source: "Dr. Catherine Halsey",
+          confetti: false,
+        },
       ];
 
-      // Find by name or random
-      const query = args.join(" ").trim().toLowerCase();
-      const matched = query
-        ? skulls.find((s) => s.name.toLowerCase().includes(query))
-        : null;
-      const skull = matched || pick(skulls);
-
-      const isBirthday = skull.name.toLowerCase().includes("birthday");
-
-      // Cortana quotes
-      const cortanaLines = [
-        "Chief... I'm picking up something on sensors.",
-        "This cave is not a natural formation.",
-        "I've run the numbers. We have a 12% chance of survival.",
-        "Don't make a girl a promise you can't keep.",
-        "They let me pick. Did I ever tell you that?",
-        "Chief, when this is over... never mind.",
-        "Scanning... I'm detecting Covenant signatures everywhere.",
-        "We need to move. The Covenant won't wait.",
-        "I've been thinking about what you said. About luck.",
-        "Protocol dictates action. Chief, are you ready?",
-      ];
-
-      // UNSC chatter
-      const unscChatter = [
-        "UNSC TACCOM: All Spartans, be advised — Covenant forces inbound.",
-        "UNSC TACCOM: Pelican inbound for extraction at LZ Alpha.",
-        "UNSC TACCOM: Slipspace rupture detected. Multiple contacts.",
-        "SGT JOHNSON: \"Dear Humanity... we regret being alien bastards.\"",
-        "SGT JOHNSON: \"Send me out... with a bang.\"",
-        "NOBLE SIX: \"I'm ready. How 'bout you?\"",
-        "CPT KEYES: \"Cortana, all I need to know is did we lose them?\"",
-        "ARBITER: \"Were it so easy.\"",
-        "GRAVEMIND: \"I am a monument to all your sins.\"",
-        "343 GUILTY SPARK: \"Reclaimer! You must activate the ring!\"",
-      ];
-
-      const weapons = [
-        "MA5B Assault Rifle", "M6D Pistol (CE)", "BR55 Battle Rifle",
-        "SRS99 Sniper Rifle", "M41 SPNKr Rocket Launcher", "Energy Sword",
-        "Type-1 Plasma Grenade", "Spartan Laser", "Gravity Hammer",
-        "Needler", "Fuel Rod Cannon", "DMR",
-      ];
-
-      const locations = [
-        "Installation 04", "Installation 05 (Delta Halo)", "The Ark",
-        "Reach", "New Mombasa", "Voi", "High Charity",
-        "Requiem", "Zeta Halo", "Harvest", "Sigma Octanus IV",
-        "The Pillar of Autumn", "Cairo Station", "Truth and Reconciliation",
-      ];
-
-      const shield = Math.floor(Math.random() * 8) + 1;
-      const kills = Math.floor(Math.random() * 2000);
-
+      const moment = pick(moments);
       const lines: string[] = [];
 
-      // Skull ASCII art
-      if (isBirthday) {
-        lines.push("        . * .  *  . *.");
-        lines.push("     *  . \\|/ .  *  .");
-        lines.push("    .  *  -*-  .  * .");
-        lines.push("     .  . /|\\ *  .  ");
-        lines.push("      ___________");
-        lines.push("     /  _     _  \\");
-        lines.push("    |  |_|   |_|  |");
-        lines.push("    |      _      |");
-        lines.push("     \\   |___|   /");
-        lines.push("      \\_________/");
-        lines.push("    *  BIRTHDAY!  *");
-        lines.push("   ~ confetti everywhere ~");
+      if (moment.confetti) {
+        lines.push("  *  . * .  *  . *  . * .");
+        lines.push(" . *  *  . *  *  . *  *  .");
+        lines.push("  . * .  *  . * .  *  . *");
+        lines.push("");
+        lines.push("  GRUNT BIRTHDAY PARTY!");
+        lines.push("  *pop* *pop* yayyy!");
+        lines.push("");
+        lines.push("  *  . * .  *  . *  . * .");
+        lines.push(" . *  *  . *  *  . *  *  .");
+        lines.push("  . * .  *  . * .  *  . *");
       } else {
-        lines.push("      ___________");
-        lines.push("     /           \\");
-        lines.push("    |  [X]   [X]  |");
-        lines.push("    |      ^      |");
-        lines.push("    |    |---|    |");
-        lines.push("     \\___________/");
+        lines.push(`  "${moment.quote}"`);
+        lines.push(`   — ${moment.source}`);
       }
-      lines.push("");
-
-      // Skull info box
-      lines.push("╔══════════════════════════════════════════════╗");
-      lines.push(`║  SKULL ACTIVATED: ${skull.name.toUpperCase().padEnd(27)}║`);
-      lines.push("╠══════════════════════════════════════════════╣");
-      lines.push(`║  ${skull.effect.padEnd(44)}║`);
-      lines.push("╚══════════════════════════════════════════════╝");
-      lines.push("");
-      lines.push(`  "${skull.flavor}"`);
-      lines.push("");
-
-      // MJOLNIR HUD readout
-      lines.push("┌─ MJOLNIR MK VI HUD ───────────────────┐");
-      lines.push(`│  SHIELD: [${"█".repeat(shield)}${"░".repeat(8 - shield)}] ${Math.floor((shield / 8) * 100)}%${" ".repeat(shield < 8 ? 13 : 12)}│`);
-      lines.push(`│  WEAPON: ${pick(weapons).padEnd(30)}│`);
-      lines.push(`│  LOCATION: ${pick(locations).padEnd(28)}│`);
-      lines.push(`│  KILLS: ${String(kills).padEnd(31)}│`);
-      lines.push(`│  DIFFICULTY: LEGENDARY ${"█".repeat(4)}          │`);
-      lines.push("└─────────────────────────────────────────┘");
-      lines.push("");
-
-      // Cortana line + UNSC chatter
-      lines.push(`CORTANA: "${pick(cortanaLines)}"`);
-      lines.push("");
-      lines.push(pick(unscChatter));
-      lines.push("");
-
-      // Sign-off
-      const signoffs = [
-        ">> \"Wake me... when you need me.\"",
-        ">> \"Finishing this fight.\"",
-        ">> \"I need a weapon.\"",
-        ">> \"To give the Covenant back their bomb.\"",
-        ">> \"Thought I'd try shooting my way out. Mix things up a little.\"",
-        ">> \"Sir, permission to leave the station.\" \"For what purpose?\" \"To give the Covenant back their bomb.\"",
-        ">> \"Don't ever let her go. Don't EVER let her go.\" — Sergeant Johnson",
-        ">> Remember Reach.",
-      ];
-      lines.push(pick(signoffs));
 
       return { output: lines.join("\n"), type: "info" };
     },
