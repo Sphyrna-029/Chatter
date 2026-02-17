@@ -16,9 +16,7 @@ export function ScreenShareHeader({
   const { state, dispatch } = useAppContext();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const otherSharers = state.activeScreenSharers.filter(
-    (id) => id !== state.userId
-  );
+  const sharers = state.activeScreenSharers;
 
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
@@ -44,7 +42,7 @@ export function ScreenShareHeader({
 
   if (
     !state.screenViewerOpen ||
-    otherSharers.length === 0 ||
+    sharers.length === 0 ||
     !state.inVoiceChannel
   ) {
     return null;
@@ -59,14 +57,16 @@ export function ScreenShareHeader({
         </span>
         <p className="text-sm font-semibold text-purple-300 truncate">
           {state.selectedScreenSharer
-            ? `${shortenId(state.selectedScreenSharer)}'s screen`
+            ? state.selectedScreenSharer === state.userId
+              ? "Your screen (preview)"
+              : `${shortenId(state.selectedScreenSharer)}'s screen`
             : "Screen Share"}
         </p>
       </div>
       <div className="flex items-center gap-1 shrink-0">
-        {otherSharers.length > 1 && (
+        {sharers.length > 1 && (
           <div className="flex items-center gap-1 mr-2">
-            {otherSharers.map((sharerId) => (
+            {sharers.map((sharerId) => (
               <button
                 key={sharerId}
                 onClick={() =>
@@ -82,7 +82,7 @@ export function ScreenShareHeader({
                     : "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30"
                 )}
               >
-                {shortenId(sharerId)}
+                {sharerId === state.userId ? "You" : shortenId(sharerId)}
               </button>
             ))}
           </div>
@@ -168,11 +168,10 @@ export function ScreenShareViewer() {
   const [screenVolumes, setScreenVolumes] = useState<Record<string, number>>({});
   const [screenMuted, setScreenMuted] = useState<Record<string, boolean>>({});
 
-  const otherSharers = state.activeScreenSharers.filter(
-    (id) => id !== state.userId
-  );
+  const sharers = state.activeScreenSharers;
 
   const currentSharer = state.selectedScreenSharer;
+  const isSelfSharer = currentSharer === state.userId;
   const currentVolume = currentSharer ? (screenVolumes[currentSharer] ?? 50) : 50;
   const currentMuted = currentSharer ? (screenMuted[currentSharer] ?? false) : false;
 
@@ -191,7 +190,9 @@ export function ScreenShareViewer() {
         mainVideoRef.current.srcObject = stream;
         mainVideoRef.current.play().catch(() => {});
       }
-      mainVideoRef.current.volume = currentMuted ? 0 : currentVolume / 100;
+      // Mute own stream to avoid audio feedback loop
+      mainVideoRef.current.muted = isSelfSharer;
+      mainVideoRef.current.volume = (isSelfSharer || currentMuted) ? 0 : currentVolume / 100;
     }
     // Thumbnails
     screenStreamsMap.forEach((stream, sharerId) => {
@@ -222,7 +223,7 @@ export function ScreenShareViewer() {
 
   if (
     !state.screenViewerOpen ||
-    otherSharers.length === 0 ||
+    sharers.length === 0 ||
     !state.inVoiceChannel
   ) {
     return null;
@@ -301,9 +302,9 @@ export function ScreenShareViewer() {
       )}
 
       {/* Preview thumbnails for multiple sharers */}
-      {otherSharers.length > 1 && (
+      {sharers.length > 1 && (
         <div className="flex gap-2 p-2 bg-black/80 border-t border-purple-500/20 overflow-x-auto shrink-0">
-          {otherSharers.map((sharerId) => (
+          {sharers.map((sharerId) => (
             <button
               key={sharerId}
               className={cn(
@@ -330,7 +331,7 @@ export function ScreenShareViewer() {
               />
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5">
                 <p className="text-[10px] text-purple-300 font-semibold truncate">
-                  {shortenId(sharerId)}
+                  {sharerId === state.userId ? "You" : shortenId(sharerId)}
                 </p>
               </div>
             </button>

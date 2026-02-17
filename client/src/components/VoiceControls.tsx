@@ -604,7 +604,11 @@ export function VoiceControls() {
         audio: true,
       });
       screenStreamRef.current = stream;
+      // Insert local stream so the viewer can show a self-preview
+      screenStreamsMap.set(state.userId!, stream);
+      window.dispatchEvent(new CustomEvent("screen-stream-update"));
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
+      dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: state.userId! } });
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
       const screenTrack = stream.getVideoTracks()[0];
@@ -632,6 +636,11 @@ export function VoiceControls() {
 
   const stopScreenShare = useCallback(async () => {
     dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
+    // Remove local self-preview stream
+    if (state.userId) {
+      screenStreamsMap.delete(state.userId);
+      window.dispatchEvent(new CustomEvent("screen-stream-update"));
+    }
     if (screenPubPcRef.current) { screenPubPcRef.current.close(); screenPubPcRef.current = null; }
     if (screenStreamRef.current) {
       screenStreamRef.current.getTracks().forEach((t) => { t.onended = null; t.stop(); });
@@ -759,14 +768,18 @@ export function VoiceControls() {
     window.dispatchEvent(new CustomEvent("screen-stream-update"));
   }, [state.activeScreenSharers]);
 
-  // Auto-close viewer when no more sharers (excluding self)
+  // Auto-close viewer when no more sharers
   useEffect(() => {
-    const otherSharers = state.activeScreenSharers.filter((id) => id !== state.userId);
-    if (otherSharers.length === 0) {
-      screenStreamsMap.clear();
+    if (state.activeScreenSharers.length === 0) {
+      // Only delete entries for sharers no longer active, preserve self-preview if still sharing
+      screenStreamsMap.forEach((_stream, id) => {
+        if (!state.activeScreenSharers.includes(id)) {
+          screenStreamsMap.delete(id);
+        }
+      });
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: false, sharer: null } });
     }
-  }, [state.activeScreenSharers, state.userId, dispatch]);
+  }, [state.activeScreenSharers, dispatch]);
 
   const watchUser = useCallback(async (sharerId: string) => {
     // Toggle: if already watching this user, close the viewer

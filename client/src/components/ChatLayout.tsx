@@ -28,7 +28,7 @@ export function ChatLayout() {
   const showViewer =
     state.screenViewerOpen &&
     state.inVoiceChannel &&
-    state.activeScreenSharers.some((id) => id !== state.userId);
+    state.activeScreenSharers.length > 0;
 
   return (
     <>
