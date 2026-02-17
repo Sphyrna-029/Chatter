@@ -151,38 +151,93 @@ pub(crate) async fn link_preview(
     // Fetch the URL
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(5))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
-    let response = match client
-        .get(&url)
-        .header("User-Agent", "Chatter/1.0 LinkPreview")
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
-    };
+    let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    // Limit body to 256KB
-    let body = match response.bytes().await {
-        Ok(b) if b.len() <= 256 * 1024 => String::from_utf8_lossy(&b).to_string(),
-        Ok(b) => String::from_utf8_lossy(&b[..256 * 1024]).to_string(),
-        Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
-    };
+    // Twitter/X: use oEmbed API since their pages are client-rendered
+    let is_twitter = url.contains("twitter.com/") || url.contains("x.com/");
+    let preview = if is_twitter {
+        let oembed_url = format!(
+            "https://publish.twitter.com/oembed?url={}&omit_script=true",
+            urlencoding::encode(&url)
+        );
+        match client
+            .get(&oembed_url)
+            .header("User-Agent", browser_ua)
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                if let Ok(json) = resp.json::<serde_json::Value>().await {
+                    CachedPreview {
+                        title: json["author_name"].as_str().map(|a| format!("@{}", a)),
+                        description: json["html"]
+                            .as_str()
+                            .map(|h| {
+                                // Strip HTML tags to get plain tweet text
+                                let stripped = h
+                                    .replace("<br>", "\n")
+                                    .replace("&amp;", "&")
+                                    .replace("&lt;", "<")
+                                    .replace("&gt;", ">");
+                                let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
+                                let text = tag_re.replace_all(&stripped, "").to_string();
+                                if text.len() > 280 {
+                                    format!("{}...", &text[..277])
+                                } else {
+                                    text
+                                }
+                            }),
+                        image: None,
+                        site_name: Some("Twitter".to_string()),
+                    }
+                } else {
+                    CachedPreview {
+                        title: None,
+                        description: None,
+                        image: None,
+                        site_name: None,
+                    }
+                }
+            }
+            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
+        }
+    } else {
+        let response = match client
+            .get(&url)
+            .header("User-Agent", browser_ua)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
+        };
 
-    let og_title = extract_og_tag(&body, "og:title");
-    let og_description = extract_og_tag(&body, "og:description");
-    let og_image = extract_og_tag(&body, "og:image");
-    let og_site_name = extract_og_tag(&body, "og:site_name");
+        // Limit body to 256KB
+        let body = match response.bytes().await {
+            Ok(b) if b.len() <= 256 * 1024 => String::from_utf8_lossy(&b).to_string(),
+            Ok(b) => String::from_utf8_lossy(&b[..256 * 1024]).to_string(),
+            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
+        };
 
-    let title = og_title.or_else(|| extract_title_tag(&body));
+        let og_title = extract_og_tag(&body, "og:title");
+        let og_description = extract_og_tag(&body, "og:description");
+        let og_image = extract_og_tag(&body, "og:image");
+        let og_site_name = extract_og_tag(&body, "og:site_name");
 
-    let preview = CachedPreview {
-        title,
-        description: og_description,
-        image: og_image,
-        site_name: og_site_name,
+        let title = og_title.or_else(|| extract_title_tag(&body));
+
+        CachedPreview {
+            title,
+            description: og_description,
+            image: og_image,
+            site_name: og_site_name,
+        }
     };
 
     // Cache it

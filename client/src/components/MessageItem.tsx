@@ -113,22 +113,32 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
   );
 }
 
+const youtubeRegex = /(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/;
+
+function getYouTubeVideoId(url: string): string | null {
+  const match = url.match(youtubeRegex);
+  return match ? match[1] : null;
+}
+
 /** Extract media URLs from body for rendering as React elements */
-function extractMediaUrls(body: string): { images: string[]; videos: string[]; audios: string[]; links: string[] } {
+function extractMediaUrls(body: string): { images: string[]; videos: string[]; audios: string[]; links: string[]; youtubeIds: string[] } {
   const images: string[] = [];
   const videos: string[] = [];
   const audios: string[] = [];
   const links: string[] = [];
+  const youtubeIds: string[] = [];
   const matches = body.match(urlRegex);
   if (matches) {
     for (const url of matches) {
-      if (imageExtensions.test(url)) images.push(url);
+      const ytId = getYouTubeVideoId(url);
+      if (ytId) youtubeIds.push(ytId);
+      else if (imageExtensions.test(url)) images.push(url);
       else if (audioExtensions.test(url)) audios.push(url);
       else if (videoExtensions.test(url)) videos.push(url);
       else links.push(url);
     }
   }
-  return { images, videos, audios, links };
+  return { images, videos, audios, links, youtubeIds };
 }
 
 /** Link preview card — fetches OG metadata on mount */
@@ -178,10 +188,21 @@ function LinkPreviewCard({ url }: { url: string }) {
 
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
-  const { images, videos, audios, links } = useMemo(() => extractMediaUrls(body), [body]);
-  if (images.length === 0 && videos.length === 0 && audios.length === 0 && links.length === 0) return null;
+  const { images, videos, audios, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
+  if (images.length === 0 && videos.length === 0 && audios.length === 0 && links.length === 0 && youtubeIds.length === 0) return null;
   return (
     <div className="mt-2 space-y-2">
+      {youtubeIds.map((id) => (
+        <div key={id} className="relative w-full max-w-lg aspect-video rounded-md overflow-hidden">
+          <iframe
+            src={`https://www.youtube.com/embed/${id}`}
+            title="YouTube video"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+            className="absolute inset-0 w-full h-full"
+          />
+        </div>
+      ))}
       {images.map((url) => (
         <img
           key={url}
