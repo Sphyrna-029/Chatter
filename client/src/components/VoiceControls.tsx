@@ -129,6 +129,55 @@ export function VoiceControls() {
     return () => clearInterval(id);
   }, [state.inVoiceChannel]);
 
+  // ─── Frozen screen share video detection ──────────────────────────────────
+  const frozenCountersRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!state.inVoiceChannel) {
+      frozenCountersRef.current = {};
+      return;
+    }
+
+    const FROZEN_THRESHOLD = 3; // consecutive 0-FPS polls (3 × 2s = 6s)
+
+    const id = setInterval(() => {
+      const counters = frozenCountersRef.current;
+      // Clean up counters for sharers we're no longer subscribed to
+      for (const key of Object.keys(counters)) {
+        if (!screenSubPcsRef.current.has(key)) {
+          delete counters[key];
+        }
+      }
+
+      for (const [uid, pc] of screenSubPcsRef.current) {
+        const statsKey = `screen-sub:${uid}`;
+        const stats = connStats[statsKey];
+        if (!stats) continue;
+
+        // Only check if the connection is still alive
+        if (pc.connectionState !== "connected") continue;
+
+        if (stats.framesPerSecond === 0) {
+          counters[uid] = (counters[uid] || 0) + 1;
+        } else {
+          counters[uid] = 0;
+        }
+
+        if (counters[uid] >= FROZEN_THRESHOLD) {
+          console.warn(`Screen share from ${uid} frozen for ${counters[uid] * 2}s, reconnecting`);
+          counters[uid] = 0;
+          try { pc.close(); } catch {}
+          screenSubPcsRef.current.delete(uid);
+          pendingScreenSubsRef.current.delete(uid);
+          screenStreamsMap.delete(uid);
+          window.dispatchEvent(new CustomEvent("screen-stream-update"));
+          scheduleScreenRetry(uid);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(id);
+  }, [state.inVoiceChannel, connStats]);
+
   // ─── Speaking detection via AnalyserNode ────────────────────────────────────
   useEffect(() => {
     if (!state.inVoiceChannel) {

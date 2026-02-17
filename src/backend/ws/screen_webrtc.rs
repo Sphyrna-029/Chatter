@@ -704,20 +704,39 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
+        // Periodic PLI ensures the publisher's encoder regularly produces keyframes.
+        // Screen share encoders (especially Chromium) produce very sparse keyframes,
+        // so without this, packet loss can permanently stall the subscriber's decoder.
+        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        pli_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
         loop {
-            match rtp_receiver.recv().await {
-                Ok(rtp_packet) => {
-                    if local_track.write_rtp(&rtp_packet).await.is_err() {
-                        break;
+            tokio::select! {
+                result = rtp_receiver.recv() => {
+                    match result {
+                        Ok(rtp_packet) => {
+                            if local_track.write_rtp(&rtp_packet).await.is_err() {
+                                break;
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            eprintln!(
+                                "screen-fwd: subscriber lagged by {} packets, requesting keyframe",
+                                skipped
+                            );
+                            let _ = publisher_pc_for_pli
+                                .write_rtcp(&[Box::new(PictureLossIndication {
+                                    sender_ssrc: 0,
+                                    media_ssrc: pli_media_ssrc,
+                                })
+                                    as Box<dyn RtcpPacket + Send + Sync>])
+                                .await;
+                            continue;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => break,
                     }
                 }
-                Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    // Packets were dropped — the decoder's reference frames are stale.
-                    // Request a fresh keyframe from the publisher so recovery is fast.
-                    eprintln!(
-                        "screen-fwd: subscriber lagged by {} packets, requesting keyframe",
-                        skipped
-                    );
+                _ = pli_interval.tick() => {
                     let _ = publisher_pc_for_pli
                         .write_rtcp(&[Box::new(PictureLossIndication {
                             sender_ssrc: 0,
@@ -725,9 +744,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
                         })
                             as Box<dyn RtcpPacket + Send + Sync>])
                         .await;
-                    continue;
                 }
-                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
