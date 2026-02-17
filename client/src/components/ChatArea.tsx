@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile } from "@/lib/api";
 import { MessageItem } from "./MessageItem";
+import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -43,6 +44,7 @@ export function ChatArea() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [cliMode, setCliMode] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
   const getViewport = useCallback(() => {
@@ -139,6 +141,14 @@ export function ChatArea() {
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
+
+    // Detect slash at start to enter CLI mode
+    if (value === "/" && !cliMode) {
+      setCliMode(true);
+      setInput("");
+      return;
+    }
+
     setInput(value);
     sendTyping();
 
@@ -203,6 +213,18 @@ export function ChatArea() {
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [input]);
+
+  // Ctrl+O to toggle CLI mode
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "o" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setCliMode((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const mentionMatches = mentionOpen
     ? state.roomMembers
@@ -349,118 +371,122 @@ export function ChatArea() {
       })()}
 
       {/* Input */}
-      <div className="border-t p-3">
-        {input.length > MAX_MESSAGE_LENGTH * 0.75 && (
-          <div className="flex justify-end mb-1">
-            <span
-              className={`text-xs font-mono px-1.5 py-0.5 rounded ${
-                input.length > MAX_MESSAGE_LENGTH
-                  ? "bg-destructive/20 text-destructive font-semibold"
-                  : input.length > MAX_MESSAGE_LENGTH * 0.9
-                  ? "text-orange-400"
-                  : "text-muted-foreground"
-              }`}
-            >
-              {input.length}/{MAX_MESSAGE_LENGTH}
-            </span>
-          </div>
-        )}
-        <div className="relative flex gap-2">
-          {/* Mention autocomplete */}
-          {mentionOpen && mentionMatches.length > 0 && (
-            <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover p-1 shadow-lg z-50">
-              {mentionMatches.map((m, i) => (
-                <button
-                  key={m.userId}
-                  className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer transition-colors ${
-                    i === selectedMentionIdx ? "bg-accent" : "hover:bg-accent/50"
-                  }`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    completeMention(m.displayName);
-                  }}
-                >
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-                    {m.displayName[0]?.toUpperCase()}
-                  </span>
-                  <span>{m.displayName}</span>
-                </button>
-              ))}
+      {cliMode ? (
+        <CommandBar onClose={() => setCliMode(false)} />
+      ) : (
+        <div className="border-t p-3">
+          {input.length > MAX_MESSAGE_LENGTH * 0.75 && (
+            <div className="flex justify-end mb-1">
+              <span
+                className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                  input.length > MAX_MESSAGE_LENGTH
+                    ? "bg-destructive/20 text-destructive font-semibold"
+                    : input.length > MAX_MESSAGE_LENGTH * 0.9
+                    ? "text-orange-400"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {input.length}/{MAX_MESSAGE_LENGTH}
+              </span>
             </div>
           )}
-
-          <input
-            type="file"
-            ref={fileInputRef}
-            className="hidden"
-            onChange={handleFileSelect}
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="shrink-0"
-            disabled={uploading}
-            onClick={() => fileInputRef.current?.click()}
-            title="Upload file"
-          >
-            {uploading ? "…" : "+"}
-          </Button>
-
-          <div className="relative flex-1">
-            <textarea
-              ref={inputRef}
-              placeholder="Type your message..."
-              value={input}
-              onChange={handleInputChange}
-              onKeyDown={handleKeyPress}
-              rows={1}
-              className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
-
-            />
-
-            {/* Emoji picker */}
-            <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
-              <PopoverTrigger asChild>
-                <button className="absolute right-2 top-3 text-lg hover:scale-110 transition-transform cursor-pointer">
-                  😊
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                side="top"
-                align="end"
-                className="w-72 max-h-64 overflow-y-auto p-3"
-              >
-                {Object.entries(emojiCategories).map(([cat, emojis]) => (
-                  <div key={cat} className="mb-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
-                      {cat}
-                    </p>
-                    <div className="grid grid-cols-8 gap-0.5">
-                      {emojis.map((e) => (
-                        <button
-                          key={e}
-                          className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
-                          onClick={() => insertEmoji(e)}
-                        >
-                          {e}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+          <div className="relative flex gap-2">
+            {/* Mention autocomplete */}
+            {mentionOpen && mentionMatches.length > 0 && (
+              <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover p-1 shadow-lg z-50">
+                {mentionMatches.map((m, i) => (
+                  <button
+                    key={m.userId}
+                    className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer transition-colors ${
+                      i === selectedMentionIdx ? "bg-accent" : "hover:bg-accent/50"
+                    }`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      completeMention(m.displayName);
+                    }}
+                  >
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
+                      {m.displayName[0]?.toUpperCase()}
+                    </span>
+                    <span>{m.displayName}</span>
+                  </button>
                 ))}
-              </PopoverContent>
-            </Popover>
-          </div>
+              </div>
+            )}
 
-          <Button
-            onClick={handleSend}
-            size="default"
-            disabled={input.length > MAX_MESSAGE_LENGTH}
-          >
-            Send
-          </Button>
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileSelect}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              disabled={uploading}
+              onClick={() => fileInputRef.current?.click()}
+              title="Upload file"
+            >
+              {uploading ? "…" : "+"}
+            </Button>
+
+            <div className="relative flex-1">
+              <textarea
+                ref={inputRef}
+                placeholder="Type your message... (/ for commands, Ctrl+O for CLI)"
+                value={input}
+                onChange={handleInputChange}
+                onKeyDown={handleKeyPress}
+                rows={1}
+                className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+
+              />
+
+              {/* Emoji picker */}
+              <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+                <PopoverTrigger asChild>
+                  <button className="absolute right-2 top-3 text-lg hover:scale-110 transition-transform cursor-pointer">
+                    😊
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  align="end"
+                  className="w-72 max-h-64 overflow-y-auto p-3"
+                >
+                  {Object.entries(emojiCategories).map(([cat, emojis]) => (
+                    <div key={cat} className="mb-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                        {cat}
+                      </p>
+                      <div className="grid grid-cols-8 gap-0.5">
+                        {emojis.map((e) => (
+                          <button
+                            key={e}
+                            className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
+                            onClick={() => insertEmoji(e)}
+                          >
+                            {e}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <Button
+              onClick={handleSend}
+              size="default"
+              disabled={input.length > MAX_MESSAGE_LENGTH}
+            >
+              Send
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
