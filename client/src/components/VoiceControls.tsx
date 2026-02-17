@@ -817,18 +817,28 @@ export function VoiceControls() {
     window.dispatchEvent(new CustomEvent("screen-stream-update"));
   }, [state.activeScreenSharers]);
 
-  // Auto-close viewer when no more sharers
+  // Auto-close viewer when no more sharers, or switch away from a sharer who left
   useEffect(() => {
     if (state.activeScreenSharers.length === 0) {
-      // Only delete entries for sharers no longer active, preserve self-preview if still sharing
+      // No one is sharing — clean up stale streams and close the viewer
       screenStreamsMap.forEach((_stream, id) => {
         if (!state.activeScreenSharers.includes(id)) {
           screenStreamsMap.delete(id);
         }
       });
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: false, sharer: null } });
+    } else if (
+      state.screenViewerOpen &&
+      state.selectedScreenSharer &&
+      !state.activeScreenSharers.includes(state.selectedScreenSharer)
+    ) {
+      // The sharer we were watching left — switch to self-preview if sharing, else first available
+      const next = state.activeScreenSharers.includes(state.userId!)
+        ? state.userId!
+        : state.activeScreenSharers[0];
+      dispatch({ type: "SET_SCREEN_VIEWER", payload: { sharer: next } });
     }
-  }, [state.activeScreenSharers, dispatch]);
+  }, [state.activeScreenSharers, state.screenViewerOpen, state.selectedScreenSharer, state.userId, dispatch]);
 
   const watchUser = useCallback(async (sharerId: string) => {
     // Toggle: if already watching this user, close the viewer
