@@ -10,13 +10,13 @@ import {
   SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface AppSidebarProps {
   onCreateRoom: () => void;
@@ -28,6 +28,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"rooms" | "dms">("rooms");
   const [roomSummaries, setRoomSummaries] = useState<
     Record<string, RoomSummary>
   >({});
@@ -85,7 +86,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       <button
         key={roomId}
         onClick={() => selectRoom(roomId)}
-        className="group relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer"
+        className="group/card relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer"
         style={{
           minHeight: "5.5rem",
           borderColor: screenShareActive
@@ -184,7 +185,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
         {/* Leave button on hover */}
         <span
-          className="absolute top-1 left-1 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
+          className="absolute top-1 left-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();
             if (confirm("Leave this room?")) {
@@ -198,7 +199,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         {/* Settings gear for room creator (non-DM only) */}
         {!isDm && info?.creator === state.userId && (
           <span
-            className="absolute top-1 right-1 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] text-muted-foreground hover:text-foreground cursor-pointer"
+            className="absolute top-1 right-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-[9px] text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               setSettingsRoomId(roomId);
@@ -264,37 +265,56 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
         <Separator />
 
-        <SidebarGroup>
-          <SidebarGroupLabel>Rooms</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <ScrollArea className={dmRoomIds.length > 0 ? "h-[calc(100vh-480px)]" : "h-[calc(100vh-280px)]"}>
-              {regularRoomIds.length === 0 && (
-                <p className="px-3 py-3 text-xs text-muted-foreground">
-                  No rooms joined yet
-                </p>
-              )}
-              <div className="grid grid-cols-2 gap-2 px-2 pb-2">
-                {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
-              </div>
-            </ScrollArea>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {dmRoomIds.length > 0 && (
-          <>
-            <Separator />
-            <SidebarGroup>
-              <SidebarGroupLabel>Direct Messages</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <ScrollArea className="h-[calc(100vh-480px)]">
+        <SidebarGroup className="flex-1 min-h-0">
+          <div className="px-2 py-2">
+            <ToggleGroup
+              type="single"
+              value={activeTab}
+              onValueChange={(val) => { if (val) setActiveTab(val as "rooms" | "dms"); }}
+              className="w-full rounded-md border border-border p-0.5 bg-muted"
+            >
+              <ToggleGroupItem
+                value="dms"
+                className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                DMs
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="rooms"
+                className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                Rooms
+              </ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+          <SidebarGroupContent className="flex-1 min-h-0">
+            <ScrollArea className="h-[calc(100vh-280px)]">
+              {activeTab === "rooms" ? (
+                <>
+                  {regularRoomIds.length === 0 && (
+                    <p className="px-3 py-3 text-xs text-muted-foreground">
+                      No rooms joined yet
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                    {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {dmRoomIds.length === 0 && (
+                    <p className="px-3 py-3 text-xs text-muted-foreground">
+                      No direct messages yet
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-2 px-2 pb-2">
                     {dmRoomIds.map((roomId) => renderRoomCard(roomId, true))}
                   </div>
-                </ScrollArea>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </>
-        )}
+                </>
+              )}
+            </ScrollArea>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="p-2">
