@@ -213,7 +213,6 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Disconnected
                         | RTCPeerConnectionState::Closed
                 ) {
                     let _ = teardown_voice_publisher(&state, &user_id).await;
@@ -525,7 +524,6 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Disconnected
                         | RTCPeerConnectionState::Closed
                 ) {
                     teardown_voice_subscriber_pair(&state, &listener_user_id, &speaker_user_id)

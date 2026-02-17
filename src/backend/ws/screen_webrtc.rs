@@ -255,7 +255,6 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Disconnected
                         | RTCPeerConnectionState::Closed
                 ) && teardown_screen_publisher(&state, &user_id).await.is_some()
                 {
@@ -611,7 +610,6 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Disconnected
                         | RTCPeerConnectionState::Closed
                 ) {
                     teardown_screen_subscriber_pair(&state, &viewer_user_id, &sharer_user_id).await;
