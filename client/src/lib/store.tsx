@@ -67,6 +67,7 @@ export interface AppState {
   activeScreenSharers: string[];
   screenViewerOpen: boolean;
   selectedScreenSharer: string | null;
+  screenViewers: Record<string, string[]>;
   // UI
   roomMentions: Record<string, boolean>;
   currentView: "chat" | "voice";
@@ -102,6 +103,7 @@ type Action =
   | { type: "SCREEN_SHARE_STOPPED"; payload: string }
   | { type: "SET_ACTIVE_SCREEN_SHARERS"; payload: string[] }
   | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null } }
+  | { type: "SET_SCREEN_VIEWERS"; payload: { sharerId: string; viewers: string[] } }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
@@ -133,6 +135,7 @@ const initialState: AppState = {
   activeScreenSharers: [],
   screenViewerOpen: false,
   selectedScreenSharer: null,
+  screenViewers: {},
   roomMentions: {},
   currentView: "chat",
   replyingTo: null,
@@ -169,6 +172,7 @@ function reducer(state: AppState, action: Action): AppState {
         activeScreenSharers: [],
         screenViewerOpen: false,
         selectedScreenSharer: null,
+        screenViewers: {},
         typingUsers: [],
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: false }
@@ -289,7 +293,8 @@ function reducer(state: AppState, action: Action): AppState {
           },
         },
       };
-    case "SCREEN_SHARE_STOPPED":
+    case "SCREEN_SHARE_STOPPED": {
+      const { [action.payload]: _removedViewers, ...remainingViewers } = state.screenViewers;
       return {
         ...state,
         activeScreenSharers: state.activeScreenSharers.filter(
@@ -305,7 +310,9 @@ function reducer(state: AppState, action: Action): AppState {
             screen_sharing: false,
           },
         },
+        screenViewers: remainingViewers,
       };
+    }
     case "SET_ACTIVE_SCREEN_SHARERS":
       return { ...state, activeScreenSharers: action.payload };
     case "SET_SCREEN_VIEWER":
@@ -313,6 +320,14 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         screenViewerOpen: action.payload.open ?? state.screenViewerOpen,
         selectedScreenSharer: action.payload.sharer !== undefined ? action.payload.sharer : state.selectedScreenSharer,
+      };
+    case "SET_SCREEN_VIEWERS":
+      return {
+        ...state,
+        screenViewers: {
+          ...state.screenViewers,
+          [action.payload.sharerId]: action.payload.viewers,
+        },
       };
     case "SET_VIEW":
       return { ...state, currentView: action.payload };
@@ -560,6 +575,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
         }
+      } else if (msg.type === "screen_viewers_update") {
+        dispatch({
+          type: "SET_SCREEN_VIEWERS",
+          payload: { sharerId: msg.sharer_user_id, viewers: msg.viewers || [] },
+        });
       } else if (msg.type === "m.reply_notification") {
         if (msg.room_id !== stateRef.current.currentRoomId) {
           dispatch({

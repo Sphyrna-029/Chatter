@@ -62,6 +62,22 @@ export function ScreenShareHeader({
               : `${shortenId(state.selectedScreenSharer)}'s screen`
             : "Screen Share"}
         </p>
+        {state.isScreenSharing && (() => {
+          const viewers = state.screenViewers[state.userId!] || [];
+          if (viewers.length === 0) return (
+            <span className="text-xs text-muted-foreground">No viewers</span>
+          );
+          if (viewers.length <= 3) return (
+            <span className="text-xs text-purple-400">
+              {viewers.map(shortenId).join(", ")}
+            </span>
+          );
+          return (
+            <span className="text-xs text-purple-400">
+              {viewers.length} viewers
+            </span>
+          );
+        })()}
       </div>
       <div className="flex items-center gap-1 shrink-0">
         {sharers.length > 1 && (

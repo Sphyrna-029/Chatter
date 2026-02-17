@@ -29,6 +29,23 @@ pub(crate) fn subscriber_key(viewer_user_id: &str, sharer_user_id: &str) -> Stri
     format!("{}|{}", viewer_user_id, sharer_user_id)
 }
 
+/// Send the current viewer list to the sharer so they can display viewer count.
+pub(crate) async fn send_screen_viewers_update(state: &AppState, sharer_user_id: &str) {
+    let viewers: Vec<String> = {
+        let subs = state.screen_subscribers.read().await;
+        subs.values()
+            .filter(|entry| entry.sharer_user_id == sharer_user_id)
+            .map(|entry| entry.viewer_user_id.clone())
+            .collect()
+    };
+    let msg = json!({
+        "type": "screen_viewers_update",
+        "sharer_user_id": sharer_user_id,
+        "viewers": viewers,
+    });
+    send_to_user(state, sharer_user_id, &msg).await;
+}
+
 pub(crate) async fn user_in_voice_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
     let vc = state.voice_channels.read().await;
     vc.get(room_id)
@@ -75,6 +92,7 @@ pub(crate) async fn teardown_screen_subscriber_pair(
             audio_task.abort();
         }
         let _ = subscriber.peer_connection.close().await;
+        send_screen_viewers_update(state, sharer_user_id).await;
     }
 }
 
@@ -99,12 +117,23 @@ pub(crate) async fn teardown_screen_subscriptions_for_viewer(
         removed
     };
 
+    let mut affected_sharers = Vec::new();
+    for subscriber in &subscribers {
+        if !affected_sharers.contains(&subscriber.sharer_user_id) {
+            affected_sharers.push(subscriber.sharer_user_id.clone());
+        }
+    }
+
     for subscriber in subscribers {
         subscriber.forward_task.abort();
         if let Some(audio_task) = subscriber.audio_forward_task {
             audio_task.abort();
         }
         let _ = subscriber.peer_connection.close().await;
+    }
+
+    for sharer_id in affected_sharers {
+        send_screen_viewers_update(state, &sharer_id).await;
     }
 }
 
@@ -154,6 +183,7 @@ pub(crate) async fn teardown_screen_publisher(
 
     teardown_screen_subscriptions_for_sharer(state, sharer_user_id).await;
     let _ = publisher.peer_connection.close().await;
+    send_screen_viewers_update(state, sharer_user_id).await;
     Some(publisher.room_id)
 }
 
@@ -841,6 +871,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
             "sdp": local_desc.sdp
         });
         send_to_user(&state, viewer_user_id, &response).await;
+        send_screen_viewers_update(&state, sharer_user_id).await;
     } else {
         teardown_screen_subscriber_pair(&state, viewer_user_id, sharer_user_id).await;
         let error = json!({
