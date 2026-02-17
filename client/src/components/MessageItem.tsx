@@ -2,7 +2,7 @@ import { memo, useMemo, useState, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -230,6 +230,7 @@ export function MessageItem({ message }: MessageItemProps) {
     hour: "2-digit",
     minute: "2-digit",
   });
+  const avatarUrl = state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
 
@@ -280,6 +281,7 @@ export function MessageItem({ message }: MessageItemProps) {
     <div className="group relative py-1 px-2 rounded-md hover:bg-accent/50 transition-colors" data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0">
+          {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
           <AvatarFallback className="text-xs font-semibold bg-secondary">
             {initial}
           </AvatarFallback>
