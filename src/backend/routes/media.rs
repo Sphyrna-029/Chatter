@@ -56,7 +56,7 @@ pub(crate) async fn upload_file(
     }
 
     if data.len() > MAX_UPLOAD_SIZE {
-        return error_response(StatusCode::BAD_REQUEST, "File too large (max 10MB)");
+        return error_response(StatusCode::BAD_REQUEST, "File too large (max 500MB)");
     }
 
     // Generate random folder name
