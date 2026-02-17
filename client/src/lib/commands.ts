@@ -53,7 +53,7 @@ const commands: Command[] = [
         };
       }
       const lines = commands
-        .filter((c) => !["cowsay", "netrun", "starfield", "grace", "skull"].includes(c.name))
+        .filter((c) => !["cowsay", "braindance", "starfield", "grace", "skull"].includes(c.name))
         .map((c) => `  /${c.name.padEnd(10)} ${c.description}`);
       return { output: `Available commands:\n${lines.join("\n")}`, type: "info" };
     },
@@ -240,111 +240,38 @@ const commands: Command[] = [
     },
   },
   {
-    name: "netrun",
-    aliases: ["breach", "jack", "hack"],
-    description: "Jack into the NET — Breach Protocol",
-    usage: "/netrun [ice-level]",
-    execute: async (args) => {
-      const iceLevel = Math.min(Math.max(parseInt(args[0]) || 2, 1), 5);
+    name: "braindance",
+    aliases: ["bd"],
+    description: "Slot in a braindance, choom",
+    usage: "/braindance",
+    execute: async () => {
       const pick = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
-      const hex = () => pick("0123456789ABCDEF".split("")) + pick("0123456789ABCDEF".split(""));
 
-      // ── Breach Protocol hex matrix ──
-      const matSize = 4 + iceLevel;
-      const matrix: string[][] = [];
-      for (let r = 0; r < matSize; r++) {
-        const row: string[] = [];
-        for (let c = 0; c < matSize; c++) row.push(hex());
-        matrix.push(row);
-      }
-
-      // Pick a "solution path" through the matrix (alternating row/col picks)
-      const seqLen = 2 + iceLevel;
-      const seq: string[] = [];
-      let curRow = Math.floor(Math.random() * matSize);
-      let curCol = Math.floor(Math.random() * matSize);
-      for (let i = 0; i < seqLen; i++) {
-        seq.push(matrix[curRow][curCol]);
-        if (i % 2 === 0) curCol = Math.floor(Math.random() * matSize);
-        else curRow = Math.floor(Math.random() * matSize);
-      }
-
-      // Daemon names — Edgerunners / cyberpunk references
-      const daemons = [
-        "DATAMINE_V1",    "DATAMINE_V2",    "DATAMINE_V3",
-        "ICEPICK",        "MASS_VULN",      "OPTICS_JAMMER",
-        "CRIPPLE_MOV",    "SYNAPSE_BURNOUT","CONTAGION",
-        "SHORT_CIRCUIT",  "CYBERPSYCHO",    "PING_DAEMON",
-        "SANDEVISTAN",    "MONOWIRE_HOOK",  "MANTIS_BLADE",
-        "LUCY_GHOST",     "DAVID_OVERCLOCK","SMASHER_KILL",
-        "KIWI_BACKDOOR",  "BECCA_BARRAGE",  "FALCO_EXFIL",
-        "RACHE_BARTMOSS", "ALT_CUNNINGHAM", "BLACKWALL_TAP",
-        "ARASAKA_WORM",   "NETWATCH_SPOOF", "MILITECH_SIPHON",
+      const intros = [
+        "Got a nova BD for you, choom. Straight from Jig-Jig Street.",
+        "Slotting you in, choomba. This one's preem.",
+        "Fresh off the black market — Judy'd be proud.",
+        "Wraith-sourced BD. No corpo filter. Raw scroll.",
+        "This one flatlined three editors. You ready, gonk?",
+        "Ripper says your chrome can handle it. Jack in.",
       ];
 
-      // Select daemons to "upload" based on ICE level
-      const activeDaemons = Array.from(
-        { length: Math.min(1 + iceLevel, 5) },
-        () => pick(daemons)
-      ).filter((v, i, a) => a.indexOf(v) === i); // unique
+      const outros = [
+        "Stay chrome out there.",
+        "Don't burn out on me, choom.",
+        "Never fade away.",
+        "See you in the Afterlife.",
+        "A thing of beauty, I know what I have to do.",
+        "What's one more corpo secret between chooms?",
+      ];
 
-      // ── Build output ──
       const lines: string[] = [];
-
-      // Header
-      lines.push("╔══════════════════════════════════════════════╗");
-      lines.push("║  BREACH PROTOCOL v4.2.77 — NETRUNNER DECK   ║");
-      lines.push("╠══════════════════════════════════════════════╣");
-      lines.push(`║  ICE LEVEL: ${"█".repeat(iceLevel)}${"░".repeat(5 - iceLevel)}  [${iceLevel}/5]                  ║`);
-      lines.push("╚══════════════════════════════════════════════╝");
+      lines.push(">> BRAINDANCE LINK DETECTED");
+      lines.push(`>> ${pick(intros)}`);
       lines.push("");
-
-      // Code matrix
-      lines.push("┌─ CODE MATRIX ─────────────────┐");
-      for (const row of matrix) {
-        lines.push("│  " + row.join("  ") + "  │");
-      }
-      lines.push("└───────────────────────────────-┘");
+      lines.push("  https://youtu.be/KvMY1uzSC1E?si=xU-Qy8hCHgAqrQ5I");
       lines.push("");
-
-      // Buffer sequence
-      lines.push("BUFFER: [ " + seq.join(" → ") + " ]");
-      lines.push("");
-
-      // Daemon upload status
-      lines.push("┌─ DAEMONS ─────────────────────┐");
-      for (const d of activeDaemons) {
-        const uploaded = Math.random() > 0.3;
-        const status = uploaded ? "UPLOADED ■" : "FAILED   □";
-        const color = uploaded ? "+" : "-";
-        lines.push(`│ ${color} ${d.padEnd(18)} ${status} │`);
-      }
-      lines.push("└───────────────────────────────┘");
-      lines.push("");
-
-      // Flavor text — random netrunner status lines
-      const flavorLines = [
-        ">> Jacking in through local subnet...",
-        ">> ICE detected — running BREACH PROTOCOL",
-        `>> Neural link stable — latency ${Math.floor(Math.random() * 12) + 1}ms`,
-        ">> RAM: ██████░░ 6/8 available",
-        ">> Cyberdeck: Arasaka MK.5 [MODDED]",
-        ">> Signal routed through " + pick(["Kabuki", "Japantown", "Watson", "Pacifica", "Dogtown", "Heywood", "Afterlife"]) + " relay",
-        ">> Daemon payload delivered. Flatline the ICE.",
-        ">> Remember — never fade away, choom.",
-        ">> \"A thing of beauty... I know what I have to do.\"",
-        ">> Connection trace: MASKED via Bartmoss' Ghost",
-      ];
-
-      // Pick a few random flavor lines
-      const numFlavor = 3 + Math.floor(Math.random() * 3);
-      const shuffled = flavorLines.sort(() => Math.random() - 0.5);
-      for (let i = 0; i < Math.min(numFlavor, shuffled.length); i++) {
-        lines.push(shuffled[i]);
-      }
-
-      lines.push("");
-      lines.push(">> BREACH COMPLETE. Stay chrome, netrunner. ◈");
+      lines.push(`>> ${pick(outros)}`);
 
       return { output: lines.join("\n"), type: "info" };
     },
