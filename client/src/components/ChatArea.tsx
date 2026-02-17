@@ -191,8 +191,8 @@ export function ChatArea() {
     const file = e.target.files?.[0];
     if (!file || !state.currentRoomId) return;
     e.target.value = "";
-    if (file.size > 10 * 1024 * 1024) {
-      alert("File too large (max 10MB)");
+    if (file.size > 500 * 1024 * 1024) {
+      alert("File too large (max 500MB)");
       return;
     }
     setUploading(true);
