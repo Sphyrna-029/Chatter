@@ -109,26 +109,34 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
         )}
 
-        {/* Room initial */}
-        <span
-          className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-bold"
-          style={{
-            background: isActive
-              ? "hsl(var(--sidebar-primary))"
-              : "hsl(var(--sidebar-accent))",
-            color: isActive
-              ? "hsl(var(--sidebar-primary-foreground))"
-              : "hsl(var(--sidebar-foreground))",
-          }}
-        >
-          {isDm ? (
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
-            </svg>
-          ) : (
-            roomInitial
-          )}
-        </span>
+        {/* Room icon / initial */}
+        {info?.icon_url ? (
+          <img
+            src={info.icon_url}
+            alt=""
+            className="h-8 w-8 rounded-md object-cover"
+          />
+        ) : (
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-md text-xs font-bold"
+            style={{
+              background: isActive
+                ? "hsl(var(--sidebar-primary))"
+                : "hsl(var(--sidebar-accent))",
+              color: isActive
+                ? "hsl(var(--sidebar-primary-foreground))"
+                : "hsl(var(--sidebar-foreground))",
+            }}
+          >
+            {isDm ? (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
+              </svg>
+            ) : (
+              roomInitial
+            )}
+          </span>
+        )}
 
         {/* Room name */}
         <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground">
