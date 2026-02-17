@@ -293,20 +293,46 @@ export async function apiUpdateTopic(roomId: string, topic: string) {
   return res.json();
 }
 
-export async function apiUploadFile(file: File): Promise<{ url: string }> {
+export async function apiUploadFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ url: string }> {
   const formData = new FormData();
   formData.append("filename", file.name);
   formData.append("file", file);
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    headers: _accessToken ? { Authorization: `Bearer ${_accessToken}` } : {},
-    body: formData,
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload");
+    if (_accessToken) {
+      xhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
+    }
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      };
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("Invalid response from server"));
+        }
+      } else {
+        try {
+          const body = JSON.parse(xhr.responseText);
+          reject(new Error(body.error || "Upload failed"));
+        } catch {
+          reject(new Error("Upload failed"));
+        }
+      }
+    };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(formData);
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error || "Upload failed");
-  }
-  return res.json();
 }
 
 // Link previews

@@ -10,6 +10,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -44,6 +50,8 @@ export function ChatArea() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
@@ -196,8 +204,10 @@ export function ChatArea() {
       return;
     }
     setUploading(true);
+    setUploadProgress(0);
+    setUploadFileName(file.name);
     try {
-      const { url } = await apiUploadFile(file);
+      const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
       await sendMessage(url);
     } catch (err: any) {
       alert(err.message || "Upload failed");
@@ -487,6 +497,28 @@ export function ChatArea() {
           </div>
         </div>
       )}
+      <Dialog open={uploading}>
+        <DialogContent
+          className="sm:max-w-[300px]"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          showCloseButton={false}
+        >
+          <DialogHeader>
+            <DialogTitle className="text-sm">Uploading file</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground truncate">{uploadFileName}</p>
+            <div className="bg-muted rounded-full h-2">
+              <div
+                className="bg-primary rounded-full h-2 transition-all"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground text-center">{uploadProgress}%</p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
