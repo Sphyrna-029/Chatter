@@ -77,7 +77,20 @@ pub(crate) async fn upload_file(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
 
-    let url = format!("https://chatter.zgaf.io/external/{}/{}", folder, filename);
+    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    // Encode characters that break URLs: spaces, quotes, angle brackets, etc.
+    const ENCODE_SET: &AsciiSet = &CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'#')
+        .add(b'?')
+        .add(b'{')
+        .add(b'}');
+    let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
+    let url = format!("https://chatter.zgaf.io/external/{}/{}", folder, encoded_filename);
     (StatusCode::OK, Json(json!({ "url": url })))
 }
 
