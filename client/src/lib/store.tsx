@@ -423,6 +423,7 @@ interface AppContextValue {
   updateTopic: (roomId: string, topic: string) => Promise<void>;
   updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => Promise<void>;
   setCustomStatus: (status: string) => void;
+  setManualStatus: (status: string) => void;
   updateProfile: (profile: { avatarUrl?: string; about?: string; customStatus?: string }) => void;
 }
 
@@ -478,8 +479,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
           const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1) ?? "";
           const hasMention = myUsername !== "" && msg.content?.body?.includes(`@${myUsername}`) === true;
+          const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
           if (isDm || hasMention) {
-            new Audio("/external/vc-join.wav").play().catch(() => {});
+            if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
             dispatch({
               type: "SET_MENTION",
               payload: { roomId: msg.room_id, hasMention: true },
@@ -594,7 +596,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
       } else if (msg.type === "m.reply_notification") {
         if (msg.room_id !== stateRef.current.currentRoomId) {
-          new Audio("/external/vc-join.wav").play().catch(() => {});
+          const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
+          if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
           dispatch({
             type: "SET_MENTION",
             payload: { roomId: msg.room_id, hasMention: true },
@@ -1013,6 +1016,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const setManualStatus = useCallback((status: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "set_status", status }));
+    }
+  }, []);
+
   const updateProfile = useCallback((profile: { avatarUrl?: string; about?: string; customStatus?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1050,6 +1060,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateTopic,
         updateRoomSettings,
         setCustomStatus,
+        setManualStatus,
         updateProfile,
       }}
     >

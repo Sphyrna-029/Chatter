@@ -6,6 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+
+const STATUS_OPTIONS = [
+  { value: "online", label: "Online", color: "bg-green-500" },
+  { value: "away", label: "Away", color: "bg-yellow-500" },
+  { value: "dnd", label: "Do Not Disturb", color: "bg-red-500" },
+  { value: "offline", label: "Invisible", color: "bg-muted-foreground" },
+] as const;
+
+function statusColor(status: string) {
+  if (status === "active" || status === "online") return "bg-green-500";
+  if (status === "idle" || status === "away") return "bg-yellow-500";
+  if (status === "dnd") return "bg-red-500";
+  return "bg-muted-foreground";
+}
+
+function statusLabel(status: string) {
+  if (status === "active" || status === "online") return "Online";
+  if (status === "idle" || status === "away") return "Away";
+  if (status === "dnd") return "Do Not Disturb";
+  return "Offline";
+}
 import {
   Dialog,
   DialogContent,
@@ -26,7 +47,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, openDM, updateProfile } = useAppContext();
+  const { state, openDM, updateProfile, setManualStatus } = useAppContext();
   const isSelf = userId === state.userId;
   const presence = state.userPresence[userId];
   const status = presence?.status || "offline";
@@ -142,17 +163,38 @@ export function UserProfileDialog({
             <p className="text-sm text-muted-foreground">{userId}</p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "h-2.5 w-2.5 rounded-full",
-                status === "active" && "bg-green-500",
-                status === "idle" && "bg-yellow-500",
-                status === "offline" && "bg-muted-foreground"
-              )}
-            />
-            <span className="text-sm capitalize">{status}</span>
-          </div>
+          {isSelf ? (
+            <div className="w-full">
+              <p className="text-xs font-medium text-muted-foreground mb-2">Status</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                {STATUS_OPTIONS.map((opt) => {
+                  const isActive = status === opt.value ||
+                    (opt.value === "online" && status === "active") ||
+                    (opt.value === "away" && status === "idle");
+                  return (
+                    <button
+                      key={opt.value}
+                      onClick={() => setManualStatus(opt.value)}
+                      className={cn(
+                        "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors cursor-pointer text-left",
+                        isActive
+                          ? "bg-accent text-foreground font-medium"
+                          : "hover:bg-accent/50 text-muted-foreground"
+                      )}
+                    >
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", opt.color)} />
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className={cn("h-2.5 w-2.5 rounded-full", statusColor(status))} />
+              <span className="text-sm">{statusLabel(status)}</span>
+            </div>
+          )}
 
           {isSelf ? (
             <div className="w-full space-y-3">

@@ -85,6 +85,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             last_typing: 0.0,
             connected: true,
             custom_status: String::new(),
+            manual_status: None,
         },
     );
 
@@ -426,12 +427,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            {
+            let effective_status = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = custom_status.clone();
-                }
-            }
+                    match &p.manual_status {
+                        Some(ms) => ms.clone(),
+                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                    }
+                } else { "active".to_string() }
+            };
             let (avatar_url, about) = {
                 let users = state.users.read().await;
                 users.get(user_id).map(|u| (u.avatar_url.clone(), u.about.clone())).unwrap_or_default()
@@ -446,7 +451,43 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let event = json!({
                 "type": "presence_update",
                 "user_id": user_id,
-                "status": "active",
+                "status": effective_status,
+                "custom_status": custom_status,
+                "avatar_url": avatar_url,
+                "about": about
+            });
+            for rid in user_rooms {
+                broadcast_to_room(&state, &rid, &event).await;
+            }
+        }
+        "set_status" => {
+            let manual_status = msg.get("status").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let (effective_status, custom_status) = {
+                let mut up = state.user_presence.write().await;
+                if let Some(p) = up.get_mut(user_id) {
+                    p.manual_status = manual_status;
+                    let eff = match &p.manual_status {
+                        Some(ms) => ms.clone(),
+                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                    };
+                    (eff, p.custom_status.clone())
+                } else { ("active".to_string(), String::new()) }
+            };
+            let (avatar_url, about) = {
+                let users = state.users.read().await;
+                users.get(user_id).map(|u| (u.avatar_url.clone(), u.about.clone())).unwrap_or_default()
+            };
+            let rm = state.room_members.read().await;
+            let user_rooms: Vec<String> = rm
+                .iter()
+                .filter(|(_, members)| members.contains(&user_id.to_string()))
+                .map(|(rid, _)| rid.clone())
+                .collect();
+            drop(rm);
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": effective_status,
                 "custom_status": custom_status,
                 "avatar_url": avatar_url,
                 "about": about
@@ -491,10 +532,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .map(|(rid, _)| rid.clone())
                 .collect();
             drop(rm);
+            let effective_status = {
+                let up = state.user_presence.read().await;
+                if let Some(p) = up.get(user_id) {
+                    match &p.manual_status {
+                        Some(ms) => ms.clone(),
+                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                    }
+                } else { "active".to_string() }
+            };
             let event = json!({
                 "type": "presence_update",
                 "user_id": user_id,
-                "status": "active",
+                "status": effective_status,
                 "custom_status": custom_status,
                 "avatar_url": avatar_url,
                 "about": about

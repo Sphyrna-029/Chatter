@@ -43,7 +43,7 @@ export function MembersPanel() {
                 }}
                 className={cn(
                   "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer hover:bg-accent/50",
-                  status === "offline" && "opacity-50"
+                  status === "offline" && "opacity-50",
                 )}
               >
                 <div className="relative flex-shrink-0">
@@ -56,9 +56,10 @@ export function MembersPanel() {
                   <span
                     className={cn(
                       "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
-                      status === "active" && "bg-green-500",
-                      status === "idle" && "bg-yellow-500",
-                      status === "offline" && "bg-muted-foreground"
+                      (status === "active" || status === "online") && "bg-green-500",
+                      (status === "idle" || status === "away") && "bg-yellow-500",
+                      status === "dnd" && "bg-red-500",
+                      (status === "offline") && "bg-muted-foreground"
                     )}
                   />
                 </div>

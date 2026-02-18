@@ -84,6 +84,8 @@ pub(crate) async fn get_room_presence(
                 let time_since_active = current_time - presence.last_active;
                 let status = if !presence.connected {
                     "offline"
+                } else if let Some(ref ms) = presence.manual_status {
+                    ms.as_str()
                 } else if time_since_active < 300.0 {
                     "active"
                 } else {
