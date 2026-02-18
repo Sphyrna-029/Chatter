@@ -57,7 +57,6 @@ export interface AppState {
   inVoiceChannel: boolean;
   isMuted: boolean;
   voiceInputMode: "open" | "ptt";
-  voiceRoomId: string | null;
   voiceMembers: string[];
   voiceMemberStates: Record<
     string,
@@ -97,7 +96,7 @@ type Action =
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> }
-  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "isScreenSharing" | "voiceRoomId">> }
+  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
@@ -133,7 +132,6 @@ const initialState: AppState = {
   inVoiceChannel: false,
   isMuted: false,
   voiceInputMode: "open",
-  voiceRoomId: null,
   voiceMembers: [],
   voiceMemberStates: {},
   isScreenSharing: false,
@@ -173,17 +171,12 @@ function reducer(state: AppState, action: Action): AppState {
         oldestMessageIndex: null,
         loadingOlderMessages: false,
         roomMembers: [],
-        // When in voice, preserve voice/screen state — the voice channel persists across room navigation
-        ...(state.inVoiceChannel
-          ? {}
-          : {
-              voiceMembers: [],
-              voiceMemberStates: {},
-              activeScreenSharers: [],
-              screenViewerOpen: false,
-              selectedScreenSharer: null,
-              screenViewers: {},
-            }),
+        voiceMembers: [],
+        voiceMemberStates: {},
+        activeScreenSharers: [],
+        screenViewerOpen: false,
+        selectedScreenSharer: null,
+        screenViewers: {},
         typingUsers: [],
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }

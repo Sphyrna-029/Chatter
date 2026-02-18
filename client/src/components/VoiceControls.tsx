@@ -527,7 +527,7 @@ export function VoiceControls() {
       });
       localStreamRef.current = stream;
 
-      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, voiceRoomId: state.currentRoomId } });
+      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false } });
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: "voice_join", room_id: state.currentRoomId }));
@@ -570,7 +570,7 @@ export function VoiceControls() {
       localStreamRef.current = null;
     }
 
-    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isScreenSharing: false, voiceRoomId: null } });
+    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isScreenSharing: false } });
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "voice_leave", room_id: state.currentRoomId }));

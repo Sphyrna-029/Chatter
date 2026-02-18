@@ -218,13 +218,6 @@ export function ChatArea() {
     inputRef.current?.focus();
   };
 
-  // Auto-focus the input whenever the user clicks reply on a message
-  useEffect(() => {
-    if (state.replyingTo) {
-      inputRef.current?.focus();
-    }
-  }, [state.replyingTo]);
-
   // Uploads a file and returns its URL; does NOT send a message.
   const uploadFile = async (file: File): Promise<string | null> => {
     if (!state.currentRoomId) return null;
