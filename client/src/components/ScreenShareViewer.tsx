@@ -10,8 +10,12 @@ const shortenId = (id: string) =>
 /** Header bar shown above the resizable panel group — always visible */
 export function ScreenShareHeader({
   containerRef,
+  isPiP,
+  onTogglePiP,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  isPiP: boolean;
+  onTogglePiP: () => void;
 }) {
   const { state, dispatch } = useAppContext();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -80,6 +84,29 @@ export function ScreenShareHeader({
         })()}
       </div>
       <div className="flex items-center gap-1 shrink-0">
+        {document.pictureInPictureEnabled && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={onTogglePiP}
+            title={isPiP ? "Exit Picture-in-Picture" : "Picture-in-Picture"}
+          >
+            {isPiP ? (
+              /* exit PiP: rectangle with arrow pointing inward */
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <rect x="13" y="9" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+              </svg>
+            ) : (
+              /* enter PiP: rectangle with smaller outlined inset rectangle */
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <rect x="13" y="9" width="7" height="5" rx="1" />
+              </svg>
+            )}
+          </Button>
+        )}
         {sharers.length > 1 && (
           <div className="flex items-center gap-1 mr-2">
             {sharers.map((sharerId) => (
