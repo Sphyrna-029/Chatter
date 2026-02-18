@@ -367,7 +367,7 @@ export function ChatArea() {
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden">
         <ScrollArea className="h-full px-2 py-2">
-          <div className="space-y-0.5">
+          <div>
             {state.loadingOlderMessages && (
               <div className="text-center text-xs text-muted-foreground py-2">
                 Loading older messages...
