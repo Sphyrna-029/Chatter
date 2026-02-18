@@ -38,6 +38,10 @@ export function ChatLayout() {
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const [isPiP, setIsPiP] = useState(false);
 
+  // pipPending: true while we're waiting for PiP to activate after a room switch.
+  // Keeps the viewer wrapper visible so the browser still decodes video frames.
+  const [pipPending, setPipPending] = useState(false);
+
   // Load rooms on mount
   useEffect(() => {
     loadRooms();
@@ -54,34 +58,45 @@ export function ChatLayout() {
 
   const showViewer = hasActiveScreenShare && isOnVoiceRoom;
 
-  // Auto-enter PiP when navigating away from the voice room; auto-exit on return.
-  // Uses the ScreenShareViewer's own <video> (which stays mounted) instead of a
-  // separate hidden anchor — browsers skip frame decoding for off-screen elements.
-  useEffect(() => {
-    if (!hasActiveScreenShare) return;
-
-    if (!isOnVoiceRoom) {
-      // Switched away — enter PiP on the already-playing video
-      const videoEl = getScreenVideo();
-      if (
-        videoEl &&
-        !document.pictureInPictureElement &&
-        typeof videoEl.requestPictureInPicture === "function"
-      ) {
-        (async () => {
-          try {
-            await videoEl.play();
-            await videoEl.requestPictureInPicture();
-          } catch { /* unsupported / not allowed */ }
-        })();
-      }
-    } else {
-      // Returned to voice room — exit PiP so the inline viewer takes over
-      if (document.pictureInPictureElement) {
-        try { document.exitPictureInPicture(); } catch { /* ignore */ }
-      }
+  // Detect transition away from voice room during render (synchronously) so
+  // the wrapper stays visible in the SAME commit — effects run too late.
+  const prevIsOnVoiceRoomRef = useRef(isOnVoiceRoom);
+  if (prevIsOnVoiceRoomRef.current !== isOnVoiceRoom) {
+    prevIsOnVoiceRoomRef.current = isOnVoiceRoom;
+    if (!isOnVoiceRoom && hasActiveScreenShare) {
+      // Leaving voice room with active screen share — hold the viewer visible
+      // until PiP is confirmed so the video keeps decoding frames.
+      if (!pipPending) setPipPending(true);
     }
-  }, [hasActiveScreenShare, isOnVoiceRoom]);
+  }
+
+  // The viewer wrapper stays visible while showing OR while PiP is pending
+  const viewerVisible = showViewer || (hasActiveScreenShare && pipPending);
+
+  // Once pipPending is set, request PiP on the still-visible video
+  useEffect(() => {
+    if (!pipPending) return;
+    const videoEl = getScreenVideo();
+    if (videoEl && typeof videoEl.requestPictureInPicture === "function") {
+      (async () => {
+        try {
+          await videoEl.play();
+          await videoEl.requestPictureInPicture();
+        } catch { /* unsupported / not allowed */ }
+        setPipPending(false);
+      })();
+    } else {
+      setPipPending(false);
+    }
+  }, [pipPending]);
+
+  // Exit PiP when returning to the voice room
+  useEffect(() => {
+    if (isOnVoiceRoom && document.pictureInPictureElement) {
+      try { document.exitPictureInPicture(); } catch { /* ignore */ }
+    }
+    if (isOnVoiceRoom) setPipPending(false);
+  }, [isOnVoiceRoom]);
 
   // Track PiP state via browser events
   useEffect(() => {
@@ -156,7 +171,7 @@ export function ChatLayout() {
                     <div
                       ref={viewerContainerRef}
                       style={
-                        showViewer
+                        viewerVisible
                           ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const }
                           : { position: "fixed", left: "-9999px", top: "-9999px", width: "320px", height: "180px" }
                       }
@@ -165,7 +180,7 @@ export function ChatLayout() {
                     </div>
                   </>
                 )}
-                <div style={showViewer ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const } : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const }}>
+                <div style={viewerVisible ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const } : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const }}>
                   <ChatArea />
                 </div>
               </div>
