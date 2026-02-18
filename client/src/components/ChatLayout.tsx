@@ -145,13 +145,11 @@ export function ChatLayout() {
             muted
             style={{
               position: "fixed",
-              left: "-2px",
-              top: "-2px",
-              width: "2px",
-              height: "2px",
-              opacity: 0.01,
+              left: "-9999px",
+              top: "-9999px",
+              width: "320px",
+              height: "180px",
               pointerEvents: "none",
-              zIndex: -1,
             }}
           />
         )}
