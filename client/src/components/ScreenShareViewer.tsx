@@ -19,6 +19,7 @@ export function ScreenShareHeader({
 }) {
   const { state, dispatch } = useAppContext();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const supportsPiP = (() => { try { return !!document.pictureInPictureEnabled; } catch { return false; } })();
 
   const sharers = state.activeScreenSharers;
 
@@ -107,7 +108,7 @@ export function ScreenShareHeader({
             ))}
           </div>
         )}
-        {document.pictureInPictureEnabled && onTogglePiP && (
+        {onTogglePiP && supportsPiP && (
           <Button
             size="sm"
             variant="ghost"

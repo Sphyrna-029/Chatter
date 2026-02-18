@@ -15,6 +15,25 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 
+// ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
+function pipEnabled(): boolean {
+  try { return !!document.pictureInPictureEnabled; } catch { return false; }
+}
+function pipActive(): boolean {
+  try { return !!document.pictureInPictureElement; } catch { return false; }
+}
+function pipRequest(video: HTMLVideoElement): Promise<void> {
+  try {
+    return video.requestPictureInPicture().then(() => {});
+  } catch { return Promise.reject(); }
+}
+function pipExit(): Promise<void> {
+  try {
+    if (!pipActive()) return Promise.resolve();
+    return document.exitPictureInPicture();
+  } catch { return Promise.reject(); }
+}
+
 /** Floating tab that appears on the left edge when the sidebar is collapsed */
 function LeftPanelRestoreButton() {
   const { state, toggleSidebar } = useSidebar();
@@ -38,6 +57,8 @@ export function ChatLayout() {
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const [isPiP, setIsPiP] = useState(false);
+  // True when we want PiP but auto-enter failed (Firefox requires user gesture)
+  const [pipWanted, setPipWanted] = useState(false);
   // Flag to distinguish our code exiting PiP vs the user clicking "back to tab" / close
   const programmaticPipExitRef = useRef(false);
 
@@ -103,39 +124,67 @@ export function ChatLayout() {
     };
   }, []);
 
+  // Helper: safely exit PiP with the programmatic flag
+  const safeExitPiP = useCallback(() => {
+    if (!pipActive()) return;
+    programmaticPipExitRef.current = true;
+    pipExit().catch(() => { programmaticPipExitRef.current = false; });
+  }, []);
+
   // Auto-PiP: when navigating away from voice room while watching a screen share
   useEffect(() => {
+    if (!pipEnabled()) {
+      // Browser doesn't support PiP at all — just show the banner
+      if (hasActiveScreenShare && !isOnVoiceRoom) setPipWanted(true);
+      else setPipWanted(false);
+      return;
+    }
     const video = pipVideoRef.current;
     if (!video) return;
     if (hasActiveScreenShare && !isOnVoiceRoom) {
-      // Navigated away — pop into PiP
-      if (!document.pictureInPictureElement && video.srcObject) {
-        video.requestPictureInPicture().catch(() => {});
+      // Navigated away — try to pop into PiP automatically
+      if (!pipActive() && video.srcObject) {
+        pipRequest(video)
+          .then(() => setPipWanted(false))
+          .catch(() => {
+            // Firefox (and others) require a user gesture — show manual banner instead
+            setPipWanted(true);
+          });
       }
-    } else if (isOnVoiceRoom && document.pictureInPictureElement) {
-      // Returned to voice room — exit PiP, inline viewer takes over
-      programmaticPipExitRef.current = true;
-      document.exitPictureInPicture().catch(() => { programmaticPipExitRef.current = false; });
+    } else if (isOnVoiceRoom) {
+      // Returned to voice room — exit PiP if active, clear wanted flag
+      setPipWanted(false);
+      safeExitPiP();
     }
-  }, [hasActiveScreenShare, isOnVoiceRoom]);
+  }, [hasActiveScreenShare, isOnVoiceRoom, safeExitPiP]);
 
   // Close PiP when leaving voice or when screen share stops
   useEffect(() => {
-    if (!hasActiveScreenShare && document.pictureInPictureElement) {
-      programmaticPipExitRef.current = true;
-      document.exitPictureInPicture().catch(() => { programmaticPipExitRef.current = false; });
+    if (!hasActiveScreenShare) {
+      setPipWanted(false);
+      safeExitPiP();
     }
-  }, [hasActiveScreenShare]);
+  }, [hasActiveScreenShare, safeExitPiP]);
 
   const togglePiP = useCallback(() => {
     const video = pipVideoRef.current;
     if (!video) return;
-    if (document.pictureInPictureElement) {
-      programmaticPipExitRef.current = true;
-      document.exitPictureInPicture().catch(() => { programmaticPipExitRef.current = false; });
+    if (pipActive()) {
+      safeExitPiP();
     } else if (video.srcObject) {
-      video.requestPictureInPicture().catch(() => {});
+      pipRequest(video)
+        .then(() => setPipWanted(false))
+        .catch(() => {});
     }
+  }, [safeExitPiP]);
+
+  // Manually enter PiP from a user click (provides the gesture Firefox needs)
+  const manualEnterPiP = useCallback(() => {
+    const video = pipVideoRef.current;
+    if (!video || !video.srcObject) return;
+    pipRequest(video)
+      .then(() => setPipWanted(false))
+      .catch(() => {});
   }, []);
 
   // Navigate back to the voice room and restore inline viewer
@@ -154,7 +203,7 @@ export function ChatLayout() {
   const voiceRoomName = state.voiceRoomId
     ? state.roomInfoMap[state.voiceRoomId]?.name || "voice channel"
     : "voice channel";
-  const showPipBanner = isPiP && hasActiveScreenShare && !isOnVoiceRoom;
+  const showPipBanner = hasActiveScreenShare && !isOnVoiceRoom && (isPiP || pipWanted);
 
   return (
     <>
@@ -198,31 +247,59 @@ export function ChatLayout() {
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500" />
                   </span>
                   <p className="text-xs text-purple-300 truncate">
-                    Watching <span className="font-semibold">{sharerName}</span> in PiP
+                    {isPiP
+                      ? <>Watching <span className="font-semibold">{sharerName}</span> in PiP</>
+                      : <>Screen share from <span className="font-semibold">{sharerName}</span> is active</>
+                    }
                   </p>
                 </div>
-                <button
-                  onClick={returnToStream}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 hover:text-purple-200 transition-colors shrink-0 cursor-pointer"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* Firefox fallback: manual PiP button (provides user gesture) */}
+                  {pipWanted && !isPiP && (
+                    <button
+                      onClick={manualEnterPiP}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 hover:text-purple-200 transition-colors cursor-pointer"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                        <rect x="12" y="9" width="8" height="6" rx="1" />
+                      </svg>
+                      Pop out
+                    </button>
+                  )}
+                  <button
+                    onClick={returnToStream}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 hover:text-purple-200 transition-colors cursor-pointer"
                   >
-                    <polyline points="15 3 21 3 21 9" />
-                    <polyline points="9 21 3 21 3 15" />
-                    <line x1="21" y1="3" x2="14" y2="10" />
-                    <line x1="3" y1="21" x2="10" y2="14" />
-                  </svg>
-                  Expand to {voiceRoomName}
-                </button>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="15 3 21 3 21 9" />
+                      <polyline points="9 21 3 21 3 15" />
+                      <line x1="21" y1="3" x2="14" y2="10" />
+                      <line x1="3" y1="21" x2="10" y2="14" />
+                    </svg>
+                    Expand to {voiceRoomName}
+                  </button>
+                </div>
               </div>
             )}
 
