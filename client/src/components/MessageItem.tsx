@@ -300,7 +300,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-px" : "py-1")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-0" : "py-1")} data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         {grouped ? (
           <span className="w-8 flex-shrink-0 text-center text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity leading-[1.25rem]">
@@ -365,7 +365,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           ) : (
             <div
               className={cn(
-                "text-sm mt-0.5 break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap",
+                cn("text-sm break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap", !grouped && "mt-0.5"),
                 isDeleted && "italic text-muted-foreground opacity-60"
               )}
             >
