@@ -41,8 +41,11 @@ function processMessageBody(body: string, currentUserId: string | null) {
     )}">${match}</span>`;
   });
 
-  // Convert URLs to links only (no inline media)
+  // Convert URLs to links — suppress image/video/YouTube URLs since MediaPreview renders those
   escaped = escaped.replace(urlRegex, (url) => {
+    if (imageExtensions.test(url) || videoExtensions.test(url) || getYouTubeVideoId(url)) {
+      return "";
+    }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });

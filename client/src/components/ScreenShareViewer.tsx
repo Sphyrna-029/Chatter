@@ -246,9 +246,9 @@ export function ScreenShareViewer() {
   }
 
   return (
-    <div className="flex flex-col min-h-0 h-full relative bg-black/95">
+    <div className="flex flex-col min-h-0 h-full bg-black/95">
       {/* Main video */}
-      <div className="flex-1 flex items-center justify-center bg-black min-h-0">
+      <div className="flex-1 flex items-center justify-center bg-black min-h-0 relative">
         {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) ? (
           <video
@@ -278,9 +278,8 @@ export function ScreenShareViewer() {
             <p className="text-sm">Connecting to stream...</p>
           </div>
         )}
-      </div>
 
-      {/* Volume controls overlay */}
+      {/* Volume controls overlay — inside the video container so thumbnails can't cover it */}
       {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) && (
         <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity">
@@ -316,6 +315,7 @@ export function ScreenShareViewer() {
           </span>
         </div>
       )}
+      </div>
 
       {/* Preview thumbnails for multiple sharers */}
       {sharers.length > 1 && (

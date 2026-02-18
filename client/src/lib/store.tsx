@@ -474,12 +474,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (msg.type === "m.room.message") {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "ADD_MESSAGE", payload: msg });
-        }
-        if (msg.room_id !== stateRef.current.currentRoomId && msg.content?.msgtype !== "m.system") {
-          // Notify for DM messages
-          const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct;
-          const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1);
-          const hasMention = myUsername && msg.content?.body?.includes(`@${myUsername}`);
+        } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
+          const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
+          const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1) ?? "";
+          const hasMention = myUsername !== "" && msg.content?.body?.includes(`@${myUsername}`) === true;
           if (isDm || hasMention) {
             new Audio("/external/vc-join.wav").play().catch(() => {});
             dispatch({

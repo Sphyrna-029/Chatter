@@ -657,6 +657,7 @@ export function VoiceControls() {
       screenStreamsMap.set(state.userId!, stream);
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
+      dispatch({ type: "SCREEN_SHARE_STARTED", payload: state.userId! });
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: state.userId! } });
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
