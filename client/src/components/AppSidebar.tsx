@@ -11,6 +11,7 @@ import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
+  SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -219,38 +220,44 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div
-          className="flex items-center gap-3 cursor-pointer rounded-md p-1 -m-1 hover:bg-accent/50 transition-colors"
-          onClick={() => setProfileOpen(true)}
-        >
-          <div className="relative shrink-0">
-            <Avatar className="h-9 w-9">
-              {state.userId && state.userPresence[state.userId]?.avatarUrl && (
-                <AvatarImage src={state.userPresence[state.userId].avatarUrl} />
-              )}
-              <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
-                {initial}
-              </AvatarFallback>
-            </Avatar>
-            {(() => {
-              const st = state.userId ? (state.userPresence[state.userId]?.status ?? "offline") : "offline";
-              return (
-                <span className={cn(
-                  "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
-                  (st === "active" || st === "online") && "bg-green-500",
-                  (st === "idle" || st === "away") && "bg-yellow-500",
-                  st === "dnd" && "bg-red-500",
-                  st === "offline" && "bg-muted-foreground",
-                )} />
-              );
-            })()}
+        <div className="flex items-center gap-2">
+          <div
+            className="flex flex-1 items-center gap-3 cursor-pointer rounded-md p-1 -m-1 hover:bg-accent/50 transition-colors min-w-0"
+            onClick={() => setProfileOpen(true)}
+          >
+            <div className="relative shrink-0">
+              <Avatar className="h-9 w-9">
+                {state.userId && state.userPresence[state.userId]?.avatarUrl && (
+                  <AvatarImage src={state.userPresence[state.userId].avatarUrl} />
+                )}
+                <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
+                  {initial}
+                </AvatarFallback>
+              </Avatar>
+              {(() => {
+                const st = state.userId ? (state.userPresence[state.userId]?.status ?? "offline") : "offline";
+                return (
+                  <span className={cn(
+                    "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
+                    (st === "active" || st === "online") && "bg-green-500",
+                    (st === "idle" || st === "away") && "bg-yellow-500",
+                    st === "dnd" && "bg-red-500",
+                    st === "offline" && "bg-muted-foreground",
+                  )} />
+                );
+              })()}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <p className="truncate text-sm font-semibold">{displayName}</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {state.userId}
+              </p>
+            </div>
           </div>
-          <div className="flex-1 overflow-hidden">
-            <p className="truncate text-sm font-semibold">{displayName}</p>
-            <p className="truncate text-xs text-muted-foreground">
-              {state.userId}
-            </p>
-          </div>
+          <SidebarTrigger
+            className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+            title="Collapse sidebar (Ctrl+B)"
+          />
         </div>
       </SidebarHeader>
 

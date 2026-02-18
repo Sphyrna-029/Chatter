@@ -303,7 +303,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "-mt-0.5" : "pt-3 pb-1")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-1 -mt-0.5" : "pt-4 pb-2")} data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         {grouped ? (
           <span className="w-8 flex-shrink-0" />
@@ -422,7 +422,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
 
         {/* Action buttons (shown on hover) */}
         {!isDeleted && (
-          <div className="absolute right-2 top-1 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+          <div className={cn("absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1", grouped ? "top-0" : "top-1")}>
             <Button
               variant="ghost"
               size="icon"

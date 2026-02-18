@@ -90,7 +90,19 @@ pub(crate) async fn upload_file(
         .add(b'{')
         .add(b'}');
     let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
-    let url = format!("https://chatter.zgaf.io/external/{}/{}", folder, encoded_filename);
+
+    // Build the URL from the incoming Host header so that it works in both
+    // local development (http://localhost:8000) and production deployments.
+    let host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:8000");
+    let scheme = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
+        "http"
+    } else {
+        "https"
+    };
+    let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
     (StatusCode::OK, Json(json!({ "url": url })))
 }
 

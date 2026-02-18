@@ -54,6 +54,10 @@ export function ChatArea() {
   const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
 
+  // Pending file attachments — staged until the user presses Send/Enter
+  type PendingFile = { file: File; previewUrl: string | null };
+  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+
   // Get the actual scrollable viewport element from ScrollArea
   const getViewport = useCallback(() => {
     return scrollWrapperRef.current?.querySelector<HTMLElement>(
@@ -102,15 +106,34 @@ export function ChatArea() {
     messagesEndRef.current?.scrollIntoView();
   }, [state.currentRoomId]);
 
-  const handleSend = useCallback(async () => {
+  // Plain async function — never memoized so it always reads the latest state/pending
+  // files from the current render closure, avoiding stale-closure bugs.
+  const handleSend = async () => {
     const body = input.trim();
-    if (!body || !state.currentRoomId) return;
+    const hasFiles = pendingFiles.length > 0;
+    if (!body && !hasFiles) return;
+    if (!state.currentRoomId) return;
     if (body.length > MAX_MESSAGE_LENGTH) return;
     const replyEventId = state.replyingTo?.event_id;
     setInput("");
     dispatch({ type: "SET_REPLYING_TO", payload: null });
-    await sendMessage(body, replyEventId);
-  }, [input, state.currentRoomId, state.replyingTo, sendMessage, dispatch]);
+
+    // Grab and clear staged files before any async work
+    const toUpload = [...pendingFiles];
+    setPendingFiles([]);
+
+    // Upload each staged file and send as a message
+    for (const { file, previewUrl } of toUpload) {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      const url = await uploadFile(file);
+      if (url) await sendMessage(url);
+    }
+
+    // Send the text message (with reply context if set)
+    if (body) {
+      await sendMessage(body, replyEventId);
+    }
+  };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (mentionOpen) {
@@ -195,30 +218,54 @@ export function ChatArea() {
     inputRef.current?.focus();
   };
 
-  const uploadFile = async (file: File) => {
-    if (!state.currentRoomId) return;
+  // Uploads a file and returns its URL; does NOT send a message.
+  const uploadFile = async (file: File): Promise<string | null> => {
+    if (!state.currentRoomId) return null;
     if (file.size > 500 * 1024 * 1024) {
       alert("File too large (max 500MB)");
-      return;
+      return null;
     }
     setUploading(true);
     setUploadProgress(0);
     setUploadFileName(file.name);
     try {
       const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
-      await sendMessage(url);
+      return url;
     } catch (err: any) {
       alert(err.message || "Upload failed");
+      return null;
     } finally {
       setUploading(false);
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const addPendingFile = (file: File) => {
+    if (file.size > 500 * 1024 * 1024) {
+      alert("File too large (max 500MB)");
+      return;
+    }
+    setPendingFiles((prev) => {
+      if (prev.length >= 4) return prev; // Max 4 attachments per message
+      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+      return [...prev, { file, previewUrl }];
+    });
+  };
+
+  const removePendingFile = (index: number) => {
+    setPendingFiles((prev) => {
+      const next = [...prev];
+      const removed = next.splice(index, 1)[0];
+      if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return next;
+    });
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Convert to Array *before* resetting the value — some browsers clear the
+    // FileList when e.target.value is reset, so we must snapshot it first.
+    const filesList = Array.from(e.target.files ?? []);
     e.target.value = "";
-    await uploadFile(file);
+    filesList.forEach(addPendingFile);
   };
 
   // Drag-and-drop file upload
@@ -248,22 +295,22 @@ export function ChatArea() {
     e.stopPropagation();
   };
 
-  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
-      await uploadFile(files[0]);
+      Array.from(files).forEach(addPendingFile);
     }
   };
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setDragging(false);
     dragCounter.current = 0;
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      await uploadFile(file);
+    const files = e.dataTransfer.files;
+    if (files) {
+      Array.from(files).forEach(addPendingFile);
     }
   };
 
@@ -286,6 +333,14 @@ export function ChatArea() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Clear staged files (and revoke object URLs) when switching rooms
+  useEffect(() => {
+    setPendingFiles((prev) => {
+      prev.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
+      return [];
+    });
+  }, [state.currentRoomId]);
 
   const mentionMatches = mentionOpen
     ? state.roomMembers
@@ -318,7 +373,7 @@ export function ChatArea() {
     >
       {dragging && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary rounded-lg pointer-events-none">
-          <p className="text-sm font-medium text-primary">Drop file to upload</p>
+          <p className="text-sm font-medium text-primary">Drop file to attach</p>
         </div>
       )}
       {/* Header */}
@@ -456,6 +511,34 @@ export function ChatArea() {
         <CommandBar onClose={() => setCliMode(false)} />
       ) : (
         <div className="border-t p-3">
+          {/* Staged file previews */}
+          {pendingFiles.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {pendingFiles.map((pf, i) => (
+                <div key={i} className="relative group">
+                  {pf.previewUrl ? (
+                    <img
+                      src={pf.previewUrl}
+                      alt={pf.file.name}
+                      className="h-16 w-16 object-cover rounded-md border border-border"
+                    />
+                  ) : (
+                    <div className="h-16 w-28 flex flex-col items-center justify-center rounded-md border border-border bg-muted px-2 gap-1">
+                      <span className="text-lg">📄</span>
+                      <span className="text-xs text-muted-foreground truncate max-w-full">{pf.file.name}</span>
+                    </div>
+                  )}
+                  <button
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    onClick={() => removePendingFile(i)}
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {input.length > MAX_MESSAGE_LENGTH * 0.75 && (
             <div className="flex justify-end mb-1">
               <span
@@ -495,10 +578,13 @@ export function ChatArea() {
               </div>
             )}
 
+            {/* Hidden file input triggered by the label below */}
             <input
+              id="chat-file-input"
               type="file"
               ref={fileInputRef}
               className="hidden"
+              multiple
               onChange={handleFileSelect}
             />
             <Button
@@ -506,10 +592,16 @@ export function ChatArea() {
               size="icon"
               className="shrink-0"
               disabled={uploading}
-              onClick={() => fileInputRef.current?.click()}
-              title="Upload file"
+              asChild
             >
-              {uploading ? "…" : "+"}
+              {/* Using a label instead of onClick+click() is universally reliable */}
+              <label
+                htmlFor={uploading ? undefined : "chat-file-input"}
+                className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
+                title="Attach files (max 4)"
+              >
+                {uploading ? "…" : "+"}
+              </label>
             </Button>
 
             <div className="relative flex-1">
@@ -528,7 +620,7 @@ export function ChatArea() {
               {/* Emoji picker */}
               <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
                 <PopoverTrigger asChild>
-                  <button className="absolute right-2 top-3 text-lg hover:scale-110 transition-transform cursor-pointer">
+                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-lg hover:scale-110 transition-transform cursor-pointer">
                     😊
                   </button>
                 </PopoverTrigger>

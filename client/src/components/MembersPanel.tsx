@@ -1,11 +1,17 @@
 import { useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { UserProfileDialog } from "./UserProfileDialog";
 
-export function MembersPanel() {
+interface MembersPanelProps {
+  collapsed: boolean;
+  onToggle: () => void;
+}
+
+export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
   const { state } = useAppContext();
   const [profileOpen, setProfileOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<{
@@ -15,15 +21,36 @@ export function MembersPanel() {
 
   if (!state.currentRoomId) return null;
 
+  if (collapsed) {
+    return (
+      <div className="w-8 border-l flex flex-col items-center pt-3 shrink-0">
+        <button
+          onClick={onToggle}
+          title="Show members"
+          className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      </div>
+    );
+  }
+
   return (
-    <div className="w-56 border-l flex flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-3">
+    <div className="w-56 border-l flex flex-col shrink-0">
+      <div className="flex items-center gap-2 border-b px-3 py-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Members
         </h3>
         <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">
           {state.roomMembers.length}
         </span>
+        <button
+          onClick={onToggle}
+          title="Hide members"
+          className="ml-auto h-6 w-6 rounded flex items-center justify-center text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       <ScrollArea className="flex-1 p-2">
