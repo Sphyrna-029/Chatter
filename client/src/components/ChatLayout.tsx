@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, ChevronRight } from "lucide-react";
-import { useAppContext, screenStreamsMap } from "@/lib/store";
+import { useAppContext } from "@/lib/store";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { MembersPanel } from "./MembersPanel";
@@ -8,11 +8,6 @@ import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 
 /** Floating tab that appears on the left edge when the sidebar is collapsed */
@@ -30,15 +25,17 @@ function LeftPanelRestoreButton() {
   );
 }
 
+/** Helper — grab the ScreenShareViewer's <video> element by id */
+function getScreenVideo(): HTMLVideoElement | null {
+  return document.getElementById("screen-share-main-video") as HTMLVideoElement | null;
+}
+
 export function ChatLayout() {
   const { state, loadRooms } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
-
-  // PiP anchor: a tiny hidden video that stays mounted for Picture-in-Picture
-  const pipAnchorRef = useRef<HTMLVideoElement>(null);
   const [isPiP, setIsPiP] = useState(false);
 
   // Load rooms on mount
@@ -57,53 +54,34 @@ export function ChatLayout() {
 
   const showViewer = hasActiveScreenShare && isOnVoiceRoom;
 
-  // Keep the PiP anchor's srcObject synced to the selected stream
+  // Auto-enter PiP when navigating away from the voice room; auto-exit on return.
+  // Uses the ScreenShareViewer's own <video> (which stays mounted) instead of a
+  // separate hidden anchor — browsers skip frame decoding for off-screen elements.
   useEffect(() => {
     if (!hasActiveScreenShare) return;
-    const anchor = pipAnchorRef.current;
-    if (!anchor) return;
 
-    const syncStream = () => {
-      const sharer = state.selectedScreenSharer;
-      if (!sharer) return;
-      const stream = screenStreamsMap.get(sharer);
-      if (stream && anchor.srcObject !== stream) {
-        anchor.srcObject = stream;
-        anchor.play().catch(() => {});
-      }
-    };
-
-    syncStream();
-    window.addEventListener("screen-stream-update", syncStream);
-    return () => window.removeEventListener("screen-stream-update", syncStream);
-  }, [hasActiveScreenShare, state.selectedScreenSharer]);
-
-  // Auto-enter PiP when switching away from the voice room; auto-exit when returning
-  useEffect(() => {
-    const anchor = pipAnchorRef.current;
-    if (!anchor) return;
-
-    if (hasActiveScreenShare && !isOnVoiceRoom) {
-      // Away from voice room — enter PiP (mute self-share to avoid feedback)
-      anchor.muted = state.selectedScreenSharer === state.userId;
-      if (!document.pictureInPictureElement && typeof anchor.requestPictureInPicture === "function") {
-        // Must await play() so at least one frame is decoded before entering PiP,
-        // otherwise the PiP window opens with a black frame.
+    if (!isOnVoiceRoom) {
+      // Switched away — enter PiP on the already-playing video
+      const videoEl = getScreenVideo();
+      if (
+        videoEl &&
+        !document.pictureInPictureElement &&
+        typeof videoEl.requestPictureInPicture === "function"
+      ) {
         (async () => {
           try {
-            await anchor.play();
-            await anchor.requestPictureInPicture();
-          } catch { /* unsupported or not allowed */ }
+            await videoEl.play();
+            await videoEl.requestPictureInPicture();
+          } catch { /* unsupported / not allowed */ }
         })();
       }
     } else {
-      // On voice room — mute anchor (ScreenShareViewer handles audio), exit PiP if needed
-      anchor.muted = true;
-      if (document.pictureInPictureElement === anchor) {
+      // Returned to voice room — exit PiP so the inline viewer takes over
+      if (document.pictureInPictureElement) {
         try { document.exitPictureInPicture(); } catch { /* ignore */ }
       }
     }
-  }, [hasActiveScreenShare, isOnVoiceRoom, state.selectedScreenSharer, state.userId]);
+  }, [hasActiveScreenShare, isOnVoiceRoom]);
 
   // Track PiP state via browser events
   useEffect(() => {
@@ -117,43 +95,24 @@ export function ChatLayout() {
     };
   }, []);
 
-  // Manual PiP toggle used by the button in ScreenShareHeader
+  // Manual PiP toggle (button in ScreenShareHeader)
   const togglePiP = useCallback(async () => {
-    const anchor = pipAnchorRef.current;
-    if (!anchor || typeof anchor.requestPictureInPicture !== "function") return;
     try {
       if (document.pictureInPictureElement) {
         await document.exitPictureInPicture();
       } else {
-        anchor.muted = state.selectedScreenSharer === state.userId;
-        await anchor.play();
-        await anchor.requestPictureInPicture();
+        const videoEl = getScreenVideo();
+        if (videoEl && typeof videoEl.requestPictureInPicture === "function") {
+          await videoEl.play();
+          await videoEl.requestPictureInPicture();
+        }
       }
     } catch { /* PiP not available or user declined */ }
-  }, [state.selectedScreenSharer, state.userId]);
+  }, []);
 
   return (
     <>
       <SidebarProvider>
-        {/* PiP anchor video: always mounted when a screen share viewer is active.
-            Positioned off-screen (not display:none) so requestPictureInPicture works. */}
-        {hasActiveScreenShare && (
-          <video
-            ref={pipAnchorRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              position: "fixed",
-              left: "-9999px",
-              top: "-9999px",
-              width: "320px",
-              height: "180px",
-              pointerEvents: "none",
-            }}
-          />
-        )}
-
         <div className="flex h-screen w-full">
           <AppSidebar
             onCreateRoom={() => setCreateOpen(true)}
@@ -177,35 +136,39 @@ export function ChatLayout() {
 
             {/* Main content: chat + members */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {showViewer ? (
-                <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
-                  {/* Header lives outside the resizable panels — always visible */}
-                  <ScreenShareHeader
-                    containerRef={viewerContainerRef}
-                    isPiP={isPiP}
-                    onTogglePiP={togglePiP}
-                  />
-
-                  <ResizablePanelGroup
-                    orientation="vertical"
-                    className="flex-1"
-                  >
-                    <ResizablePanel defaultSize={50} minSize={15}>
-                      <div className="h-full flex flex-col min-h-0">
-                        <ScreenShareViewer />
-                      </div>
-                    </ResizablePanel>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize={50} minSize={15}>
-                      <div className="h-full flex flex-col min-h-0">
-                        <ChatArea />
-                      </div>
-                    </ResizablePanel>
-                  </ResizablePanelGroup>
+              <div className="flex-1 flex flex-col min-h-0">
+                {/*
+                  ScreenShareViewer is always at this tree position when
+                  hasActiveScreenShare is true, so it never unmounts on room
+                  switch.  The wrapper div switches between visible (flex child)
+                  and hidden (off-screen fixed) keeping the <video> alive and
+                  its decode pipeline running for PiP.
+                */}
+                {hasActiveScreenShare && (
+                  <>
+                    {showViewer && (
+                      <ScreenShareHeader
+                        containerRef={viewerContainerRef}
+                        isPiP={isPiP}
+                        onTogglePiP={togglePiP}
+                      />
+                    )}
+                    <div
+                      ref={viewerContainerRef}
+                      style={
+                        showViewer
+                          ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const }
+                          : { position: "fixed", left: "-9999px", top: "-9999px", width: "320px", height: "180px" }
+                      }
+                    >
+                      <ScreenShareViewer />
+                    </div>
+                  </>
+                )}
+                <div style={showViewer ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const } : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const }}>
+                  <ChatArea />
                 </div>
-              ) : (
-                <ChatArea />
-              )}
+              </div>
               <MembersPanel
                 collapsed={membersCollapsed}
                 onToggle={() => setMembersCollapsed((v) => !v)}

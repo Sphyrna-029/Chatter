@@ -264,6 +264,8 @@ export function ScreenShareViewer() {
     }
   }, [currentSharer, currentMuted, currentVolume]);
 
+  // When conditions aren't met, still render nothing — but the parent
+  // container keeps us mounted so the video element stays alive for PiP.
   if (
     !state.screenViewerOpen ||
     sharers.length === 0 ||
@@ -279,6 +281,7 @@ export function ScreenShareViewer() {
         {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) ? (
           <video
+            id="screen-share-main-video"
             ref={mainVideoRef}
             autoPlay
             playsInline
