@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { WifiOff, ChevronRight } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { AppSidebar } from "./AppSidebar";
@@ -35,12 +35,7 @@ export function ChatLayout() {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
-  const viewerContainerRef = useRef<HTMLDivElement>(null);
   const [isPiP, setIsPiP] = useState(false);
-
-  // pipPending: true while we're waiting for PiP to activate after a room switch.
-  // Keeps the viewer wrapper visible so the browser still decodes video frames.
-  const [pipPending, setPipPending] = useState(false);
 
   // Load rooms on mount
   useEffect(() => {
@@ -52,51 +47,39 @@ export function ChatLayout() {
     state.inVoiceChannel &&
     state.activeScreenSharers.length > 0;
 
-  // Only show the in-panel viewer when we're in the voice room itself
   const isOnVoiceRoom =
     state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
 
+  // Show the full inline viewer only when on the voice room
   const showViewer = hasActiveScreenShare && isOnVoiceRoom;
 
-  // Detect transition away from voice room during render (synchronously) so
-  // the wrapper stays visible in the SAME commit — effects run too late.
-  const prevIsOnVoiceRoomRef = useRef(isOnVoiceRoom);
-  if (prevIsOnVoiceRoomRef.current !== isOnVoiceRoom) {
-    prevIsOnVoiceRoomRef.current = isOnVoiceRoom;
-    if (!isOnVoiceRoom && hasActiveScreenShare) {
-      // Leaving voice room with active screen share — hold the viewer visible
-      // until PiP is confirmed so the video keeps decoding frames.
-      if (!pipPending) setPipPending(true);
-    }
-  }
-
-  // The viewer wrapper stays visible while showing OR while PiP is pending
-  const viewerVisible = showViewer || (hasActiveScreenShare && pipPending);
-
-  // Once pipPending is set, request PiP on the still-visible video
+  // Auto-enter PiP when navigating away from the voice room.
+  // The viewer wrapper stays on-screen (behind the chat via z-index:-1)
+  // so the browser keeps decoding video frames for the PiP request.
   useEffect(() => {
-    if (!pipPending) return;
-    const videoEl = getScreenVideo();
-    if (videoEl && typeof videoEl.requestPictureInPicture === "function") {
-      (async () => {
-        try {
-          await videoEl.play();
-          await videoEl.requestPictureInPicture();
-        } catch { /* unsupported / not allowed */ }
-        setPipPending(false);
-      })();
+    if (!hasActiveScreenShare) return;
+
+    if (!isOnVoiceRoom) {
+      const videoEl = getScreenVideo();
+      if (
+        videoEl &&
+        !document.pictureInPictureElement &&
+        typeof videoEl.requestPictureInPicture === "function"
+      ) {
+        (async () => {
+          try {
+            await videoEl.play();
+            await videoEl.requestPictureInPicture();
+          } catch { /* unsupported / not allowed */ }
+        })();
+      }
     } else {
-      setPipPending(false);
+      // Returned to voice room — exit PiP so the inline viewer takes over
+      if (document.pictureInPictureElement) {
+        try { document.exitPictureInPicture(); } catch { /* ignore */ }
+      }
     }
-  }, [pipPending]);
-
-  // Exit PiP when returning to the voice room
-  useEffect(() => {
-    if (isOnVoiceRoom && document.pictureInPictureElement) {
-      try { document.exitPictureInPicture(); } catch { /* ignore */ }
-    }
-    if (isOnVoiceRoom) setPipPending(false);
-  }, [isOnVoiceRoom]);
+  }, [hasActiveScreenShare, isOnVoiceRoom]);
 
   // Track PiP state via browser events
   useEffect(() => {
@@ -151,39 +134,56 @@ export function ChatLayout() {
 
             {/* Main content: chat + members */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              <div className="flex-1 flex flex-col min-h-0">
+              {/*
+                The inner column uses position:relative so the viewer can
+                be placed behind the chat (position:absolute, z-index:-1)
+                when not on the voice room.  This keeps the video element
+                on-screen and decoding so PiP gets real frames.
+              */}
+              <div className="flex-1 flex flex-col min-h-0 relative">
+                {showViewer && (
+                  <ScreenShareHeader
+                    containerRef={undefined as any}
+                    isPiP={isPiP}
+                    onTogglePiP={togglePiP}
+                  />
+                )}
+
                 {/*
-                  ScreenShareViewer is always at this tree position when
-                  hasActiveScreenShare is true, so it never unmounts on room
-                  switch.  The wrapper div switches between visible (flex child)
-                  and hidden (off-screen fixed) keeping the <video> alive and
-                  its decode pipeline running for PiP.
+                  ScreenShareViewer stays mounted at this tree position
+                  whenever hasActiveScreenShare is true.  When showing: flex
+                  child taking 50%.  When hidden: absolute behind the chat
+                  so video keeps decoding for PiP.
                 */}
                 {hasActiveScreenShare && (
-                  <>
-                    {showViewer && (
-                      <ScreenShareHeader
-                        containerRef={viewerContainerRef}
-                        isPiP={isPiP}
-                        onTogglePiP={togglePiP}
-                      />
-                    )}
-                    <div
-                      ref={viewerContainerRef}
-                      style={
-                        viewerVisible
-                          ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const }
-                          : { position: "fixed", left: "-9999px", top: "-9999px", width: "320px", height: "180px" }
-                      }
-                    >
-                      <ScreenShareViewer />
-                    </div>
-                  </>
+                  <div
+                    style={
+                      showViewer
+                        ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const }
+                        : {
+                            position: "absolute" as const,
+                            inset: 0,
+                            zIndex: -1,
+                            overflow: "hidden",
+                            pointerEvents: "none" as const,
+                          }
+                    }
+                  >
+                    <ScreenShareViewer />
+                  </div>
                 )}
-                <div style={viewerVisible ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const } : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const }}>
+
+                <div
+                  style={
+                    showViewer
+                      ? { flex: "1 1 50%", minHeight: 0, display: "flex", flexDirection: "column" as const }
+                      : { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" as const }
+                  }
+                >
                   <ChatArea />
                 </div>
               </div>
+
               <MembersPanel
                 collapsed={membersCollapsed}
                 onToggle={() => setMembersCollapsed((v) => !v)}
