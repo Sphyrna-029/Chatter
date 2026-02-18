@@ -332,10 +332,12 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [tagInput, setTagInput] = useState("");
   const [customEmojis, setCustomEmojis] = useState<string[]>([]);
   const [emojiInput, setEmojiInput] = useState("");
+  const [emojiUploading, setEmojiUploading] = useState(false);
   const [iconFile, setIconFile] = useState<File | null>(null);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const emojiFileInputRef = useRef<HTMLInputElement>(null);
 
   // Pre-populate when dialog opens
   useEffect(() => {
@@ -399,6 +401,23 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
 
   const removeEmoji = (emoji: string) => {
     setCustomEmojis(customEmojis.filter((e) => e !== emoji));
+  };
+
+  const handleEmojiFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setEmojiUploading(true);
+    try {
+      const { url } = await apiUploadFile(file);
+      if (!customEmojis.includes(url)) {
+        setCustomEmojis((prev) => [...prev, url]);
+      }
+    } catch {
+      alert("Failed to upload emoji image");
+    } finally {
+      setEmojiUploading(false);
+    }
   };
 
   const handleIconSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -492,7 +511,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             <div className="flex gap-2">
               <Input
                 id="settings-room-emojis"
-                placeholder="Paste an emoji and press Enter"
+                placeholder="Paste a Unicode emoji and press Enter"
                 value={emojiInput}
                 onChange={(e) => setEmojiInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -505,12 +524,33 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               <Button type="button" variant="outline" size="sm" onClick={addEmoji} disabled={!emojiInput.trim()}>
                 Add
               </Button>
+              <input
+                ref={emojiFileInputRef}
+                type="file"
+                accept=".webp,.png,image/webp,image/png"
+                className="hidden"
+                onChange={handleEmojiFileSelect}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => emojiFileInputRef.current?.click()}
+                disabled={emojiUploading}
+                title="Upload .png or .webp image"
+              >
+                <ImagePlus className="w-4 h-4" />
+              </Button>
             </div>
             {customEmojis.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">
                 {customEmojis.map((emoji) => (
                   <Badge key={emoji} variant="secondary" className="gap-1 pr-1 text-base">
-                    {emoji}
+                    {emoji.startsWith("/") || emoji.startsWith("http") ? (
+                      <img src={emoji} alt="custom emoji" className="w-5 h-5 object-contain" />
+                    ) : (
+                      emoji
+                    )}
                     <button
                       type="button"
                       onClick={() => removeEmoji(emoji)}

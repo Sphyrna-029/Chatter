@@ -69,7 +69,7 @@ export interface AppState {
   selectedScreenSharer: string | null;
   screenViewers: Record<string, string[]>;
   // UI
-  roomMentions: Record<string, boolean>;
+  roomMentions: Record<string, number>;
   currentView: "chat" | "voice";
   replyingTo: MatrixMessage | null;
   // Typing
@@ -107,7 +107,7 @@ type Action =
   | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null } }
   | { type: "SET_SCREEN_VIEWERS"; payload: { sharerId: string; viewers: string[] } }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
-  | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean } }
+  | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
@@ -179,7 +179,7 @@ function reducer(state: AppState, action: Action): AppState {
         screenViewers: {},
         typingUsers: [],
         roomMentions: action.payload
-          ? { ...state.roomMentions, [action.payload]: false }
+          ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
       };
     case "SET_MESSAGES":
@@ -340,7 +340,9 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         roomMentions: {
           ...state.roomMentions,
-          [action.payload.roomId]: action.payload.hasMention,
+          [action.payload.roomId]: action.payload.hasMention
+            ? (state.roomMentions[action.payload.roomId] || 0) + 1
+            : 0,
         },
       };
     case "SET_REPLYING_TO":
@@ -473,10 +475,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "ADD_MESSAGE", payload: msg });
         }
-        // Check for mentions
-        const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1);
-        if (myUsername && msg.content?.body?.includes(`@${myUsername}`)) {
-          if (msg.room_id !== stateRef.current.currentRoomId) {
+        if (msg.room_id !== stateRef.current.currentRoomId && msg.content?.msgtype !== "m.system") {
+          // Notify for DM messages
+          const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct;
+          const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1);
+          const hasMention = myUsername && msg.content?.body?.includes(`@${myUsername}`);
+          if (isDm || hasMention) {
+            new Audio("/external/vc-join.wav").play().catch(() => {});
             dispatch({
               type: "SET_MENTION",
               payload: { roomId: msg.room_id, hasMention: true },
@@ -591,6 +596,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
       } else if (msg.type === "m.reply_notification") {
         if (msg.room_id !== stateRef.current.currentRoomId) {
+          new Audio("/external/vc-join.wav").play().catch(() => {});
           dispatch({
             type: "SET_MENTION",
             payload: { roomId: msg.room_id, hasMention: true },
@@ -650,6 +656,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Update document title with total unread notification count
+  useEffect(() => {
+    const total = Object.values(state.roomMentions).reduce((a, b) => a + b, 0);
+    document.title = total > 0 ? `(${total}) Chatter` : "Chatter";
+  }, [state.roomMentions]);
 
   // Keep a ref to loadRooms so WS handler can call it without stale closure
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());

@@ -248,6 +248,14 @@ export function ChatArea() {
     e.stopPropagation();
   };
 
+  const handlePaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = e.clipboardData?.files;
+    if (files && files.length > 0) {
+      e.preventDefault();
+      await uploadFile(files[0]);
+    }
+  };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -511,6 +519,7 @@ export function ChatArea() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyPress}
+                onPaste={handlePaste}
                 rows={1}
                 className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
 
@@ -541,10 +550,14 @@ export function ChatArea() {
                           {roomCustomEmojis.map((e) => (
                             <button
                               key={e}
-                              className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
+                              className="p-1 rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110 flex items-center justify-center"
                               onClick={() => insertEmoji(e)}
                             >
-                              {e}
+                              {e.startsWith("/") || e.startsWith("http") ? (
+                                <img src={e} alt="emoji" className="w-6 h-6 object-contain" />
+                              ) : (
+                                <span className="text-lg">{e}</span>
+                              )}
                             </button>
                           ))}
                         </div>
