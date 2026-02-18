@@ -74,6 +74,8 @@ export interface AppState {
   replyingTo: MatrixMessage | null;
   // Typing
   typingUsers: string[];
+  // Connection
+  wsConnected: boolean;
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -111,7 +113,8 @@ type Action =
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
   | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[] } }
   | { type: "SET_TYPING_USER"; payload: string }
-  | { type: "CLEAR_TYPING_USER"; payload: string };
+  | { type: "CLEAR_TYPING_USER"; payload: string }
+  | { type: "SET_WS_CONNECTED"; payload: boolean };
 
 const initialState: AppState = {
   accessToken: null,
@@ -140,6 +143,7 @@ const initialState: AppState = {
   currentView: "chat",
   replyingTo: null,
   typingUsers: [],
+  wsConnected: false,
 };
 
 function reducer(state: AppState, action: Action): AppState {
@@ -382,6 +386,8 @@ function reducer(state: AppState, action: Action): AppState {
         ...state,
         typingUsers: state.typingUsers.filter((id) => id !== action.payload),
       };
+    case "SET_WS_CONNECTED":
+      return { ...state, wsConnected: action.payload };
     default:
       return state;
   }
@@ -443,6 +449,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ access_token: state.accessToken }));
+      dispatch({ type: "SET_WS_CONNECTED", payload: true });
     };
 
     ws.onmessage = async (event) => {
@@ -454,6 +461,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ws.onerror = () => {};
     ws.onclose = () => {
       wsRef.current = null;
+      dispatch({ type: "SET_WS_CONNECTED", payload: false });
       setTimeout(connectWebSocket, 3000);
     };
   }, [state.accessToken]);

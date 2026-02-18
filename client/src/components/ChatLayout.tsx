@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { WifiOff } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
@@ -40,6 +41,14 @@ export function ChatLayout() {
           />
 
           <SidebarInset className="flex flex-1 flex-col min-w-0">
+            {/* Connection lost banner */}
+            {!state.wsConnected && (
+              <div className="flex items-center justify-center gap-2 bg-amber-600 px-3 py-1.5 text-sm font-medium text-white">
+                <WifiOff className="h-4 w-4" />
+                Connection lost — reconnecting…
+              </div>
+            )}
+
             {/* Voice controls at top of main area */}
             <VoiceControls />
 

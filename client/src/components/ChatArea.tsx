@@ -378,9 +378,18 @@ export function ChatArea() {
                 Beginning of conversation
               </div>
             )}
-            {state.messages.map((msg) => (
-              <MessageItem key={msg.event_id} message={msg} />
-            ))}
+            {state.messages.map((msg, i) => {
+              const prev = state.messages[i - 1];
+              const grouped =
+                !!prev &&
+                prev.content.msgtype !== "m.system" &&
+                msg.content.msgtype !== "m.system" &&
+                prev.sender === msg.sender &&
+                msg.origin_server_ts - prev.origin_server_ts < 15000;
+              return (
+                <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>

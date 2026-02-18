@@ -238,9 +238,10 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
 
 interface MessageItemProps {
   message: MatrixMessage;
+  grouped?: boolean;
 }
 
-export function MessageItem({ message }: MessageItemProps) {
+export function MessageItem({ message, grouped }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction } = useAppContext();
   const [isEditing, setIsEditing] = useState(false);
   const [editDraft, setEditDraft] = useState("");
@@ -299,14 +300,20 @@ export function MessageItem({ message }: MessageItemProps) {
     : null;
 
   return (
-    <div className="group relative py-1 px-2 rounded-md hover:bg-accent/50 transition-colors" data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-0.5" : "py-1")} data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
-        <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0">
-          {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
-          <AvatarFallback className="text-xs font-semibold bg-secondary">
-            {initial}
-          </AvatarFallback>
-        </Avatar>
+        {grouped ? (
+          <span className="w-8 flex-shrink-0 text-center text-[10px] text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity leading-[1.25rem]">
+            {time}
+          </span>
+        ) : (
+          <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0">
+            {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
+            <AvatarFallback className="text-xs font-semibold bg-secondary">
+              {initial}
+            </AvatarFallback>
+          </Avatar>
+        )}
 
         <div className="flex-1 min-w-0 overflow-hidden">
           {/* Reply quote */}
@@ -320,10 +327,12 @@ export function MessageItem({ message }: MessageItemProps) {
             </button>
           )}
 
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold">{sender}</span>
-            <span className="text-xs text-muted-foreground">{time}</span>
-          </div>
+          {!grouped && (
+            <div className="flex items-baseline gap-2">
+              <span className="text-sm font-semibold">{sender}</span>
+              <span className="text-xs text-muted-foreground">{time}</span>
+            </div>
+          )}
 
           {isEditing ? (
             <div className="mt-1">
