@@ -904,8 +904,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const addReaction = useCallback(
     async (eventId: string, emoji: string) => {
-      if (!stateRef.current.currentRoomId) return;
-      await apiAddReaction(stateRef.current.currentRoomId, eventId, emoji);
+      if (!stateRef.current.currentRoomId || !stateRef.current.userId) return;
+      // Optimistic update: toggle locally before the server round-trip
+      const current = stateRef.current.messageReactions[eventId] ?? {};
+      const users = current[emoji] ?? [];
+      const userId = stateRef.current.userId;
+      let optimistic: Record<string, string[]>;
+      if (users.includes(userId)) {
+        const next = users.filter((u) => u !== userId);
+        if (next.length === 0) {
+          const { [emoji]: _removed, ...rest } = current;
+          optimistic = rest;
+        } else {
+          optimistic = { ...current, [emoji]: next };
+        }
+      } else {
+        optimistic = { ...current, [emoji]: [...users, userId] };
+      }
+      dispatch({ type: "SET_REACTIONS", payload: { eventId, reactions: optimistic } });
+      // Fire-and-forget; server WS broadcast will confirm with authoritative state
+      apiAddReaction(stateRef.current.currentRoomId, eventId, emoji).catch(() => {
+        // On failure, revert to previous state
+        dispatch({ type: "SET_REACTIONS", payload: { eventId, reactions: current } });
+      });
     },
     []
   );
