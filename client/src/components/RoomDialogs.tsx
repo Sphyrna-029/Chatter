@@ -330,6 +330,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [name, setName] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [customEmojis, setCustomEmojis] = useState<string[]>([]);
+  const [emojiInput, setEmojiInput] = useState("");
   const [iconFile, setIconFile] = useState<File | null>(null);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -341,6 +343,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setName(info.name || "");
       setTags(info.tags || []);
       setTagInput("");
+      setCustomEmojis(info.custom_emojis || []);
+      setEmojiInput("");
       setIconFile(null);
       setIconPreview(info.icon_url || null);
     }
@@ -355,11 +359,13 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[] } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
       if (JSON.stringify(tags) !== JSON.stringify(infoTags)) settings.tags = tags;
+      const infoEmojis = info?.custom_emojis || [];
+      if (JSON.stringify(customEmojis) !== JSON.stringify(infoEmojis)) settings.custom_emojis = customEmojis;
       if (Object.keys(settings).length > 0) {
         await updateRoomSettings(roomId, settings);
       }
@@ -381,6 +387,18 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
 
   const removeTag = (tag: string) => {
     setTags(tags.filter((t) => t !== tag));
+  };
+
+  const addEmoji = () => {
+    const trimmed = emojiInput.trim();
+    if (trimmed && !customEmojis.includes(trimmed)) {
+      setCustomEmojis([...customEmojis, trimmed]);
+    }
+    setEmojiInput("");
+  };
+
+  const removeEmoji = (emoji: string) => {
+    setCustomEmojis(customEmojis.filter((e) => e !== emoji));
   };
 
   const handleIconSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -460,6 +478,42 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     <button
                       type="button"
                       onClick={() => removeTag(tag)}
+                      className="ml-0.5 hover:text-destructive cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-room-emojis">Room Emojis</Label>
+            <div className="flex gap-2">
+              <Input
+                id="settings-room-emojis"
+                placeholder="Paste an emoji and press Enter"
+                value={emojiInput}
+                onChange={(e) => setEmojiInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addEmoji();
+                  }
+                }}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={addEmoji} disabled={!emojiInput.trim()}>
+                Add
+              </Button>
+            </div>
+            {customEmojis.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {customEmojis.map((emoji) => (
+                  <Badge key={emoji} variant="secondary" className="gap-1 pr-1 text-base">
+                    {emoji}
+                    <button
+                      type="button"
+                      onClick={() => removeEmoji(emoji)}
                       className="ml-0.5 hover:text-destructive cursor-pointer"
                     >
                       <X className="w-3 h-3" />

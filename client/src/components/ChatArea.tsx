@@ -385,7 +385,7 @@ export function ChatArea() {
                 prev.content.msgtype !== "m.system" &&
                 msg.content.msgtype !== "m.system" &&
                 prev.sender === msg.sender &&
-                msg.origin_server_ts - prev.origin_server_ts < 15000;
+                msg.origin_server_ts - prev.origin_server_ts < 60000;
               return (
                 <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
               );
@@ -528,6 +528,29 @@ export function ChatArea() {
                   align="end"
                   className="w-72 max-h-64 overflow-y-auto p-3"
                 >
+                  {(() => {
+                    const roomCustomEmojis = state.currentRoomId
+                      ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
+                      : [];
+                    return roomCustomEmojis.length > 0 ? (
+                      <div className="mb-3">
+                        <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+                          Room
+                        </p>
+                        <div className="grid grid-cols-8 gap-0.5">
+                          {roomCustomEmojis.map((e) => (
+                            <button
+                              key={e}
+                              className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
+                              onClick={() => insertEmoji(e)}
+                            >
+                              {e}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
                   {Object.entries(emojiCategories).map(([cat, emojis]) => (
                     <div key={cat} className="mb-3">
                       <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">

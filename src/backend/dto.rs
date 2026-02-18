@@ -68,4 +68,5 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) name: Option<String>,
     pub(crate) icon_url: Option<String>,
     pub(crate) tags: Option<Vec<String>>,
+    pub(crate) custom_emojis: Option<Vec<String>>,
 }

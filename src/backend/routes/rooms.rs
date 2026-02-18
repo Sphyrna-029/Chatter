@@ -120,6 +120,7 @@ pub(crate) async fn create_room(
                         is_dm: true,
                         tags: vec![],
                         icon_url: String::new(),
+                        custom_emojis: vec![],
                     },
                 );
 
@@ -199,6 +200,7 @@ pub(crate) async fn create_room(
             is_dm: false,
             tags: req.tags.unwrap_or_default(),
             icon_url: req.icon_url.unwrap_or_default(),
+            custom_emojis: vec![],
         },
     );
 
@@ -518,6 +520,7 @@ pub(crate) async fn update_room_settings(
     let mut updated_name = None;
     let mut updated_icon_url = None;
     let mut updated_tags = None;
+    let mut updated_custom_emojis = None;
     {
         let mut rooms = state.rooms.write().await;
         if let Some(room) = rooms.get_mut(&room_id) {
@@ -533,6 +536,10 @@ pub(crate) async fn update_room_settings(
                 room.tags = tags.clone();
                 updated_tags = Some(tags.clone());
             }
+            if let Some(ref custom_emojis) = req.custom_emojis {
+                room.custom_emojis = custom_emojis.clone();
+                updated_custom_emojis = Some(custom_emojis.clone());
+            }
         }
     }
 
@@ -546,6 +553,9 @@ pub(crate) async fn update_room_settings(
     }
     if let Some(tags) = updated_tags {
         content.insert("tags".to_string(), json!(tags));
+    }
+    if let Some(custom_emojis) = updated_custom_emojis {
+        content.insert("custom_emojis".to_string(), json!(custom_emojis));
     }
 
     let event = json!({

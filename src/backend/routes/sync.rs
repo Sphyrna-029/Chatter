@@ -112,6 +112,12 @@ pub(crate) async fn sync(
                 "content": {"icon_url": room_data.icon_url},
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.custom_emojis",
+                "state_key": "",
+                "content": {"custom_emojis": room_data.custom_emojis},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

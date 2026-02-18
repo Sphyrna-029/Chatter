@@ -111,7 +111,7 @@ type Action =
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
-  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[] } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean };
@@ -368,6 +368,7 @@ function reducer(state: AppState, action: Action): AppState {
             ...(action.payload.name !== undefined && { name: action.payload.name }),
             ...(action.payload.icon_url !== undefined && { icon_url: action.payload.icon_url }),
             ...(action.payload.tags !== undefined && { tags: action.payload.tags }),
+            ...(action.payload.custom_emojis !== undefined && { custom_emojis: action.payload.custom_emojis }),
           },
         },
       };
@@ -418,7 +419,7 @@ interface AppContextValue {
   getAllRooms: () => Promise<import("./api").RoomSummary[]>;
   openDM: (targetUserId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
-  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[] }) => Promise<void>;
+  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   updateProfile: (profile: { avatarUrl?: string; about?: string; customStatus?: string }) => void;
 }
@@ -621,6 +622,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             name: msg.content?.name,
             icon_url: msg.content?.icon_url,
             tags: msg.content?.tags,
+            custom_emojis: msg.content?.custom_emojis,
           },
         });
       }
@@ -750,6 +752,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const iconEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.icon"
         );
+        const customEmojisEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.custom_emojis"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -758,6 +763,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           tags: tagsEvent?.content?.tags || [],
           icon_url: iconEvent?.content?.icon_url || "",
           creator: nameEvent?.sender || "",
+          custom_emojis: customEmojisEvent?.content?.custom_emojis || [],
         };
       } else {
         roomInfoMap[roomId] = {
@@ -984,7 +990,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateRoomSettings = useCallback(
-    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[] }) => {
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => {
       await apiUpdateRoomSettings(roomId, settings);
     },
     []

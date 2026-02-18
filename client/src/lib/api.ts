@@ -278,6 +278,7 @@ export interface RoomInfo {
   tags?: string[];
   icon_url?: string;
   creator?: string;
+  custom_emojis?: string[];
 }
 
 export async function apiUpdateTopic(roomId: string, topic: string) {
@@ -353,7 +354,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[] }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }
 ) {
   const res = await fetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,
