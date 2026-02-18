@@ -87,8 +87,14 @@ export function ChatLayout() {
       // Away from voice room — enter PiP (mute self-share to avoid feedback)
       anchor.muted = state.selectedScreenSharer === state.userId;
       if (!document.pictureInPictureElement && typeof anchor.requestPictureInPicture === "function") {
-        anchor.play().catch(() => {});
-        try { anchor.requestPictureInPicture(); } catch { /* unsupported or not allowed */ }
+        // Must await play() so at least one frame is decoded before entering PiP,
+        // otherwise the PiP window opens with a black frame.
+        (async () => {
+          try {
+            await anchor.play();
+            await anchor.requestPictureInPicture();
+          } catch { /* unsupported or not allowed */ }
+        })();
       }
     } else {
       // On voice room — mute anchor (ScreenShareViewer handles audio), exit PiP if needed
@@ -120,6 +126,7 @@ export function ChatLayout() {
         await document.exitPictureInPicture();
       } else {
         anchor.muted = state.selectedScreenSharer === state.userId;
+        await anchor.play();
         await anchor.requestPictureInPicture();
       }
     } catch { /* PiP not available or user declined */ }
