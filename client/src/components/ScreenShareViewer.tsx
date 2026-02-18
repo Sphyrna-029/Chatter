@@ -10,8 +10,12 @@ const shortenId = (id: string) =>
 /** Header bar shown above the resizable panel group — always visible */
 export function ScreenShareHeader({
   containerRef,
+  isPiP,
+  onTogglePiP,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  isPiP?: boolean;
+  onTogglePiP?: () => void;
 }) {
   const { state, dispatch } = useAppContext();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -102,6 +106,48 @@ export function ScreenShareHeader({
               </button>
             ))}
           </div>
+        )}
+        {document.pictureInPictureEnabled && onTogglePiP && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            onClick={onTogglePiP}
+            title={isPiP ? "Exit Picture-in-Picture" : "Picture-in-Picture"}
+          >
+            {isPiP ? (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <path d="M8 21h8M12 17v4" />
+                <path d="M7 9l5 3-5 3V9z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                <rect x="12" y="9" width="8" height="6" rx="1" />
+              </svg>
+            )}
+          </Button>
         )}
         <Button
           size="sm"

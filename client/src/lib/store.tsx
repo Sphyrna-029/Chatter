@@ -57,6 +57,7 @@ export interface AppState {
   inVoiceChannel: boolean;
   isMuted: boolean;
   voiceInputMode: "open" | "ptt";
+  voiceRoomId: string | null;
   voiceMembers: string[];
   voiceMemberStates: Record<
     string,
@@ -96,7 +97,7 @@ type Action =
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> }
-  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "isScreenSharing">> }
+  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
@@ -132,6 +133,7 @@ const initialState: AppState = {
   inVoiceChannel: false,
   isMuted: false,
   voiceInputMode: "open",
+  voiceRoomId: null,
   voiceMembers: [],
   voiceMemberStates: {},
   isScreenSharing: false,
@@ -162,7 +164,9 @@ function reducer(state: AppState, action: Action): AppState {
         joinedRoomIds: action.payload.roomIds,
         roomInfoMap: action.payload.roomInfoMap,
       };
-    case "SELECT_ROOM":
+    case "SELECT_ROOM": {
+      // When in a voice channel, preserve voice/screen share state across room switches
+      const preserveVoice = state.inVoiceChannel;
       return {
         ...state,
         currentRoomId: action.payload,
@@ -171,17 +175,18 @@ function reducer(state: AppState, action: Action): AppState {
         oldestMessageIndex: null,
         loadingOlderMessages: false,
         roomMembers: [],
-        voiceMembers: [],
-        voiceMemberStates: {},
-        activeScreenSharers: [],
-        screenViewerOpen: false,
-        selectedScreenSharer: null,
-        screenViewers: {},
+        voiceMembers: preserveVoice ? state.voiceMembers : [],
+        voiceMemberStates: preserveVoice ? state.voiceMemberStates : {},
+        activeScreenSharers: preserveVoice ? state.activeScreenSharers : [],
+        screenViewerOpen: preserveVoice ? state.screenViewerOpen : false,
+        selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
+        screenViewers: preserveVoice ? state.screenViewers : {},
         typingUsers: [],
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
       };
+    }
     case "SET_MESSAGES":
       return {
         ...state,
@@ -564,29 +569,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         }
       } else if (msg.type === "voice_user_joined") {
-        if (msg.room_id === stateRef.current.currentRoomId) {
+        const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+        if (isVoiceRoom) {
           dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
           if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
             new Audio("/external/vc-join.wav").play().catch(() => {});
           }
         }
       } else if (msg.type === "voice_user_left") {
-        if (msg.room_id === stateRef.current.currentRoomId) {
+        const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+        if (isVoiceRoom) {
           dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
         }
       } else if (msg.type === "voice_user_muted") {
-        if (msg.room_id === stateRef.current.currentRoomId) {
+        const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+        if (isVoiceRoom) {
           dispatch({
             type: "VOICE_USER_MUTED",
             payload: { userId: msg.user_id, muted: msg.muted },
           });
         }
       } else if (msg.type === "screen_share_started") {
-        if (msg.room_id === stateRef.current.currentRoomId) {
+        const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+        if (isVoiceRoom) {
           dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
         }
       } else if (msg.type === "screen_share_stopped") {
-        if (msg.room_id === stateRef.current.currentRoomId) {
+        const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+        if (isVoiceRoom) {
           dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
         }
       } else if (msg.type === "screen_viewers_update") {
@@ -832,28 +842,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
-      // Load voice members
-      try {
-        const voiceData = await apiGetVoiceMembers(roomId);
-        const members = voiceData.voice_members.map((m) => m.user_id);
-        const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
-        const sharers: string[] = [];
-        voiceData.voice_members.forEach((m) => {
-          states[m.user_id] = {
-            muted: m.muted,
-            screen_sharing: m.screen_sharing,
-          };
-          if (m.screen_sharing) sharers.push(m.user_id);
-        });
-        dispatch({
-          type: "SET_VOICE_MEMBERS",
-          payload: { members, states },
-        });
-        dispatch({
-          type: "SET_ACTIVE_SCREEN_SHARERS",
-          payload: sharers,
-        });
-      } catch {}
+      // Load voice members — skip if we're in a voice channel on a different room
+      // to avoid overwriting preserved voice/screen state
+      const inVoice = stateRef.current.inVoiceChannel;
+      const voiceRoom = stateRef.current.voiceRoomId;
+      if (!inVoice || roomId === voiceRoom) {
+        try {
+          const voiceData = await apiGetVoiceMembers(roomId);
+          const members = voiceData.voice_members.map((m) => m.user_id);
+          const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
+          const sharers: string[] = [];
+          voiceData.voice_members.forEach((m) => {
+            states[m.user_id] = {
+              muted: m.muted,
+              screen_sharing: m.screen_sharing,
+            };
+            if (m.screen_sharing) sharers.push(m.user_id);
+          });
+          dispatch({
+            type: "SET_VOICE_MEMBERS",
+            payload: { members, states },
+          });
+          dispatch({
+            type: "SET_ACTIVE_SCREEN_SHARERS",
+            payload: sharers,
+          });
+        } catch {}
+      }
     },
     []
   );
