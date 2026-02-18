@@ -300,7 +300,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "-mt-0.5" : "py-1")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "-mt-0.5" : "pt-3 pb-1")} data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         {grouped ? (
           <span className="w-8 flex-shrink-0" />
