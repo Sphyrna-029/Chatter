@@ -86,15 +86,15 @@ export function ChatLayout() {
     if (hasActiveScreenShare && !isOnVoiceRoom) {
       // Away from voice room — enter PiP (mute self-share to avoid feedback)
       anchor.muted = state.selectedScreenSharer === state.userId;
-      if (!document.pictureInPictureElement) {
+      if (!document.pictureInPictureElement && typeof anchor.requestPictureInPicture === "function") {
         anchor.play().catch(() => {});
-        anchor.requestPictureInPicture().catch(() => {});
+        try { anchor.requestPictureInPicture(); } catch { /* unsupported or not allowed */ }
       }
     } else {
       // On voice room — mute anchor (ScreenShareViewer handles audio), exit PiP if needed
       anchor.muted = true;
       if (document.pictureInPictureElement === anchor) {
-        document.exitPictureInPicture().catch(() => {});
+        try { document.exitPictureInPicture(); } catch { /* ignore */ }
       }
     }
   }, [hasActiveScreenShare, isOnVoiceRoom, state.selectedScreenSharer, state.userId]);
@@ -114,13 +114,15 @@ export function ChatLayout() {
   // Manual PiP toggle used by the button in ScreenShareHeader
   const togglePiP = useCallback(async () => {
     const anchor = pipAnchorRef.current;
-    if (!anchor) return;
-    if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture().catch(() => {});
-    } else {
-      anchor.muted = state.selectedScreenSharer === state.userId;
-      await anchor.requestPictureInPicture().catch(() => {});
-    }
+    if (!anchor || typeof anchor.requestPictureInPicture !== "function") return;
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else {
+        anchor.muted = state.selectedScreenSharer === state.userId;
+        await anchor.requestPictureInPicture();
+      }
+    } catch { /* PiP not available or user declined */ }
   }, [state.selectedScreenSharer, state.userId]);
 
   return (
