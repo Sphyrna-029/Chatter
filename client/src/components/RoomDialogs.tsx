@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, type RoomSummary } from "@/lib/api";
+import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, type RoomSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { X, ArrowUpDown, Search, ImagePlus, Settings } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -333,11 +333,16 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [customEmojis, setCustomEmojis] = useState<string[]>([]);
   const [emojiInput, setEmojiInput] = useState("");
   const [emojiUploading, setEmojiUploading] = useState(false);
+  const [invites, setInvites] = useState<{ code: string; click_count: number; created_at: number }[]>([]);
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [iconFile, setIconFile] = useState<File | null>(null);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiFileInputRef = useRef<HTMLInputElement>(null);
+
+  const isOwner = info?.creator === state.userId;
 
   // Pre-populate when dialog opens
   useEffect(() => {
@@ -349,6 +354,11 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setEmojiInput("");
       setIconFile(null);
       setIconPreview(info.icon_url || null);
+      setInvites([]);
+      setCopiedCode(null);
+      if (isOwner) {
+        apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
+      }
     }
   }, [open, roomId]);
 
@@ -563,6 +573,90 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               </div>
             )}
           </div>
+          {isOwner && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-1.5">
+                  <Link className="w-3.5 h-3.5" />
+                  Invite Links
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={inviteLoading}
+                  onClick={async () => {
+                    setInviteLoading(true);
+                    try {
+                      const { code } = await apiCreateInvite(roomId);
+                      setInvites((prev) => [...prev, { code, click_count: 0, created_at: Date.now() }]);
+                    } catch (e: any) {
+                      alert(e.message || "Failed to create invite");
+                    } finally {
+                      setInviteLoading(false);
+                    }
+                  }}
+                >
+                  {inviteLoading ? "Creating..." : "Create Invite"}
+                </Button>
+              </div>
+              {invites.length > 0 && (
+                <div className="space-y-2 max-h-[160px] overflow-y-auto">
+                  {invites.map((inv) => {
+                    const url = `${window.location.origin}/invite/${inv.code}`;
+                    return (
+                      <div
+                        key={inv.code}
+                        className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                      >
+                        <div className="flex-1 min-w-0 truncate font-mono text-xs text-muted-foreground">
+                          {url}
+                        </div>
+                        <span className="text-[10px] text-muted-foreground shrink-0">
+                          {inv.click_count} click{inv.click_count !== 1 ? "s" : ""}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          title="Copy link"
+                          onClick={() => {
+                            navigator.clipboard.writeText(url);
+                            setCopiedCode(inv.code);
+                            setTimeout(() => setCopiedCode(null), 2000);
+                          }}
+                        >
+                          {copiedCode === inv.code ? (
+                            <span className="text-[10px] text-green-400">ok</span>
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 hover:text-destructive"
+                          title="Delete invite"
+                          onClick={async () => {
+                            try {
+                              await apiDeleteInvite(inv.code);
+                              setInvites((prev) => prev.filter((i) => i.code !== inv.code));
+                            } catch {
+                              alert("Failed to delete invite");
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

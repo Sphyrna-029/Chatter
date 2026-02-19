@@ -1,8 +1,8 @@
 use super::super::{
     dto::{CreateRoomRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
-        now_millis,
+        broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
+        get_user_from_token, now_millis,
     },
     state::{AppState, RoomRecord},
 };
@@ -241,52 +241,7 @@ pub(crate) async fn join_room(
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
-    let mut rm = state.room_members.write().await;
-    let members = rm.entry(room_id.clone()).or_insert_with(Vec::new);
-
-    let need_broadcast = !members.contains(&user_id);
-    if need_broadcast {
-        members.push(user_id.clone());
-    }
-    drop(rm);
-
-    if need_broadcast {
-        let event = json!({
-            "type": "m.room.member",
-            "room_id": room_id,
-            "sender": user_id,
-            "content": {"membership": "join"},
-            "event_id": generate_id("$"),
-            "origin_server_ts": now_millis()
-        });
-        broadcast_to_room(&state, &room_id, &event).await;
-
-        // System message for the join
-        let display = user_id
-            .split(':')
-            .next()
-            .unwrap_or(&user_id)
-            .trim_start_matches('@');
-        let sys_event = json!({
-            "type": "m.room.message",
-            "room_id": room_id,
-            "sender": user_id,
-            "content": {
-                "msgtype": "m.system",
-                "body": format!("{} has joined the room", display)
-            },
-            "event_id": generate_id("$"),
-            "origin_server_ts": now_millis()
-        });
-        state
-            .messages
-            .write()
-            .await
-            .entry(room_id.clone())
-            .or_insert_with(Vec::new)
-            .push(sys_event.clone());
-        broadcast_to_room(&state, &room_id, &sys_event).await;
-    }
+    do_join_room(&state, &room_id, &user_id).await;
 
     Ok(Json(json!({"room_id": room_id})))
 }

@@ -2,6 +2,7 @@ use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
         auth::{login, logout, register},
+        invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{link_preview, upload_file},
         messages::{edit_message, get_room_messages, redact_message, send_message},
         presence::{get_room_presence, get_voice_channel_status},
@@ -88,6 +89,14 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
         .route("/api/rooms/{room_id}/presence", get(get_room_presence))
         .route("/api/link-preview", get(link_preview))
+        // Invites
+        .route("/api/rooms/{room_id}/invites", post(create_invite))
+        .route("/api/rooms/{room_id}/invites", get(list_invites))
+        .route("/api/invites/{code}", delete(delete_invite))
+        .route("/api/invites/{code}", get(get_invite_info))
+        .route("/api/invites/{code}/accept", post(accept_invite))
+        // SPA fallback for invite pages
+        .route("/invite/{code}", get(serve_client))
         // WebSocket
         .route("/ws", get(ws_upgrade))
 }

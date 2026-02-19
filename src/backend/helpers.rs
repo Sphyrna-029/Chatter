@@ -101,6 +101,57 @@ pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: 
     }
 }
 
+/// Join a user to a room, broadcasting member join + system message.
+/// Returns true if the user was newly added, false if already a member.
+/// Caller must NOT hold any locks.
+pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    let mut rm = state.room_members.write().await;
+    let members = rm.entry(room_id.to_string()).or_insert_with(Vec::new);
+    let need_broadcast = !members.contains(&user_id.to_string());
+    if need_broadcast {
+        members.push(user_id.to_string());
+    }
+    drop(rm);
+
+    if need_broadcast {
+        let event = json!({
+            "type": "m.room.member",
+            "room_id": room_id,
+            "sender": user_id,
+            "content": {"membership": "join"},
+            "event_id": generate_id("$"),
+            "origin_server_ts": now_millis()
+        });
+        broadcast_to_room(state, room_id, &event).await;
+
+        let display = user_id
+            .split(':')
+            .next()
+            .unwrap_or(user_id)
+            .trim_start_matches('@');
+        let sys_event = json!({
+            "type": "m.room.message",
+            "room_id": room_id,
+            "sender": user_id,
+            "content": {
+                "msgtype": "m.system",
+                "body": format!("{} has joined the room", display)
+            },
+            "event_id": generate_id("$"),
+            "origin_server_ts": now_millis()
+        });
+        state
+            .messages
+            .write()
+            .await
+            .entry(room_id.to_string())
+            .or_insert_with(Vec::new)
+            .push(sys_event.clone());
+        broadcast_to_room(state, room_id, &sys_event).await;
+    }
+    need_broadcast
+}
+
 /// Send a JSON message to a single WebSocket-connected user.
 pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Value) {
     let ws_map = state.active_websockets.read().await;

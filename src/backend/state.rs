@@ -29,6 +29,7 @@ pub struct AppState {
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
+    pub(crate) invites: RwLock<HashMap<String, InviteRecord>>, // keyed by invite code
 }
 
 #[derive(Clone)]
@@ -70,6 +71,14 @@ pub(crate) struct CachedPreview {
     pub(crate) description: Option<String>,
     pub(crate) image: Option<String>,
     pub(crate) site_name: Option<String>,
+}
+
+pub(crate) struct InviteRecord {
+    pub(crate) code: String,
+    pub(crate) room_id: String,
+    pub(crate) creator: String,
+    pub(crate) click_count: u64,
+    pub(crate) created_at: i64,
 }
 
 #[derive(Clone)]

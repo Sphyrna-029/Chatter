@@ -27,6 +27,7 @@ pub fn build_state() -> Arc<AppState> {
         voice_subscribers: RwLock::new(HashMap::new()),
         dm_rooms: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
+        invites: RwLock::new(HashMap::new()),
     })
 }
 

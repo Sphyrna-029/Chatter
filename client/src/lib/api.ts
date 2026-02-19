@@ -371,6 +371,65 @@ export async function apiUpdateRoomSettings(
   return res.json();
 }
 
+// Invites
+export async function apiGetInviteInfo(code: string) {
+  const res = await fetch(`/api/invites/${code}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Invite not found");
+  }
+  return res.json() as Promise<{ room_name: string; icon_url: string; member_count: number }>;
+}
+
+export async function apiAcceptInvite(code: string) {
+  const res = await fetch(`/api/invites/${code}/accept`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to accept invite");
+  }
+  return res.json() as Promise<{ room_id: string }>;
+}
+
+export async function apiCreateInvite(roomId: string) {
+  const res = await fetch(`/api/rooms/${roomId}/invites`, {
+    method: "POST",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to create invite");
+  }
+  return res.json() as Promise<{ code: string }>;
+}
+
+export async function apiListInvites(roomId: string) {
+  const res = await fetch(`/api/rooms/${roomId}/invites`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to list invites");
+  }
+  return res.json() as Promise<{
+    invites: { code: string; click_count: number; created_at: number }[];
+  }>;
+}
+
+export async function apiDeleteInvite(code: string) {
+  const res = await fetch(`/api/invites/${code}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete invite");
+  }
+  return res.json();
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",
