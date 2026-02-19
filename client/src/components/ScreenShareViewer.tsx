@@ -295,7 +295,7 @@ export function ScreenShareViewer() {
   return (
     <div className="flex flex-col min-h-0 h-full bg-black/95">
       {/* Main video */}
-      <div className="flex-1 flex items-center justify-center bg-black min-h-0 relative">
+      <div className="flex-1 flex items-center justify-center bg-black min-h-0 relative group">
         {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) ? (
           <video
@@ -326,10 +326,21 @@ export function ScreenShareViewer() {
           </div>
         )}
 
-      {/* Volume controls overlay — inside the video container so thumbnails can't cover it */}
+      {/* Volume controls overlay — vertical slider, visible when hovering anywhere on the video */}
       {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) && (
-        <div className="absolute bottom-0 left-0 right-0 flex items-center gap-2 px-3 py-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 hover:opacity-100 transition-opacity">
+        <div className="absolute right-3 bottom-3 flex flex-col items-center gap-2 px-2 py-2.5 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="text-xs text-white/60 tabular-nums">
+            {currentMuted ? 0 : currentVolume}%
+          </span>
+          <Slider
+            value={[currentMuted ? 0 : currentVolume]}
+            onValueChange={([v]) => setVolume(v)}
+            max={100}
+            step={1}
+            orientation="vertical"
+            style={{ height: '5rem', minHeight: '5rem' }}
+          />
           <Button
             size="sm"
             variant="ghost"
@@ -350,16 +361,6 @@ export function ScreenShareViewer() {
               </svg>
             )}
           </Button>
-          <Slider
-            value={[currentMuted ? 0 : currentVolume]}
-            onValueChange={([v]) => setVolume(v)}
-            max={100}
-            step={1}
-            className="w-32"
-          />
-          <span className="text-xs text-white/60 w-8 text-right tabular-nums">
-            {currentMuted ? 0 : currentVolume}%
-          </span>
         </div>
       )}
       </div>
