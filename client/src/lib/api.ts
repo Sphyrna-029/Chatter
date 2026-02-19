@@ -455,6 +455,17 @@ export async function apiDeleteUpload(url: string): Promise<void> {
   if (!res.ok) throw new Error("Failed to delete upload");
 }
 
+export async function apiDeleteRoom(roomId: string): Promise<void> {
+  const res = await fetch(`/api/rooms/${roomId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete room");
+  }
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",

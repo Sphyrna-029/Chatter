@@ -526,6 +526,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
         // Refresh room list (member counts may have changed)
         loadRoomsRef.current();
+      } else if (msg.type === "m.room.deleted") {
+        // Room was deleted by the owner — deselect if active and refresh room list
+        if (msg.room_id === stateRef.current.currentRoomId) {
+          dispatch({ type: "SELECT_ROOM", payload: null });
+        }
+        loadRoomsRef.current();
       } else if (msg.type === "m.room.redaction") {
         if (msg.room_id === stateRef.current.currentRoomId) {
           dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });

@@ -8,7 +8,7 @@ use super::{
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
-            create_room, join_room, joined_rooms, leave_room, list_all_rooms,
+            create_room, delete_room, join_room, joined_rooms, leave_room, list_all_rooms,
             update_room_settings, update_room_topic,
         },
         static_content::{serve_client, versions},
@@ -43,6 +43,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
+        .route("/api/rooms/{room_id}", delete(delete_room))
         .route(
             "/api/upload",
             post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)),

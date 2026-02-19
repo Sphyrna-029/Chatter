@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, type RoomSummary } from "@/lib/api";
+import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, type RoomSummary } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -339,6 +339,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [iconFile, setIconFile] = useState<File | null>(null);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [deleteConfirmName, setDeleteConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -356,6 +358,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setIconPreview(info.icon_url || null);
       setInvites([]);
       setCopiedCode(null);
+      setDeleteConfirmName("");
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
       }
@@ -655,6 +658,38 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   })}
                 </div>
               )}
+            </div>
+          )}
+          {isOwner && (
+            <div className="space-y-2 border-t pt-4">
+              <Label className="text-destructive">Danger Zone</Label>
+              <p className="text-xs text-muted-foreground">
+                Deleting a room is permanent. Type the room name <span className="font-semibold text-foreground">{info?.name}</span> to confirm.
+              </p>
+              <Input
+                placeholder="Enter room name to confirm"
+                value={deleteConfirmName}
+                onChange={(e) => setDeleteConfirmName(e.target.value)}
+                className="text-sm"
+              />
+              <Button
+                variant="destructive"
+                className="w-full"
+                disabled={deleteConfirmName !== info?.name || deleting}
+                onClick={async () => {
+                  setDeleting(true);
+                  try {
+                    await apiDeleteRoom(roomId);
+                    onOpenChange(false);
+                  } catch (e: any) {
+                    alert(e.message || "Failed to delete room");
+                  } finally {
+                    setDeleting(false);
+                  }
+                }}
+              >
+                {deleting ? "Deleting..." : "Delete Room"}
+              </Button>
             </div>
           )}
         </div>

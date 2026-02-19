@@ -345,6 +345,62 @@ pub(crate) async fn joined_rooms(
     Ok(Json(json!({"joined_rooms": joined})))
 }
 
+pub(crate) async fn delete_room(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .await
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Check room exists and user is creator
+    {
+        let rooms = state.rooms.read().await;
+        let room = rooms
+            .get(&room_id)
+            .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+        if room.creator != user_id {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Only the room creator can delete the room",
+            ));
+        }
+    }
+
+    // Broadcast deletion event to all current members before removing anything
+    let event = json!({
+        "type": "m.room.deleted",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": {}
+    });
+    broadcast_to_room(&state, &room_id, &event).await;
+
+    // Remove from all state maps
+    state.rooms.write().await.remove(&room_id);
+    state.room_members.write().await.remove(&room_id);
+    state.messages.write().await.remove(&room_id);
+    state.message_reactions.write().await.remove(&room_id);
+    state.voice_channels.write().await.remove(&room_id);
+
+    // Remove any DM mapping pointing to this room
+    {
+        let mut dm = state.dm_rooms.write().await;
+        dm.retain(|_, rid| *rid != room_id);
+    }
+
+    // Remove any invites for this room
+    {
+        let mut invites = state.invites.write().await;
+        invites.retain(|_, inv| inv.room_id != room_id);
+    }
+
+    Ok(Json(json!({"deleted": true})))
+}
+
 pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
     let rooms = state.rooms.read().await;
     let rm = state.room_members.read().await;
