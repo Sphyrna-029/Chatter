@@ -2,7 +2,7 @@ use super::super::{
     constants::MAX_UPLOAD_SIZE,
     dto::LinkPreviewQuery,
     helpers::{error_response, extract_token, get_user_from_token},
-    state::{AppState, CachedPreview},
+    state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
     extract::{Multipart, Query, State},
@@ -21,9 +21,10 @@ pub(crate) async fn upload_file(
         Some(t) => t,
         None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
     };
-    if get_user_from_token(&state, &token).await.is_none() {
-        return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
-    }
+    let user_id = match get_user_from_token(&state, &token).await {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
 
     let mut filename = String::new();
     let mut data = None;
@@ -103,6 +104,20 @@ pub(crate) async fn upload_file(
         "https"
     };
     let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
+
+    // Track the upload for the user
+    {
+        let record = UploadRecord {
+            filename: filename.clone(),
+            url: url.clone(),
+            disk_path: path,
+            size: data.len() as u64,
+            uploaded_at: chrono::Utc::now().timestamp(),
+        };
+        let mut uploads = state.user_uploads.write().await;
+        uploads.entry(user_id).or_default().push(record);
+    }
+
     (StatusCode::OK, Json(json!({ "url": url })))
 }
 
@@ -262,4 +277,67 @@ pub(crate) async fn link_preview(
         StatusCode::OK,
         Json(serde_json::to_value(&preview).unwrap()),
     )
+}
+
+// ---------------------------------------------------------------------------
+// User uploads list & delete
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn list_uploads(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token).await {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let uploads = state.user_uploads.read().await;
+    let files = uploads.get(&user_id).cloned().unwrap_or_default();
+    (StatusCode::OK, Json(json!({ "files": files })))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct DeleteUploadBody {
+    url: String,
+}
+
+pub(crate) async fn delete_upload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<DeleteUploadBody>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token).await {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let mut uploads = state.user_uploads.write().await;
+    let files = match uploads.get_mut(&user_id) {
+        Some(f) => f,
+        None => return error_response(StatusCode::NOT_FOUND, "No uploads found"),
+    };
+
+    let idx = files.iter().position(|r| r.url == body.url);
+    let record = match idx {
+        Some(i) => files.remove(i),
+        None => return error_response(StatusCode::NOT_FOUND, "File not found"),
+    };
+
+    // Delete from disk
+    let _ = tokio::fs::remove_file(&record.disk_path).await;
+    // Try to remove the parent directory (will fail silently if not empty)
+    if let Some(parent) = std::path::Path::new(&record.disk_path).parent() {
+        let _ = tokio::fs::remove_dir(parent).await;
+    }
+
+    (StatusCode::OK, Json(json!({ "deleted": true })))
 }

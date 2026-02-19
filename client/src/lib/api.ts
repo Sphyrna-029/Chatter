@@ -430,6 +430,31 @@ export async function apiDeleteInvite(code: string) {
   return res.json();
 }
 
+// User uploads
+export interface UploadRecord {
+  filename: string;
+  url: string;
+  disk_path: string;
+  size: number;
+  uploaded_at: number;
+}
+
+export async function apiListUploads(): Promise<UploadRecord[]> {
+  const res = await fetch("/api/uploads", { headers: authHeaders() });
+  if (!res.ok) throw new Error("Failed to list uploads");
+  const data = await res.json();
+  return data.files as UploadRecord[];
+}
+
+export async function apiDeleteUpload(url: string): Promise<void> {
+  const res = await fetch("/api/uploads", {
+    method: "DELETE",
+    headers: authHeaders(),
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) throw new Error("Failed to delete upload");
+}
+
 export async function apiCreateDM(targetUserId: string) {
   const res = await fetch("/_matrix/client/r0/createRoom", {
     method: "POST",

@@ -3,7 +3,7 @@ use super::{
     routes::{
         auth::{login, logout, register},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
-        media::{link_preview, upload_file},
+        media::{delete_upload, link_preview, list_uploads, upload_file},
         messages::{edit_message, get_room_messages, redact_message, send_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
@@ -89,6 +89,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
         .route("/api/rooms/{room_id}/presence", get(get_room_presence))
         .route("/api/link-preview", get(link_preview))
+        .route("/api/uploads", get(list_uploads).delete(delete_upload))
         // Invites
         .route("/api/rooms/{room_id}/invites", post(create_invite))
         .route("/api/rooms/{room_id}/invites", get(list_invites))

@@ -30,6 +30,7 @@ pub struct AppState {
     pub(crate) dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) invites: RwLock<HashMap<String, InviteRecord>>, // keyed by invite code
+    pub(crate) user_uploads: RwLock<HashMap<String, Vec<UploadRecord>>>, // keyed by user_id
 }
 
 #[derive(Clone)]
@@ -71,6 +72,15 @@ pub(crate) struct CachedPreview {
     pub(crate) description: Option<String>,
     pub(crate) image: Option<String>,
     pub(crate) site_name: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct UploadRecord {
+    pub(crate) filename: String,
+    pub(crate) url: String,
+    pub(crate) disk_path: String,
+    pub(crate) size: u64,
+    pub(crate) uploaded_at: i64,
 }
 
 pub(crate) struct InviteRecord {
