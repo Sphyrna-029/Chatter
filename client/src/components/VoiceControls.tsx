@@ -645,12 +645,37 @@ export function VoiceControls() {
   }, [state.inVoiceChannel, state.voiceInputMode, state.currentRoomId, dispatch]);
 
   // ─── Screen share ─────────────────────────────────────────────────────────
+
+  // Munge the SDP for the screen share publisher to force high-fidelity stereo Opus.
+  // This overrides WebRTC's default voice-optimised codec parameters.
+  const mungeScreenAudioSdp = (sdp: string): string => {
+    const opusMatch = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
+    if (!opusMatch) return sdp;
+    const pt = opusMatch[1];
+    const highQualityFmtp = `a=fmtp:${pt} useinbandfec=1; stereo=1; sprop-stereo=1; maxaveragebitrate=510000`;
+    const existingFmtp = new RegExp(`a=fmtp:${pt} [^\r\n]+`);
+    if (existingFmtp.test(sdp)) {
+      return sdp.replace(existingFmtp, highQualityFmtp);
+    }
+    // No existing fmtp line — insert one after the rtpmap line
+    return sdp.replace(
+      new RegExp(`(a=rtpmap:${pt} opus\\/48000[^\r\n]*\r?\n)`),
+      `$1${highQualityFmtp}\r\n`,
+    );
+  };
+
   const startScreenShare = useCallback(async () => {
     if (!state.inVoiceChannel || !canSignal()) return;
     try {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: { width: { ideal: 1920 }, height: { ideal: 1080 }, frameRate: { ideal: screenFps } } as any,
-        audio: true,
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          sampleRate: 48000,
+          channelCount: 2,
+        },
       });
       screenStreamRef.current = stream;
       // Insert local stream so the viewer can show a self-preview
@@ -664,20 +689,28 @@ export function VoiceControls() {
       const screenTrack = stream.getVideoTracks()[0];
       screenTrack.onended = () => stopScreenShare();
 
-      // Publish via WebRTC
+      // Publish via WebRTC — video and system audio added as separate tracks so
+      // the mic (on voicePublisherPcRef) keeps standard voice processing while
+      // system audio gets raw high-fidelity treatment.
       const pc = new RTCPeerConnection(WEBRTC_CONFIG);
       screenPubPcRef.current = pc;
       pc.addTrack(screenTrack, stream);
-      // Add system audio track if available (user may decline or browser may not support it)
       const screenAudioTrack = stream.getAudioTracks()[0];
-      if (screenAudioTrack) pc.addTrack(screenAudioTrack, stream);
+      if (screenAudioTrack) {
+        // Use a dedicated single-track stream so the audio is truly independent
+        // from the video stream association inside the PeerConnection.
+        pc.addTrack(screenAudioTrack, new MediaStream([screenAudioTrack]));
+      }
       pc.onicecandidate = (ev) => {
         if (!ev.candidate || !canSignal()) return;
         wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_candidate", room_id: state.currentRoomId, candidate: ev.candidate.toJSON() }));
       };
       const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, sdp: offer.sdp }));
+      // Munge SDP before setting local description to force stereo high-bitrate Opus
+      // on the system audio track (bypasses WebRTC's default voice codec settings).
+      const mungedSdp = mungeScreenAudioSdp(offer.sdp!);
+      await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
+      wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, sdp: mungedSdp }));
     } catch (err: any) {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
       if (err.name !== "NotAllowedError") alert("Could not start screen sharing: " + err.message);
