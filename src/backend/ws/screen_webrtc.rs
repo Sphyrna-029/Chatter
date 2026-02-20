@@ -702,7 +702,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
-        const LAGGED_PACKET_THRESHOLD_FOR_PLI: usize = 64;
+        const LAGGED_PACKET_THRESHOLD_FOR_PLI: u64 = 64;
         let pli_cooldown = std::time::Duration::from_secs(2);
         let mut last_pli_request = std::time::Instant::now() - pli_cooldown;
 
