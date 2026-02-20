@@ -14,13 +14,32 @@ function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
 ): MediaTrackConstraints {
   return {
-    width: { min: 960, ideal: 1920, max: 1920 },
-    height: { min: 540, ideal: 1080, max: 1080 },
-    frameRate:
-      profile.targetFps === 60
-        ? { min: 30, ideal: 60, max: 60 }
-        : { min: 24, ideal: 30, max: 30 },
+    // getDisplayMedia is stricter than getUserMedia and some browsers reject
+    // min/exact constraints entirely. Keep this as a soft preference only.
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: profile.targetFps },
   };
+}
+
+function buildDisplayAudioConstraints(): MediaTrackConstraints {
+  return {
+    echoCancellation: false,
+    noiseSuppression: false,
+    autoGainControl: false,
+    sampleRate: 48000,
+    channelCount: 2,
+  };
+}
+
+function isUnsupportedDisplayConstraintError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message = err.message.toLowerCase();
+  return (
+    message.includes("constraints are not supported") ||
+    message.includes("min constraints are not supported") ||
+    (err.name === "TypeError" && message.includes("getdisplaymedia"))
+  );
 }
 
 async function tuneScreenVideoSender(
@@ -345,16 +364,23 @@ export function useWebRTCScreen() {
     const profile = getScreenSharePublishProfile(screenFps);
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        video: videoConstraints,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-          sampleRate: 48000,
-          channelCount: 2,
-        },
-      });
+      const audioConstraints = buildDisplayAudioConstraints();
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: videoConstraints,
+          audio: audioConstraints,
+        });
+      } catch (constraintErr) {
+        if (!isUnsupportedDisplayConstraintError(constraintErr)) {
+          throw constraintErr;
+        }
+        // Fallback for browsers that reject advanced display constraints.
+        stream = await navigator.mediaDevices.getDisplayMedia({
+          video: true,
+          audio: audioConstraints,
+        });
+      }
       screenStreamRef.current = stream;
       screenStreamsMap.set(state.userId!, stream);
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
