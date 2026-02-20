@@ -704,12 +704,12 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
-        // Periodic PLI ensures the publisher's encoder regularly produces keyframes.
-        // Screen share encoders (especially Chromium) produce very sparse keyframes,
-        // so without this, packet loss can permanently stall the subscriber's decoder.
-        // Use a longer interval (5s) to avoid forcing expensive keyframes too often,
-        // which starves the video encoder of bandwidth and tanks FPS.
-        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(5));
+        // Periodic PLI as a safety net: if the subscriber's decoder stalls and
+        // its own RTCP PLI feedback doesn't reach the publisher, this will recover.
+        // Use a long interval (15s) because the subscriber's browser already sends
+        // PLI on decoder stall, and frequent keyframes at 1080p are huge (~100KB+)
+        // which destabilizes the encoder's rate control and tanks FPS.
+        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(15));
         pli_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {

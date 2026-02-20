@@ -5,7 +5,6 @@ use rtcp::{
         full_intra_request::{FirEntry, FullIntraRequest},
         picture_loss_indication::PictureLossIndication,
     },
-    transport_feedbacks::transport_layer_nack::TransportLayerNack,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -89,6 +88,12 @@ pub(crate) async fn create_peer_connection(
         .map(Arc::new)
 }
 
+/// Forward only keyframe requests (PLI/FIR) from subscribers to the publisher.
+/// NACKs are intentionally NOT forwarded: the server's default interceptors
+/// cache recent RTP packets and handle retransmissions on each leg independently.
+/// Forwarding subscriber NACKs to the publisher causes NACK amplification —
+/// the publisher's browser interprets them as loss on its own upload path and
+/// aggressively reduces bitrate/framerate.
 pub(crate) fn rewrite_rtcp_feedback_for_publisher(
     packet: &(dyn RtcpPacket + Send + Sync),
     publisher_media_ssrc: u32,
@@ -101,14 +106,6 @@ pub(crate) fn rewrite_rtcp_feedback_for_publisher(
         return Some(Box::new(PictureLossIndication {
             sender_ssrc: 0,
             media_ssrc: publisher_media_ssrc,
-        }));
-    }
-
-    if let Some(nack) = packet.as_any().downcast_ref::<TransportLayerNack>() {
-        return Some(Box::new(TransportLayerNack {
-            sender_ssrc: 0,
-            media_ssrc: publisher_media_ssrc,
-            nacks: nack.nacks.clone(),
         }));
     }
 
