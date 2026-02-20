@@ -711,7 +711,7 @@ export function VoiceControls() {
     const opusMatch = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
     if (!opusMatch) return sdp;
     const pt = opusMatch[1];
-    const highQualityFmtp = `a=fmtp:${pt} useinbandfec=1; stereo=1; sprop-stereo=1; maxaveragebitrate=256000`;
+    const highQualityFmtp = `a=fmtp:${pt} useinbandfec=1; stereo=1; sprop-stereo=1; maxaveragebitrate=64000`;
     const existingFmtp = new RegExp(`a=fmtp:${pt} [^\r\n]+`);
     if (existingFmtp.test(sdp)) {
       return sdp.replace(existingFmtp, highQualityFmtp);
@@ -746,6 +746,10 @@ export function VoiceControls() {
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
       const screenTrack = stream.getVideoTracks()[0];
+      // Tell the encoder this is screen content (optimises for sharp text/detail)
+      if ('contentHint' in screenTrack) {
+        screenTrack.contentHint = "detail";
+      }
       screenTrack.onended = () => stopScreenShare();
 
       // Publish via WebRTC — video and system audio added as separate tracks so
@@ -753,7 +757,13 @@ export function VoiceControls() {
       // system audio gets raw high-fidelity treatment.
       const pc = new RTCPeerConnection(WEBRTC_CONFIG);
       screenPubPcRef.current = pc;
-      pc.addTrack(screenTrack, stream);
+      const videoSender = pc.addTrack(screenTrack, stream);
+      // Prioritise framerate over resolution when bandwidth is constrained
+      try {
+        const params = videoSender.getParameters();
+        params.degradationPreference = "maintain-framerate";
+        await videoSender.setParameters(params);
+      } catch {}
       const screenAudioTrack = stream.getAudioTracks()[0];
       if (screenAudioTrack) {
         // Use a dedicated single-track stream so the audio is truly independent

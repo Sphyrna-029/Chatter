@@ -707,7 +707,9 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         // Periodic PLI ensures the publisher's encoder regularly produces keyframes.
         // Screen share encoders (especially Chromium) produce very sparse keyframes,
         // so without this, packet loss can permanently stall the subscriber's decoder.
-        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(2));
+        // Use a longer interval (5s) to avoid forcing expensive keyframes too often,
+        // which starves the video encoder of bandwidth and tanks FPS.
+        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(5));
         pli_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
