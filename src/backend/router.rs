@@ -30,6 +30,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // Static / client
         .route("/", get(serve_client))
         .nest_service("/assets", ServeDir::new("client/dist/assets"))
+        .nest_service("/external", ServeDir::new("external"))
         .route("/external/{folder}/{filename}", get(serve_upload))
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
