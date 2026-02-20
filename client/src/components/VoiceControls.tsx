@@ -804,12 +804,23 @@ export function VoiceControls() {
   }, [state.currentRoomId, dispatch]);
 
   // Subscribe to screen shares from other users.
-  // NOTE: We intentionally do NOT initiate new subscriptions here.
-  // New subscriptions are started only from the `screen_webrtc_publisher_ready`
-  // WS event (handled above), which fires after the server has a confirmed SSRC.
-  // Initiating here would race against SSRC availability and spam "SSRC not ready" errors.
+  // The `screen_webrtc_publisher_ready` WS event handles the case where a sharer
+  // starts while we're already in voice. But if we join voice AFTER a sharer has
+  // already started, that event was already broadcast and we missed it. So we also
+  // initiate subscriptions here for any active sharers we're not yet subscribed to.
   useEffect(() => {
     if (!state.inVoiceChannel) return;
+    // Initiate subscriptions for active sharers we haven't connected to yet
+    for (const sharerId of state.activeScreenSharers) {
+      if (
+        sharerId !== state.userId &&
+        !screenSubPcsRef.current.has(sharerId) &&
+        !pendingScreenSubsRef.current.has(sharerId) &&
+        !screenRetryTimersRef.current.has(sharerId)
+      ) {
+        ensureScreenSub(sharerId);
+      }
+    }
     // Clean up subscriptions for sharers who stopped
     screenSubPcsRef.current.forEach((pc, sharerId) => {
       if (!state.activeScreenSharers.includes(sharerId)) {
