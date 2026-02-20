@@ -746,6 +746,12 @@ export function VoiceControls() {
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
       const screenTrack = stream.getVideoTracks()[0];
+      // Tell the encoder to prioritise smooth motion over per-frame sharpness.
+      // Without this hint the browser defaults to "balanced" which drops framerate
+      // under bandwidth pressure.  ("detail" was previously used but killed FPS.)
+      if ('contentHint' in screenTrack) {
+        screenTrack.contentHint = "motion";
+      }
       screenTrack.onended = () => stopScreenShare();
 
       // Publish via WebRTC — video and system audio added as separate tracks so
@@ -754,12 +760,6 @@ export function VoiceControls() {
       const pc = new RTCPeerConnection(WEBRTC_CONFIG);
       screenPubPcRef.current = pc;
       const videoSender = pc.addTrack(screenTrack, stream);
-      // Prioritise framerate over resolution when bandwidth is constrained
-      try {
-        const params = videoSender.getParameters();
-        params.degradationPreference = "maintain-framerate";
-        await videoSender.setParameters(params);
-      } catch {}
       const screenAudioTrack = stream.getAudioTracks()[0];
       if (screenAudioTrack) {
         // Use a dedicated single-track stream so the audio is truly independent
@@ -775,6 +775,20 @@ export function VoiceControls() {
       // on the system audio track (bypasses WebRTC's default voice codec settings).
       const mungedSdp = mungeScreenAudioSdp(offer.sdp!);
       await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
+
+      // Configure video sender AFTER setLocalDescription so encodings are populated.
+      // Before this point getParameters().encodings is empty and settings are ignored.
+      try {
+        const params = videoSender.getParameters();
+        if (params.encodings && params.encodings.length > 0) {
+          // Give the encoder a generous bitrate budget so rate-control stays stable.
+          // Without this the browser's BWE can be overly conservative and starve frames.
+          params.encodings[0].maxBitrate = screenFps >= 60 ? 8_000_000 : 4_000_000;
+        }
+        params.degradationPreference = "maintain-framerate";
+        await videoSender.setParameters(params);
+      } catch {}
+
       wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, sdp: mungedSdp }));
     } catch (err: any) {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
