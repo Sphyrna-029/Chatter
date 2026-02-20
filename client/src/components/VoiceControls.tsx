@@ -746,10 +746,6 @@ export function VoiceControls() {
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
       const screenTrack = stream.getVideoTracks()[0];
-      // Tell the encoder this is screen content (optimises for sharp text/detail)
-      if ('contentHint' in screenTrack) {
-        screenTrack.contentHint = "detail";
-      }
       screenTrack.onended = () => stopScreenShare();
 
       // Publish via WebRTC — video and system audio added as separate tracks so
