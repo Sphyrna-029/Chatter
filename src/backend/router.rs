@@ -3,7 +3,7 @@ use super::{
     routes::{
         auth::{login, logout, register},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
-        media::{delete_upload, link_preview, list_uploads, upload_file},
+        media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
         messages::{edit_message, get_room_messages, redact_message, send_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
@@ -30,7 +30,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // Static / client
         .route("/", get(serve_client))
         .nest_service("/assets", ServeDir::new("client/dist/assets"))
-        .nest_service("/external", ServeDir::new("external"))
+        .route("/external/{folder}/{filename}", get(serve_upload))
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
         // Auth

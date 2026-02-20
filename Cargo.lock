@@ -352,6 +352,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "futures-util",
+ "mime_guess",
  "percent-encoding",
  "rand 0.8.5",
  "regex",

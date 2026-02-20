@@ -5,9 +5,10 @@ use super::super::{
     state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
-    extract::{Multipart, Query, State},
-    http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Json},
+    extract::{Multipart, Path, Query, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{IntoResponse, Json, Response},
+    body::Body,
 };
 use serde_json::json;
 use std::sync::Arc;
@@ -340,4 +341,65 @@ pub(crate) async fn delete_upload(
     }
 
     (StatusCode::OK, Json(json!({ "deleted": true })))
+}
+
+// ---------------------------------------------------------------------------
+// Serve uploaded files with safe Content-Type
+// ---------------------------------------------------------------------------
+
+/// File extensions that browsers can execute — force these to `text/plain`.
+fn is_dangerous_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "html" | "htm" | "xhtml" | "js" | "mjs" | "cjs" | "ts"
+            | "css" | "svg" | "xml" | "xsl" | "xslt"
+            | "wasm" | "crx" | "swf"
+    )
+}
+
+pub(crate) async fn serve_upload(
+    Path((folder, filename)): Path<(String, String)>,
+) -> Response<Body> {
+    // Sanitize path components to prevent directory traversal
+    if folder.contains("..") || filename.contains("..") {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Body::from("Invalid path"))
+            .unwrap();
+    }
+
+    let path = format!("external/{}/{}", folder, filename);
+    let data = match tokio::fs::read(&path).await {
+        Ok(d) => d,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap();
+        }
+    };
+
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    let content_type = if is_dangerous_extension(&ext) {
+        "text/plain".to_string()
+    } else {
+        mime_guess::from_ext(&ext)
+            .first_or_octet_stream()
+            .to_string()
+    };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("inline; filename=\"{}\"", filename),
+        )
+        .body(Body::from(data))
+        .unwrap()
 }
