@@ -284,8 +284,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             Box::pin(async move {
                 if matches!(
                     pc_state,
-                    RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Closed
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) && teardown_screen_publisher(&state, &user_id).await.is_some()
                 {
                     set_user_screen_sharing(&state, &room_id, &user_id, false).await;
@@ -639,8 +638,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
             Box::pin(async move {
                 if matches!(
                     pc_state,
-                    RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Closed
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) {
                     teardown_screen_subscriber_pair(&state, &viewer_user_id, &sharer_user_id).await;
                 }
@@ -704,49 +702,37 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
-        // Periodic PLI as a safety net: if the subscriber's decoder stalls and
-        // its own RTCP PLI feedback doesn't reach the publisher, this will recover.
-        // Use a long interval (15s) because the subscriber's browser already sends
-        // PLI on decoder stall, and frequent keyframes at 1080p are huge (~100KB+)
-        // which destabilizes the encoder's rate control and tanks FPS.
-        let mut pli_interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        pli_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        const LAGGED_PACKET_THRESHOLD_FOR_PLI: usize = 64;
+        let pli_cooldown = std::time::Duration::from_secs(2);
+        let mut last_pli_request = std::time::Instant::now() - pli_cooldown;
 
         loop {
-            tokio::select! {
-                result = rtp_receiver.recv() => {
-                    match result {
-                        Ok(rtp_packet) => {
-                            if local_track.write_rtp(&rtp_packet).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                            eprintln!(
-                                "screen-fwd: subscriber lagged by {} packets, requesting keyframe",
-                                skipped
-                            );
-                            let _ = publisher_pc_for_pli
-                                .write_rtcp(&[Box::new(PictureLossIndication {
-                                    sender_ssrc: 0,
-                                    media_ssrc: pli_media_ssrc,
-                                })
-                                    as Box<dyn RtcpPacket + Send + Sync>])
-                                .await;
-                            continue;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
+            match rtp_receiver.recv().await {
+                Ok(rtp_packet) => {
+                    if local_track.write_rtp(&rtp_packet).await.is_err() {
+                        break;
                     }
                 }
-                _ = pli_interval.tick() => {
-                    let _ = publisher_pc_for_pli
-                        .write_rtcp(&[Box::new(PictureLossIndication {
-                            sender_ssrc: 0,
-                            media_ssrc: pli_media_ssrc,
-                        })
-                            as Box<dyn RtcpPacket + Send + Sync>])
-                        .await;
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    if skipped >= LAGGED_PACKET_THRESHOLD_FOR_PLI
+                        && last_pli_request.elapsed() >= pli_cooldown
+                    {
+                        last_pli_request = std::time::Instant::now();
+                        eprintln!(
+                            "screen-fwd: subscriber lagged by {} packets, requesting keyframe",
+                            skipped
+                        );
+                        let _ = publisher_pc_for_pli
+                            .write_rtcp(&[Box::new(PictureLossIndication {
+                                sender_ssrc: 0,
+                                media_ssrc: pli_media_ssrc,
+                            })
+                                as Box<dyn RtcpPacket + Send + Sync>])
+                            .await;
+                    }
+                    continue;
                 }
+                Err(broadcast::error::RecvError::Closed) => break,
             }
         }
     });
