@@ -1,12 +1,14 @@
 use super::super::{
     helpers::{do_join_room, error_response, extract_token, get_user_from_token, now_millis},
-    state::{AppState, InviteRecord},
+    state::{AppState, InviteRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use futures_util::TryStreamExt;
+use mongodb::bson::doc;
 use rand::Rng;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -27,13 +29,16 @@ pub(crate) async fn create_invite(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let rooms = state.rooms.read().await;
-    let room = rooms
-        .get(&room_id)
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
     if room.creator != user_id {
         return Err(error_response(
             StatusCode::FORBIDDEN,
@@ -46,7 +51,6 @@ pub(crate) async fn create_invite(
             "Cannot create invites for DM rooms",
         ));
     }
-    drop(rooms);
 
     let code = generate_invite_code();
     let record = InviteRecord {
@@ -56,7 +60,9 @@ pub(crate) async fn create_invite(
         click_count: 0,
         created_at: now_millis(),
     };
-    state.invites.write().await.insert(code.clone(), record);
+
+    let inv_coll = state.db.collection::<InviteRecord>("invites");
+    let _ = inv_coll.insert_one(record).await;
 
     Ok(Json(json!({ "code": code })))
 }
@@ -69,33 +75,35 @@ pub(crate) async fn list_invites(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let rooms = state.rooms.read().await;
-    let room = rooms
-        .get(&room_id)
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
     if room.creator != user_id {
         return Err(error_response(
             StatusCode::FORBIDDEN,
             "Only the room owner can list invites",
         ));
     }
-    drop(rooms);
 
-    let invites = state.invites.read().await;
-    let list: Vec<Value> = invites
-        .values()
-        .filter(|inv| inv.room_id == room_id)
-        .map(|inv| {
-            json!({
+    let inv_coll = state.db.collection::<InviteRecord>("invites");
+    let mut list: Vec<Value> = Vec::new();
+
+    if let Ok(mut cursor) = inv_coll.find(doc! { "room_id": &room_id }).await {
+        while let Ok(Some(inv)) = cursor.try_next().await {
+            list.push(json!({
                 "code": inv.code,
                 "click_count": inv.click_count,
                 "created_at": inv.created_at,
-            })
-        })
-        .collect();
+            }));
+        }
+    }
 
     Ok(Json(json!({ "invites": list })))
 }
@@ -108,29 +116,32 @@ pub(crate) async fn delete_invite(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let invites = state.invites.read().await;
-    let invite = invites
-        .get(&code)
+    let inv_coll = state.db.collection::<InviteRecord>("invites");
+    let invite = inv_coll
+        .find_one(doc! { "_id": &code })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
-    let room_id = invite.room_id.clone();
-    drop(invites);
 
-    let rooms = state.rooms.read().await;
-    let room = rooms
-        .get(&room_id)
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &invite.room_id })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
     if room.creator != user_id {
         return Err(error_response(
             StatusCode::FORBIDDEN,
             "Only the room owner can delete invites",
         ));
     }
-    drop(rooms);
 
-    state.invites.write().await.remove(&code);
+    let _ = inv_coll.delete_one(doc! { "_id": &code }).await;
 
     Ok(Json(json!({ "success": true })))
 }
@@ -139,29 +150,33 @@ pub(crate) async fn get_invite_info(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    // Increment click count
-    let mut invites = state.invites.write().await;
-    let invite = invites
-        .get_mut(&code)
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
-    invite.click_count += 1;
-    let room_id = invite.room_id.clone();
-    drop(invites);
+    let inv_coll = state.db.collection::<InviteRecord>("invites");
 
-    let rooms = state.rooms.read().await;
-    let room = rooms
-        .get(&room_id)
+    // Increment click count
+    let invite = inv_coll
+        .find_one_and_update(
+            doc! { "_id": &code },
+            doc! { "$inc": { "click_count": 1_i64 } },
+        )
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &invite.room_id })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
-    let name = room.name.clone();
-    let icon_url = room.icon_url.clone();
-    drop(rooms);
 
     let rm = state.room_members.read().await;
-    let member_count = rm.get(&room_id).map(|m| m.len()).unwrap_or(0);
+    let member_count = rm.get(&invite.room_id).map(|m| m.len()).unwrap_or(0);
 
     Ok(Json(json!({
-        "room_name": name,
-        "icon_url": icon_url,
+        "room_name": room.name,
+        "icon_url": room.icon_url,
         "member_count": member_count,
     })))
 }
@@ -174,21 +189,28 @@ pub(crate) async fn accept_invite(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let invites = state.invites.read().await;
-    let invite = invites
-        .get(&code)
+    let inv_coll = state.db.collection::<InviteRecord>("invites");
+    let invite = inv_coll
+        .find_one(doc! { "_id": &code })
+        .await
+        .ok()
+        .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
-    let room_id = invite.room_id.clone();
-    drop(invites);
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &invite.room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room no longer exists"));
     }
 
-    do_join_room(&state, &room_id, &user_id).await;
+    do_join_room(&state, &invite.room_id, &user_id).await;
 
-    Ok(Json(json!({ "room_id": room_id })))
+    Ok(Json(json!({ "room_id": invite.room_id })))
 }

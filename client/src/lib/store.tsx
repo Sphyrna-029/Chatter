@@ -10,6 +10,10 @@ import {
 } from "react";
 import {
   setAccessToken,
+  setRefreshToken,
+  restoreTokens,
+  clearTokens,
+  getAccessToken,
   apiLogin,
   apiRegister,
   apiLogout,
@@ -683,6 +687,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Keep a ref to loadRooms so WS handler can call it without stale closure
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
+  // Restore tokens from localStorage on mount
+  useEffect(() => {
+    restoreTokens();
+    const token = getAccessToken();
+    if (token) {
+      // Parse user_id from JWT payload
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        if (payload.sub && payload.exp * 1000 > Date.now()) {
+          dispatch({
+            type: "LOGIN",
+            payload: { accessToken: token, userId: payload.sub },
+          });
+        } else {
+          // Token expired, clear
+          clearTokens();
+        }
+      } catch {
+        clearTokens();
+      }
+    }
+  }, []);
+
   // Connect WS when logged in
   useEffect(() => {
     if (state.accessToken && !wsRef.current) {
@@ -731,6 +758,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const data = await apiLogin(username, password);
     setAccessToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
@@ -740,6 +768,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (username: string, password: string) => {
     const data = await apiRegister(username, password);
     setAccessToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
@@ -750,7 +779,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       await apiLogout();
     } catch {}
-    setAccessToken(null);
+    clearTokens();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();

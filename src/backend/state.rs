@@ -1,6 +1,6 @@
 use axum::extract::ws::Message;
-use serde::Serialize;
-use serde_json::Value;
+use mongodb::Database;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
@@ -13,12 +13,14 @@ use webrtc::{
 pub(crate) type WsSender = mpsc::UnboundedSender<Message>;
 
 pub struct AppState {
-    pub(crate) users: RwLock<HashMap<String, UserRecord>>,
-    pub(crate) rooms: RwLock<HashMap<String, RoomRecord>>,
+    // MongoDB
+    pub(crate) db: Database,
+    pub(crate) jwt_secret: String,
+
+    // Write-through cache for room members (avoids DB query on every broadcast)
     pub(crate) room_members: RwLock<HashMap<String, Vec<String>>>,
-    pub(crate) messages: RwLock<HashMap<String, Vec<Value>>>,
-    pub(crate) message_reactions: RwLock<HashMap<String, HashMap<String, Vec<String>>>>,
-    pub(crate) access_tokens: RwLock<HashMap<String, String>>,
+
+    // Ephemeral in-memory state (not persisted)
     pub(crate) active_websockets: RwLock<HashMap<String, WsSender>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     pub(crate) user_presence: RwLock<HashMap<String, PresenceRecord>>,
@@ -27,21 +29,24 @@ pub struct AppState {
     pub(crate) screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
     pub(crate) voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
-    pub(crate) dm_rooms: RwLock<HashMap<String, String>>, // Maps sorted "user1|user2" to room_id
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
-    pub(crate) invites: RwLock<HashMap<String, InviteRecord>>, // keyed by invite code
-    pub(crate) user_uploads: RwLock<HashMap<String, Vec<UploadRecord>>>, // keyed by user_id
 }
 
-#[derive(Clone)]
+// ─── MongoDB document types ──────────────────────────────────────────────────
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct UserRecord {
-    pub(crate) password: String,
+    #[serde(rename = "_id")]
+    pub(crate) user_id: String,
+    pub(crate) password_hash: String,
     pub(crate) avatar_url: String,
     pub(crate) about: String,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct RoomRecord {
+    #[serde(rename = "_id")]
+    pub(crate) room_id: String,
     pub(crate) name: String,
     pub(crate) topic: String,
     pub(crate) creator: String,
@@ -50,6 +55,55 @@ pub(crate) struct RoomRecord {
     pub(crate) icon_url: String,
     pub(crate) custom_emojis: Vec<String>,
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct RoomMemberRecord {
+    pub(crate) room_id: String,
+    pub(crate) user_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ReactionRecord {
+    pub(crate) event_id: String,
+    pub(crate) emoji: String,
+    pub(crate) user_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct DmRoomRecord {
+    #[serde(rename = "_id")]
+    pub(crate) user_pair: String, // sorted "user1|user2"
+    pub(crate) room_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct InviteRecord {
+    #[serde(rename = "_id")]
+    pub(crate) code: String,
+    pub(crate) room_id: String,
+    pub(crate) creator: String,
+    pub(crate) click_count: u64,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct UploadRecord {
+    pub(crate) user_id: String,
+    pub(crate) filename: String,
+    pub(crate) url: String,
+    pub(crate) disk_path: String,
+    pub(crate) size: u64,
+    pub(crate) uploaded_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct RefreshTokenRecord {
+    pub(crate) token: String,
+    pub(crate) user_id: String,
+    pub(crate) expires_at: chrono::DateTime<chrono::Utc>,
+}
+
+// ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]
 pub(crate) struct VoiceMemberState {
@@ -72,23 +126,6 @@ pub(crate) struct CachedPreview {
     pub(crate) description: Option<String>,
     pub(crate) image: Option<String>,
     pub(crate) site_name: Option<String>,
-}
-
-#[derive(Clone, Serialize)]
-pub(crate) struct UploadRecord {
-    pub(crate) filename: String,
-    pub(crate) url: String,
-    pub(crate) disk_path: String,
-    pub(crate) size: u64,
-    pub(crate) uploaded_at: i64,
-}
-
-pub(crate) struct InviteRecord {
-    pub(crate) code: String,
-    pub(crate) room_id: String,
-    pub(crate) creator: String,
-    pub(crate) click_count: u64,
-    pub(crate) created_at: i64,
 }
 
 #[derive(Clone)]

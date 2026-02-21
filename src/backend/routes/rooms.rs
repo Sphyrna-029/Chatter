@@ -4,13 +4,14 @@ use super::super::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
         get_user_from_token, now_millis,
     },
-    state::{AppState, RoomRecord},
+    state::{AppState, DmRoomRecord, RoomMemberRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use mongodb::bson::doc;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -22,7 +23,6 @@ pub(crate) async fn create_room(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let is_dm = req.is_direct.unwrap_or(false);
@@ -33,7 +33,6 @@ pub(crate) async fn create_room(
             if invite_list.len() == 1 {
                 let other_user = &invite_list[0];
 
-                // Prevent self-DMs
                 if *other_user == user_id {
                     return Err(error_response(
                         StatusCode::BAD_REQUEST,
@@ -41,66 +40,31 @@ pub(crate) async fn create_room(
                     ));
                 }
 
-                // Create sorted key for DM lookup
                 let dm_key = if user_id < *other_user {
                     format!("{}|{}", user_id, other_user)
                 } else {
                     format!("{}|{}", other_user, user_id)
                 };
 
-                // Check if DM already exists
-                let dm_rooms = state.dm_rooms.read().await;
-                if let Some(existing_room_id) = dm_rooms.get(&dm_key) {
-                    let existing_room_id = existing_room_id.clone();
-                    drop(dm_rooms);
+                // Check MongoDB for existing DM
+                let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
+                if let Ok(Some(existing)) = dm_coll.find_one(doc! { "_id": &dm_key }).await {
+                    let existing_room_id = existing.room_id;
 
                     // Re-add the user if they left
-                    let mut rm = state.room_members.write().await;
-                    if let Some(members) = rm.get_mut(&existing_room_id) {
-                        if !members.contains(&user_id) {
-                            members.push(user_id.clone());
-                            drop(rm);
+                    let is_member = {
+                        let rm = state.room_members.read().await;
+                        rm.get(&existing_room_id)
+                            .map(|m| m.contains(&user_id))
+                            .unwrap_or(false)
+                    };
 
-                            let display = user_id
-                                .split(':')
-                                .next()
-                                .unwrap_or(&user_id)
-                                .trim_start_matches('@');
-                            let sys_event = json!({
-                                "type": "m.room.message",
-                                "room_id": existing_room_id,
-                                "sender": user_id,
-                                "content": {
-                                    "msgtype": "m.system",
-                                    "body": format!("{} has joined the room", display)
-                                },
-                                "event_id": generate_id("$"),
-                                "origin_server_ts": now_millis()
-                            });
-                            state
-                                .messages
-                                .write()
-                                .await
-                                .entry(existing_room_id.clone())
-                                .or_insert_with(Vec::new)
-                                .push(sys_event.clone());
-                            broadcast_to_room(&state, &existing_room_id, &sys_event).await;
-
-                            let event = json!({
-                                "type": "m.room.member",
-                                "room_id": existing_room_id,
-                                "sender": user_id,
-                                "content": {"membership": "join"},
-                                "event_id": generate_id("$"),
-                                "origin_server_ts": now_millis()
-                            });
-                            broadcast_to_room(&state, &existing_room_id, &event).await;
-                        }
+                    if !is_member {
+                        do_join_room(&state, &existing_room_id, &user_id).await;
                     }
 
                     return Ok(Json(json!({"room_id": existing_room_id})));
                 }
-                drop(dm_rooms);
 
                 // Create new DM room
                 let room_id = generate_id("!");
@@ -111,36 +75,49 @@ pub(crate) async fn create_room(
                     .trim_start_matches('@');
                 let room_name = format!("DM with {}", other_user_name);
 
-                state.rooms.write().await.insert(
-                    room_id.clone(),
-                    RoomRecord {
-                        name: room_name.clone(),
-                        topic: String::from("Direct Message"),
-                        creator: user_id.clone(),
-                        is_dm: true,
-                        tags: vec![],
-                        icon_url: String::new(),
-                        custom_emojis: vec![],
-                    },
-                );
+                let room_record = RoomRecord {
+                    room_id: room_id.clone(),
+                    name: room_name.clone(),
+                    topic: String::from("Direct Message"),
+                    creator: user_id.clone(),
+                    is_dm: true,
+                    tags: vec![],
+                    icon_url: String::new(),
+                    custom_emojis: vec![],
+                };
+                let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+                let _ = rooms_coll.insert_one(room_record).await;
 
-                let members = vec![user_id.clone(), other_user.clone()];
+                // Add both members to MongoDB and cache
+                let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+                let _ = members_coll
+                    .insert_one(RoomMemberRecord {
+                        room_id: room_id.clone(),
+                        user_id: user_id.clone(),
+                    })
+                    .await;
+                let _ = members_coll
+                    .insert_one(RoomMemberRecord {
+                        room_id: room_id.clone(),
+                        user_id: other_user.clone(),
+                    })
+                    .await;
 
-                state
-                    .room_members
-                    .write()
-                    .await
-                    .insert(room_id.clone(), members);
-                state
-                    .messages
-                    .write()
-                    .await
-                    .insert(room_id.clone(), Vec::new());
+                // Update cache
+                {
+                    let mut rm = state.room_members.write().await;
+                    rm.insert(room_id.clone(), vec![user_id.clone(), other_user.clone()]);
+                }
 
                 // Store DM mapping
-                state.dm_rooms.write().await.insert(dm_key, room_id.clone());
+                let _ = dm_coll
+                    .insert_one(DmRoomRecord {
+                        user_pair: dm_key,
+                        room_id: room_id.clone(),
+                    })
+                    .await;
 
-                // Broadcast room creation so the invited user sees it in real-time
+                // Broadcast room creation
                 let event = json!({
                     "type": "m.room.created",
                     "room_id": room_id,
@@ -159,22 +136,29 @@ pub(crate) async fn create_room(
 
     // Regular room creation
     let room_id = generate_id("!");
-    let room_count = state.rooms.read().await.len();
 
     let mut members = vec![user_id.clone()];
 
-    // Add invited users
+    // Add invited users (check they exist)
     if let Some(ref invite_list) = req.invite {
-        let users = state.users.read().await;
+        let users_coll = state
+            .db
+            .collection::<super::super::state::UserRecord>("users");
         for invited in invite_list {
-            if users.contains_key(invited) && !members.contains(invited) {
+            if users_coll
+                .find_one(doc! { "_id": invited })
+                .await
+                .ok()
+                .flatten()
+                .is_some()
+                && !members.contains(invited)
+            {
                 members.push(invited.clone());
             }
         }
     }
 
     let room_name = if is_dm && members.len() == 2 {
-        // Name DM after the other user
         let other = if members[0] == user_id {
             &members[1]
         } else {
@@ -187,41 +171,59 @@ pub(crate) async fn create_room(
             .trim_start_matches('@');
         format!("DM with {}", other_display)
     } else {
+        let room_count = state
+            .db
+            .collection::<RoomRecord>("rooms")
+            .count_documents(doc! {})
+            .await
+            .unwrap_or(0);
         req.name
             .unwrap_or_else(|| format!("Room {}", room_count + 1))
     };
 
-    state.rooms.write().await.insert(
-        room_id.clone(),
-        RoomRecord {
-            name: room_name,
-            topic: req.topic.unwrap_or_default(),
-            creator: user_id.clone(),
-            is_dm: false,
-            tags: req.tags.unwrap_or_default(),
-            icon_url: req.icon_url.unwrap_or_default(),
-            custom_emojis: vec![],
-        },
-    );
+    let room_record = RoomRecord {
+        room_id: room_id.clone(),
+        name: room_name,
+        topic: req.topic.unwrap_or_default(),
+        creator: user_id.clone(),
+        is_dm,
+        tags: req.tags.unwrap_or_default(),
+        icon_url: req.icon_url.unwrap_or_default(),
+        custom_emojis: vec![],
+    };
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let _ = rooms_coll.insert_one(room_record).await;
 
     // Register DM mapping
     if is_dm && members.len() == 2 {
         let mut key_parts = [members[0].clone(), members[1].clone()];
         key_parts.sort();
         let dm_key = key_parts.join("|");
-        state.dm_rooms.write().await.insert(dm_key, room_id.clone());
+        let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
+        let _ = dm_coll
+            .insert_one(DmRoomRecord {
+                user_pair: dm_key,
+                room_id: room_id.clone(),
+            })
+            .await;
     }
 
-    state
-        .room_members
-        .write()
-        .await
-        .insert(room_id.clone(), members);
-    state
-        .messages
-        .write()
-        .await
-        .insert(room_id.clone(), Vec::new());
+    // Add members to MongoDB
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    for member in &members {
+        let _ = members_coll
+            .insert_one(RoomMemberRecord {
+                room_id: room_id.clone(),
+                user_id: member.clone(),
+            })
+            .await;
+    }
+
+    // Update cache
+    {
+        let mut rm = state.room_members.write().await;
+        rm.insert(room_id.clone(), members);
+    }
 
     Ok(Json(json!({"room_id": room_id})))
 }
@@ -234,10 +236,17 @@ pub(crate) async fn join_room(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    // Check room exists in MongoDB
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -254,28 +263,38 @@ pub(crate) async fn leave_room(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
-    let was_member = {
-        let mut rm = state.room_members.write().await;
-        if let Some(members) = rm.get_mut(&room_id) {
-            if let Some(pos) = members.iter().position(|m| m == &user_id) {
-                members.remove(pos);
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
+    // Remove from MongoDB
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    let delete_result = members_coll
+        .delete_one(doc! { "room_id": &room_id, "user_id": &user_id })
+        .await;
 
+    let was_member = delete_result
+        .map(|r| r.deleted_count > 0)
+        .unwrap_or(false);
+
+    // Update cache
     if was_member {
+        {
+            let mut rm = state.room_members.write().await;
+            if let Some(members) = rm.get_mut(&room_id) {
+                members.retain(|m| m != &user_id);
+            }
+        }
+
         // Remove from voice channel
         {
             let mut vc = state.voice_channels.write().await;
@@ -284,8 +303,6 @@ pub(crate) async fn leave_room(
             }
         }
 
-        // System message for the leave (store before broadcasting member event,
-        // so remaining members AND the leaving user's last fetch both include it)
         let display = user_id
             .split(':')
             .next()
@@ -302,13 +319,12 @@ pub(crate) async fn leave_room(
             "event_id": generate_id("$"),
             "origin_server_ts": now_millis()
         });
-        state
-            .messages
-            .write()
-            .await
-            .entry(room_id.clone())
-            .or_insert_with(Vec::new)
-            .push(sys_event.clone());
+
+        // Store system message in MongoDB
+        let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+        if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+            let _ = msg_coll.insert_one(doc).await;
+        }
         broadcast_to_room(&state, &room_id, &sys_event).await;
 
         let event = json!({
@@ -332,9 +348,9 @@ pub(crate) async fn joined_rooms(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    // Use cache for fast lookup
     let rm = state.room_members.read().await;
     let joined: Vec<String> = rm
         .iter()
@@ -353,24 +369,25 @@ pub(crate) async fn delete_room(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     // Check room exists and user is creator
-    {
-        let rooms = state.rooms.read().await;
-        let room = rooms
-            .get(&room_id)
-            .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
-        if room.creator != user_id {
-            return Err(error_response(
-                StatusCode::FORBIDDEN,
-                "Only the room creator can delete the room",
-            ));
-        }
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    if room.creator != user_id {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only the room creator can delete the room",
+        ));
     }
 
-    // Broadcast deletion event to all current members before removing anything
+    // Broadcast deletion event before removing
     let event = json!({
         "type": "m.room.deleted",
         "room_id": room_id,
@@ -379,61 +396,67 @@ pub(crate) async fn delete_room(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
-    // Remove from all state maps
-    state.rooms.write().await.remove(&room_id);
+    // Remove from MongoDB
+    let _ = rooms_coll.delete_one(doc! { "_id": &room_id }).await;
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    let _ = members_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let _ = msg_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let react_coll = state
+        .db
+        .collection::<super::super::state::ReactionRecord>("reactions");
+    // Delete reactions for messages in this room (we'd need event_ids, but simpler to just
+    // leave orphaned reactions since they won't be queried)
+    let _ = react_coll; // reactions will be orphaned but harmless
+
+    // Remove DM mapping
+    let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
+    let _ = dm_coll.delete_many(doc! { "room_id": &room_id }).await;
+
+    // Remove invites
+    let inv_coll = state
+        .db
+        .collection::<super::super::state::InviteRecord>("invites");
+    let _ = inv_coll.delete_many(doc! { "room_id": &room_id }).await;
+
+    // Update caches
     state.room_members.write().await.remove(&room_id);
-    state.messages.write().await.remove(&room_id);
-    state.message_reactions.write().await.remove(&room_id);
     state.voice_channels.write().await.remove(&room_id);
-
-    // Remove any DM mapping pointing to this room
-    {
-        let mut dm = state.dm_rooms.write().await;
-        dm.retain(|_, rid| *rid != room_id);
-    }
-
-    // Remove any invites for this room
-    {
-        let mut invites = state.invites.write().await;
-        invites.retain(|_, inv| inv.room_id != room_id);
-    }
 
     Ok(Json(json!({"deleted": true})))
 }
 
 pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
-    let rooms = state.rooms.read().await;
+    use futures_util::TryStreamExt;
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let rm = state.room_members.read().await;
     let vc = state.voice_channels.read().await;
 
-    let room_list: Vec<Value> = rooms
-        .iter()
-        .filter(|(_, room)| !room.is_dm) // Don't include DMs in public room list
-        .map(|(room_id, room)| {
-            let voice_members = vc.get(room_id);
+    let mut room_list: Vec<Value> = Vec::new();
+
+    if let Ok(mut cursor) = rooms_coll.find(doc! { "is_dm": false }).await {
+        while let Ok(Some(room)) = cursor.try_next().await {
+            let voice_members = vc.get(&room.room_id);
             let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
             let screen_share_active = voice_members
                 .map(|v| v.values().any(|m| m.screen_sharing))
                 .unwrap_or(false);
-            json!({
-                "room_id": room_id,
+            room_list.push(json!({
+                "room_id": room.room_id,
                 "name": room.name,
                 "topic": room.topic,
-                "member_count": rm.get(room_id).map(|m| m.len()).unwrap_or(0),
+                "member_count": rm.get(&room.room_id).map(|m| m.len()).unwrap_or(0),
                 "voice_count": voice_count,
                 "screen_share_active": screen_share_active,
                 "tags": room.tags,
                 "icon_url": room.icon_url
-            })
-        })
-        .collect();
+            }));
+        }
+    }
 
     Json(json!({"rooms": room_list}))
 }
-
-// ---------------------------------------------------------------------------
-// Messages
-// ---------------------------------------------------------------------------
 
 pub(crate) async fn update_room_topic(
     State(state): State<Arc<AppState>>,
@@ -444,16 +467,20 @@ pub(crate) async fn update_room_topic(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    // Check room exists and user is a member
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
     {
-        let rooms = state.rooms.read().await;
-        if !rooms.contains_key(&room_id) {
-            return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
-        }
+        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
+
+    // Check membership from cache
     {
         let rm = state.room_members.read().await;
         if !rm
@@ -468,15 +495,14 @@ pub(crate) async fn update_room_topic(
         }
     }
 
-    // Update topic
-    {
-        let mut rooms = state.rooms.write().await;
-        if let Some(room) = rooms.get_mut(&room_id) {
-            room.topic = req.topic.clone();
-        }
-    }
+    // Update topic in MongoDB
+    let _ = rooms_coll
+        .update_one(
+            doc! { "_id": &room_id },
+            doc! { "$set": { "topic": &req.topic } },
+        )
+        .await;
 
-    // Broadcast to room
     let event = json!({
         "type": "m.room.topic",
         "room_id": room_id,
@@ -497,22 +523,23 @@ pub(crate) async fn update_room_settings(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    // Check room exists and user is creator
-    {
-        let rooms = state.rooms.read().await;
-        let room = rooms
-            .get(&room_id)
-            .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
-        if room.creator != user_id {
-            return Err(error_response(
-                StatusCode::FORBIDDEN,
-                "Only the room creator can edit settings",
-            ));
-        }
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    if room.creator != user_id {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only the room creator can edit settings",
+        ));
     }
+
     {
         let rm = state.room_members.read().await;
         if !rm
@@ -527,46 +554,37 @@ pub(crate) async fn update_room_settings(
         }
     }
 
-    // Update fields
-    let mut updated_name = None;
-    let mut updated_icon_url = None;
-    let mut updated_tags = None;
-    let mut updated_custom_emojis = None;
-    {
-        let mut rooms = state.rooms.write().await;
-        if let Some(room) = rooms.get_mut(&room_id) {
-            if let Some(ref name) = req.name {
-                room.name = name.clone();
-                updated_name = Some(name.clone());
-            }
-            if let Some(ref icon_url) = req.icon_url {
-                room.icon_url = icon_url.clone();
-                updated_icon_url = Some(icon_url.clone());
-            }
-            if let Some(ref tags) = req.tags {
-                room.tags = tags.clone();
-                updated_tags = Some(tags.clone());
-            }
-            if let Some(ref custom_emojis) = req.custom_emojis {
-                room.custom_emojis = custom_emojis.clone();
-                updated_custom_emojis = Some(custom_emojis.clone());
-            }
-        }
-    }
-
-    // Build broadcast content with only changed fields
+    // Build update doc
+    let mut set_doc = mongodb::bson::Document::new();
     let mut content = serde_json::Map::new();
-    if let Some(name) = updated_name {
+
+    if let Some(ref name) = req.name {
+        set_doc.insert("name", name.as_str());
         content.insert("name".to_string(), json!(name));
     }
-    if let Some(icon_url) = updated_icon_url {
+    if let Some(ref icon_url) = req.icon_url {
+        set_doc.insert("icon_url", icon_url.as_str());
         content.insert("icon_url".to_string(), json!(icon_url));
     }
-    if let Some(tags) = updated_tags {
+    if let Some(ref tags) = req.tags {
+        set_doc.insert(
+            "tags",
+            mongodb::bson::to_bson(tags).unwrap_or(mongodb::bson::Bson::Null),
+        );
         content.insert("tags".to_string(), json!(tags));
     }
-    if let Some(custom_emojis) = updated_custom_emojis {
+    if let Some(ref custom_emojis) = req.custom_emojis {
+        set_doc.insert(
+            "custom_emojis",
+            mongodb::bson::to_bson(custom_emojis).unwrap_or(mongodb::bson::Bson::Null),
+        );
         content.insert("custom_emojis".to_string(), json!(custom_emojis));
+    }
+
+    if !set_doc.is_empty() {
+        let _ = rooms_coll
+            .update_one(doc! { "_id": &room_id }, doc! { "$set": set_doc })
+            .await;
     }
 
     let event = json!({

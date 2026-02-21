@@ -1,7 +1,7 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
-        auth::{login, logout, register},
+        auth::{login, logout, refresh, register},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
         messages::{edit_message, get_room_messages, redact_message, send_message},
@@ -42,6 +42,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/_matrix/client/r0/register", post(register))
            .route("/_matrix/client/r0/login", post(login))
            .route("/_matrix/client/r0/logout", post(logout))
+           .route("/_matrix/client/r0/refresh", post(refresh))
            // Rooms
            .route("/_matrix/client/r0/createRoom", post(create_room))
            .route("/_matrix/client/r0/rooms/{room_id}/join", post(join_room))

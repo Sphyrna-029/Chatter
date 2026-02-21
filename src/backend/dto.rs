@@ -70,3 +70,8 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) custom_emojis: Option<Vec<String>>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct RefreshTokenRequest {
+    pub(crate) refresh_token: String,
+}

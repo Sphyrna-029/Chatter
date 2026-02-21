@@ -4,13 +4,15 @@ use super::super::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         now_millis, send_to_user,
     },
-    state::AppState,
+    state::{AppState, RoomRecord},
 };
 use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use futures_util::TryStreamExt;
+use mongodb::bson::doc;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -24,10 +26,16 @@ pub(crate) async fn send_message(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -67,23 +75,18 @@ pub(crate) async fn send_message(
     if let Some(ref parent_event_id) = req.in_reply_to {
         content["in_reply_to"] = json!(parent_event_id);
 
-        // Look up parent message to get sender and body preview
-        let msgs = state.messages.read().await;
-        if let Some(room_msgs) = msgs.get(&room_id) {
-            if let Some(parent) = room_msgs
-                .iter()
-                .find(|m| m.get("event_id").and_then(|v| v.as_str()) == Some(parent_event_id))
-            {
-                if let Some(sender) = parent.get("sender").and_then(|v| v.as_str()) {
-                    content["reply_to_sender"] = json!(sender);
-                    reply_to_user = Some(sender.to_string());
-                }
-                if let Some(body) = parent
-                    .get("content")
-                    .and_then(|c| c.get("body"))
-                    .and_then(|v| v.as_str())
-                {
-                    // Truncate to 100 chars for preview
+        // Look up parent message from MongoDB
+        let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+        if let Ok(Some(parent)) = msg_coll
+            .find_one(doc! { "event_id": parent_event_id, "room_id": &room_id })
+            .await
+        {
+            if let Some(sender) = parent.get_str("sender").ok() {
+                content["reply_to_sender"] = json!(sender);
+                reply_to_user = Some(sender.to_string());
+            }
+            if let Some(parent_content) = parent.get_document("content").ok() {
+                if let Some(body) = parent_content.get_str("body").ok() {
                     let preview: String = body.chars().take(100).collect();
                     content["reply_to_body"] = json!(preview);
                 }
@@ -100,17 +103,15 @@ pub(crate) async fn send_message(
         "origin_server_ts": timestamp
     });
 
-    state
-        .messages
-        .write()
-        .await
-        .entry(room_id.clone())
-        .or_insert_with(Vec::new)
-        .push(event.clone());
+    // Store in MongoDB
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(doc) = mongodb::bson::to_document(&event) {
+        let _ = msg_coll.insert_one(doc).await;
+    }
 
     broadcast_to_room(&state, &room_id, &event).await;
 
-    // Send reply notification to the replied-to user (if online, not self-reply)
+    // Send reply notification
     if let Some(ref replied_user) = reply_to_user {
         if replied_user != &user_id {
             let notification = json!({
@@ -136,10 +137,16 @@ pub(crate) async fn get_room_messages(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -157,14 +164,38 @@ pub(crate) async fn get_room_messages(
         }
     }
 
-    let limit = query.limit.unwrap_or(50);
-    let msgs = state.messages.read().await;
-    let room_msgs = msgs.get(&room_id).cloned().unwrap_or_default();
-    let total = room_msgs.len();
+    let limit = query.limit.unwrap_or(50) as i64;
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    // Get total count for this room
+    let total = msg_coll
+        .count_documents(doc! { "room_id": &room_id })
+        .await
+        .unwrap_or(0) as usize;
+
     let end = query.before.unwrap_or(total).min(total);
-    let start = end.saturating_sub(limit);
-    let chunk: Vec<Value> = room_msgs[start..end].to_vec();
+    let start = end.saturating_sub(limit as usize);
     let has_more = start > 0;
+
+    // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
+    let fetch_count = (end - start) as i64;
+    let mut cursor = msg_coll
+        .find(doc! { "room_id": &room_id })
+        .sort(doc! { "origin_server_ts": 1 })
+        .skip(start as u64)
+        .limit(fetch_count)
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+
+    let mut chunk: Vec<Value> = Vec::new();
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        // Remove MongoDB _id field
+        let mut doc = doc;
+        doc.remove("_id");
+        if let Ok(val) = serde_json::to_value(&doc) {
+            chunk.push(val);
+        }
+    }
 
     Ok(Json(json!({
         "start": start,
@@ -183,10 +214,16 @@ pub(crate) async fn redact_message(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -204,41 +241,48 @@ pub(crate) async fn redact_message(
         }
     }
 
-    let mut msgs = state.messages.write().await;
-    if let Some(room_msgs) = msgs.get_mut(&room_id) {
-        for msg in room_msgs.iter_mut() {
-            if msg.get("event_id").and_then(|v| v.as_str()) == Some(&event_id) {
-                if msg.get("sender").and_then(|v| v.as_str()) != Some(&user_id) {
-                    return Err(error_response(
-                        StatusCode::FORBIDDEN,
-                        "Can only delete your own messages",
-                    ));
-                }
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let msg = msg_coll
+        .find_one(doc! { "event_id": &event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
 
-                msg["content"] = json!({"msgtype": "m.text", "body": "[deleted]"});
-                msg["redacted"] = json!(true);
-                msg["redacted_by"] = json!(user_id);
-                msg["redacted_at"] = json!(now_millis());
-
-                let redaction_event = json!({
-                    "type": "m.room.redaction",
-                    "room_id": room_id,
-                    "sender": user_id,
-                    "redacts": event_id,
-                    "event_id": generate_id("$"),
-                    "origin_server_ts": now_millis()
-                });
-
-                let redaction_id = redaction_event["event_id"].as_str().unwrap().to_string();
-                drop(msgs);
-
-                broadcast_to_room(&state, &room_id, &redaction_event).await;
-                return Ok(Json(json!({"event_id": redaction_id})));
-            }
-        }
+    if msg.get_str("sender").ok() != Some(&user_id) {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Can only delete your own messages",
+        ));
     }
 
-    Err(error_response(StatusCode::NOT_FOUND, "Message not found"))
+    // Update message in MongoDB
+    let _ = msg_coll
+        .update_one(
+            doc! { "event_id": &event_id, "room_id": &room_id },
+            doc! {
+                "$set": {
+                    "content": { "msgtype": "m.text", "body": "[deleted]" },
+                    "redacted": true,
+                    "redacted_by": &user_id,
+                    "redacted_at": now_millis()
+                }
+            },
+        )
+        .await;
+
+    let redaction_event_id = generate_id("$");
+    let redaction_event = json!({
+        "type": "m.room.redaction",
+        "room_id": room_id,
+        "sender": user_id,
+        "redacts": event_id,
+        "event_id": redaction_event_id,
+        "origin_server_ts": now_millis()
+    });
+
+    broadcast_to_room(&state, &room_id, &redaction_event).await;
+    Ok(Json(json!({"event_id": redaction_event_id})))
 }
 
 pub(crate) async fn edit_message(
@@ -251,10 +295,16 @@ pub(crate) async fn edit_message(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -280,58 +330,61 @@ pub(crate) async fn edit_message(
         ));
     }
 
-    let mut msgs = state.messages.write().await;
-    if let Some(room_msgs) = msgs.get_mut(&room_id) {
-        for msg in room_msgs.iter_mut() {
-            if msg.get("event_id").and_then(|v| v.as_str()) == Some(&event_id) {
-                if msg.get("sender").and_then(|v| v.as_str()) != Some(&user_id) {
-                    return Err(error_response(
-                        StatusCode::FORBIDDEN,
-                        "Can only edit your own messages",
-                    ));
-                }
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let msg = msg_coll
+        .find_one(doc! { "event_id": &event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
 
-                if msg.get("redacted").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    return Err(error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Cannot edit a deleted message",
-                    ));
-                }
-
-                let original_body = msg
-                    .get("content")
-                    .and_then(|c| c.get("body"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                msg["content"]["body"] = json!(new_body);
-                msg["edited"] = json!(true);
-                msg["edited_at"] = json!(now_millis());
-
-                let edit_event = json!({
-                    "type": "m.room.edit",
-                    "room_id": room_id,
-                    "sender": user_id,
-                    "edits": event_id,
-                    "new_body": new_body,
-                    "original_body": original_body,
-                    "event_id": generate_id("$"),
-                    "origin_server_ts": now_millis()
-                });
-
-                let edit_event_id = edit_event["event_id"].as_str().unwrap().to_string();
-                drop(msgs);
-
-                broadcast_to_room(&state, &room_id, &edit_event).await;
-                return Ok(Json(json!({"event_id": edit_event_id})));
-            }
-        }
+    if msg.get_str("sender").ok() != Some(&user_id) {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Can only edit your own messages",
+        ));
     }
 
-    Err(error_response(StatusCode::NOT_FOUND, "Message not found"))
-}
+    if msg.get_bool("redacted").unwrap_or(false) {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot edit a deleted message",
+        ));
+    }
 
-// ---------------------------------------------------------------------------
-// Room topic
-// ---------------------------------------------------------------------------
+    let original_body = msg
+        .get_document("content")
+        .ok()
+        .and_then(|c| c.get_str("body").ok())
+        .unwrap_or("")
+        .to_string();
+
+    // Update in MongoDB
+    let _ = msg_coll
+        .update_one(
+            doc! { "event_id": &event_id, "room_id": &room_id },
+            doc! {
+                "$set": {
+                    "content.body": &new_body,
+                    "edited": true,
+                    "edited_at": now_millis()
+                }
+            },
+        )
+        .await;
+
+    let edit_event_id = generate_id("$");
+    let edit_event = json!({
+        "type": "m.room.edit",
+        "room_id": room_id,
+        "sender": user_id,
+        "edits": event_id,
+        "new_body": new_body,
+        "original_body": original_body,
+        "event_id": edit_event_id,
+        "origin_server_ts": now_millis()
+    });
+
+    broadcast_to_room(&state, &room_id, &edit_event).await;
+    Ok(Json(json!({"event_id": edit_event_id})))
+}

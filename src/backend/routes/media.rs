@@ -10,6 +10,8 @@ use axum::{
     response::{IntoResponse, Json, Response},
     body::Body,
 };
+use futures_util::TryStreamExt;
+use mongodb::bson::doc;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -22,7 +24,7 @@ pub(crate) async fn upload_file(
         Some(t) => t,
         None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
     };
-    let user_id = match get_user_from_token(&state, &token).await {
+    let user_id = match get_user_from_token(&state, &token) {
         Some(uid) => uid,
         None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
     };
@@ -80,7 +82,6 @@ pub(crate) async fn upload_file(
     }
 
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-    // Encode characters that break URLs: spaces, quotes, angle brackets, etc.
     const ENCODE_SET: &AsciiSet = &CONTROLS
         .add(b' ')
         .add(b'"')
@@ -93,8 +94,6 @@ pub(crate) async fn upload_file(
         .add(b'}');
     let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
 
-    // Build the URL from the incoming Host header so that it works in both
-    // local development (http://localhost:8000) and production deployments.
     let host = headers
         .get("host")
         .and_then(|h| h.to_str().ok())
@@ -106,18 +105,17 @@ pub(crate) async fn upload_file(
     };
     let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
 
-    // Track the upload for the user
-    {
-        let record = UploadRecord {
-            filename: filename.clone(),
-            url: url.clone(),
-            disk_path: path,
-            size: data.len() as u64,
-            uploaded_at: chrono::Utc::now().timestamp(),
-        };
-        let mut uploads = state.user_uploads.write().await;
-        uploads.entry(user_id).or_default().push(record);
-    }
+    // Track the upload in MongoDB
+    let record = UploadRecord {
+        user_id: user_id.clone(),
+        filename: filename.clone(),
+        url: url.clone(),
+        disk_path: path,
+        size: data.len() as u64,
+        uploaded_at: chrono::Utc::now().timestamp(),
+    };
+    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
+    let _ = uploads_coll.insert_one(record).await;
 
     (StatusCode::OK, Json(json!({ "url": url })))
 }
@@ -127,11 +125,9 @@ pub(crate) async fn upload_file(
 // ---------------------------------------------------------------------------
 
 pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
-    // Look for <meta property="og:___" content="...">
     let pattern = format!("property=\"{}\"", property);
     let pos = html.find(&pattern)?;
     let snippet = &html[pos..];
-    // Find content attribute
     let content_start = snippet.find("content=\"")? + 9;
     let content_end = snippet[content_start..].find('"')? + content_start;
     let value = snippet[content_start..content_end].to_string();
@@ -162,7 +158,7 @@ pub(crate) async fn link_preview(
         Some(t) => t,
         None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
     };
-    if get_user_from_token(&state, &token).await.is_none() {
+    if get_user_from_token(&state, &token).is_none() {
         return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
     }
 
@@ -176,7 +172,6 @@ pub(crate) async fn link_preview(
         }
     }
 
-    // Fetch the URL
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
         .redirect(reqwest::redirect::Policy::limited(5))
@@ -185,7 +180,6 @@ pub(crate) async fn link_preview(
 
     let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    // Twitter/X: use oEmbed API since their pages are client-rendered
     let is_twitter = url.contains("twitter.com/") || url.contains("x.com/");
     let preview = if is_twitter {
         let oembed_url = format!(
@@ -206,7 +200,6 @@ pub(crate) async fn link_preview(
                         description: json["html"]
                             .as_str()
                             .map(|h| {
-                                // Strip HTML tags to get plain tweet text
                                 let stripped = h
                                     .replace("<br>", "\n")
                                     .replace("&amp;", "&")
@@ -246,7 +239,6 @@ pub(crate) async fn link_preview(
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
         };
 
-        // Limit body to 256KB
         let body = match response.bytes().await {
             Ok(b) if b.len() <= 256 * 1024 => String::from_utf8_lossy(&b).to_string(),
             Ok(b) => String::from_utf8_lossy(&b[..256 * 1024]).to_string(),
@@ -292,13 +284,26 @@ pub(crate) async fn list_uploads(
         Some(t) => t,
         None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
     };
-    let user_id = match get_user_from_token(&state, &token).await {
+    let user_id = match get_user_from_token(&state, &token) {
         Some(uid) => uid,
         None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
     };
 
-    let uploads = state.user_uploads.read().await;
-    let files = uploads.get(&user_id).cloned().unwrap_or_default();
+    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
+    let mut files: Vec<serde_json::Value> = Vec::new();
+
+    if let Ok(mut cursor) = uploads_coll.find(doc! { "user_id": &user_id }).await {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            files.push(json!({
+                "filename": record.filename,
+                "url": record.url,
+                "disk_path": record.disk_path,
+                "size": record.size,
+                "uploaded_at": record.uploaded_at,
+            }));
+        }
+    }
+
     (StatusCode::OK, Json(json!({ "files": files })))
 }
 
@@ -316,38 +321,34 @@ pub(crate) async fn delete_upload(
         Some(t) => t,
         None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
     };
-    let user_id = match get_user_from_token(&state, &token).await {
+    let user_id = match get_user_from_token(&state, &token) {
         Some(uid) => uid,
         None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
     };
 
-    let mut uploads = state.user_uploads.write().await;
-    let files = match uploads.get_mut(&user_id) {
-        Some(f) => f,
-        None => return error_response(StatusCode::NOT_FOUND, "No uploads found"),
-    };
+    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
+    let record = uploads_coll
+        .find_one_and_delete(doc! { "user_id": &user_id, "url": &body.url })
+        .await
+        .ok()
+        .flatten();
 
-    let idx = files.iter().position(|r| r.url == body.url);
-    let record = match idx {
-        Some(i) => files.remove(i),
-        None => return error_response(StatusCode::NOT_FOUND, "File not found"),
-    };
-
-    // Delete from disk
-    let _ = tokio::fs::remove_file(&record.disk_path).await;
-    // Try to remove the parent directory (will fail silently if not empty)
-    if let Some(parent) = std::path::Path::new(&record.disk_path).parent() {
-        let _ = tokio::fs::remove_dir(parent).await;
+    match record {
+        Some(rec) => {
+            let _ = tokio::fs::remove_file(&rec.disk_path).await;
+            if let Some(parent) = std::path::Path::new(&rec.disk_path).parent() {
+                let _ = tokio::fs::remove_dir(parent).await;
+            }
+            (StatusCode::OK, Json(json!({ "deleted": true })))
+        }
+        None => error_response(StatusCode::NOT_FOUND, "File not found"),
     }
-
-    (StatusCode::OK, Json(json!({ "deleted": true })))
 }
 
 // ---------------------------------------------------------------------------
 // Serve uploaded files with safe Content-Type
 // ---------------------------------------------------------------------------
 
-/// File extensions that browsers can execute — force these to `text/plain`.
 fn is_dangerous_extension(ext: &str) -> bool {
     matches!(
         ext,
@@ -360,7 +361,6 @@ fn is_dangerous_extension(ext: &str) -> bool {
 pub(crate) async fn serve_upload(
     Path((folder, filename)): Path<(String, String)>,
 ) -> Response<Body> {
-    // Sanitize path components to prevent directory traversal
     if folder.contains("..") || filename.contains("..") {
         return Response::builder()
             .status(StatusCode::BAD_REQUEST)
