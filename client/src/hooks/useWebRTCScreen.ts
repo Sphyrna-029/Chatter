@@ -6,7 +6,6 @@ import {
   canSignal,
   getScreenSharePublishProfile,
   mungeScreenAudioSdp,
-  mungeScreenVideoSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
 
@@ -14,9 +13,9 @@ function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
 ): MediaTrackConstraints {
   return {
-    width: { min: 1920, ideal: 2560 },
-    height: { min: 1080, ideal: 1440 },
-    frameRate: { min: 30, ideal: profile.targetFps },
+    width: { ideal: 1920 },
+    height: { ideal: 1080 },
+    frameRate: { ideal: profile.targetFps },
   };
 }
 
@@ -30,16 +29,6 @@ function buildDisplayAudioConstraints(): MediaTrackConstraints {
   };
 }
 
-function isUnsupportedDisplayConstraintError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const message = err.message.toLowerCase();
-  return (
-    message.includes("constraints are not supported") ||
-    message.includes("min constraints are not supported") ||
-    (err.name === "TypeError" && message.includes("getdisplaymedia"))
-  );
-}
-
 async function tuneScreenVideoSender(
   sender: RTCRtpSender,
   profile: ScreenSharePublishProfile,
@@ -51,12 +40,11 @@ async function tuneScreenVideoSender(
       ...baseEncoding,
       maxBitrate: profile.maxBitrateBps,
       maxFramerate: profile.targetFps,
-      scaleResolutionDownBy: 1,
       priority: "high",
       networkPriority: "high",
     };
     params.encodings = [encoding];
-    params.degradationPreference = "disabled";
+    params.degradationPreference = "maintain-resolution";
     await sender.setParameters(params);
   } catch {
     // Browsers differ in which sender parameters are writable.
@@ -375,22 +363,10 @@ export function useWebRTCScreen() {
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
       const audioConstraints = buildDisplayAudioConstraints();
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: videoConstraints,
-          audio: audioConstraints,
-        });
-      } catch (constraintErr) {
-        if (!isUnsupportedDisplayConstraintError(constraintErr)) {
-          throw constraintErr;
-        }
-        // Fallback for browsers that reject advanced display constraints.
-        stream = await navigator.mediaDevices.getDisplayMedia({
-          video: true,
-          audio: audioConstraints,
-        });
-      }
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: videoConstraints,
+        audio: audioConstraints,
+      });
       screenStreamRef.current = stream;
       screenStreamsMap.set(state.userId!, stream);
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
@@ -400,11 +376,6 @@ export function useWebRTCScreen() {
       wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
 
       const screenTrack = stream.getVideoTracks()[0];
-      try {
-        await screenTrack.applyConstraints(videoConstraints);
-      } catch {
-        // Some browsers reject strict display constraints after capture starts.
-      }
       if ("contentHint" in screenTrack) {
         screenTrack.contentHint = profile.contentHint;
       }
@@ -427,13 +398,8 @@ export function useWebRTCScreen() {
         wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_candidate", room_id: state.currentRoomId, candidate: ev.candidate.toJSON() }));
       };
       const offer = await pc.createOffer();
-      const withAudioTuning = mungeScreenAudioSdp(offer.sdp!, {
+      const mungedSdp = mungeScreenAudioSdp(offer.sdp!, {
         maxAverageBitrate: profile.audioMaxAverageBitrate,
-      });
-      const mungedSdp = mungeScreenVideoSdp(withAudioTuning, {
-        startBitrateKbps: profile.startBitrateKbps,
-        minBitrateKbps: profile.minBitrateKbps,
-        maxBitrateKbps: profile.maxBitrateKbps,
       });
       await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
       await tuneScreenVideoSender(videoSender, profile);
