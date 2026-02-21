@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -262,7 +262,43 @@ interface MessageItemProps {
 export function MessageItem({ message, grouped }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction } = useAppContext();
   const [isEditing, setIsEditing] = useState(false);
-  const [editDraft, setEditDraft] = useState("");
+  const editRef = useRef<HTMLDivElement>(null);
+
+  // Convert raw body text (with :emoji{url}: markers) to HTML for the contenteditable div
+  const bodyToEditHtml = useCallback((body: string): string => {
+    const escaped = body
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    return escaped.replace(/:emoji\{([^}]+)\}:/g, (_match, url) => {
+      return `<img src="${url}" data-emoji-url="${url}" alt=":emoji{${url}}:" class="inline-block h-5 w-5 object-contain align-middle mx-0.5" />`;
+    });
+  }, []);
+
+  // Read the contenteditable div back into a text string with :emoji{url}: markers
+  const getEditDivContent = useCallback((): string => {
+    const div = editRef.current;
+    if (!div) return "";
+    const walk = (node: Node): string => {
+      let result = "";
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          result += child.textContent ?? "";
+        } else if ((child as Element).tagName === "IMG") {
+          const url = (child as HTMLImageElement).dataset.emojiUrl ?? "";
+          result += `:emoji{${url}}:`;
+        } else if ((child as Element).tagName === "BR") {
+          result += "\n";
+        } else {
+          const tag = (child as Element).tagName;
+          result += walk(child);
+          if (tag === "DIV" || tag === "P") result += "\n";
+        }
+      });
+      return result;
+    };
+    return walk(div).replace(/\n+$/, "");
+  }, []);
   const isSystem = message.content.msgtype === "m.system";
   const sender = message.sender.split(":")[0].substring(1);
   const initial = sender.substring(0, 1).toUpperCase();
@@ -273,6 +309,21 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const avatarUrl = state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
+
+  // Populate edit div with HTML and focus with cursor at end
+  useEffect(() => {
+    if (isEditing && editRef.current) {
+      const div = editRef.current;
+      div.innerHTML = bodyToEditHtml(message.content.body);
+      div.focus();
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }, [isEditing]);
 
   // Role-based permissions
   const roomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
@@ -376,14 +427,51 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
 
           {isEditing ? (
             <div className="mt-1">
-              <textarea
-                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none max-h-40 overflow-y-auto"
-                value={editDraft}
-                onChange={(e) => setEditDraft(e.target.value)}
+              <div
+                ref={editRef}
+                contentEditable
+                role="textbox"
+                aria-multiline="true"
+                suppressContentEditableWarning
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-h-40 overflow-y-auto break-words"
+                style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: "20px" }}
                 onKeyDown={(e) => {
+                  if (e.key === "Backspace" && editRef.current) {
+                    const sel = window.getSelection();
+                    if (sel && sel.isCollapsed && sel.rangeCount > 0) {
+                      const range = sel.getRangeAt(0);
+                      const container = range.startContainer;
+                      const offset = range.startOffset;
+                      let imgToRemove: Node | null = null;
+                      if (container === editRef.current && offset > 0) {
+                        const child = container.childNodes[offset - 1];
+                        if (child && (child as Element).tagName === "IMG") imgToRemove = child;
+                      } else if (container.nodeType === Node.TEXT_NODE && offset === 0) {
+                        const prev = container.previousSibling;
+                        if (prev && (prev as Element).tagName === "IMG") imgToRemove = prev;
+                      }
+                      if (imgToRemove) {
+                        e.preventDefault();
+                        const nextSibling = imgToRemove.nextSibling;
+                        imgToRemove.parentNode?.removeChild(imgToRemove);
+                        // Restore cursor position where the image was
+                        const newRange = document.createRange();
+                        if (nextSibling) {
+                          newRange.setStartBefore(nextSibling);
+                        } else {
+                          newRange.selectNodeContents(editRef.current);
+                          newRange.collapse(false);
+                        }
+                        newRange.collapse(true);
+                        sel.removeAllRanges();
+                        sel.addRange(newRange);
+                        return;
+                      }
+                    }
+                  }
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    const trimmed = editDraft.trim();
+                    const trimmed = getEditDivContent().trim();
                     if (trimmed && trimmed !== message.content.body) {
                       editMessage(message.event_id, trimmed);
                     }
@@ -393,9 +481,6 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                     setIsEditing(false);
                   }
                 }}
-                rows={2}
-                style={{ fieldSizing: "content" } as React.CSSProperties}
-                autoFocus
               />
               <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
                 <span>Enter to save</span>
@@ -504,10 +589,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6"
-                onClick={() => {
-                  setEditDraft(message.content.body);
-                  setIsEditing(true);
-                }}
+                onClick={() => setIsEditing(true)}
                 title="Edit"
               >
                 <span className="text-xs">✎</span>
