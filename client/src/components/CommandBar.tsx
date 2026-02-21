@@ -30,6 +30,11 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
     sendMessage,
     loadRooms,
     updateTopic,
+    kickMember,
+    banMember,
+    unbanMember,
+    setMemberRole,
+    setNameColors,
   } = useAppContext();
 
   const [input, setInput] = useState(initialValue);
@@ -67,8 +72,13 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
       sendMessage: (body: string) => sendMessage(body),
       loadRooms,
       updateTopic,
+      kickMember,
+      banMember,
+      unbanMember,
+      setMemberRole,
+      setNameColors,
     }),
-    [state, createRoom, joinRoom, leaveRoom, selectRoom, getAllRooms, setCustomStatus, sendMessage, loadRooms, updateTopic]
+    [state, createRoom, joinRoom, leaveRoom, selectRoom, getAllRooms, setCustomStatus, sendMessage, loadRooms, updateTopic, kickMember, banMember, unbanMember, setMemberRole, setNameColors]
   );
 
   // Autocomplete suggestions

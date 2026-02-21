@@ -1,13 +1,45 @@
 // HTTP API wrapper for the Matrix-compatible backend
 
 let _accessToken: string | null = null;
+let _refreshToken: string | null = null;
+let _refreshPromise: Promise<boolean> | null = null;
 
 export function setAccessToken(token: string | null) {
   _accessToken = token;
+  if (token) {
+    localStorage.setItem("access_token", token);
+  } else {
+    localStorage.removeItem("access_token");
+  }
+}
+
+export function setRefreshToken(token: string | null) {
+  _refreshToken = token;
+  if (token) {
+    localStorage.setItem("refresh_token", token);
+  } else {
+    localStorage.removeItem("refresh_token");
+  }
 }
 
 export function getAccessToken() {
   return _accessToken;
+}
+
+export function getRefreshToken() {
+  return _refreshToken;
+}
+
+export function restoreTokens() {
+  _accessToken = localStorage.getItem("access_token");
+  _refreshToken = localStorage.getItem("refresh_token");
+}
+
+export function clearTokens() {
+  _accessToken = null;
+  _refreshToken = null;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
 }
 
 function authHeaders(): Record<string, string> {
@@ -20,7 +52,57 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-// Auth
+// ─── Token refresh ──────────────────────────────────────────────────────────
+
+async function apiRefreshToken(): Promise<boolean> {
+  if (!_refreshToken) return false;
+  try {
+    const res = await fetch("/_matrix/client/r0/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: _refreshToken }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    setAccessToken(data.access_token);
+    setRefreshToken(data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function authenticatedFetch(
+  url: string,
+  init?: RequestInit
+): Promise<Response> {
+  const res = await fetch(url, {
+    ...init,
+    headers: { ...authHeaders(), ...init?.headers },
+  });
+
+  if (res.status === 401 && _refreshToken) {
+    // Deduplicate concurrent refresh attempts
+    if (!_refreshPromise) {
+      _refreshPromise = apiRefreshToken().finally(() => {
+        _refreshPromise = null;
+      });
+    }
+    const refreshed = await _refreshPromise;
+    if (refreshed) {
+      // Retry with new token
+      return fetch(url, {
+        ...init,
+        headers: { ...authHeaders(), ...init?.headers },
+      });
+    }
+  }
+
+  return res;
+}
+
+// ─── Auth ───────────────────────────────────────────────────────────────────
+
 export async function apiLogin(username: string, password: string) {
   let res: Response;
   try {
@@ -33,7 +115,6 @@ export async function apiLogin(username: string, password: string) {
     throw new Error("Cannot reach server. Is the backend running on :8000?");
   }
   if (!res.ok) {
-    // Try to get server error message
     try {
       const body = await res.json();
       throw new Error(body.error || "Login failed");
@@ -46,7 +127,11 @@ export async function apiLogin(username: string, password: string) {
       );
     }
   }
-  return res.json() as Promise<{ access_token: string; user_id: string }>;
+  return res.json() as Promise<{
+    access_token: string;
+    refresh_token: string;
+    user_id: string;
+  }>;
 }
 
 export async function apiRegister(username: string, password: string) {
@@ -73,37 +158,36 @@ export async function apiRegister(username: string, password: string) {
       );
     }
   }
-  return res.json() as Promise<{ access_token: string; user_id: string }>;
+  return res.json() as Promise<{
+    access_token: string;
+    refresh_token: string;
+    user_id: string;
+  }>;
 }
 
 export async function apiLogout() {
-  await fetch("/_matrix/client/r0/logout", {
+  await authenticatedFetch("/_matrix/client/r0/logout", {
     method: "POST",
-    headers: authHeaders(),
   });
 }
 
-// Rooms
+// ─── Rooms ──────────────────────────────────────────────────────────────────
+
 export async function apiGetJoinedRooms() {
-  const res = await fetch("/_matrix/client/r0/joined_rooms", {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch("/_matrix/client/r0/joined_rooms");
   if (!res.ok) throw new Error("Failed to load rooms");
   return res.json() as Promise<{ joined_rooms: string[] }>;
 }
 
 export async function apiSync() {
-  const res = await fetch("/_matrix/client/r0/sync?timeout=0", {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch("/_matrix/client/r0/sync?timeout=0");
   if (!res.ok) throw new Error("Sync failed");
   return res.json();
 }
 
 export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string) {
-  const res = await fetch("/_matrix/client/r0/createRoom", {
+  const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
     method: "POST",
-    headers: authHeaders(),
     body: JSON.stringify({ name, topic, tags, icon_url: iconUrl }),
   });
   if (!res.ok) throw new Error("Failed to create room");
@@ -111,18 +195,16 @@ export async function apiCreateRoom(name: string, topic: string, tags?: string[]
 }
 
 export async function apiJoinRoom(roomId: string) {
-  const res = await fetch(`/_matrix/client/r0/rooms/${roomId}/join`, {
+  const res = await authenticatedFetch(`/_matrix/client/r0/rooms/${roomId}/join`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to join room");
   return res.json();
 }
 
 export async function apiLeaveRoom(roomId: string) {
-  const res = await fetch(`/_matrix/client/r0/rooms/${roomId}/leave`, {
+  const res = await authenticatedFetch(`/_matrix/client/r0/rooms/${roomId}/leave`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to leave room");
   return res.json();
@@ -146,11 +228,12 @@ export async function apiGetAllRooms() {
   }>;
 }
 
-// Messages
+// ─── Messages ───────────────────────────────────────────────────────────────
+
 export async function apiGetMessages(roomId: string, limit = 50, before?: number) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
   if (before !== undefined) url += `&before=${before}`;
-  const res = await fetch(url, { headers: authHeaders() });
+  const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json() as Promise<{
     chunk: MatrixMessage[];
@@ -166,11 +249,10 @@ export async function apiSendMessage(roomId: string, body: string, inReplyTo?: s
   if (inReplyTo) {
     payload.in_reply_to = inReplyTo;
   }
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.room.message/${txnId}`,
     {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify(payload),
     }
   );
@@ -180,11 +262,10 @@ export async function apiSendMessage(roomId: string, body: string, inReplyTo?: s
 
 export async function apiDeleteMessage(roomId: string, eventId: string) {
   const txnId = Date.now();
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/redact/${eventId}/${txnId}`,
     {
       method: "DELETE",
-      headers: authHeaders(),
     }
   );
   if (!res.ok) throw new Error("Failed to delete message");
@@ -193,11 +274,10 @@ export async function apiDeleteMessage(roomId: string, eventId: string) {
 
 export async function apiEditMessage(roomId: string, eventId: string, newBody: string) {
   const txnId = Date.now();
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/edit/${eventId}/${txnId}`,
     {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify({ body: newBody }),
     }
   );
@@ -210,11 +290,10 @@ export async function apiAddReaction(
   eventId: string,
   emoji: string
 ) {
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.reaction/${eventId}`,
     {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify({ emoji }),
     }
   );
@@ -222,29 +301,40 @@ export async function apiAddReaction(
   return res.json();
 }
 
-// Voice
+// ─── Search ──────────────────────────────────────────────────────────────────
+
+export async function apiSearchMessages(
+  roomId: string,
+  query: string,
+  filter: string = "all"
+): Promise<MatrixMessage[]> {
+  const params = new URLSearchParams({ q: query, filter });
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/search?${params}`);
+  if (!res.ok) throw new Error("Search failed");
+  const data = await res.json();
+  return data.results as MatrixMessage[];
+}
+
+// ─── Voice & Presence ───────────────────────────────────────────────────────
+
 export async function apiGetVoiceMembers(roomId: string) {
-  const res = await fetch(`/api/rooms/${roomId}/voice`, {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/voice`);
   if (!res.ok) throw new Error("Failed to load voice members");
   return res.json() as Promise<{
     voice_members: VoiceMember[];
   }>;
 }
 
-// Presence
 export async function apiGetPresence(roomId: string) {
-  const res = await fetch(`/api/rooms/${roomId}/presence`, {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/presence`);
   if (!res.ok) throw new Error("Failed to load presence");
   return res.json() as Promise<{
     presence: Record<string, { status: string }>;
   }>;
 }
 
-// Types
+// ─── Types ──────────────────────────────────────────────────────────────────
+
 export interface MatrixMessage {
   event_id: string;
   sender: string;
@@ -279,14 +369,17 @@ export interface RoomInfo {
   icon_url?: string;
   creator?: string;
   custom_emojis?: string[];
+  owner_name_color?: string;
+  mod_name_color?: string;
 }
 
+// ─── Room Settings ──────────────────────────────────────────────────────────
+
 export async function apiUpdateTopic(roomId: string, topic: string) {
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.topic`,
     {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify({ topic }),
     }
   );
@@ -322,6 +415,29 @@ export async function apiUploadFile(
         } catch {
           reject(new Error("Invalid response from server"));
         }
+      } else if (xhr.status === 401 && _refreshToken) {
+        // Try refresh and retry
+        apiRefreshToken().then((refreshed) => {
+          if (!refreshed) {
+            reject(new Error("Upload failed - authentication expired"));
+            return;
+          }
+          // Retry upload with new token
+          const retryXhr = new XMLHttpRequest();
+          retryXhr.open("POST", "/api/upload");
+          if (_accessToken) {
+            retryXhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
+          }
+          retryXhr.onload = () => {
+            if (retryXhr.status >= 200 && retryXhr.status < 300) {
+              try { resolve(JSON.parse(retryXhr.responseText)); } catch { reject(new Error("Invalid response")); }
+            } else {
+              reject(new Error("Upload failed"));
+            }
+          };
+          retryXhr.onerror = () => reject(new Error("Upload failed"));
+          retryXhr.send(formData);
+        });
       } else {
         try {
           const body = JSON.parse(xhr.responseText);
@@ -336,7 +452,8 @@ export async function apiUploadFile(
   });
 }
 
-// Link previews
+// ─── Link previews ──────────────────────────────────────────────────────────
+
 export interface LinkPreview {
   title?: string;
   description?: string;
@@ -345,9 +462,7 @@ export interface LinkPreview {
 }
 
 export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
-  const res = await fetch(`/api/link-preview?url=${encodeURIComponent(url)}`, {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error("Failed to fetch link preview");
   return res.json() as Promise<LinkPreview>;
 }
@@ -356,11 +471,10 @@ export async function apiUpdateRoomSettings(
   roomId: string,
   settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }
 ) {
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,
     {
       method: "PUT",
-      headers: authHeaders(),
       body: JSON.stringify(settings),
     }
   );
@@ -371,7 +485,8 @@ export async function apiUpdateRoomSettings(
   return res.json();
 }
 
-// Invites
+// ─── Invites ────────────────────────────────────────────────────────────────
+
 export async function apiGetInviteInfo(code: string) {
   const res = await fetch(`/api/invites/${code}`);
   if (!res.ok) {
@@ -382,9 +497,8 @@ export async function apiGetInviteInfo(code: string) {
 }
 
 export async function apiAcceptInvite(code: string) {
-  const res = await fetch(`/api/invites/${code}/accept`, {
+  const res = await authenticatedFetch(`/api/invites/${code}/accept`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -394,9 +508,8 @@ export async function apiAcceptInvite(code: string) {
 }
 
 export async function apiCreateInvite(roomId: string) {
-  const res = await fetch(`/api/rooms/${roomId}/invites`, {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/invites`, {
     method: "POST",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -406,9 +519,7 @@ export async function apiCreateInvite(roomId: string) {
 }
 
 export async function apiListInvites(roomId: string) {
-  const res = await fetch(`/api/rooms/${roomId}/invites`, {
-    headers: authHeaders(),
-  });
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/invites`);
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "Failed to list invites");
@@ -419,9 +530,8 @@ export async function apiListInvites(roomId: string) {
 }
 
 export async function apiDeleteInvite(code: string) {
-  const res = await fetch(`/api/invites/${code}`, {
+  const res = await authenticatedFetch(`/api/invites/${code}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -430,7 +540,8 @@ export async function apiDeleteInvite(code: string) {
   return res.json();
 }
 
-// User uploads
+// ─── User uploads ───────────────────────────────────────────────────────────
+
 export interface UploadRecord {
   filename: string;
   url: string;
@@ -440,25 +551,23 @@ export interface UploadRecord {
 }
 
 export async function apiListUploads(): Promise<UploadRecord[]> {
-  const res = await fetch("/api/uploads", { headers: authHeaders() });
+  const res = await authenticatedFetch("/api/uploads");
   if (!res.ok) throw new Error("Failed to list uploads");
   const data = await res.json();
   return data.files as UploadRecord[];
 }
 
 export async function apiDeleteUpload(url: string): Promise<void> {
-  const res = await fetch("/api/uploads", {
+  const res = await authenticatedFetch("/api/uploads", {
     method: "DELETE",
-    headers: authHeaders(),
     body: JSON.stringify({ url }),
   });
   if (!res.ok) throw new Error("Failed to delete upload");
 }
 
 export async function apiDeleteRoom(roomId: string): Promise<void> {
-  const res = await fetch(`/api/rooms/${roomId}`, {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}`, {
     method: "DELETE",
-    headers: authHeaders(),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -466,10 +575,68 @@ export async function apiDeleteRoom(roomId: string): Promise<void> {
   }
 }
 
-export async function apiCreateDM(targetUserId: string) {
-  const res = await fetch("/_matrix/client/r0/createRoom", {
+// ─── Room Permissions ────────────────────────────────────────────────────────
+
+export async function apiKickMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/members/${userId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to kick member");
+  }
+  return res.json();
+}
+
+export async function apiBanMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/ban/${userId}`, {
     method: "POST",
-    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to ban member");
+  }
+  return res.json();
+}
+
+export async function apiUnbanMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/ban/${userId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to unban member");
+  }
+  return res.json();
+}
+
+export async function apiSetMemberRole(roomId: string, userId: string, role: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/members/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set role");
+  }
+  return res.json();
+}
+
+export async function apiSetNameColors(roomId: string, ownerColor?: string, modColor?: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/name-colors`, {
+    method: "PUT",
+    body: JSON.stringify({ owner_color: ownerColor, mod_color: modColor }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set name colors");
+  }
+  return res.json();
+}
+
+export async function apiCreateDM(targetUserId: string) {
+  const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
+    method: "POST",
     body: JSON.stringify({ is_direct: true, invite: [targetUserId] }),
   });
   if (!res.ok) throw new Error("Failed to create DM");

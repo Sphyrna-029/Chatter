@@ -9,6 +9,10 @@ import {
 } from "react";
 import {
   setAccessToken,
+  setRefreshToken,
+  restoreTokens,
+  clearTokens,
+  getAccessToken,
   apiLogin,
   apiRegister,
   apiLogout,
@@ -28,6 +32,11 @@ import {
   apiCreateDM,
   apiUpdateTopic,
   apiUpdateRoomSettings,
+  apiKickMember,
+  apiBanMember,
+  apiUnbanMember,
+  apiSetMemberRole,
+  apiSetNameColors,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -54,6 +63,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Restore tokens from localStorage on mount
+  useEffect(() => {
+    restoreTokens();
+    const token = getAccessToken();
+    if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split(".")[1]));
+        if (payload.sub && payload.exp * 1000 > Date.now()) {
+          dispatch({
+            type: "LOGIN",
+            payload: { accessToken: token, userId: payload.sub },
+          });
+        } else {
+          clearTokens();
+        }
+      } catch {
+        clearTokens();
+      }
+    }
+  }, []);
 
   // Keep a ref to loadRooms so WS handler can call it without stale closure
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -144,6 +174,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     const data = await apiLogin(username, password);
     setAccessToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
@@ -153,6 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (username: string, password: string) => {
     const data = await apiRegister(username, password);
     setAccessToken(data.access_token);
+    setRefreshToken(data.refresh_token);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
@@ -163,7 +195,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       await apiLogout();
     } catch {}
-    setAccessToken(null);
+    clearTokens();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -197,6 +229,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const customEmojisEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.custom_emojis"
         );
+        const nameColorsEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.name_colors"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -206,6 +241,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           icon_url: iconEvent?.content?.icon_url || "",
           creator: nameEvent?.sender || "",
           custom_emojis: customEmojisEvent?.content?.custom_emojis || [],
+          owner_name_color: nameColorsEvent?.content?.owner_name_color || "",
+          mod_name_color: nameColorsEvent?.content?.mod_name_color || "",
         };
       } else {
         roomInfoMap[roomId] = {
@@ -248,6 +285,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             userId: e.state_key,
             displayName:
               e.content.displayname || e.state_key.split(":")[0].substring(1),
+            role: e.content.role || "member",
           })),
         });
       }
@@ -478,6 +516,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const kickMember = useCallback(async (roomId: string, userId: string) => {
+    await apiKickMember(roomId, userId);
+  }, []);
+
+  const banMember = useCallback(async (roomId: string, userId: string) => {
+    await apiBanMember(roomId, userId);
+  }, []);
+
+  const unbanMember = useCallback(async (roomId: string, userId: string) => {
+    await apiUnbanMember(roomId, userId);
+  }, []);
+
+  const setMemberRole = useCallback(async (roomId: string, userId: string, role: string) => {
+    await apiSetMemberRole(roomId, userId, role);
+  }, []);
+
+  const setNameColors = useCallback(async (roomId: string, ownerColor?: string, modColor?: string) => {
+    await apiSetNameColors(roomId, ownerColor, modColor);
+  }, []);
+
   const updateProfile = useCallback((profile: { avatarUrl?: string; about?: string; customStatus?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -517,6 +575,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCustomStatus,
         setManualStatus,
         updateProfile,
+        kickMember,
+        banMember,
+        unbanMember,
+        setMemberRole,
+        setNameColors,
       }}
     >
       {children}

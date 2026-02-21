@@ -1,13 +1,15 @@
 use super::super::{
     dto::SyncQuery,
     helpers::{error_response, extract_token, get_user_from_token},
-    state::AppState,
+    state::{AppState, RoomRecord},
 };
 use axum::{
     extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use futures_util::TryStreamExt;
+use mongodb::bson::doc;
 use serde_json::{json, Value};
 use std::{sync::Arc, time::SystemTime};
 
@@ -19,12 +21,12 @@ pub(crate) async fn sync(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rm = state.room_members.read().await;
-    let rooms = state.rooms.read().await;
-    let msgs = state.messages.read().await;
+    let room_roles = state.room_roles.read().await;
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
 
     let mut joined_rooms_data = serde_json::Map::new();
 
@@ -33,38 +35,56 @@ pub(crate) async fn sync(
             continue;
         }
 
-        let room_data = match rooms.get(room_id) {
-            Some(r) => r,
-            None => continue,
+        let room_data = match rooms_coll.find_one(doc! { "_id": room_id }).await {
+            Ok(Some(r)) => r,
+            _ => continue,
         };
 
-        let room_msgs = msgs.get(room_id).cloned().unwrap_or_default();
-        let last_msgs: Vec<Value> = room_msgs
-            .into_iter()
-            .rev()
-            .take(10)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        // Fetch last 10 messages from MongoDB
+        let mut last_msgs: Vec<Value> = Vec::new();
+        if let Ok(mut cursor) = msg_coll
+            .find(doc! { "room_id": room_id })
+            .sort(doc! { "origin_server_ts": -1 })
+            .limit(10)
+            .await
+        {
+            while let Ok(Some(doc)) = cursor.try_next().await {
+                let mut doc = doc;
+                doc.remove("_id");
+                if let Ok(val) = serde_json::to_value(&doc) {
+                    last_msgs.push(val);
+                }
+            }
+        }
+        last_msgs.reverse(); // chronological order
 
         let member_events: Vec<Value> = members
             .iter()
             .map(|mid| {
                 let display = mid.split(':').next().unwrap_or(mid).trim_start_matches('@');
+                let mut role = room_roles
+                    .get(room_id)
+                    .and_then(|m| m.get(mid))
+                    .map(|r| r.as_str())
+                    .unwrap_or("member");
+                // Legacy fallback: creator is always owner
+                if role == "member" && *mid == room_data.creator {
+                    role = "owner";
+                }
                 json!({
                     "type": "m.room.member",
                     "state_key": mid,
                     "content": {
                         "membership": "join",
-                        "displayname": display
+                        "displayname": display,
+                        "role": role
                     },
                     "sender": mid
                 })
             })
             .collect();
 
-        // For DMs, show the other person's name relative to the viewer
+        // For DMs, show the other person's name
         let display_name = if room_data.is_dm {
             let other = members.iter().find(|m| *m != &user_id);
             if let Some(other_id) = other {
@@ -116,6 +136,15 @@ pub(crate) async fn sync(
                 "type": "m.room.custom_emojis",
                 "state_key": "",
                 "content": {"custom_emojis": room_data.custom_emojis},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.name_colors",
+                "state_key": "",
+                "content": {
+                    "owner_name_color": room_data.owner_name_color,
+                    "mod_name_color": room_data.mod_name_color
+                },
                 "sender": room_data.creator
             }),
         ];

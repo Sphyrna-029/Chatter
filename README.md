@@ -11,12 +11,12 @@ A lightweight, performant, self-hosted chat application built with Rust. Chatter
 - **Rooms**
 - **Real-time messaging**
 - **Voice chat** 
-- **Screen sharing**
+- **Multi Screen sharing (Requires HTTPS for WebRTC)**
 - **File sharing**
 - **Code snippets with syntax highlighting**
-- **Reactions**
-- **Notifications** 
 - **Direct messages** 
+- **Custom emojis**
+- **Room invite links**
 
 ## Prerequisites
 
@@ -118,7 +118,7 @@ docker build -t chatter .
 **Run the container:**
 
 ```bash
-docker run -d -p 8000:8000 --name chatter chatter
+docker run -d -p 8000:8000/tcp -p 8000:8000/udp --name chatter chatter
 ```
 
 Chatter will be available at [http://localhost:8000](http://localhost:8000).
@@ -126,7 +126,7 @@ Chatter will be available at [http://localhost:8000](http://localhost:8000).
 To run on a different host port (for example, 3000):
 
 ```bash
-docker run -d -p 3000:8000 --name chatter chatter
+docker run -d -p 3000:8000/tcp -p 3000:8000/udp --name chatter chatter
 ```
 
 The container includes a health check that polls the server every 30 seconds. You can verify the container is healthy with:
@@ -144,6 +144,7 @@ docker stop chatter && docker rm chatter
 ## Notes
 
 - All data is stored in memory. Restarting the server clears all rooms, messages, and accounts.
+- HTTPS context is required for WebRTC (screen share, voice)
 - There is no built-in TLS. Use a reverse proxy for HTTPS in production.
 - Voice chat and screen sharing require a secure context (HTTPS) in most browsers.
 

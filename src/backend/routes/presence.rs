@@ -1,12 +1,13 @@
 use super::super::{
     helpers::{error_response, extract_token, get_user_from_token, now_secs},
-    state::AppState,
+    state::{AppState, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use mongodb::bson::doc;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -18,10 +19,16 @@ pub(crate) async fn get_voice_channel_status(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let _user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -60,25 +67,43 @@ pub(crate) async fn get_room_presence(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let _user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
     let current_time = now_secs();
     let rm = state.room_members.read().await;
     let up = state.user_presence.read().await;
-    let users = state.users.read().await;
+
+    // Fetch user records from MongoDB for avatar/about info
+    let users_coll = state.db.collection::<UserRecord>("users");
 
     let mut presence_data = serde_json::Map::new();
 
     if let Some(members) = rm.get(&room_id) {
         for member_id in members {
-            let user_record = users.get(member_id);
-            let avatar_url = user_record.map(|u| u.avatar_url.as_str()).unwrap_or("");
-            let about = user_record.map(|u| u.about.as_str()).unwrap_or("");
+            let user_record = users_coll
+                .find_one(doc! { "_id": member_id })
+                .await
+                .ok()
+                .flatten();
+            let avatar_url = user_record
+                .as_ref()
+                .map(|u| u.avatar_url.as_str())
+                .unwrap_or("");
+            let about = user_record
+                .as_ref()
+                .map(|u| u.about.as_str())
+                .unwrap_or("");
 
             if let Some(presence) = up.get(member_id) {
                 let time_since_active = current_time - presence.last_active;

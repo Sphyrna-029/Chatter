@@ -70,3 +70,26 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) custom_emojis: Option<Vec<String>>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct RefreshTokenRequest {
+    pub(crate) refresh_token: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SearchQuery {
+    pub(crate) q: String,
+    pub(crate) filter: Option<String>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetRoleRequest {
+    pub(crate) role: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetNameColorRequest {
+    pub(crate) owner_color: Option<String>,
+    pub(crate) mod_color: Option<String>,
+}

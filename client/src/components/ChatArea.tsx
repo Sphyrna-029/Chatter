@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile } from "@/lib/api";
+import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
 import { MessageItem } from "./MessageItem";
+import { Search, X } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -53,6 +54,14 @@ export function ChatArea() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
+
+  // Search state
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchFilter, setSearchFilter] = useState<"all" | "user" | "file">("all");
+  const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Pending file attachments — staged until the user presses Send/Enter
   type PendingFile = { file: File; previewUrl: string | null };
@@ -340,7 +349,46 @@ export function ChatArea() {
       prev.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
       return [];
     });
+    // Also close search on room switch
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
   }, [state.currentRoomId]);
+
+  // Debounced search execution
+  useEffect(() => {
+    if (!searchOpen || !state.currentRoomId) return;
+    if (searchFilter !== "file" && !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(async () => {
+      setSearchLoading(true);
+      try {
+        const results = await apiSearchMessages(
+          state.currentRoomId!,
+          searchQuery.trim(),
+          searchFilter
+        );
+        setSearchResults(results);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [searchQuery, searchFilter, searchOpen, state.currentRoomId]);
+
+  const closeSearch = () => {
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    setSearchFilter("all");
+  };
 
   const mentionMatches = mentionOpen
     ? state.roomMembers
@@ -378,6 +426,7 @@ export function ChatArea() {
       )}
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
+        <div className="w-8" /> {/* Spacer for centering */}
         <div className="flex-1 min-w-0 text-center">
           <h2 className="text-sm font-semibold">
             {roomInfo?.name || "Unnamed Room"}
@@ -425,35 +474,123 @@ export function ChatArea() {
             </div>
           )}
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="shrink-0"
+          onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
+          title="Search messages"
+        >
+          <Search className="h-4 w-4" />
+        </Button>
       </div>
+
+      {/* Search bar */}
+      {searchOpen && (
+        <div className="border-b px-4 py-2 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder={
+                  searchFilter === "user"
+                    ? "Search by username..."
+                    : searchFilter === "file"
+                    ? "Showing file attachments..."
+                    : "Search messages..."
+                }
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full rounded-md border border-input bg-transparent pl-8 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                autoFocus
+                disabled={searchFilter === "file"}
+              />
+            </div>
+            <button
+              onClick={closeSearch}
+              className="text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex gap-1">
+            {(["all", "user", "file"] as const).map((f) => (
+              <Button
+                key={f}
+                variant={searchFilter === f ? "default" : "outline"}
+                size="sm"
+                className="h-6 text-xs px-2"
+                onClick={() => setSearchFilter(f)}
+              >
+                {f === "all" ? "All" : f === "user" ? "Users" : "Files"}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden">
         <ScrollArea className="h-full px-2 py-2">
           <div>
-            {state.loadingOlderMessages && (
-              <div className="text-center text-xs text-muted-foreground py-2">
-                Loading older messages...
-              </div>
+            {searchOpen ? (
+              <>
+                {searchLoading && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    Searching...
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && (searchQuery.trim() || searchFilter === "file") && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    No results found
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && !searchQuery.trim() && searchFilter !== "file" && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    Type to search messages
+                  </div>
+                )}
+                {searchResults.map((msg, i) => {
+                  const prev = searchResults[i - 1];
+                  const grouped =
+                    !!prev &&
+                    prev.content.msgtype !== "m.system" &&
+                    msg.content.msgtype !== "m.system" &&
+                    prev.sender === msg.sender &&
+                    msg.origin_server_ts - prev.origin_server_ts < 60000;
+                  return (
+                    <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+                  );
+                })}
+              </>
+            ) : (
+              <>
+                {state.loadingOlderMessages && (
+                  <div className="text-center text-xs text-muted-foreground py-2">
+                    Loading older messages...
+                  </div>
+                )}
+                {!state.hasMoreMessages && state.messages.length > 0 && (
+                  <div className="text-center text-xs text-muted-foreground py-2">
+                    Beginning of conversation
+                  </div>
+                )}
+                {state.messages.map((msg, i) => {
+                  const prev = state.messages[i - 1];
+                  const grouped =
+                    !!prev &&
+                    prev.content.msgtype !== "m.system" &&
+                    msg.content.msgtype !== "m.system" &&
+                    prev.sender === msg.sender &&
+                    msg.origin_server_ts - prev.origin_server_ts < 60000;
+                  return (
+                    <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </>
             )}
-            {!state.hasMoreMessages && state.messages.length > 0 && (
-              <div className="text-center text-xs text-muted-foreground py-2">
-                Beginning of conversation
-              </div>
-            )}
-            {state.messages.map((msg, i) => {
-              const prev = state.messages[i - 1];
-              const grouped =
-                !!prev &&
-                prev.content.msgtype !== "m.system" &&
-                msg.content.msgtype !== "m.system" &&
-                prev.sender === msg.sender &&
-                msg.origin_server_ts - prev.origin_server_ts < 60000;
-              return (
-                <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
-              );
-            })}
-            <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
       </div>

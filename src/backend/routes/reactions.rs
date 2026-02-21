@@ -1,13 +1,15 @@
 use super::super::{
     dto::ReactionRequest,
     helpers::{broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token},
-    state::AppState,
+    state::{AppState, ReactionRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
+use futures_util::TryStreamExt;
+use mongodb::bson::doc;
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Arc};
 
@@ -20,10 +22,16 @@ pub(crate) async fn add_reaction(
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    if !state.rooms.read().await.contains_key(&room_id) {
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
@@ -45,32 +53,32 @@ pub(crate) async fn add_reaction(
         .emoji
         .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "Emoji required"))?;
 
-    let (action, reactions_snapshot) = {
-        let mut reactions = state.message_reactions.write().await;
-        let event_reactions = reactions
-            .entry(event_id.clone())
-            .or_insert_with(HashMap::new);
-        let emoji_users = event_reactions
-            .entry(emoji.clone())
-            .or_insert_with(Vec::new);
+    let react_coll = state.db.collection::<ReactionRecord>("reactions");
 
-        let action = if let Some(pos) = emoji_users.iter().position(|u| u == &user_id) {
-            emoji_users.remove(pos);
-            if emoji_users.is_empty() {
-                event_reactions.remove(&emoji);
-            }
-            "removed"
-        } else {
-            emoji_users.push(user_id.clone());
-            "added"
-        };
+    // Toggle: try to delete existing, if nothing deleted then insert
+    let delete_result = react_coll
+        .delete_one(doc! {
+            "event_id": &event_id,
+            "emoji": &emoji,
+            "user_id": &user_id
+        })
+        .await;
 
-        // Clone the current reactions for broadcast
-        let snap: HashMap<String, Vec<String>> =
-            reactions.get(&event_id).cloned().unwrap_or_default();
-        (action.to_string(), snap)
+    let action = if delete_result.map(|r| r.deleted_count > 0).unwrap_or(false) {
+        "removed"
+    } else {
+        let _ = react_coll
+            .insert_one(ReactionRecord {
+                event_id: event_id.clone(),
+                emoji: emoji.clone(),
+                user_id: user_id.clone(),
+            })
+            .await;
+        "added"
     };
 
+    // Build current reactions snapshot from MongoDB
+    let reactions_snapshot = get_reactions_for_event(&state, &event_id).await;
     let reactions_value = serde_json::to_value(&reactions_snapshot).unwrap();
 
     let broadcast_msg = json!({
@@ -93,21 +101,37 @@ pub(crate) async fn add_reaction(
 
 pub(crate) async fn get_reactions(
     State(state): State<Arc<AppState>>,
-    Path((room_id, event_id)): Path<(String, String)>,
+    Path((_room_id, event_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _ = room_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let _user_id = get_user_from_token(&state, &token)
-        .await
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let reactions = state.message_reactions.read().await;
-    let event_reactions = reactions.get(&event_id).cloned().unwrap_or_default();
+    let reactions = get_reactions_for_event(&state, &event_id).await;
 
     Ok(Json(json!({
         "event_id": event_id,
-        "reactions": event_reactions
+        "reactions": reactions
     })))
+}
+
+async fn get_reactions_for_event(
+    state: &AppState,
+    event_id: &str,
+) -> HashMap<String, Vec<String>> {
+    let react_coll = state.db.collection::<ReactionRecord>("reactions");
+    let mut reactions: HashMap<String, Vec<String>> = HashMap::new();
+
+    if let Ok(mut cursor) = react_coll.find(doc! { "event_id": event_id }).await {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            reactions
+                .entry(record.emoji)
+                .or_default()
+                .push(record.user_id);
+        }
+    }
+
+    reactions
 }

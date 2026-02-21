@@ -1,0 +1,25 @@
+services:
+  mongodb:
+    image: mongo:7
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:27017:27017
+
+  chatter:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MONGODB_URI: mongodb://mongodb:27017
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    volumes:
+      - uploads:/app/external
+    depends_on:
+      - mongodb
+    restart: unless-stopped
+
+volumes:
+  mongo_data:
+  uploads:

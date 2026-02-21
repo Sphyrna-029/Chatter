@@ -9,7 +9,7 @@ RUN npm run build
 # Build backend
 FROM rust:1.88-slim AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y pkg-config clang mold && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y pkg-config clang mold libssl-dev && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=mold"
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
@@ -19,7 +19,7 @@ RUN touch src/main.rs && cargo build --release
 
 # Runtime
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/chatter .

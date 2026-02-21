@@ -43,6 +43,7 @@ export function createWsMessageHandler(
                   userId: e.state_key,
                   displayName:
                     e.content.displayname || e.state_key.split(":")[0].substring(1),
+                  role: e.content.role || "member",
                 })),
               });
             }
@@ -186,6 +187,33 @@ export function createWsMessageHandler(
         type: "UPDATE_ROOM_TOPIC",
         payload: { roomId: msg.room_id, topic: msg.content?.topic || "" },
       });
+    }
+    else if (msg.type === "m.room.member_role") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({
+          type: "UPDATE_MEMBER_ROLE",
+          payload: { userId: msg.user_id, role: msg.role },
+        });
+      }
+    }
+    else if (msg.type === "m.room.name_colors") {
+      dispatch({
+        type: "UPDATE_NAME_COLORS",
+        payload: {
+          roomId: msg.room_id,
+          owner_name_color: msg.content?.owner_name_color || "",
+          mod_name_color: msg.content?.mod_name_color || "",
+        },
+      });
+    }
+    else if (msg.type === "m.room.kick") {
+      // We got kicked from a room
+      if (msg.user_id === stateRef.current.userId) {
+        if (msg.room_id === stateRef.current.currentRoomId) {
+          dispatch({ type: "SELECT_ROOM", payload: null });
+        }
+        loadRoomsRef.current();
+      }
     }
     else if (msg.type === "m.room.created") {
       // A new DM room was created — refresh rooms list so it appears instantly

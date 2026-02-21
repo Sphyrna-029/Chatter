@@ -249,6 +249,30 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_WS_CONNECTED":
       return { ...state, wsConnected: action.payload };
+    case "UPDATE_MEMBER_ROLE":
+      return {
+        ...state,
+        roomMembers: state.roomMembers.map((m) =>
+          m.userId === action.payload.userId
+            ? { ...m, role: action.payload.role }
+            : m
+        ),
+      };
+    case "UPDATE_NAME_COLORS": {
+      const existing = state.roomInfoMap[action.payload.roomId];
+      if (!existing) return state;
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: {
+            ...existing,
+            owner_name_color: action.payload.owner_name_color,
+            mod_name_color: action.payload.mod_name_color,
+          },
+        },
+      };
+    }
     default:
       return state;
   }

@@ -20,6 +20,11 @@ export interface CommandContext {
   sendMessage: (body: string) => Promise<void>;
   loadRooms: () => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
+  kickMember: (roomId: string, userId: string) => Promise<void>;
+  banMember: (roomId: string, userId: string) => Promise<void>;
+  unbanMember: (roomId: string, userId: string) => Promise<void>;
+  setMemberRole: (roomId: string, userId: string, role: string) => Promise<void>;
+  setNameColors: (roomId: string, ownerColor?: string, modColor?: string) => Promise<void>;
 }
 
 export interface Command {
@@ -205,6 +210,136 @@ const commands: Command[] = [
     execute: async () => {
       // Handled specially by CommandBar — it checks for this name
       return { output: "", type: "success" };
+    },
+  },
+  {
+    name: "kick",
+    aliases: [],
+    description: "Kick a user from the current room",
+    usage: "/kick <username>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const username = args[0]?.trim();
+      if (!username) return { output: "Usage: /kick <username>", type: "error" };
+      const target = ctx.state.roomMembers.find(
+        (m) => m.displayName.toLowerCase() === username.toLowerCase()
+      );
+      if (!target) return { output: `User "${username}" not found in this room.`, type: "error" };
+      try {
+        await ctx.kickMember(ctx.state.currentRoomId, target.userId);
+        return { output: `Kicked ${username}.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
+    },
+  },
+  {
+    name: "ban",
+    aliases: [],
+    description: "Ban a user from the current room",
+    usage: "/ban <username>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const username = args[0]?.trim();
+      if (!username) return { output: "Usage: /ban <username>", type: "error" };
+      const target = ctx.state.roomMembers.find(
+        (m) => m.displayName.toLowerCase() === username.toLowerCase()
+      );
+      if (!target) return { output: `User "${username}" not found in this room.`, type: "error" };
+      try {
+        await ctx.banMember(ctx.state.currentRoomId, target.userId);
+        return { output: `Banned ${username}.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
+    },
+  },
+  {
+    name: "unban",
+    aliases: [],
+    description: "Unban a user from the current room (owner only)",
+    usage: "/unban <username>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const username = args[0]?.trim();
+      if (!username) return { output: "Usage: /unban <username>", type: "error" };
+      const userId = `@${username}:localhost`;
+      try {
+        await ctx.unbanMember(ctx.state.currentRoomId, userId);
+        return { output: `Unbanned ${username}.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
+    },
+  },
+  {
+    name: "promote",
+    aliases: ["mod"],
+    description: "Promote a user to moderator (owner only)",
+    usage: "/promote <username>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const username = args[0]?.trim();
+      if (!username) return { output: "Usage: /promote <username>", type: "error" };
+      const target = ctx.state.roomMembers.find(
+        (m) => m.displayName.toLowerCase() === username.toLowerCase()
+      );
+      if (!target) return { output: `User "${username}" not found in this room.`, type: "error" };
+      try {
+        await ctx.setMemberRole(ctx.state.currentRoomId, target.userId, "moderator");
+        return { output: `${username} promoted to moderator.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
+    },
+  },
+  {
+    name: "demote",
+    aliases: ["unmod"],
+    description: "Demote a moderator to member (owner only)",
+    usage: "/demote <username>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const username = args[0]?.trim();
+      if (!username) return { output: "Usage: /demote <username>", type: "error" };
+      const target = ctx.state.roomMembers.find(
+        (m) => m.displayName.toLowerCase() === username.toLowerCase()
+      );
+      if (!target) return { output: `User "${username}" not found in this room.`, type: "error" };
+      try {
+        await ctx.setMemberRole(ctx.state.currentRoomId, target.userId, "member");
+        return { output: `${username} demoted to member.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
+    },
+  },
+  {
+    name: "namecolor",
+    aliases: ["nc"],
+    description: "Set name color for owner or moderators",
+    usage: "/namecolor <owner|mod> <#hex>",
+    execute: async (args, ctx) => {
+      if (!ctx.state.currentRoomId) return { output: "No room selected.", type: "error" };
+      const target = args[0]?.toLowerCase();
+      const color = args[1];
+      if (!target || !color) return { output: "Usage: /namecolor <owner|mod> <#hex>", type: "error" };
+      if (target !== "owner" && target !== "mod") {
+        return { output: "First argument must be 'owner' or 'mod'.", type: "error" };
+      }
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) {
+        return { output: "Color must be a hex code like #ff5500.", type: "error" };
+      }
+      try {
+        await ctx.setNameColors(
+          ctx.state.currentRoomId,
+          target === "owner" ? color : undefined,
+          target === "mod" ? color : undefined
+        );
+        return { output: `Name color for ${target} set to ${color}.`, type: "success" };
+      } catch (err: any) {
+        return { output: `Failed: ${err.message || err}`, type: "error" };
+      }
     },
   },
   {
