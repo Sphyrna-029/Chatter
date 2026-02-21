@@ -4,24 +4,24 @@ import {
   mungeScreenVideoSdp,
 } from "@/lib/webrtc";
 
-describe("Screen share quality configuration", () => {
+describe("Screen share quality configuration (maxed)", () => {
   describe("30fps profile", () => {
     const profile = getScreenSharePublishProfile(30);
 
-    it("uses motion contentHint for smooth FPS", () => {
+    it("uses motion contentHint", () => {
       expect(profile.contentHint).toBe("motion");
     });
 
-    it("starts at max bitrate for instant 1080p", () => {
+    it("starts at max bitrate", () => {
       expect(profile.startBitrateKbps).toBe(profile.maxBitrateKbps);
     });
 
-    it("has generous max bitrate (>= 20 Mbps) for LAN", () => {
-      expect(profile.maxBitrateBps).toBeGreaterThanOrEqual(20_000_000);
+    it("has 50 Mbps max bitrate", () => {
+      expect(profile.maxBitrateBps).toBe(50_000_000);
     });
 
-    it("has high min bitrate floor (>= 8 Mbps) to prevent resolution drops", () => {
-      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(8_000);
+    it("has 20 Mbps min bitrate floor", () => {
+      expect(profile.minBitrateKbps).toBe(20_000);
     });
 
     it("targets 30fps", () => {
@@ -32,20 +32,16 @@ describe("Screen share quality configuration", () => {
   describe("60fps profile", () => {
     const profile = getScreenSharePublishProfile(60);
 
-    it("uses motion contentHint", () => {
-      expect(profile.contentHint).toBe("motion");
+    it("has 80 Mbps max bitrate", () => {
+      expect(profile.maxBitrateBps).toBe(80_000_000);
     });
 
-    it("starts at max bitrate for instant 1080p", () => {
+    it("starts at max bitrate", () => {
       expect(profile.startBitrateKbps).toBe(profile.maxBitrateKbps);
     });
 
-    it("has generous max bitrate (>= 30 Mbps) for LAN", () => {
-      expect(profile.maxBitrateBps).toBeGreaterThanOrEqual(30_000_000);
-    });
-
-    it("has high min bitrate floor (>= 10 Mbps)", () => {
-      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(10_000);
+    it("has 30 Mbps min bitrate floor", () => {
+      expect(profile.minBitrateKbps).toBe(30_000);
     });
 
     it("targets 60fps", () => {
@@ -61,30 +57,16 @@ describe("Screen share quality configuration", () => {
       "",
     ].join("\r\n");
 
-    it("sets start bitrate equal to max bitrate in SDP", () => {
+    it("injects maxed bitrate hints into SDP", () => {
       const profile = getScreenSharePublishProfile(30);
       const munged = mungeScreenVideoSdp(fakeSdp, {
         startBitrateKbps: profile.startBitrateKbps,
         minBitrateKbps: profile.minBitrateKbps,
         maxBitrateKbps: profile.maxBitrateKbps,
       });
-      const startMatch = munged.match(/x-google-start-bitrate=(\d+)/);
-      const maxMatch = munged.match(/x-google-max-bitrate=(\d+)/);
-      expect(startMatch).not.toBeNull();
-      expect(maxMatch).not.toBeNull();
-      expect(Number(startMatch![1])).toBe(Number(maxMatch![1]));
-    });
-
-    it("sets min bitrate >= 8000 in SDP for 30fps", () => {
-      const profile = getScreenSharePublishProfile(30);
-      const munged = mungeScreenVideoSdp(fakeSdp, {
-        startBitrateKbps: profile.startBitrateKbps,
-        minBitrateKbps: profile.minBitrateKbps,
-        maxBitrateKbps: profile.maxBitrateKbps,
-      });
-      const match = munged.match(/x-google-min-bitrate=(\d+)/);
-      expect(match).not.toBeNull();
-      expect(Number(match![1])).toBeGreaterThanOrEqual(8000);
+      expect(munged).toContain("x-google-start-bitrate=50000");
+      expect(munged).toContain("x-google-min-bitrate=20000");
+      expect(munged).toContain("x-google-max-bitrate=50000");
     });
   });
 });

@@ -14,9 +14,9 @@ function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
 ): MediaTrackConstraints {
   return {
-    width: { min: 1280, ideal: 1920 },
-    height: { min: 720, ideal: 1080 },
-    frameRate: { min: 24, ideal: profile.targetFps },
+    width: { min: 1920, ideal: 2560 },
+    height: { min: 1080, ideal: 1440 },
+    frameRate: { min: 30, ideal: profile.targetFps },
   };
 }
 
@@ -56,7 +56,7 @@ async function tuneScreenVideoSender(
       networkPriority: "high",
     };
     params.encodings = [encoding];
-    params.degradationPreference = "maintain-framerate";
+    params.degradationPreference = "disabled";
     await sender.setParameters(params);
   } catch {
     // Browsers differ in which sender parameters are writable.
