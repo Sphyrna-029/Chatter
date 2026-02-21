@@ -158,10 +158,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(async () => {
       try {
         const data = await apiGetPresence(stateRef.current.currentRoomId!);
-        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> = {};
+        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string }> = {};
         for (const [uid, p] of Object.entries(data.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
@@ -292,10 +292,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Load presence
       try {
         const presData = await apiGetPresence(roomId);
-        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> = {};
+        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string }> = {};
         for (const [uid, p] of Object.entries(presData.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}
@@ -536,11 +536,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiSetNameColors(roomId, ownerColor, modColor);
   }, []);
 
-  const updateProfile = useCallback((profile: { avatarUrl?: string; about?: string; customStatus?: string }) => {
+  const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       const payload: any = { type: "set_profile" };
       if (profile.avatarUrl !== undefined) payload.avatar_url = profile.avatarUrl;
+      if (profile.bannerUrl !== undefined) payload.banner_url = profile.bannerUrl;
       if (profile.about !== undefined) payload.about = profile.about;
       if (profile.customStatus !== undefined) payload.custom_status = profile.customStatus;
       ws.send(JSON.stringify(payload));

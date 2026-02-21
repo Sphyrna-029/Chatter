@@ -19,7 +19,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string }[];
-  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string }>;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;
@@ -63,7 +63,7 @@ export type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
@@ -143,7 +143,7 @@ export interface AppContextValue {
   updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
-  updateProfile: (profile: { avatarUrl?: string; about?: string; customStatus?: string }) => void;
+  updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string }) => void;
   kickMember: (roomId: string, userId: string) => Promise<void>;
   banMember: (roomId: string, userId: string) => Promise<void>;
   unbanMember: (roomId: string, userId: string) => Promise<void>;

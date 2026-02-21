@@ -67,14 +67,18 @@ export function UserProfileDialog({
   const customStatus = presence?.customStatus || "";
   const avatarUrl = presence?.avatarUrl || "";
   const about = presence?.about || "";
+  const bannerUrl = presence?.bannerUrl || "";
   const initial = displayName[0]?.toUpperCase() || "?";
 
   const [statusInput, setStatusInput] = useState(customStatus);
   const [aboutInput, setAboutInput] = useState(about);
   const [avatarPreview, setAvatarPreview] = useState(avatarUrl);
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState(bannerUrl);
+  const [pendingBannerFile, setPendingBannerFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState("profile");
 
   // My Files state
@@ -88,9 +92,11 @@ export function UserProfileDialog({
       setAboutInput(about);
       setAvatarPreview(avatarUrl);
       setPendingAvatarFile(null);
+      setBannerPreview(bannerUrl);
+      setPendingBannerFile(null);
       setActiveTab("profile");
     }
-  }, [open, customStatus, about, avatarUrl]);
+  }, [open, customStatus, about, avatarUrl, bannerUrl]);
 
   const fetchUploads = useCallback(async () => {
     setLoadingUploads(true);
@@ -150,6 +156,18 @@ export function UserProfileDialog({
     e.target.value = "";
   };
 
+  const handleBannerClick = () => {
+    if (isSelf) bannerInputRef.current?.click();
+  };
+
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingBannerFile(file);
+    setBannerPreview(URL.createObjectURL(file));
+    e.target.value = "";
+  };
+
   const handleSave = async () => {
     setUploading(true);
     try {
@@ -158,8 +176,14 @@ export function UserProfileDialog({
         const uploaded = await apiUploadFile(pendingAvatarFile);
         newAvatarUrl = uploaded.url;
       }
+      let newBannerUrl: string | undefined;
+      if (pendingBannerFile) {
+        const uploaded = await apiUploadFile(pendingBannerFile);
+        newBannerUrl = uploaded.url;
+      }
       updateProfile({
         avatarUrl: newAvatarUrl !== undefined ? newAvatarUrl : undefined,
+        bannerUrl: newBannerUrl !== undefined ? newBannerUrl : undefined,
         about: aboutInput.trim(),
         customStatus: statusInput.trim(),
       });
@@ -172,41 +196,73 @@ export function UserProfileDialog({
   const hasChanges =
     statusInput.trim() !== customStatus ||
     aboutInput.trim() !== about ||
-    pendingAvatarFile !== null;
+    pendingAvatarFile !== null ||
+    pendingBannerFile !== null;
 
   const profileContent = (
-    <div className="flex flex-col items-center gap-4 py-2">
+    <div className="flex flex-col">
+      {/* Banner */}
       <div
-        className={cn("relative", isSelf && "cursor-pointer group")}
-        onClick={handleAvatarClick}
+        className={cn("relative h-28 w-full overflow-hidden bg-secondary shrink-0", isSelf && "cursor-pointer group")}
+        onClick={handleBannerClick}
       >
-        <Avatar className="h-20 w-20">
-          {avatarPreview && <AvatarImage src={avatarPreview} />}
-          <AvatarFallback className="text-2xl bg-secondary">
-            {initial}
-          </AvatarFallback>
-        </Avatar>
+        {bannerPreview ? (
+          <img src={bannerPreview} alt="Profile banner" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full bg-gradient-to-br from-muted to-secondary" />
+        )}
+        {/* Fade to dialog background */}
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background pointer-events-none" />
         {isSelf && (
-          <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 16 16" fill="white">
-              <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z" />
-              <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z" />
-            </svg>
+          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <span className="text-white text-xs font-medium">Change Banner</span>
           </div>
         )}
         <input
-          ref={fileInputRef}
+          ref={bannerInputRef}
           type="file"
           accept="image/*"
           className="hidden"
-          onChange={handleFileChange}
+          onChange={handleBannerChange}
         />
       </div>
 
-      <div className="text-center space-y-1">
-        <h2 className="text-lg font-semibold">{displayName}</h2>
-        <p className="text-sm text-muted-foreground">{userId}</p>
+      {/* Avatar — overlaps banner bottom */}
+      <div className="px-5 -mt-9 mb-1 flex items-end gap-3">
+        <div
+          className={cn("relative shrink-0", isSelf && "cursor-pointer group")}
+          onClick={handleAvatarClick}
+        >
+          <Avatar className="h-16 w-16 border-4 border-background">
+            {avatarPreview && <AvatarImage src={avatarPreview} />}
+            <AvatarFallback className="text-xl bg-secondary">
+              {initial}
+            </AvatarFallback>
+          </Avatar>
+          {isSelf && (
+            <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="white">
+                <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z" />
+                <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z" />
+              </svg>
+            </div>
+          )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+        </div>
       </div>
+
+      {/* Rest of profile content */}
+      <div className="flex flex-col items-center gap-4 px-5 pb-5">
+        <div className="text-center space-y-1 w-full">
+          <h2 className="text-lg font-semibold">{displayName}</h2>
+          <p className="text-sm text-muted-foreground">{userId}</p>
+        </div>
 
       {isSelf ? (
         <div className="w-full">
@@ -368,6 +424,7 @@ export function UserProfileDialog({
           })()}
         </>
       )}
+      </div>
     </div>
   );
 
@@ -449,20 +506,22 @@ export function UserProfileDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
-        "transition-all duration-200",
+        "transition-all duration-200 p-0 overflow-hidden",
         isSelf && activeTab === "files" ? "sm:max-w-[440px]" : "sm:max-w-[340px]"
       )}>
-        <DialogHeader>
-          <DialogTitle className="sr-only">User Profile</DialogTitle>
+        <DialogHeader className="sr-only">
+          <DialogTitle>User Profile</DialogTitle>
         </DialogHeader>
         {isSelf ? (
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full">
-              <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
-              <TabsTrigger value="files" className="flex-1">My Files</TabsTrigger>
-            </TabsList>
-            <TabsContent value="profile">{profileContent}</TabsContent>
-            <TabsContent value="files">{filesContent}</TabsContent>
+            <TabsContent value="profile" className="mt-0">{profileContent}</TabsContent>
+            <TabsContent value="files" className="mt-0 px-5 pb-5">{filesContent}</TabsContent>
+            <div className="px-5 pb-4 border-t pt-3">
+              <TabsList className="w-full">
+                <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
+                <TabsTrigger value="files" className="flex-1">My Files</TabsTrigger>
+              </TabsList>
+            </div>
           </Tabs>
         ) : (
           profileContent

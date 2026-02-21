@@ -50,6 +50,7 @@ pub(crate) async fn register(
         password_hash,
         avatar_url: String::new(),
         about: String::new(),
+        banner_url: String::new(),
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(
