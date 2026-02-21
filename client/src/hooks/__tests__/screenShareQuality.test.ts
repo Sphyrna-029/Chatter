@@ -12,8 +12,8 @@ describe("Screen share quality configuration", () => {
       expect(profile.contentHint).toBe("motion");
     });
 
-    it("has startBitrateKbps >= 10000 for instant HD", () => {
-      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(10000);
+    it("starts at max bitrate for instant 1080p", () => {
+      expect(profile.startBitrateKbps).toBe(profile.maxBitrateKbps);
     });
 
     it("has minBitrateKbps >= 4000 to prevent encoder drops", () => {
@@ -36,8 +36,8 @@ describe("Screen share quality configuration", () => {
       expect(profile.contentHint).toBe("motion");
     });
 
-    it("has startBitrateKbps >= 16000 for instant HD", () => {
-      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(16000);
+    it("starts at max bitrate for instant 1080p", () => {
+      expect(profile.startBitrateKbps).toBe(profile.maxBitrateKbps);
     });
 
     it("has minBitrateKbps >= 6000 to prevent encoder drops", () => {
@@ -57,16 +57,18 @@ describe("Screen share quality configuration", () => {
       "",
     ].join("\r\n");
 
-    it("sets x-google-start-bitrate >= 10000 for 30fps profile", () => {
+    it("sets x-google-start-bitrate equal to max for 30fps profile", () => {
       const profile = getScreenSharePublishProfile(30);
       const munged = mungeScreenVideoSdp(fakeSdp, {
         startBitrateKbps: profile.startBitrateKbps,
         minBitrateKbps: profile.minBitrateKbps,
         maxBitrateKbps: profile.maxBitrateKbps,
       });
-      const match = munged.match(/x-google-start-bitrate=(\d+)/);
-      expect(match).not.toBeNull();
-      expect(Number(match![1])).toBeGreaterThanOrEqual(10000);
+      const startMatch = munged.match(/x-google-start-bitrate=(\d+)/);
+      const maxMatch = munged.match(/x-google-max-bitrate=(\d+)/);
+      expect(startMatch).not.toBeNull();
+      expect(maxMatch).not.toBeNull();
+      expect(Number(startMatch![1])).toBe(Number(maxMatch![1]));
     });
 
     it("sets x-google-min-bitrate >= 4000 for 30fps profile", () => {
