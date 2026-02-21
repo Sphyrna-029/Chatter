@@ -12,12 +12,12 @@ describe("Screen share quality configuration", () => {
       expect(profile.contentHint).toBe("motion");
     });
 
-    it("has startBitrateKbps >= 6000 for fast ramp-up", () => {
-      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(6000);
+    it("has startBitrateKbps >= 10000 for instant HD", () => {
+      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(10000);
     });
 
-    it("has minBitrateKbps >= 2500 to prevent encoder drops", () => {
-      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(2500);
+    it("has minBitrateKbps >= 4000 to prevent encoder drops", () => {
+      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(4000);
     });
 
     it("targets 30fps", () => {
@@ -36,12 +36,12 @@ describe("Screen share quality configuration", () => {
       expect(profile.contentHint).toBe("motion");
     });
 
-    it("has startBitrateKbps >= 10000 for fast ramp-up", () => {
-      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(10000);
+    it("has startBitrateKbps >= 16000 for instant HD", () => {
+      expect(profile.startBitrateKbps).toBeGreaterThanOrEqual(16000);
     });
 
-    it("has minBitrateKbps >= 4000 to prevent encoder drops", () => {
-      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(4000);
+    it("has minBitrateKbps >= 6000 to prevent encoder drops", () => {
+      expect(profile.minBitrateKbps).toBeGreaterThanOrEqual(6000);
     });
 
     it("targets 60fps", () => {
@@ -57,7 +57,7 @@ describe("Screen share quality configuration", () => {
       "",
     ].join("\r\n");
 
-    it("sets x-google-start-bitrate >= 6000 for 30fps profile", () => {
+    it("sets x-google-start-bitrate >= 10000 for 30fps profile", () => {
       const profile = getScreenSharePublishProfile(30);
       const munged = mungeScreenVideoSdp(fakeSdp, {
         startBitrateKbps: profile.startBitrateKbps,
@@ -66,10 +66,10 @@ describe("Screen share quality configuration", () => {
       });
       const match = munged.match(/x-google-start-bitrate=(\d+)/);
       expect(match).not.toBeNull();
-      expect(Number(match![1])).toBeGreaterThanOrEqual(6000);
+      expect(Number(match![1])).toBeGreaterThanOrEqual(10000);
     });
 
-    it("sets x-google-min-bitrate >= 2500 for 30fps profile", () => {
+    it("sets x-google-min-bitrate >= 4000 for 30fps profile", () => {
       const profile = getScreenSharePublishProfile(30);
       const munged = mungeScreenVideoSdp(fakeSdp, {
         startBitrateKbps: profile.startBitrateKbps,
@@ -78,7 +78,7 @@ describe("Screen share quality configuration", () => {
       });
       const match = munged.match(/x-google-min-bitrate=(\d+)/);
       expect(match).not.toBeNull();
-      expect(Number(match![1])).toBeGreaterThanOrEqual(2500);
+      expect(Number(match![1])).toBeGreaterThanOrEqual(4000);
     });
   });
 });

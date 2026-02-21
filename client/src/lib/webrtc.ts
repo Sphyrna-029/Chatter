@@ -50,8 +50,8 @@ const SCREEN_PROFILE_30FPS: ScreenSharePublishProfile = {
   targetFps: 30,
   contentHint: "motion",
   maxBitrateBps: 12_000_000,
-  startBitrateKbps: 6_000,
-  minBitrateKbps: 2_500,
+  startBitrateKbps: 10_000,
+  minBitrateKbps: 4_000,
   maxBitrateKbps: 12_000,
   audioMaxAverageBitrate: 48_000,
 };
@@ -60,8 +60,8 @@ const SCREEN_PROFILE_60FPS: ScreenSharePublishProfile = {
   targetFps: 60,
   contentHint: "motion",
   maxBitrateBps: 20_000_000,
-  startBitrateKbps: 10_000,
-  minBitrateKbps: 4_000,
+  startBitrateKbps: 16_000,
+  minBitrateKbps: 6_000,
   maxBitrateKbps: 20_000,
   audioMaxAverageBitrate: 48_000,
 };

@@ -51,7 +51,8 @@ async function tuneScreenVideoSender(
       ...baseEncoding,
       maxBitrate: profile.maxBitrateBps,
       maxFramerate: profile.targetFps,
-      scaleResolutionDownBy: 1,
+      priority: "high",
+      networkPriority: "high",
     };
     params.encodings = [encoding];
     params.degradationPreference = "maintain-framerate";
