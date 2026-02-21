@@ -158,6 +158,54 @@ pub(crate) fn error_response(status: StatusCode, detail: &str) -> (StatusCode, J
     )
 }
 
+// ─── Role helpers ────────────────────────────────────────────────────────────
+
+pub(crate) async fn get_user_role(state: &AppState, room_id: &str, user_id: &str) -> String {
+    let roles = state.room_roles.read().await;
+    let role = roles
+        .get(room_id)
+        .and_then(|m| m.get(user_id))
+        .cloned()
+        .unwrap_or_else(|| "member".to_string());
+
+    // Legacy fallback: if role is "member", check if user is actually the room creator
+    if role == "member" {
+        use super::state::RoomRecord;
+        use mongodb::bson::doc;
+        let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+        if let Ok(Some(room)) = rooms_coll.find_one(doc! { "_id": room_id }).await {
+            if room.creator == user_id {
+                // Backfill the cache so we don't hit DB again
+                drop(roles);
+                let mut roles_w = state.room_roles.write().await;
+                roles_w
+                    .entry(room_id.to_string())
+                    .or_default()
+                    .insert(user_id.to_string(), "owner".to_string());
+
+                // Also update MongoDB
+                let members_coll =
+                    state.db.collection::<super::state::RoomMemberRecord>("room_members");
+                let _ = members_coll
+                    .update_one(
+                        doc! { "room_id": room_id, "user_id": user_id },
+                        doc! { "$set": { "role": "owner" } },
+                    )
+                    .await;
+
+                return "owner".to_string();
+            }
+        }
+    }
+
+    role
+}
+
+pub(crate) async fn is_moderator_or_owner(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    let role = get_user_role(state, room_id, user_id).await;
+    role == "owner" || role == "moderator"
+}
+
 /// Broadcast a JSON value to all WebSocket-connected members of a room.
 /// Uses the write-through room_members cache (no DB call).
 pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: &Value) {
@@ -179,8 +227,24 @@ pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: 
 
 /// Join a user to a room, broadcasting member join + system message.
 /// Updates both MongoDB and the in-memory cache.
-/// Returns true if the user was newly added, false if already a member.
-pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
+/// Returns Ok(true) if newly added, Ok(false) if already a member, Err if banned.
+pub(crate) async fn do_join_room(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Result<bool, &'static str> {
+    // Check ban list
+    {
+        let banned = state.banned_users.read().await;
+        if banned
+            .get(room_id)
+            .map(|list| list.contains(&user_id.to_string()))
+            .unwrap_or(false)
+        {
+            return Err("You are banned from this room");
+        }
+    }
+
     // Check cache first
     let need_add = {
         let rm = state.room_members.read().await;
@@ -191,7 +255,7 @@ pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str)
     };
 
     if !need_add {
-        return false;
+        return Ok(false);
     }
 
     // Insert into MongoDB
@@ -199,11 +263,12 @@ pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str)
     let record = RoomMemberRecord {
         room_id: room_id.to_string(),
         user_id: user_id.to_string(),
+        role: "member".to_string(),
     };
     // Use insert, ignore duplicate errors
     let _ = collection.insert_one(record).await;
 
-    // Update cache
+    // Update caches
     {
         let mut rm = state.room_members.write().await;
         let members = rm.entry(room_id.to_string()).or_default();
@@ -211,13 +276,20 @@ pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str)
             members.push(user_id.to_string());
         }
     }
+    {
+        let mut roles = state.room_roles.write().await;
+        roles
+            .entry(room_id.to_string())
+            .or_default()
+            .insert(user_id.to_string(), "member".to_string());
+    }
 
     // Broadcast join events
     let event = json!({
         "type": "m.room.member",
         "room_id": room_id,
         "sender": user_id,
-        "content": {"membership": "join"},
+        "content": {"membership": "join", "role": "member"},
         "event_id": generate_id("$"),
         "origin_server_ts": now_millis()
     });
@@ -249,7 +321,7 @@ pub(crate) async fn do_join_room(state: &AppState, room_id: &str, user_id: &str)
     }
 
     broadcast_to_room(state, room_id, &sys_event).await;
-    true
+    Ok(true)
 }
 
 /// Send a JSON message to a single WebSocket-connected user.

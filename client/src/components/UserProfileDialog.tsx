@@ -60,7 +60,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, openDM, updateProfile, setManualStatus } = useAppContext();
+  const { state, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole } = useAppContext();
   const isSelf = userId === state.userId;
   const presence = state.userPresence[userId];
   const status = presence?.status || "offline";
@@ -299,9 +299,74 @@ export function UserProfileDialog({
       )}
 
       {!isSelf && (
-        <Button className="w-full mt-2" onClick={handleMessage}>
-          Message
-        </Button>
+        <>
+          <Button className="w-full mt-2" onClick={handleMessage}>
+            Message
+          </Button>
+          {state.currentRoomId && (() => {
+            const myRole = state.roomMembers.find(m => m.userId === state.userId)?.role;
+            const targetRole = state.roomMembers.find(m => m.userId === userId)?.role;
+            const isOwner = myRole === "owner";
+            const isMod = myRole === "moderator";
+            const canManage = (isOwner && targetRole !== "owner") ||
+              (isMod && targetRole === "member");
+
+            if (!canManage) return null;
+
+            return (
+              <div className="w-full space-y-1.5">
+                {isOwner && targetRole === "member" && (
+                  <Button
+                    variant="outline"
+                    className="w-full text-blue-400 border-blue-400/30 hover:bg-blue-400/10"
+                    onClick={async () => {
+                      await setMemberRole(state.currentRoomId!, userId, "moderator");
+                      onOpenChange(false);
+                    }}
+                  >
+                    Promote to Moderator
+                  </Button>
+                )}
+                {isOwner && targetRole === "moderator" && (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                      await setMemberRole(state.currentRoomId!, userId, "member");
+                      onOpenChange(false);
+                    }}
+                  >
+                    Demote to Member
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
+                  onClick={async () => {
+                    if (confirm(`Kick ${displayName} from this room?`)) {
+                      await kickMember(state.currentRoomId!, userId);
+                      onOpenChange(false);
+                    }
+                  }}
+                >
+                  Kick
+                </Button>
+                <Button
+                  variant="outline"
+                  className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={async () => {
+                    if (confirm(`Ban ${displayName} from this room? They won't be able to rejoin.`)) {
+                      await banMember(state.currentRoomId!, userId);
+                      onOpenChange(false);
+                    }
+                  }}
+                >
+                  Ban
+                </Button>
+              </div>
+            );
+          })()}
+        </>
       )}
     </div>
   );

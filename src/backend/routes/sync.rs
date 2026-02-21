@@ -24,6 +24,7 @@ pub(crate) async fn sync(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rm = state.room_members.read().await;
+    let room_roles = state.room_roles.read().await;
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
 
@@ -61,12 +62,22 @@ pub(crate) async fn sync(
             .iter()
             .map(|mid| {
                 let display = mid.split(':').next().unwrap_or(mid).trim_start_matches('@');
+                let mut role = room_roles
+                    .get(room_id)
+                    .and_then(|m| m.get(mid))
+                    .map(|r| r.as_str())
+                    .unwrap_or("member");
+                // Legacy fallback: creator is always owner
+                if role == "member" && *mid == room_data.creator {
+                    role = "owner";
+                }
                 json!({
                     "type": "m.room.member",
                     "state_key": mid,
                     "content": {
                         "membership": "join",
-                        "displayname": display
+                        "displayname": display,
+                        "role": role
                     },
                     "sender": mid
                 })
@@ -125,6 +136,15 @@ pub(crate) async fn sync(
                 "type": "m.room.custom_emojis",
                 "state_key": "",
                 "content": {"custom_emojis": room_data.custom_emojis},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.name_colors",
+                "state_key": "",
+                "content": {
+                    "owner_name_color": room_data.owner_name_color,
+                    "mod_name_color": room_data.mod_name_color
+                },
                 "sender": room_data.creator
             }),
         ];

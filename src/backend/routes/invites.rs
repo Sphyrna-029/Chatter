@@ -210,7 +210,9 @@ pub(crate) async fn accept_invite(
         return Err(error_response(StatusCode::NOT_FOUND, "Room no longer exists"));
     }
 
-    do_join_room(&state, &invite.room_id, &user_id).await;
+    if let Err(msg) = do_join_room(&state, &invite.room_id, &user_id).await {
+        return Err(error_response(StatusCode::FORBIDDEN, msg));
+    }
 
     Ok(Json(json!({ "room_id": invite.room_id })))
 }

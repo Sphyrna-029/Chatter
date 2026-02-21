@@ -24,8 +24,9 @@ pub async fn build_state() -> Arc<AppState> {
     // Create indexes
     create_indexes(&db).await;
 
-    // Load room_members cache from MongoDB
-    let room_members = load_room_members_cache(&db).await;
+    // Load caches from MongoDB
+    let (room_members, room_roles) = load_room_members_cache(&db).await;
+    let banned_users = load_banned_users_cache(&db).await;
 
     let webrtc_api = build_webrtc_api();
 
@@ -33,6 +34,8 @@ pub async fn build_state() -> Arc<AppState> {
         db,
         jwt_secret,
         room_members: RwLock::new(room_members),
+        room_roles: RwLock::new(room_roles),
+        banned_users: RwLock::new(banned_users),
         active_websockets: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
         user_presence: RwLock::new(HashMap::new()),
@@ -127,13 +130,42 @@ async fn create_indexes(db: &mongodb::Database) {
         .await;
 }
 
-async fn load_room_members_cache(db: &mongodb::Database) -> HashMap<String, Vec<String>> {
+async fn load_room_members_cache(
+    db: &mongodb::Database,
+) -> (
+    HashMap<String, Vec<String>>,
+    HashMap<String, HashMap<String, String>>,
+) {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let mut members_cache: HashMap<String, Vec<String>> = HashMap::new();
+    let mut roles_cache: HashMap<String, HashMap<String, String>> = HashMap::new();
+
+    let collection = db.collection::<super::state::RoomMemberRecord>("room_members");
+    if let Ok(mut cursor) = collection.find(doc! {}).await {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            members_cache
+                .entry(record.room_id.clone())
+                .or_default()
+                .push(record.user_id.clone());
+            roles_cache
+                .entry(record.room_id)
+                .or_default()
+                .insert(record.user_id, record.role);
+        }
+    }
+
+    (members_cache, roles_cache)
+}
+
+async fn load_banned_users_cache(db: &mongodb::Database) -> HashMap<String, Vec<String>> {
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
     let mut cache: HashMap<String, Vec<String>> = HashMap::new();
 
-    let collection = db.collection::<super::state::RoomMemberRecord>("room_members");
+    let collection = db.collection::<super::state::BannedUserRecord>("banned_users");
     if let Ok(mut cursor) = collection.find(doc! {}).await {
         while let Ok(Some(record)) = cursor.try_next().await {
             cache

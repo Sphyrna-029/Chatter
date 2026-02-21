@@ -1,10 +1,10 @@
 use super::super::{
-    dto::{CreateRoomRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
+    dto::{CreateRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_user_from_token, now_millis,
+        get_user_from_token, get_user_role, now_millis,
     },
-    state::{AppState, DmRoomRecord, RoomMemberRecord, RoomRecord},
+    state::{AppState, BannedUserRecord, DmRoomRecord, RoomMemberRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -60,7 +60,7 @@ pub(crate) async fn create_room(
                     };
 
                     if !is_member {
-                        do_join_room(&state, &existing_room_id, &user_id).await;
+                        let _ = do_join_room(&state, &existing_room_id, &user_id).await;
                     }
 
                     return Ok(Json(json!({"room_id": existing_room_id})));
@@ -84,6 +84,8 @@ pub(crate) async fn create_room(
                     tags: vec![],
                     icon_url: String::new(),
                     custom_emojis: vec![],
+                    owner_name_color: String::new(),
+                    mod_name_color: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -94,19 +96,27 @@ pub(crate) async fn create_room(
                     .insert_one(RoomMemberRecord {
                         room_id: room_id.clone(),
                         user_id: user_id.clone(),
+                        role: "owner".to_string(),
                     })
                     .await;
                 let _ = members_coll
                     .insert_one(RoomMemberRecord {
                         room_id: room_id.clone(),
                         user_id: other_user.clone(),
+                        role: "member".to_string(),
                     })
                     .await;
 
-                // Update cache
+                // Update caches
                 {
                     let mut rm = state.room_members.write().await;
                     rm.insert(room_id.clone(), vec![user_id.clone(), other_user.clone()]);
+                }
+                {
+                    let mut roles = state.room_roles.write().await;
+                    let room_roles = roles.entry(room_id.clone()).or_default();
+                    room_roles.insert(user_id.clone(), "owner".to_string());
+                    room_roles.insert(other_user.clone(), "member".to_string());
                 }
 
                 // Store DM mapping
@@ -190,6 +200,8 @@ pub(crate) async fn create_room(
         tags: req.tags.unwrap_or_default(),
         icon_url: req.icon_url.unwrap_or_default(),
         custom_emojis: vec![],
+        owner_name_color: String::new(),
+        mod_name_color: String::new(),
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -211,18 +223,32 @@ pub(crate) async fn create_room(
     // Add members to MongoDB
     let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
     for member in &members {
+        let role = if *member == user_id {
+            "owner".to_string()
+        } else {
+            "member".to_string()
+        };
         let _ = members_coll
             .insert_one(RoomMemberRecord {
                 room_id: room_id.clone(),
                 user_id: member.clone(),
+                role,
             })
             .await;
     }
 
-    // Update cache
+    // Update caches
     {
         let mut rm = state.room_members.write().await;
-        rm.insert(room_id.clone(), members);
+        rm.insert(room_id.clone(), members.clone());
+    }
+    {
+        let mut roles = state.room_roles.write().await;
+        let room_roles = roles.entry(room_id.clone()).or_default();
+        for member in &members {
+            let role = if *member == user_id { "owner" } else { "member" };
+            room_roles.insert(member.clone(), role.to_string());
+        }
     }
 
     Ok(Json(json!({"room_id": room_id})))
@@ -250,7 +276,9 @@ pub(crate) async fn join_room(
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
-    do_join_room(&state, &room_id, &user_id).await;
+    if let Err(msg) = do_join_room(&state, &room_id, &user_id).await {
+        return Err(error_response(StatusCode::FORBIDDEN, msg));
+    }
 
     Ok(Json(json!({"room_id": room_id})))
 }
@@ -286,12 +314,18 @@ pub(crate) async fn leave_room(
         .map(|r| r.deleted_count > 0)
         .unwrap_or(false);
 
-    // Update cache
+    // Update caches
     if was_member {
         {
             let mut rm = state.room_members.write().await;
             if let Some(members) = rm.get_mut(&room_id) {
                 members.retain(|m| m != &user_id);
+            }
+        }
+        {
+            let mut roles = state.room_roles.write().await;
+            if let Some(room_roles) = roles.get_mut(&room_id) {
+                room_roles.remove(&user_id);
             }
         }
 
@@ -419,8 +453,16 @@ pub(crate) async fn delete_room(
         .collection::<super::super::state::InviteRecord>("invites");
     let _ = inv_coll.delete_many(doc! { "room_id": &room_id }).await;
 
+    // Delete banned users for this room
+    let banned_coll = state
+        .db
+        .collection::<super::super::state::BannedUserRecord>("banned_users");
+    let _ = banned_coll.delete_many(doc! { "room_id": &room_id }).await;
+
     // Update caches
     state.room_members.write().await.remove(&room_id);
+    state.room_roles.write().await.remove(&room_id);
+    state.banned_users.write().await.remove(&room_id);
     state.voice_channels.write().await.remove(&room_id);
 
     Ok(Json(json!({"deleted": true})))
@@ -596,4 +638,375 @@ pub(crate) async fn update_room_settings(
     broadcast_to_room(&state, &room_id, &event).await;
 
     Ok(Json(json!({"event_id": generate_id("$")})))
+}
+
+// ─── Permissions handlers ────────────────────────────────────────────────────
+
+pub(crate) async fn kick_member(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, target_user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    let target_role = get_user_role(&state, &room_id, &target_user_id).await;
+
+    if caller_role == "member" {
+        return Err(error_response(StatusCode::FORBIDDEN, "No permission to kick"));
+    }
+    if target_role == "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Cannot kick the owner"));
+    }
+    if caller_role == "moderator" && target_role == "moderator" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Moderators cannot kick other moderators"));
+    }
+
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    let _ = members_coll
+        .delete_one(doc! { "room_id": &room_id, "user_id": &target_user_id })
+        .await;
+
+    {
+        let mut rm = state.room_members.write().await;
+        if let Some(members) = rm.get_mut(&room_id) {
+            members.retain(|m| m != &target_user_id);
+        }
+    }
+    {
+        let mut roles = state.room_roles.write().await;
+        if let Some(room_roles) = roles.get_mut(&room_id) {
+            room_roles.remove(&target_user_id);
+        }
+    }
+    {
+        let mut vc = state.voice_channels.write().await;
+        if let Some(room_vc) = vc.get_mut(&room_id) {
+            room_vc.remove(&target_user_id);
+        }
+    }
+
+    let target_display = target_user_id
+        .split(':')
+        .next()
+        .unwrap_or(&target_user_id)
+        .trim_start_matches('@');
+    let sys_event = json!({
+        "type": "m.room.message",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": {
+            "msgtype": "m.system",
+            "body": format!("{} was kicked from the room", target_display)
+        },
+        "event_id": generate_id("$"),
+        "origin_server_ts": now_millis()
+    });
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+        let _ = msg_coll.insert_one(doc).await;
+    }
+    broadcast_to_room(&state, &room_id, &sys_event).await;
+
+    let kick_event = json!({
+        "type": "m.room.kick",
+        "room_id": room_id,
+        "user_id": target_user_id,
+        "sender": user_id,
+    });
+    super::super::helpers::send_to_user(&state, &target_user_id, &kick_event).await;
+
+    let member_event = json!({
+        "type": "m.room.member",
+        "room_id": room_id,
+        "sender": target_user_id,
+        "content": {"membership": "leave"},
+        "event_id": generate_id("$"),
+        "origin_server_ts": now_millis()
+    });
+    broadcast_to_room(&state, &room_id, &member_event).await;
+
+    Ok(Json(json!({"kicked": true})))
+}
+
+pub(crate) async fn ban_member(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, target_user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    let target_role = get_user_role(&state, &room_id, &target_user_id).await;
+
+    if caller_role == "member" {
+        return Err(error_response(StatusCode::FORBIDDEN, "No permission to ban"));
+    }
+    if target_role == "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Cannot ban the owner"));
+    }
+    if caller_role == "moderator" && target_role == "moderator" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Moderators cannot ban other moderators"));
+    }
+
+    let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
+    let _ = ban_coll
+        .insert_one(BannedUserRecord {
+            room_id: room_id.clone(),
+            user_id: target_user_id.clone(),
+            banned_by: user_id.clone(),
+            banned_at: now_millis(),
+        })
+        .await;
+
+    {
+        let mut banned = state.banned_users.write().await;
+        banned
+            .entry(room_id.clone())
+            .or_default()
+            .push(target_user_id.clone());
+    }
+
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    let _ = members_coll
+        .delete_one(doc! { "room_id": &room_id, "user_id": &target_user_id })
+        .await;
+    {
+        let mut rm = state.room_members.write().await;
+        if let Some(members) = rm.get_mut(&room_id) {
+            members.retain(|m| m != &target_user_id);
+        }
+    }
+    {
+        let mut roles = state.room_roles.write().await;
+        if let Some(room_roles) = roles.get_mut(&room_id) {
+            room_roles.remove(&target_user_id);
+        }
+    }
+    {
+        let mut vc = state.voice_channels.write().await;
+        if let Some(room_vc) = vc.get_mut(&room_id) {
+            room_vc.remove(&target_user_id);
+        }
+    }
+
+    let target_display = target_user_id
+        .split(':')
+        .next()
+        .unwrap_or(&target_user_id)
+        .trim_start_matches('@');
+    let sys_event = json!({
+        "type": "m.room.message",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": {
+            "msgtype": "m.system",
+            "body": format!("{} was banned from the room", target_display)
+        },
+        "event_id": generate_id("$"),
+        "origin_server_ts": now_millis()
+    });
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+        let _ = msg_coll.insert_one(doc).await;
+    }
+    broadcast_to_room(&state, &room_id, &sys_event).await;
+
+    let kick_event = json!({
+        "type": "m.room.kick",
+        "room_id": room_id,
+        "user_id": target_user_id,
+        "sender": user_id,
+    });
+    super::super::helpers::send_to_user(&state, &target_user_id, &kick_event).await;
+
+    let member_event = json!({
+        "type": "m.room.member",
+        "room_id": room_id,
+        "sender": target_user_id,
+        "content": {"membership": "leave"},
+        "event_id": generate_id("$"),
+        "origin_server_ts": now_millis()
+    });
+    broadcast_to_room(&state, &room_id, &member_event).await;
+
+    Ok(Json(json!({"banned": true})))
+}
+
+pub(crate) async fn unban_member(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, target_user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    if caller_role != "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can unban"));
+    }
+
+    let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
+    let _ = ban_coll
+        .delete_one(doc! { "room_id": &room_id, "user_id": &target_user_id })
+        .await;
+
+    {
+        let mut banned = state.banned_users.write().await;
+        if let Some(list) = banned.get_mut(&room_id) {
+            list.retain(|u| u != &target_user_id);
+        }
+    }
+
+    Ok(Json(json!({"unbanned": true})))
+}
+
+pub(crate) async fn set_member_role(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, target_user_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<SetRoleRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    if caller_role != "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can change roles"));
+    }
+
+    if req.role != "moderator" && req.role != "member" {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Role must be 'moderator' or 'member'"));
+    }
+
+    let target_role = get_user_role(&state, &room_id, &target_user_id).await;
+    if target_role == "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Cannot change the owner's role"));
+    }
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&target_user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(StatusCode::NOT_FOUND, "User is not a member"));
+        }
+    }
+
+    let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+    let _ = members_coll
+        .update_one(
+            doc! { "room_id": &room_id, "user_id": &target_user_id },
+            doc! { "$set": { "role": &req.role } },
+        )
+        .await;
+
+    {
+        let mut roles = state.room_roles.write().await;
+        roles
+            .entry(room_id.clone())
+            .or_default()
+            .insert(target_user_id.clone(), req.role.clone());
+    }
+
+    let target_display = target_user_id
+        .split(':')
+        .next()
+        .unwrap_or(&target_user_id)
+        .trim_start_matches('@');
+    let action = if req.role == "moderator" {
+        "promoted to moderator"
+    } else {
+        "demoted to member"
+    };
+    let sys_event = json!({
+        "type": "m.room.message",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": {
+            "msgtype": "m.system",
+            "body": format!("{} was {}", target_display, action)
+        },
+        "event_id": generate_id("$"),
+        "origin_server_ts": now_millis()
+    });
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+        let _ = msg_coll.insert_one(doc).await;
+    }
+    broadcast_to_room(&state, &room_id, &sys_event).await;
+
+    let role_event = json!({
+        "type": "m.room.member_role",
+        "room_id": room_id,
+        "user_id": target_user_id,
+        "role": req.role,
+        "sender": user_id,
+    });
+    broadcast_to_room(&state, &room_id, &role_event).await;
+
+    Ok(Json(json!({"role": req.role})))
+}
+
+pub(crate) async fn set_name_colors(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<SetNameColorRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    if caller_role != "owner" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can set name colors"));
+    }
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    let final_owner_color = req.owner_color.unwrap_or(room.owner_name_color);
+    let final_mod_color = req.mod_color.unwrap_or(room.mod_name_color);
+
+    let _ = rooms_coll
+        .update_one(
+            doc! { "_id": &room_id },
+            doc! { "$set": {
+                "owner_name_color": &final_owner_color,
+                "mod_name_color": &final_mod_color,
+            }},
+        )
+        .await;
+
+    let event = json!({
+        "type": "m.room.name_colors",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": {
+            "owner_name_color": final_owner_color,
+            "mod_name_color": final_mod_color,
+        }
+    });
+    broadcast_to_room(&state, &room_id, &event).await;
+
+    Ok(Json(json!({"updated": true})))
 }

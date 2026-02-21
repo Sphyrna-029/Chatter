@@ -33,6 +33,11 @@ import {
   apiCreateDM,
   apiUpdateTopic,
   apiUpdateRoomSettings,
+  apiKickMember,
+  apiBanMember,
+  apiUnbanMember,
+  apiSetMemberRole,
+  apiSetNameColors,
   type MatrixMessage,
   type VoiceMember,
   type RoomInfo,
@@ -55,7 +60,7 @@ export interface AppState {
   oldestMessageIndex: number | null;
   loadingOlderMessages: boolean;
   // Members
-  roomMembers: { userId: string; displayName: string }[];
+  roomMembers: { userId: string; displayName: string; role: string }[];
   userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }>;
   // Voice
   inVoiceChannel: boolean;
@@ -99,7 +104,7 @@ type Action =
   | { type: "REDACT_MESSAGE"; payload: string }
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
-  | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string }[] }
+  | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
@@ -119,7 +124,9 @@ type Action =
   | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
-  | { type: "SET_WS_CONNECTED"; payload: boolean };
+  | { type: "SET_WS_CONNECTED"; payload: boolean }
+  | { type: "UPDATE_MEMBER_ROLE"; payload: { userId: string; role: string } }
+  | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } };
 
 const initialState: AppState = {
   accessToken: null,
@@ -400,6 +407,30 @@ function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_WS_CONNECTED":
       return { ...state, wsConnected: action.payload };
+    case "UPDATE_MEMBER_ROLE":
+      return {
+        ...state,
+        roomMembers: state.roomMembers.map((m) =>
+          m.userId === action.payload.userId
+            ? { ...m, role: action.payload.role }
+            : m
+        ),
+      };
+    case "UPDATE_NAME_COLORS": {
+      const existing = state.roomInfoMap[action.payload.roomId];
+      if (!existing) return state;
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: {
+            ...existing,
+            owner_name_color: action.payload.owner_name_color,
+            mod_name_color: action.payload.mod_name_color,
+          },
+        },
+      };
+    }
     default:
       return state;
   }
@@ -434,6 +465,11 @@ interface AppContextValue {
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
   updateProfile: (profile: { avatarUrl?: string; about?: string; customStatus?: string }) => void;
+  kickMember: (roomId: string, userId: string) => Promise<void>;
+  banMember: (roomId: string, userId: string) => Promise<void>;
+  unbanMember: (roomId: string, userId: string) => Promise<void>;
+  setMemberRole: (roomId: string, userId: string, role: string) => Promise<void>;
+  setNameColors: (roomId: string, ownerColor?: string, modColor?: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -515,6 +551,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
                     userId: e.state_key,
                     displayName:
                       e.content.displayname || e.state_key.split(":")[0].substring(1),
+                    role: e.content.role || "member",
                   })),
                 });
               }
@@ -658,6 +695,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
           type: "UPDATE_ROOM_TOPIC",
           payload: { roomId: msg.room_id, topic: msg.content?.topic || "" },
         });
+      }
+      else if (msg.type === "m.room.member_role") {
+        if (msg.room_id === stateRef.current.currentRoomId) {
+          dispatch({
+            type: "UPDATE_MEMBER_ROLE",
+            payload: { userId: msg.user_id, role: msg.role },
+          });
+        }
+      }
+      else if (msg.type === "m.room.name_colors") {
+        dispatch({
+          type: "UPDATE_NAME_COLORS",
+          payload: {
+            roomId: msg.room_id,
+            owner_name_color: msg.content?.owner_name_color || "",
+            mod_name_color: msg.content?.mod_name_color || "",
+          },
+        });
+      }
+      else if (msg.type === "m.room.kick") {
+        // We got kicked from a room
+        if (msg.user_id === stateRef.current.userId) {
+          if (msg.room_id === stateRef.current.currentRoomId) {
+            dispatch({ type: "SELECT_ROOM", payload: null });
+          }
+          loadRoomsRef.current();
+        }
       }
       else if (msg.type === "m.room.created") {
         // A new DM room was created — refresh rooms list so it appears instantly
@@ -813,6 +877,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const customEmojisEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.custom_emojis"
         );
+        const nameColorsEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.name_colors"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -822,6 +889,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           icon_url: iconEvent?.content?.icon_url || "",
           creator: nameEvent?.sender || "",
           custom_emojis: customEmojisEvent?.content?.custom_emojis || [],
+          owner_name_color: nameColorsEvent?.content?.owner_name_color || "",
+          mod_name_color: nameColorsEvent?.content?.mod_name_color || "",
         };
       } else {
         roomInfoMap[roomId] = {
@@ -864,6 +933,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             userId: e.state_key,
             displayName:
               e.content.displayname || e.state_key.split(":")[0].substring(1),
+            role: e.content.role || "member",
           })),
         });
       }
@@ -1094,6 +1164,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const kickMember = useCallback(async (roomId: string, userId: string) => {
+    await apiKickMember(roomId, userId);
+  }, []);
+
+  const banMember = useCallback(async (roomId: string, userId: string) => {
+    await apiBanMember(roomId, userId);
+  }, []);
+
+  const unbanMember = useCallback(async (roomId: string, userId: string) => {
+    await apiUnbanMember(roomId, userId);
+  }, []);
+
+  const setMemberRole = useCallback(async (roomId: string, userId: string, role: string) => {
+    await apiSetMemberRole(roomId, userId, role);
+  }, []);
+
+  const setNameColors = useCallback(async (roomId: string, ownerColor?: string, modColor?: string) => {
+    await apiSetNameColors(roomId, ownerColor, modColor);
+  }, []);
+
   const updateProfile = useCallback((profile: { avatarUrl?: string; about?: string; customStatus?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -1133,6 +1223,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCustomStatus,
         setManualStatus,
         updateProfile,
+        kickMember,
+        banMember,
+        unbanMember,
+        setMemberRole,
+        setNameColors,
       }}
     >
       {children}

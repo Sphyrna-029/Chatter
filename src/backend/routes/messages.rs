@@ -1,8 +1,8 @@
 use super::super::{
-    dto::{EditMessageRequest, MessagesQuery, SendMessageRequest},
+    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
-        now_millis, send_to_user,
+        get_user_role, is_moderator_or_owner, now_millis, send_to_user,
     },
     state::{AppState, RoomRecord},
 };
@@ -249,11 +249,27 @@ pub(crate) async fn redact_message(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
 
-    if msg.get_str("sender").ok() != Some(&user_id) {
-        return Err(error_response(
-            StatusCode::FORBIDDEN,
-            "Can only delete your own messages",
-        ));
+    let msg_sender = msg.get_str("sender").ok().unwrap_or("");
+    let is_own = msg_sender == user_id;
+    if !is_own {
+        let caller_is_mod = is_moderator_or_owner(&state, &room_id, &user_id).await;
+        if !caller_is_mod {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Can only delete your own messages",
+            ));
+        }
+        // Moderators can't delete owner's messages
+        let caller_role = get_user_role(&state, &room_id, &user_id).await;
+        if caller_role == "moderator" {
+            let sender_role = get_user_role(&state, &room_id, msg_sender).await;
+            if sender_role == "owner" {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Moderators cannot delete the owner's messages",
+                ));
+            }
+        }
     }
 
     // Update message in MongoDB
@@ -387,4 +403,79 @@ pub(crate) async fn edit_message(
 
     broadcast_to_room(&state, &room_id, &edit_event).await;
     Ok(Json(json!({"event_id": edit_event_id})))
+}
+
+pub(crate) async fn search_messages(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<SearchQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let limit = query.limit.unwrap_or(50).min(100);
+    let filter = query.filter.as_deref().unwrap_or("all");
+    let q = &query.q;
+
+    let mongo_filter = match filter {
+        "user" => {
+            doc! {
+                "room_id": &room_id,
+                "sender": { "$regex": q, "$options": "i" }
+            }
+        }
+        "file" => {
+            // Match file-type messages or body containing common file extensions
+            doc! {
+                "room_id": &room_id,
+                "$or": [
+                    { "content.msgtype": { "$in": ["m.file", "m.image", "m.video", "m.audio"] } },
+                    { "content.body": { "$regex": r"(?i)\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|mp3|ogg|wav|zip|tar|gz|doc|docx|xls|xlsx|txt)(\?|$|\s)", "$options": "i" } }
+                ]
+            }
+        }
+        _ => {
+            // "all" — search by message body
+            doc! {
+                "room_id": &room_id,
+                "content.body": { "$regex": q, "$options": "i" }
+            }
+        }
+    };
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let mut cursor = msg_coll
+        .find(mongo_filter)
+        .sort(doc! { "origin_server_ts": -1 })
+        .limit(limit)
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+
+    let mut results: Vec<Value> = Vec::new();
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        let mut doc = doc;
+        doc.remove("_id");
+        if let Ok(val) = serde_json::to_value(&doc) {
+            results.push(val);
+        }
+    }
+
+    Ok(Json(json!({ "results": results })))
 }

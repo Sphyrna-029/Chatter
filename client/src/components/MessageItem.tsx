@@ -259,6 +259,23 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
 
+  // Role-based permissions
+  const roomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
+  const myMember = state.roomMembers.find(m => m.userId === state.userId);
+  const senderMember = state.roomMembers.find(m => m.userId === message.sender);
+  const myRole = myMember?.role || "member";
+  const senderRole = senderMember?.role || "member";
+  const canDeleteOthers =
+    (myRole === "owner" && senderRole !== "owner") ||
+    (myRole === "moderator" && senderRole === "member");
+
+  const senderNameColor =
+    senderRole === "owner" && roomInfo?.owner_name_color
+      ? roomInfo.owner_name_color
+      : senderRole === "moderator" && roomInfo?.mod_name_color
+        ? roomInfo.mod_name_color
+        : undefined;
+
   if (isSystem) {
     const isLeave = message.content.body.includes("has left");
     return (
@@ -330,7 +347,12 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
 
           {!grouped && (
             <div className="flex items-baseline gap-2">
-              <span className="text-sm font-semibold">{sender}</span>
+              <span
+                className="text-sm font-semibold"
+                style={senderNameColor ? { color: senderNameColor } : undefined}
+              >
+                {sender}
+              </span>
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>
           )}
@@ -460,32 +482,32 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
             </Popover>
 
             {isOwn && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={() => {
-                    setEditDraft(message.content.body);
-                    setIsEditing(true);
-                  }}
-                  title="Edit"
-                >
-                  <span className="text-xs">✎</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 text-destructive hover:text-destructive"
-                  onClick={() => {
-                    if (confirm("Delete this message?")) {
-                      deleteMessage(message.event_id);
-                    }
-                  }}
-                >
-                  <span className="text-xs">✕</span>
-                </Button>
-              </>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={() => {
+                  setEditDraft(message.content.body);
+                  setIsEditing(true);
+                }}
+                title="Edit"
+              >
+                <span className="text-xs">✎</span>
+              </Button>
+            )}
+            {(isOwn || canDeleteOthers) && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 text-destructive hover:text-destructive"
+                onClick={() => {
+                  if (confirm("Delete this message?")) {
+                    deleteMessage(message.event_id);
+                  }
+                }}
+              >
+                <span className="text-xs">✕</span>
+              </Button>
             )}
           </div>
         )}

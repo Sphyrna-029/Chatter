@@ -4,11 +4,12 @@ use super::{
         auth::{login, logout, refresh, register},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
-        messages::{edit_message, get_room_messages, redact_message, send_message},
+        messages::{edit_message, get_room_messages, redact_message, search_messages, send_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
-            create_room, delete_room, join_room, joined_rooms, leave_room, list_all_rooms,
+            ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
+            leave_room, list_all_rooms, set_member_role, set_name_colors, unban_member,
             update_room_settings, update_room_topic,
         },
         static_content::{serve_client, versions},
@@ -92,6 +93,14 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
                "/_matrix/client/r0/rooms/{room_id}/event/{event_id}/reactions",
                get(get_reactions),
            )
+           // Permissions
+           .route("/api/rooms/{room_id}/members/{user_id}", delete(kick_member))
+           .route("/api/rooms/{room_id}/ban/{user_id}", post(ban_member))
+           .route("/api/rooms/{room_id}/ban/{user_id}", delete(unban_member))
+           .route("/api/rooms/{room_id}/members/{user_id}/role", put(set_member_role))
+           .route("/api/rooms/{room_id}/name-colors", put(set_name_colors))
+           // Search
+           .route("/api/rooms/{room_id}/search", get(search_messages))
            // Voice & Presence
            .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
            .route("/api/rooms/{room_id}/presence", get(get_room_presence))

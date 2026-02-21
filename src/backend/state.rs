@@ -19,6 +19,10 @@ pub struct AppState {
 
     // Write-through cache for room members (avoids DB query on every broadcast)
     pub(crate) room_members: RwLock<HashMap<String, Vec<String>>>,
+    // Cache: room_id -> user_id -> role ("owner", "moderator", "member")
+    pub(crate) room_roles: RwLock<HashMap<String, HashMap<String, String>>>,
+    // Cache: room_id -> list of banned user_ids
+    pub(crate) banned_users: RwLock<HashMap<String, Vec<String>>>,
 
     // Ephemeral in-memory state (not persisted)
     pub(crate) active_websockets: RwLock<HashMap<String, WsSender>>,
@@ -54,12 +58,30 @@ pub(crate) struct RoomRecord {
     pub(crate) tags: Vec<String>,
     pub(crate) icon_url: String,
     pub(crate) custom_emojis: Vec<String>,
+    #[serde(default)]
+    pub(crate) owner_name_color: String,
+    #[serde(default)]
+    pub(crate) mod_name_color: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct RoomMemberRecord {
     pub(crate) room_id: String,
     pub(crate) user_id: String,
+    #[serde(default = "default_member_role")]
+    pub(crate) role: String,
+}
+
+fn default_member_role() -> String {
+    "member".to_string()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct BannedUserRecord {
+    pub(crate) room_id: String,
+    pub(crate) user_id: String,
+    pub(crate) banned_by: String,
+    pub(crate) banned_at: i64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

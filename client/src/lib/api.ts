@@ -301,6 +301,20 @@ export async function apiAddReaction(
   return res.json();
 }
 
+// ─── Search ──────────────────────────────────────────────────────────────────
+
+export async function apiSearchMessages(
+  roomId: string,
+  query: string,
+  filter: string = "all"
+): Promise<MatrixMessage[]> {
+  const params = new URLSearchParams({ q: query, filter });
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/search?${params}`);
+  if (!res.ok) throw new Error("Search failed");
+  const data = await res.json();
+  return data.results as MatrixMessage[];
+}
+
 // ─── Voice & Presence ───────────────────────────────────────────────────────
 
 export async function apiGetVoiceMembers(roomId: string) {
@@ -355,6 +369,8 @@ export interface RoomInfo {
   icon_url?: string;
   creator?: string;
   custom_emojis?: string[];
+  owner_name_color?: string;
+  mod_name_color?: string;
 }
 
 // ─── Room Settings ──────────────────────────────────────────────────────────
@@ -557,6 +573,65 @@ export async function apiDeleteRoom(roomId: string): Promise<void> {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "Failed to delete room");
   }
+}
+
+// ─── Room Permissions ────────────────────────────────────────────────────────
+
+export async function apiKickMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/members/${userId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to kick member");
+  }
+  return res.json();
+}
+
+export async function apiBanMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/ban/${userId}`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to ban member");
+  }
+  return res.json();
+}
+
+export async function apiUnbanMember(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/ban/${userId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to unban member");
+  }
+  return res.json();
+}
+
+export async function apiSetMemberRole(roomId: string, userId: string, role: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/members/${userId}/role`, {
+    method: "PUT",
+    body: JSON.stringify({ role }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set role");
+  }
+  return res.json();
+}
+
+export async function apiSetNameColors(roomId: string, ownerColor?: string, modColor?: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/name-colors`, {
+    method: "PUT",
+    body: JSON.stringify({ owner_color: ownerColor, mod_color: modColor }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set name colors");
+  }
+  return res.json();
 }
 
 export async function apiCreateDM(targetUserId: string) {
