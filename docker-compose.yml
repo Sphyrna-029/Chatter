@@ -10,7 +10,8 @@ services:
   chatter:
     build: .
     ports:
-      - "8000:8000"
+      - 127.0.0.1:8067:8000/tcp
+      - 127.0.0.1:8067:8000/udp
     environment:
       MONGODB_URI: mongodb://mongodb:27017
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
@@ -19,6 +20,12 @@ services:
     depends_on:
       - mongodb
     restart: unless-stopped
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.chatter.entrypoints: "websecure"
+      traefik.http.routers.chatter.rule: "Host(`chatter.zgaf.io`)"
+      traefik.http.routers.chatter.tls.certResolver: "zgaf"
+      traefik.http.routers.chatter.tls: "true"
 
 volumes:
   mongo_data:
