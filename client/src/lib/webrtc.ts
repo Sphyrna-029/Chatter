@@ -48,10 +48,10 @@ export interface ScreenSharePublishProfile {
 
 const SCREEN_PROFILE_30FPS: ScreenSharePublishProfile = {
   targetFps: 30,
-  contentHint: "detail",
+  contentHint: "motion",
   maxBitrateBps: 12_000_000,
-  startBitrateKbps: 4_500,
-  minBitrateKbps: 1_500,
+  startBitrateKbps: 6_000,
+  minBitrateKbps: 2_500,
   maxBitrateKbps: 12_000,
   audioMaxAverageBitrate: 48_000,
 };
@@ -60,8 +60,8 @@ const SCREEN_PROFILE_60FPS: ScreenSharePublishProfile = {
   targetFps: 60,
   contentHint: "motion",
   maxBitrateBps: 20_000_000,
-  startBitrateKbps: 8_000,
-  minBitrateKbps: 3_000,
+  startBitrateKbps: 10_000,
+  minBitrateKbps: 4_000,
   maxBitrateKbps: 20_000,
   audioMaxAverageBitrate: 48_000,
 };

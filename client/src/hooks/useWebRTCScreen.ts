@@ -14,11 +14,9 @@ function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
 ): MediaTrackConstraints {
   return {
-    // getDisplayMedia is stricter than getUserMedia and some browsers reject
-    // min/exact constraints entirely. Keep this as a soft preference only.
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    frameRate: { ideal: profile.targetFps },
+    width: { min: 1280, ideal: 1920 },
+    height: { min: 720, ideal: 1080 },
+    frameRate: { min: 24, ideal: profile.targetFps },
   };
 }
 
@@ -56,7 +54,7 @@ async function tuneScreenVideoSender(
       scaleResolutionDownBy: 1,
     };
     params.encodings = [encoding];
-    params.degradationPreference = "maintain-resolution";
+    params.degradationPreference = "maintain-framerate";
     await sender.setParameters(params);
   } catch {
     // Browsers differ in which sender parameters are writable.
@@ -186,7 +184,17 @@ export function useWebRTCScreen() {
     const handler = async (e: Event) => {
       const msg = (e as CustomEvent).detail;
       if (msg.type === "screen_webrtc_publish_answer" && screenPubPcRef.current) {
-        try { await screenPubPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp }); } catch { /* noop */ }
+        try {
+          await screenPubPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          // Re-apply sender parameters — some browsers reset encodings when the answer is applied.
+          const profile = getScreenSharePublishProfile(screenFps);
+          const videoSender = screenPubPcRef.current.getSenders().find(
+            (s) => s.track?.kind === "video",
+          );
+          if (videoSender) {
+            await tuneScreenVideoSender(videoSender, profile);
+          }
+        } catch { /* noop */ }
       } else if (msg.type === "screen_webrtc_publish_candidate" && screenPubPcRef.current) {
         try { await screenPubPcRef.current.addIceCandidate(msg.candidate); } catch { /* noop */ }
       } else if (msg.type === "screen_webrtc_subscribe_answer") {
@@ -240,7 +248,7 @@ export function useWebRTCScreen() {
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps]);
 
   // Subscribe to screen shares from other users
   useEffect(() => {

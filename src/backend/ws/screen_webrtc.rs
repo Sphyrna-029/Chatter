@@ -702,11 +702,24 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let pli_media_ssrc = publisher_media_ssrc;
     let mut rtp_receiver = publisher_rtp_sender.subscribe();
     let forward_task = tokio::spawn(async move {
-        const LAGGED_PACKET_THRESHOLD_FOR_PLI: u64 = 64;
+        const LAGGED_PACKET_THRESHOLD_FOR_PLI: u64 = 32;
         let pli_cooldown = std::time::Duration::from_secs(2);
+        let periodic_pli_interval = std::time::Duration::from_secs(10);
         let mut last_pli_request = std::time::Instant::now() - pli_cooldown;
 
         loop {
+            // Check if periodic PLI is due (safety net for corruption recovery)
+            if last_pli_request.elapsed() >= periodic_pli_interval {
+                last_pli_request = std::time::Instant::now();
+                let _ = publisher_pc_for_pli
+                    .write_rtcp(&[Box::new(PictureLossIndication {
+                        sender_ssrc: 0,
+                        media_ssrc: pli_media_ssrc,
+                    })
+                        as Box<dyn RtcpPacket + Send + Sync>])
+                    .await;
+            }
+
             match rtp_receiver.recv().await {
                 Ok(rtp_packet) => {
                     if local_track.write_rtp(&rtp_packet).await.is_err() {
