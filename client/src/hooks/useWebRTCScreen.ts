@@ -43,7 +43,6 @@ function isUnsupportedDisplayConstraintError(err: unknown): boolean {
 async function tuneScreenVideoSender(
   sender: RTCRtpSender,
   profile: ScreenSharePublishProfile,
-  forceFullRes = false,
 ) {
   try {
     const params = sender.getParameters();
@@ -52,11 +51,9 @@ async function tuneScreenVideoSender(
       ...baseEncoding,
       maxBitrate: profile.maxBitrateBps,
       maxFramerate: profile.targetFps,
+      scaleResolutionDownBy: 1,
       priority: "high",
       networkPriority: "high",
-      // Lock resolution at startup to prevent the encoder from starting at 540p.
-      // After a few seconds this is released so the encoder can adapt under activity.
-      ...(forceFullRes ? { scaleResolutionDownBy: 1 } : {}),
     };
     params.encodings = [encoding];
     params.degradationPreference = "maintain-framerate";
@@ -416,8 +413,7 @@ export function useWebRTCScreen() {
       const pc = new RTCPeerConnection(WEBRTC_CONFIG);
       screenPubPcRef.current = pc;
       const videoSender = pc.addTrack(screenTrack, stream);
-      // Phase 1: force full resolution at startup so we don't start at 540p
-      await tuneScreenVideoSender(videoSender, profile, true);
+      await tuneScreenVideoSender(videoSender, profile);
 
       const screenAudioTrack = stream.getAudioTracks()[0];
       if (screenAudioTrack) {
@@ -440,18 +436,7 @@ export function useWebRTCScreen() {
         maxBitrateKbps: profile.maxBitrateKbps,
       });
       await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
-      await tuneScreenVideoSender(videoSender, profile, true);
-
-      // Phase 2: after 5s release the resolution lock so the encoder can adapt
-      // under activity (slight resolution reduction to maintain FPS).
-      setTimeout(async () => {
-        if (screenPubPcRef.current === pc) {
-          const sender = pc.getSenders().find((s) => s.track?.kind === "video");
-          if (sender) {
-            await tuneScreenVideoSender(sender, profile, false);
-          }
-        }
-      }, 5000);
+      await tuneScreenVideoSender(videoSender, profile);
 
       wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, sdp: mungedSdp }));
     } catch (err: unknown) {
