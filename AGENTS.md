@@ -67,15 +67,35 @@ On GitHub, the same checks run in `.github/workflows/rust-quality.yml`.
 - Static files served from `client/dist/` via `tower-http::services::ServeDir`
 
 **client/** - React + Vite + TypeScript frontend using shadcn/ui component library (new-york style with Lyra preset theme, JetBrains Mono font, neutral base color, dark mode). Key files:
-- `src/lib/store.tsx` - Global state management via React Context + useReducer
+
+*State management (`src/lib/store/`)*:
+- `store/types.ts` - `AppState`, `Action` union, `initialState`, `screenStreamsMap`, `AppContextValue`
+- `store/reducer.ts` - Pure reducer function (33 switch cases)
+- `store/wsHandler.ts` - `createWsMessageHandler` factory for WebSocket message dispatch
+- `store/provider.tsx` - `AppProvider`, `useAppContext` hook, all action callbacks, side effects
+- `store/index.ts` - Barrel re-exports (`useAppContext`, `AppProvider`, `screenStreamsMap`)
+
+*Shared utilities*:
 - `src/lib/api.ts` - HTTP API wrapper functions
+- `src/lib/webrtc.ts` - `WEBRTC_CONFIG`, `PeerStats` interface, `canSignal()`, `mungeScreenAudioSdp()`
+
+*Custom hooks (`src/hooks/`)*:
+- `useWebRTCVoice.ts` - Voice pub/sub, join/leave/mute/PTT, voice WS signaling, retry logic
+- `useWebRTCScreen.ts` - Screen pub/sub, start/stop/watch, screen WS signaling, frozen detection
+- `useConnectionStats.ts` - Stats polling from all peer connections
+- `useSpeakingDetection.ts` - AudioContext + AnalyserNode + rAF loop for speaking indicators
+
+*Components*:
 - `src/components/LoginScreen.tsx` - Auth (login/register)
 - `src/components/ChatLayout.tsx` - Main app shell with sidebar layout
 - `src/components/AppSidebar.tsx` - Room list, user info, actions (uses shadcn Sidebar)
 - `src/components/ChatArea.tsx` - Messages list, input, emoji picker, @mention autocomplete
 - `src/components/MessageItem.tsx` - Individual message with reactions
 - `src/components/MembersPanel.tsx` - Room members with presence indicators
-- `src/components/VoiceControls.tsx` - Voice chat, PTT, screen share, WebRTC management
+- `src/components/VoiceControls.tsx` - Voice orchestrator composing hooks and sub-components
+- `src/components/voice/VoiceToolbar.tsx` - Join/leave/mute/PTT/screen share buttons
+- `src/components/voice/VoiceDebugPanel.tsx` - Debug stats overlay
+- `src/components/voice/VoiceMemberList.tsx` - Voice member cards with volume sliders
 - `src/components/RoomDialogs.tsx` - Create/Join room dialogs
 - Vite dev server proxies API calls to `localhost:8000` for hot-reload development
 
