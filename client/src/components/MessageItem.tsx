@@ -27,7 +27,15 @@ function escapeHtml(text: string) {
 
 /** Returns HTML with URLs as links and @mentions styled, but NO embedded media tags */
 function processMessageBody(body: string, currentUserId: string | null) {
-  let escaped = escapeHtml(body);
+  // Extract custom emoji markers before escaping HTML — replace with placeholders
+  const emojiUrls: string[] = [];
+  let processed = body.replace(/:emoji\{([^}]+)\}:/g, (_match, url) => {
+    const idx = emojiUrls.length;
+    emojiUrls.push(url);
+    return `\x00EMOJI${idx}\x00`;
+  });
+
+  let escaped = escapeHtml(processed);
 
   // Process @mentions
   escaped = escaped.replace(/@(\w+)/g, (match, username) => {
@@ -48,6 +56,12 @@ function processMessageBody(body: string, currentUserId: string | null) {
     }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
+  });
+
+  // Restore custom emoji placeholders as inline images
+  escaped = escaped.replace(/\x00EMOJI(\d+)\x00/g, (_match, idx) => {
+    const url = emojiUrls[parseInt(idx)];
+    return `<img src="${url}" alt=":emoji{${url}}:" class="inline-block h-5 w-5 object-contain align-middle mx-0.5" />`;
   });
 
   return escaped;
@@ -130,7 +144,9 @@ function extractMediaUrls(body: string): { images: string[]; videos: string[]; a
   const audios: string[] = [];
   const links: string[] = [];
   const youtubeIds: string[] = [];
-  const matches = body.match(urlRegex);
+  // Strip custom emoji markers so they're not treated as full-size media
+  const stripped = body.replace(/:emoji\{[^}]+\}:/g, "");
+  const matches = stripped.match(urlRegex);
   if (matches) {
     for (const url of matches) {
       const ytId = getYouTubeVideoId(url);

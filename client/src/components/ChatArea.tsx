@@ -48,12 +48,118 @@ export function ChatArea() {
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const prevScrollHeightRef = useRef<number>(0);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
+  const [displayLength, setDisplayLength] = useState(0);
+
+  // --- Contenteditable helpers ---
+
+  // Extract the text/emoji content from the contenteditable div.
+  // Image emojis are replaced with their data-emoji-url attribute value.
+  const getDivContent = (): string => {
+    const div = inputRef.current;
+    if (!div) return "";
+    const walk = (node: Node): string => {
+      let result = "";
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          result += child.textContent ?? "";
+        } else if ((child as Element).tagName === "IMG") {
+          const url = (child as HTMLImageElement).dataset.emojiUrl ?? "";
+          result += `:emoji{${url}}:`;
+        } else if ((child as Element).tagName === "BR") {
+          result += "\n";
+        } else {
+          const tag = (child as Element).tagName;
+          result += walk(child);
+          if (tag === "DIV" || tag === "P") result += "\n";
+        }
+      });
+      return result;
+    };
+    return walk(div).replace(/\n+$/, "");
+  };
+
+  // Count visible characters — each custom emoji counts as 1 character.
+  const computeDisplayLength = (): number => {
+    const div = inputRef.current;
+    if (!div) return 0;
+    let len = 0;
+    const walk = (node: Node) => {
+      node.childNodes.forEach((child) => {
+        if (child.nodeType === Node.TEXT_NODE) {
+          len += (child.textContent ?? "").length;
+        } else if ((child as Element).tagName === "IMG") {
+          len += 1;
+        } else if ((child as Element).tagName === "BR") {
+          len += 1;
+        } else {
+          walk(child);
+          const tag = (child as Element).tagName;
+          if (tag === "DIV" || tag === "P") len += 1;
+        }
+      });
+    };
+    walk(div);
+    return len;
+  };
+
+  // Sync both input state and display length from the div content.
+  const syncFromDiv = () => {
+    setInput(getDivContent());
+    setDisplayLength(computeDisplayLength());
+  };
+
+  // Insert a DOM node at the current cursor position inside the div.
+  const insertAtCursor = (node: Node) => {
+    const div = inputRef.current;
+    if (!div) return;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && div.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      range.insertNode(node);
+      const newRange = document.createRange();
+      newRange.setStartAfter(node);
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+    } else {
+      div.appendChild(node);
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      range.collapse(false);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }
+  };
+
+  // Find the Range at a text-character offset within the div (ignores img/br).
+  const findRangeAtOffset = (div: HTMLElement, targetOffset: number): Range | null => {
+    let pos = 0;
+    const range = document.createRange();
+    const walk = (node: Node): boolean => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        const len = (node.textContent ?? "").length;
+        if (pos + len >= targetOffset) {
+          range.setStart(node, targetOffset - pos);
+          range.collapse(true);
+          return true;
+        }
+        pos += len;
+      } else {
+        for (const child of Array.from(node.childNodes)) {
+          if (walk(child)) return true;
+        }
+      }
+      return false;
+    };
+    return walk(div) ? range : null;
+  };
 
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
@@ -118,13 +224,15 @@ export function ChatArea() {
   // Plain async function — never memoized so it always reads the latest state/pending
   // files from the current render closure, avoiding stale-closure bugs.
   const handleSend = async () => {
-    const body = input.trim();
+    const body = getDivContent().trim();
     const hasFiles = pendingFiles.length > 0;
     if (!body && !hasFiles) return;
     if (!state.currentRoomId) return;
-    if (body.length > MAX_MESSAGE_LENGTH) return;
+    if (displayLength > MAX_MESSAGE_LENGTH) return;
     const replyEventId = state.replyingTo?.event_id;
+    if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
+    setDisplayLength(0);
     dispatch({ type: "SET_REPLYING_TO", payload: null });
 
     // Grab and clear staged files before any async work
@@ -169,6 +277,29 @@ export function ChatArea() {
         return;
       }
     }
+    // Backspace: manually delete an img element if the browser can't
+    if (e.key === "Backspace" && inputRef.current) {
+      const sel = window.getSelection();
+      if (sel && sel.isCollapsed && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const container = range.startContainer;
+        const offset = range.startOffset;
+        let imgToRemove: Node | null = null;
+        if (container === inputRef.current && offset > 0) {
+          const child = container.childNodes[offset - 1];
+          if (child && (child as Element).tagName === "IMG") imgToRemove = child;
+        } else if (container.nodeType === Node.TEXT_NODE && offset === 0) {
+          const prev = container.previousSibling;
+          if (prev && (prev as Element).tagName === "IMG") imgToRemove = prev;
+        }
+        if (imgToRemove) {
+          e.preventDefault();
+          imgToRemove.parentNode?.removeChild(imgToRemove);
+          syncFromDiv();
+          return;
+        }
+      }
+    }
     if (e.key === "Escape" && state.replyingTo) {
       dispatch({ type: "SET_REPLYING_TO", payload: null });
       return;
@@ -179,52 +310,105 @@ export function ChatArea() {
     }
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value;
+  const handleInput = (_e: React.FormEvent<HTMLDivElement>) => {
+    const content = getDivContent();
 
     // Detect slash at start to enter CLI mode
-    if (value === "/" && !cliMode) {
+    if (content === "/" && !cliMode) {
+      if (inputRef.current) inputRef.current.innerHTML = "";
       setCliMode(true);
       setInput("");
+      setDisplayLength(0);
       return;
     }
 
-    setInput(value);
+    setInput(content);
+    setDisplayLength(computeDisplayLength());
     sendTyping();
 
-    // Mention detection
-    const cursorPos = e.target.selectionStart ?? value.length;
-    const before = value.substring(0, cursorPos);
-    const lastAt = before.lastIndexOf("@");
-    if (
-      lastAt !== -1 &&
-      (lastAt === before.length - 1 || /^@\w*$/.test(before.substring(lastAt)))
-    ) {
-      const search = before.substring(lastAt + 1);
-      setMentionSearch(search);
-      setMentionStart(lastAt);
-      setMentionOpen(true);
-      setSelectedMentionIdx(0);
-    } else {
+    // Mention detection using Selection API
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || !inputRef.current) {
+      setMentionOpen(false);
+      return;
+    }
+    try {
+      const range = sel.getRangeAt(0);
+      const preRange = document.createRange();
+      preRange.setStart(inputRef.current, 0);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const before = preRange.toString();
+      const lastAt = before.lastIndexOf("@");
+      if (
+        lastAt !== -1 &&
+        (lastAt === before.length - 1 || /^@\w*$/.test(before.substring(lastAt)))
+      ) {
+        const search = before.substring(lastAt + 1);
+        setMentionSearch(search);
+        setMentionStart(lastAt);
+        setMentionOpen(true);
+        setSelectedMentionIdx(0);
+      } else {
+        setMentionOpen(false);
+      }
+    } catch {
       setMentionOpen(false);
     }
   };
 
   const completeMention = (username: string) => {
-    if (!username) return;
-    const before = input.substring(0, mentionStart);
-    const after = input.substring(
-      (inputRef.current?.selectionStart ?? input.length)
-    );
-    setInput(`${before}@${username} ${after}`);
+    if (!username || !inputRef.current) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    try {
+      const range = sel.getRangeAt(0);
+      const div = inputRef.current;
+      // Get text before cursor
+      const preRange = document.createRange();
+      preRange.setStart(div, 0);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const before = preRange.toString();
+      const lastAt = before.lastIndexOf("@");
+      if (lastAt === -1) return;
+      // Build a range spanning from @ to current cursor
+      const atRange = findRangeAtOffset(div, lastAt);
+      if (!atRange) return;
+      atRange.setEnd(range.startContainer, range.startOffset);
+      atRange.deleteContents();
+      const textNode = document.createTextNode(`@${username} `);
+      atRange.insertNode(textNode);
+      // Move cursor after the inserted text
+      const newRange = document.createRange();
+      newRange.setStartAfter(textNode);
+      newRange.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(newRange);
+    } catch {
+      // ignore
+    }
     setMentionOpen(false);
+    syncFromDiv();
     inputRef.current?.focus();
   };
 
   const insertEmoji = (emoji: string) => {
-    setInput((prev) => prev + emoji);
+    const div = inputRef.current;
+    if (!div) return;
+    div.focus();
+    const isImageUrl = emoji.startsWith("/") || emoji.startsWith("http");
+    if (isImageUrl) {
+      const img = document.createElement("img");
+      img.src = emoji;
+      img.dataset.emojiUrl = emoji;
+      img.alt = `:emoji{${emoji}}:`;
+      img.className = "inline-block h-5 w-5 object-contain align-middle mx-0.5";
+      insertAtCursor(img);
+    } else {
+      insertAtCursor(document.createTextNode(emoji));
+    }
     setEmojiOpen(false);
-    inputRef.current?.focus();
+    syncFromDiv();
+    div.focus();
   };
 
   // Uploads a file and returns its URL; does NOT send a message.
@@ -304,12 +488,42 @@ export function ChatArea() {
     e.stopPropagation();
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
       Array.from(files).forEach(addPendingFile);
+      return;
     }
+    // Prevent HTML paste — insert as plain text only, but reconstitute custom emoji markers
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+
+    // Split on :emoji{url}: markers and insert text nodes + img elements
+    const emojiMarkerRegex = /:emoji\{([^}]+)\}:/g;
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = emojiMarkerRegex.exec(text)) !== null) {
+      // Insert any plain text before this marker
+      if (match.index > lastIndex) {
+        insertAtCursor(document.createTextNode(text.slice(lastIndex, match.index)));
+      }
+      // Insert the emoji as an inline image
+      const url = match[1];
+      const img = document.createElement("img");
+      img.src = url;
+      img.dataset.emojiUrl = url;
+      img.alt = `:emoji{${url}}:`;
+      img.className = "inline-block h-5 w-5 object-contain align-middle mx-0.5";
+      insertAtCursor(img);
+      lastIndex = match.index + match[0].length;
+    }
+    // Insert any remaining plain text after the last marker
+    if (lastIndex < text.length) {
+      insertAtCursor(document.createTextNode(text.slice(lastIndex)));
+    }
+    syncFromDiv();
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -323,13 +537,6 @@ export function ChatArea() {
     }
   };
 
-  // Auto-resize textarea vertically as content grows
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [input]);
 
   // Ctrl+O to toggle CLI mode
   useEffect(() => {
@@ -353,6 +560,10 @@ export function ChatArea() {
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
+    // Clear the input div on room switch
+    if (inputRef.current) inputRef.current.innerHTML = "";
+    setInput("");
+    setDisplayLength(0);
   }, [state.currentRoomId]);
 
   // Debounced search execution
@@ -676,18 +887,18 @@ export function ChatArea() {
               ))}
             </div>
           )}
-          {input.length > MAX_MESSAGE_LENGTH * 0.75 && (
+          {displayLength > MAX_MESSAGE_LENGTH * 0.75 && (
             <div className="flex justify-end mb-1">
               <span
                 className={`text-xs font-mono px-1.5 py-0.5 rounded ${
-                  input.length > MAX_MESSAGE_LENGTH
+                  displayLength > MAX_MESSAGE_LENGTH
                     ? "bg-destructive/20 text-destructive font-semibold"
-                    : input.length > MAX_MESSAGE_LENGTH * 0.9
+                    : displayLength > MAX_MESSAGE_LENGTH * 0.9
                     ? "text-orange-400"
                     : "text-muted-foreground"
                 }`}
               >
-                {input.length}/{MAX_MESSAGE_LENGTH}
+                {displayLength}/{MAX_MESSAGE_LENGTH}
               </span>
             </div>
           )}
@@ -742,16 +953,24 @@ export function ChatArea() {
             </Button>
 
             <div className="relative flex-1">
-              <textarea
+              {/* Placeholder — shown when the div is empty */}
+              {!input && (
+                <span className="absolute top-2 left-3 text-sm text-muted-foreground pointer-events-none select-none z-10">
+                  Type your message... (/ for commands, Ctrl+O for CLI)
+                </span>
+              )}
+              <div
                 ref={inputRef}
-                placeholder="Type your message... (/ for commands, Ctrl+O for CLI)"
-                value={input}
-                onChange={handleInputChange}
+                contentEditable
+                role="textbox"
+                aria-multiline="true"
+                aria-label="Message input"
+                onInput={handleInput}
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
-                rows={1}
-                className={`flex w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none max-h-40 overflow-y-auto ${input.length > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
-
+                suppressContentEditableWarning
+                className={`w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] max-h-40 overflow-y-auto break-words ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+                style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: "20px" }}
               />
 
               {/* Emoji picker */}
@@ -818,7 +1037,7 @@ export function ChatArea() {
             <Button
               onClick={handleSend}
               size="default"
-              disabled={input.length > MAX_MESSAGE_LENGTH}
+              disabled={displayLength > MAX_MESSAGE_LENGTH}
             >
               Send
             </Button>
