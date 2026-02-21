@@ -7,6 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -267,28 +273,42 @@ export function UserProfileDialog({
       {isSelf ? (
         <div className="w-full">
           <p className="text-xs font-medium text-muted-foreground mb-2">Status</p>
-          <div className="grid grid-cols-2 gap-1.5">
-            {STATUS_OPTIONS.map((opt) => {
-              const isActive = status === opt.value ||
-                (opt.value === "online" && status === "active") ||
-                (opt.value === "away" && status === "idle");
-              return (
-                <button
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-input bg-background text-sm hover:bg-accent/50 transition-colors">
+                {(() => {
+                  const active = STATUS_OPTIONS.find(
+                    (o) => o.value === status ||
+                      (o.value === "online" && status === "active") ||
+                      (o.value === "away" && status === "idle")
+                  ) ?? STATUS_OPTIONS[0];
+                  return (
+                    <>
+                      <span className="flex items-center gap-2">
+                        <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", active.color)} />
+                        {active.label}
+                      </span>
+                      <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </>
+                  );
+                })()}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
+              {STATUS_OPTIONS.map((opt) => (
+                <DropdownMenuItem
                   key={opt.value}
                   onClick={() => setManualStatus(opt.value)}
-                  className={cn(
-                    "flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors cursor-pointer text-left",
-                    isActive
-                      ? "bg-accent text-foreground font-medium"
-                      : "hover:bg-accent/50 text-muted-foreground"
-                  )}
+                  className="flex items-center gap-2 cursor-pointer"
                 >
                   <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", opt.color)} />
                   {opt.label}
-                </button>
-              );
-            })}
-          </div>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       ) : (
         <div className="flex items-center gap-2">
