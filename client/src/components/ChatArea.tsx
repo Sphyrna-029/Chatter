@@ -17,21 +17,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 
 const MAX_MESSAGE_LENGTH = 4000;
-
-const emojiCategories: Record<string, string[]> = {
-  Smileys: ["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔","😐","😑","😶","😏","😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🤧","🥵","🥶","🥴","😵","🤯","🤠","🥳","🥸","😎","🤓","🧐","😕","😟","🙁","☹️","😮","😯","😲","😳","🥺","😦","😧","😨","😰","😥","😢","😭","😱","😖","😣","😞","😓","😩","😫","🥱","😤","😠","😡","🤬","😈","👿","💀","☠️","💩","🤡","👹","👺","👻","👽","👾","🤖"],
-  Gestures: ["👍","👎","👊","✊","🤛","🤜","🤞","✌️","🤟","🤘","👌","🤌","🤏","👈","👉","👆","👇","☝️","🫵","👋","🤚","🖐️","✋","🖖","🫱","🫲","🫳","🫴","👏","🙌","🤲","🤝","🙏","✍️","💅","🤳","💪","🦾","🫀","🧠","👀","👁️","👅","👄","🫦","👣"],
-  Hearts: ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","🩷","🩵","🩶","💔","❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟","💌","💋","😻","💑","👫","👬","👭"],
-  Animals: ["🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐔","🐧","🐦","🦆","🦅","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🐛","🦋","🐌","🐞","🦟","🕷️","🦂","🐢","🐍","🦎","🐙","🦑","🦐","🦀","🐡","🐠","🐟","🐬","🐳","🦈","🐊","🐅","🐆","🦓","🐘","🦒","🦘","🦬","🐄","🐎","🐑","🦙","🐐","🦌","🐕","🐈","🪶","🦃","🦚","🦜","🦢","🐇","🦝","🦦","🦥","🐁","🐿️","🦔","🐾"],
-  Nature: ["🌱","🌲","🌳","🌴","🌵","🌾","🌿","☘️","🍀","🍁","🍂","🍃","🍄","🌺","🌻","🌹","🥀","🌷","🌸","💐","🌼","🌰","⭐","🌟","✨","💫","⚡","🔥","🌊","💧","🌍","🌎","🌏","🏔️","🌋","🏝️","🌅","🌄","🌠","🌌","🌈","☀️","🌤️","⛅","☁️","🌧️","⛈️","🌩️","❄️","☃️","⛄","🌬️","🌀","☂️","🌫️"],
-  Food: ["🍕","🍔","🍟","🌭","🍿","🥓","🥚","🍳","🥞","🍞","🥐","🧀","🥗","🌮","🌯","🥪","🍖","🍗","🥙","🧆","🍱","🍜","🍝","🍣","🍤","🥟","🍦","🍧","🍨","🍩","🍪","🎂","🍰","🧁","🍫","🍬","🍭","🍷","🍸","🍹","🍺","🥂","🥃","🧋","☕","🍵","🧃","🥛","🍾","🧊","🫖","🍎","🍊","🍋","🍇","🍓","🫐","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🥦","🥕","🌽","🍆","🧅","🧄","🥔"],
-  Activities: ["⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱","🏓","🏸","🥊","🥋","⛳","🏹","🛹","🛼","⛸️","🛷","🥌","🎿","🏂","🏋️","🤸","🏄","🏊","🚴","🧘","🧗","🏆","🥇","🥈","🥉","🎮","🎲","♟️","🎯","🎳","🧩","🎰","🎭","🎨","🎬","🎤","🎧","🎼","🎹","🥁","🎷","🎺","🎸","🎻","🪗","🎣","🤿","🪁","🎡","🎢","🎠","🎪"],
-  Travel: ["🚗","🚕","🚙","🚌","🏎️","🚓","🚑","🚒","🚐","🛻","🚚","🚜","🏍️","🛵","🚲","🛴","✈️","🚀","🛸","🚁","⛵","🚢","🚂","🚇","🚉","🚊","🚝","⚓","🚦","🗺️","🗽","🗼","🏰","🏯","🏟️","⛩️","🏛️","⛪","🕌","🏠","🏡","🏢","🏥","🏦","🏨","🏪","🏫","🏬","🏭","🌁","🌃","🌆","🌇","🌉","🏙️"],
-  Objects: ["📱","💻","⌨️","🖥️","🖱️","💾","💿","📷","📸","📹","🎥","📞","☎️","📺","📻","⏰","🔋","🔌","💡","🔦","🕯️","💸","💵","💳","💎","⚖️","🧲","🔧","🔨","🛠️","🔩","🔑","🗝️","🔐","🔒","🔓","🚪","🪑","🛋️","🛏️","🛁","🧴","🧹","🧺","🧻","🧼","🧽","🛒","🎁","🎀","🎊","🎉","🎈","🧨","🪄","🔮","💈","🪞","🛍️","📚","📖","✏️","🖊️","📝","📌","📎","✂️","🗑️","🔍","🔎","🔏","💊","🩺","🩹","🧬","🔭","📡","🧪","🧫","🧯","🛢️","⚗️"],
-  Symbols: ["✅","❌","❓","❗","💯","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪","🟤","🔶","🔷","🔸","🔹","🔺","🔻","♻️","⭕","🚫","⛔","📵","🔞","🔃","🔄","🔙","🔚","🔛","🔜","🔝","🏧","♿","💤","🔔","🔕","🎵","🎶","💱","💲","Ⓜ️","🅰️","🅱️","🆎","🆑","🅾️","🆘","🆒","🆓","🆕","🆖","🆗","🆙","🆚","🈺","🈷️","✴️","🌐","💠","🔱","📛","🔰","⚜️","🏁","🚩","🎌","🏴","🏳️"],
-};
 
 export function ChatArea() {
   const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages } = useAppContext();
@@ -813,8 +801,8 @@ export function ChatArea() {
             <p className="text-xs font-semibold text-primary">
               Replying to {state.replyingTo.sender.split(":")[0].substring(1)}
             </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {state.replyingTo.content.body}
+            <p className="text-xs text-muted-foreground truncate inline-flex items-center gap-0.5">
+              {renderInlineEmojis(state.replyingTo.content.body)}
             </p>
           </div>
           <button
@@ -983,53 +971,16 @@ export function ChatArea() {
                 <PopoverContent
                   side="top"
                   align="end"
-                  className="w-72 max-h-64 overflow-y-auto p-3"
+                  className="w-auto p-0"
                 >
-                  {(() => {
-                    const roomCustomEmojis = state.currentRoomId
-                      ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
-                      : [];
-                    return roomCustomEmojis.length > 0 ? (
-                      <div className="mb-3">
-                        <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
-                          Room
-                        </p>
-                        <div className="grid grid-cols-8 gap-0.5">
-                          {roomCustomEmojis.map((e) => (
-                            <button
-                              key={e}
-                              className="p-1 rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110 flex items-center justify-center"
-                              onClick={() => insertEmoji(e)}
-                            >
-                              {e.startsWith("/") || e.startsWith("http") ? (
-                                <img src={e} alt="emoji" className="w-6 h-6 object-contain" />
-                              ) : (
-                                <span className="text-lg">{e}</span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-                  {Object.entries(emojiCategories).map(([cat, emojis]) => (
-                    <div key={cat} className="mb-3">
-                      <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
-                        {cat}
-                      </p>
-                      <div className="grid grid-cols-8 gap-0.5">
-                        {emojis.map((e) => (
-                          <button
-                            key={e}
-                            className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
-                            onClick={() => insertEmoji(e)}
-                          >
-                            {e}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
+                  <EmojiPicker
+                    onSelect={insertEmoji}
+                    roomCustomEmojis={
+                      state.currentRoomId
+                        ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
+                        : []
+                    }
+                  />
                 </PopoverContent>
               </Popover>
             </div>

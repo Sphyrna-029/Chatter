@@ -10,9 +10,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import hljs from "highlight.js";
-
-const quickReactions = ["👍", "❤️", "😂", "😮", "😢", "🎉"];
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
@@ -357,7 +356,9 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
               onClick={scrollToParent}
             >
               <span className="font-semibold">{replySender}</span>
-              <span className="truncate max-w-xs">{message.content.reply_to_body || "..."}</span>
+              <span className="truncate max-w-xs inline-flex items-center gap-0.5">
+                {renderInlineEmojis(message.content.reply_to_body || "...")}
+              </span>
             </button>
           )}
 
@@ -447,7 +448,13 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                         addReaction(message.event_id, emoji)
                       }
                     >
-                      <span>{emoji}</span>
+                      <span>
+                        {isCustomEmojiUrl(emoji) ? (
+                          <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
+                        ) : (
+                          emoji
+                        )}
+                      </span>
                       <span className="text-muted-foreground font-medium">
                         {userIds.length}
                       </span>
@@ -478,22 +485,17 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
               </PopoverTrigger>
               <PopoverContent
                 side="top"
-                className="w-auto p-2"
+                className="w-auto p-0"
                 align="end"
               >
-                <div className="flex gap-1">
-                  {quickReactions.map((emoji) => (
-                    <button
-                      key={emoji}
-                      className="p-1.5 rounded hover:bg-accent transition-colors text-lg cursor-pointer"
-                      onClick={() =>
-                        addReaction(message.event_id, emoji)
-                      }
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
+                <EmojiPicker
+                  onSelect={(emoji) => addReaction(message.event_id, emoji)}
+                  roomCustomEmojis={
+                    state.currentRoomId
+                      ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
+                      : []
+                  }
+                />
               </PopoverContent>
             </Popover>
 
