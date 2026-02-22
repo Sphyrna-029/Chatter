@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
+import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
@@ -262,6 +263,7 @@ interface MessageItemProps {
 export function MessageItem({ message, grouped }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction } = useAppContext();
   const [isEditing, setIsEditing] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
 
   // Convert raw body text (with :emoji{url}: markers) to HTML for the contenteditable div
@@ -391,7 +393,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
         {grouped ? (
           <span className="w-8 flex-shrink-0" />
         ) : (
-          <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0">
+          <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0 cursor-pointer" onClick={() => setProfileOpen(true)}>
             {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
             <AvatarFallback className="text-xs font-semibold bg-secondary">
               {initial}
@@ -416,8 +418,9 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           {!grouped && (
             <div className="flex items-baseline gap-2">
               <span
-                className="text-sm font-semibold"
+                className="text-sm font-semibold cursor-pointer hover:underline"
                 style={senderNameColor ? { color: senderNameColor } : undefined}
+                onClick={() => setProfileOpen(true)}
               >
                 {sender}
               </span>
@@ -612,6 +615,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           </div>
         )}
       </div>
+      <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />
     </div>
   );
 }
