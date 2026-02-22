@@ -1,8 +1,8 @@
 use super::super::{
-    dto::{CreateRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
+    dto::{CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_user_from_token, get_user_role, now_millis,
+        get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
     },
     state::{AppState, BannedUserRecord, DmRoomRecord, RoomMemberRecord, RoomRecord},
 };
@@ -86,6 +86,8 @@ pub(crate) async fn create_room(
                     custom_emojis: vec![],
                     owner_name_color: String::new(),
                     mod_name_color: String::new(),
+                    unlisted: false,
+                    password_hash: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -191,6 +193,10 @@ pub(crate) async fn create_room(
             .unwrap_or_else(|| format!("Room {}", room_count + 1))
     };
 
+    let password_hash = req.password
+        .filter(|p| !p.is_empty())
+        .map(|p| hash_password(&p))
+        .unwrap_or_default();
     let room_record = RoomRecord {
         room_id: room_id.clone(),
         name: room_name,
@@ -202,6 +208,8 @@ pub(crate) async fn create_room(
         custom_emojis: vec![],
         owner_name_color: String::new(),
         mod_name_color: String::new(),
+        unlisted: req.unlisted.unwrap_or(false),
+        password_hash,
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -258,6 +266,7 @@ pub(crate) async fn join_room(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
     headers: HeaderMap,
+    body: Option<Json<JoinRoomRequest>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
@@ -266,14 +275,19 @@ pub(crate) async fn join_room(
 
     // Check room exists in MongoDB
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    if rooms_coll
+    let room = rooms_coll
         .find_one(doc! { "_id": &room_id })
         .await
         .ok()
         .flatten()
-        .is_none()
-    {
-        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    // Check password if room is password-protected
+    if !room.password_hash.is_empty() {
+        let provided = body.as_ref().and_then(|b| b.password.as_deref()).unwrap_or("");
+        if !verify_password(provided, &room.password_hash) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Incorrect password"));
+        }
     }
 
     if let Err(msg) = do_join_room(&state, &room_id, &user_id).await {
@@ -477,7 +491,7 @@ pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<V
 
     let mut room_list: Vec<Value> = Vec::new();
 
-    if let Ok(mut cursor) = rooms_coll.find(doc! { "is_dm": false }).await {
+    if let Ok(mut cursor) = rooms_coll.find(doc! { "is_dm": false, "unlisted": { "$ne": true } }).await {
         while let Ok(Some(room)) = cursor.try_next().await {
             let voice_members = vc.get(&room.room_id);
             let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
@@ -492,7 +506,8 @@ pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<V
                 "voice_count": voice_count,
                 "screen_share_active": screen_share_active,
                 "tags": room.tags,
-                "icon_url": room.icon_url
+                "icon_url": room.icon_url,
+                "has_password": !room.password_hash.is_empty()
             }));
         }
     }
@@ -621,6 +636,19 @@ pub(crate) async fn update_room_settings(
             mongodb::bson::to_bson(custom_emojis).unwrap_or(mongodb::bson::Bson::Null),
         );
         content.insert("custom_emojis".to_string(), json!(custom_emojis));
+    }
+    if let Some(unlisted) = req.unlisted {
+        set_doc.insert("unlisted", unlisted);
+        content.insert("unlisted".to_string(), json!(unlisted));
+    }
+    if req.remove_password.unwrap_or(false) {
+        set_doc.insert("password_hash", "");
+        content.insert("has_password".to_string(), json!(false));
+    } else if let Some(ref password) = req.password {
+        if !password.is_empty() {
+            set_doc.insert("password_hash", hash_password(password));
+            content.insert("has_password".to_string(), json!(true));
+        }
     }
 
     if !set_doc.is_empty() {

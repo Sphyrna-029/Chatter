@@ -22,6 +22,8 @@ pub(crate) struct CreateRoomRequest {
     pub(crate) is_direct: Option<bool>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) icon_url: Option<String>,
+    pub(crate) unlisted: Option<bool>,
+    pub(crate) password: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +71,14 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) icon_url: Option<String>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) custom_emojis: Option<Vec<String>>,
+    pub(crate) unlisted: Option<bool>,
+    pub(crate) password: Option<String>,
+    pub(crate) remove_password: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct JoinRoomRequest {
+    pub(crate) password: Option<String>,
 }
 
 #[derive(Deserialize)]

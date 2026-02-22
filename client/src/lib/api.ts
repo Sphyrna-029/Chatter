@@ -185,20 +185,24 @@ export async function apiSync() {
   return res.json();
 }
 
-export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string) {
+export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string) {
   const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
     method: "POST",
-    body: JSON.stringify({ name, topic, tags, icon_url: iconUrl }),
+    body: JSON.stringify({ name, topic, tags, icon_url: iconUrl, unlisted, password }),
   });
   if (!res.ok) throw new Error("Failed to create room");
   return res.json() as Promise<{ room_id: string }>;
 }
 
-export async function apiJoinRoom(roomId: string) {
+export async function apiJoinRoom(roomId: string, password?: string) {
   const res = await authenticatedFetch(`/_matrix/client/r0/rooms/${roomId}/join`, {
     method: "POST",
+    body: JSON.stringify({ password }),
   });
-  if (!res.ok) throw new Error("Failed to join room");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to join room");
+  }
   return res.json();
 }
 
@@ -218,6 +222,7 @@ export interface RoomSummary {
   screen_share_active?: boolean;
   tags?: string[];
   icon_url?: string;
+  has_password?: boolean;
 }
 
 export async function apiGetAllRooms() {
@@ -371,6 +376,8 @@ export interface RoomInfo {
   custom_emojis?: string[];
   owner_name_color?: string;
   mod_name_color?: string;
+  unlisted?: boolean;
+  has_password?: boolean;
 }
 
 // ─── Room Settings ──────────────────────────────────────────────────────────
@@ -469,7 +476,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }
 ) {
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,

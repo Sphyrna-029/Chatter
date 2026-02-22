@@ -147,6 +147,18 @@ pub(crate) async fn sync(
                 },
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.unlisted",
+                "state_key": "",
+                "content": {"unlisted": room_data.unlisted},
+                "sender": room_data.creator
+            }),
+            json!({
+                "type": "m.room.has_password",
+                "state_key": "",
+                "content": {"has_password": !room_data.password_hash.is_empty()},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

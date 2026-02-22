@@ -79,7 +79,7 @@ export type Action =
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
-  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; has_password?: boolean } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean }
@@ -131,8 +131,8 @@ export interface AppContextValue {
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
-  createRoom: (name: string, topic: string, tags?: string[], iconUrl?: string) => Promise<void>;
-  joinRoom: (roomId: string) => Promise<void>;
+  createRoom: (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string) => Promise<void>;
+  joinRoom: (roomId: string, password?: string) => Promise<void>;
   leaveRoom: (roomId: string) => Promise<void>;
   loadVoiceMembers: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
@@ -140,7 +140,7 @@ export interface AppContextValue {
   getAllRooms: () => Promise<import("../api").RoomSummary[]>;
   openDM: (targetUserId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
-  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => Promise<void>;
+  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
   updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string }) => void;

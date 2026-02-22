@@ -13,7 +13,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -28,6 +29,9 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [tagInput, setTagInput] = useState("");
   const [iconFile, setIconFile] = useState<File | null>(null);
   const [iconPreview, setIconPreview] = useState<string | null>(null);
+  const [unlisted, setUnlisted] = useState(false);
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -40,13 +44,15 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      await createRoom(name, topic, tags.length > 0 ? tags : undefined, iconUrl);
+      await createRoom(name, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined);
       setName("");
       setTopic("");
       setTags([]);
       setTagInput("");
       setIconFile(null);
       setIconPreview(null);
+      setUnlisted(false);
+      setPassword("");
       onOpenChange(false);
     } catch {
       alert("Failed to create room");
@@ -162,6 +168,32 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               </div>
             )}
           </div>
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <Label>Unlisted</Label>
+              <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
+            </div>
+            <Switch checked={unlisted} onCheckedChange={setUnlisted} />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="room-password">Password (Optional)</Label>
+            <div className="relative">
+              <Input
+                id="room-password"
+                type={showPassword ? "text" : "password"}
+                placeholder="Set a room password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button
+                type="button"
+                className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
@@ -188,11 +220,15 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [sortDesc, setSortDesc] = useState(true);
+  const [password, setPassword] = useState("");
+  const [joinError, setJoinError] = useState("");
 
   useEffect(() => {
     if (open) {
       setSearch("");
       setSortDesc(true);
+      setPassword("");
+      setJoinError("");
       getAllRooms().then((allRooms) => {
         const filtered = allRooms.filter(
           (r) => !state.joinedRoomIds.includes(r.room_id)
@@ -219,14 +255,17 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
     return result;
   }, [rooms, search, sortDesc]);
 
+  const selectedRoom = rooms.find((r) => r.room_id === selected);
+
   const handleJoin = async () => {
     if (!selected) return;
     setLoading(true);
+    setJoinError("");
     try {
-      await joinRoom(selected);
+      await joinRoom(selected, password || undefined);
       onOpenChange(false);
-    } catch {
-      alert("Failed to join room");
+    } catch (e: any) {
+      setJoinError(e.message || "Failed to join room");
     } finally {
       setLoading(false);
     }
@@ -275,7 +314,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
                     ? "bg-accent"
                     : "hover:bg-accent/50"
                 }`}
-                onClick={() => setSelected(room.room_id)}
+                onClick={() => { setSelected(room.room_id); setPassword(""); setJoinError(""); }}
               >
                 <div className="flex items-center gap-2">
                   <div className="shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden text-xs font-medium">
@@ -286,7 +325,10 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate">{room.name}</div>
+                    <div className="font-medium truncate flex items-center gap-1.5">
+                      {room.name}
+                      {room.has_password && <Lock className="w-3 h-3 text-muted-foreground shrink-0" />}
+                    </div>
                     <div className="text-xs text-muted-foreground">
                       {room.member_count} member{room.member_count !== 1 ? "s" : ""}
                     </div>
@@ -305,6 +347,25 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
             ))}
           </div>
         </div>
+        {selectedRoom?.has_password && (
+          <div className="space-y-2">
+            <Label htmlFor="join-password" className="flex items-center gap-1.5">
+              <Lock className="w-3.5 h-3.5" />
+              This room requires a password
+            </Label>
+            <Input
+              id="join-password"
+              type="password"
+              placeholder="Enter room password"
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setJoinError(""); }}
+              onKeyDown={(e) => e.key === "Enter" && handleJoin()}
+            />
+          </div>
+        )}
+        {joinError && (
+          <p className="text-sm text-destructive">{joinError}</p>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
@@ -341,6 +402,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [loading, setLoading] = useState(false);
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [settingsUnlisted, setSettingsUnlisted] = useState(false);
+  const [settingsPassword, setSettingsPassword] = useState("");
+  const [showSettingsPassword, setShowSettingsPassword] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -359,6 +423,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setInvites([]);
       setCopiedCode(null);
       setDeleteConfirmName("");
+      setSettingsUnlisted(info.unlisted || false);
+      setSettingsPassword("");
+      setShowSettingsPassword(false);
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
       }
@@ -374,13 +441,15 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
       if (JSON.stringify(tags) !== JSON.stringify(infoTags)) settings.tags = tags;
       const infoEmojis = info?.custom_emojis || [];
       if (JSON.stringify(customEmojis) !== JSON.stringify(infoEmojis)) settings.custom_emojis = customEmojis;
+      if (settingsUnlisted !== (info?.unlisted || false)) settings.unlisted = settingsUnlisted;
+      if (settingsPassword) settings.password = settingsPassword;
       if (Object.keys(settings).length > 0) {
         await updateRoomSettings(roomId, settings);
       }
@@ -576,6 +645,76 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               </div>
             )}
           </div>
+          {isOwner && (
+            <div className="flex items-center justify-between">
+              <div className="space-y-0.5">
+                <Label>Unlisted</Label>
+                <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
+              </div>
+              <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
+            </div>
+          )}
+          {isOwner && (
+            <div className="space-y-2">
+              <Label className="flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5" />
+                Password Protection
+              </Label>
+              {info?.has_password ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">This room is currently password-protected.</p>
+                  <div className="relative">
+                    <Input
+                      type={showSettingsPassword ? "text" : "password"}
+                      placeholder="Change password (leave empty to keep)"
+                      value={settingsPassword}
+                      onChange={(e) => setSettingsPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                      onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                    >
+                      {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        await updateRoomSettings(roomId, { remove_password: true });
+                      } catch (e: any) {
+                        alert(e.message || "Failed to remove password");
+                      }
+                    }}
+                  >
+                    Remove Password
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">No password set. Add one to require a password to join.</p>
+                  <div className="relative">
+                    <Input
+                      type={showSettingsPassword ? "text" : "password"}
+                      placeholder="Set a password"
+                      value={settingsPassword}
+                      onChange={(e) => setSettingsPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                      onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                    >
+                      {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           {isOwner && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">

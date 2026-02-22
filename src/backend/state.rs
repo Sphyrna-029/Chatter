@@ -64,6 +64,10 @@ pub(crate) struct RoomRecord {
     pub(crate) owner_name_color: String,
     #[serde(default)]
     pub(crate) mod_name_color: String,
+    #[serde(default)]
+    pub(crate) unlisted: bool,
+    #[serde(default)]
+    pub(crate) password_hash: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -232,6 +232,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const nameColorsEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.name_colors"
         );
+        const unlistedEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.unlisted"
+        );
+        const hasPasswordEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.has_password"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -243,6 +249,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           custom_emojis: customEmojisEvent?.content?.custom_emojis || [],
           owner_name_color: nameColorsEvent?.content?.owner_name_color || "",
           mod_name_color: nameColorsEvent?.content?.mod_name_color || "",
+          unlisted: unlistedEvent?.content?.unlisted || false,
+          has_password: hasPasswordEvent?.content?.has_password || false,
         };
       } else {
         roomInfoMap[roomId] = {
@@ -404,8 +412,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createRoom = useCallback(
-    async (name: string, topic: string, tags?: string[], iconUrl?: string) => {
-      const data = await apiCreateRoom(name, topic, tags, iconUrl);
+    async (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string) => {
+      const data = await apiCreateRoom(name, topic, tags, iconUrl, unlisted, password);
       await loadRooms();
       await selectRoom(data.room_id);
     },
@@ -413,8 +421,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const joinRoom = useCallback(
-    async (roomId: string) => {
-      await apiJoinRoom(roomId);
+    async (roomId: string, password?: string) => {
+      await apiJoinRoom(roomId, password);
       await loadRooms();
       await selectRoom(roomId);
     },
@@ -496,7 +504,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateRoomSettings = useCallback(
-    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[] }) => {
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }) => {
       await apiUpdateRoomSettings(roomId, settings);
     },
     []
