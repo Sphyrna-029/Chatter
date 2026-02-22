@@ -1,4 +1,10 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useAppContext } from "@/lib/store";
 import { useWebRTCVoice } from "@/hooks/useWebRTCVoice";
 import { useWebRTCScreen } from "@/hooks/useWebRTCScreen";
@@ -8,7 +14,11 @@ import { VoiceToolbar } from "./voice/VoiceToolbar";
 import { VoiceDebugPanel } from "./voice/VoiceDebugPanel";
 import { VoiceMemberList } from "./voice/VoiceMemberList";
 
-export function VoiceControls() {
+interface VoiceControlsProps {
+  joinVoiceRef?: React.MutableRefObject<(() => void) | null>;
+}
+
+export function VoiceControls({ joinVoiceRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
@@ -18,6 +28,12 @@ export function VoiceControls() {
 
   const voice = useWebRTCVoice({ cleanupScreenRef });
   const screen = useWebRTCScreen();
+
+  // Expose joinVoice to parent via ref
+  useEffect(() => {
+    if (joinVoiceRef) joinVoiceRef.current = voice.joinVoice;
+    return () => { if (joinVoiceRef) joinVoiceRef.current = null; };
+  }, [joinVoiceRef, voice.joinVoice]);
 
   // Wire up the cleanup ref after both hooks are initialized
   cleanupScreenRef.current = screen.fullCleanup;
@@ -55,9 +71,48 @@ export function VoiceControls() {
   }, [screen.watchUser, voice.joinVoice]);
 
   if (!state.currentRoomId) return null;
+  if (state.voiceMembers.length === 0) return null;
 
   return (
-    <div className="flex flex-col">
+    <div className="w-52 border-r flex flex-col h-full shrink-0">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Voice Channel
+        </span>
+        <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          {state.voiceMembers.length}
+        </span>
+      </div>
+
+      {/* Members list */}
+      <VoiceMemberList
+        inVoiceChannel={state.inVoiceChannel}
+        voiceMembers={state.voiceMembers}
+        userId={state.userId}
+        isMuted={state.isMuted}
+        voiceMemberStates={state.voiceMemberStates}
+        activeScreenSharers={state.activeScreenSharers}
+        selectedScreenSharer={state.selectedScreenSharer}
+        screenViewerOpen={state.screenViewerOpen}
+        connStats={connStats}
+        speakingUsers={speakingUsers}
+        volumes={volumes}
+        onSetUserVolume={setUserVolume}
+        onWatchUser={watchUser}
+      />
+
+      {/* Debug modal */}
+      <Dialog open={debugOpen && state.inVoiceChannel} onOpenChange={setDebugOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>WebRTC Debug</DialogTitle>
+          </DialogHeader>
+          <VoiceDebugPanel connStats={connStats} />
+        </DialogContent>
+      </Dialog>
+
+      {/* Controls at bottom */}
       <VoiceToolbar
         inVoiceChannel={state.inVoiceChannel}
         isMuted={state.isMuted}
@@ -73,25 +128,6 @@ export function VoiceControls() {
         onStopScreenShare={screen.stopScreenShare}
         onSetScreenFps={screen.setScreenFps}
         onToggleDebug={() => setDebugOpen((o) => !o)}
-      />
-
-      {debugOpen && state.inVoiceChannel && (
-        <VoiceDebugPanel connStats={connStats} />
-      )}
-
-      <VoiceMemberList
-        voiceMembers={state.voiceMembers}
-        userId={state.userId}
-        isMuted={state.isMuted}
-        voiceMemberStates={state.voiceMemberStates}
-        activeScreenSharers={state.activeScreenSharers}
-        selectedScreenSharer={state.selectedScreenSharer}
-        screenViewerOpen={state.screenViewerOpen}
-        connStats={connStats}
-        speakingUsers={speakingUsers}
-        volumes={volumes}
-        onSetUserVolume={setUserVolume}
-        onWatchUser={watchUser}
       />
     </div>
   );

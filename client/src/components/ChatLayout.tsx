@@ -56,6 +56,7 @@ export function ChatLayout() {
   const [membersCollapsed, setMembersCollapsed] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
+  const joinVoiceRef = useRef<(() => void) | null>(null);
   const [isPiP, setIsPiP] = useState(false);
   // True when we want PiP but auto-enter failed (Firefox requires user gesture)
   const [pipWanted, setPipWanted] = useState(false);
@@ -235,9 +236,6 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* Voice controls at top of main area */}
-            <VoiceControls />
-
             {/* PiP active banner — shown when watching a screen share from another room */}
             {showPipBanner && (
               <div className="flex items-center justify-between px-3 py-1.5 bg-purple-500/10 border-b border-purple-500/20 shrink-0">
@@ -303,8 +301,9 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* Main content: chat + members */}
+            {/* Main content: voice column + chat + members */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
+              <VoiceControls joinVoiceRef={joinVoiceRef} />
               {showViewer ? (
                 <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
                   {/* Header lives outside the resizable panels — always visible */}
@@ -326,13 +325,13 @@ export function ChatLayout() {
                     <ResizableHandle withHandle />
                     <ResizablePanel defaultSize={50} minSize={15}>
                       <div className="h-full flex flex-col min-h-0">
-                        <ChatArea />
+                        <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
                       </div>
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 </div>
               ) : (
-                <ChatArea />
+                <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
               )}
               <MembersPanel
                 collapsed={membersCollapsed}

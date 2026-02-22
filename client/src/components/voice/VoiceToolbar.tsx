@@ -34,83 +34,81 @@ export function VoiceToolbar({
   onSetScreenFps,
   onToggleDebug,
 }: VoiceToolbarProps) {
+  if (!inVoiceChannel) return null;
+
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+    <div className="flex flex-col gap-1.5 border-t p-2">
       <Button
         size="sm"
-        variant={inVoiceChannel ? "destructive" : "default"}
-        onClick={inVoiceChannel ? onLeaveVoice : onJoinVoice}
-        className="text-xs"
+        variant="destructive"
+        onClick={onLeaveVoice}
+        className="text-xs w-full"
       >
-        {inVoiceChannel ? "🔇 Leave Voice" : "🔊 Join Voice"}
+        🔇 Leave Voice
       </Button>
 
-      {inVoiceChannel && (
-        <>
-          {voiceInputMode === "open" && (
-            <Button
-              size="sm"
-              variant={isMuted ? "destructive" : "outline"}
-              onClick={onToggleMute}
-              className="text-xs"
-            >
-              {isMuted ? "🔇 Unmute" : "🎤 Mute"}
-            </Button>
-          )}
+      {voiceInputMode === "open" && (
+        <Button
+          size="sm"
+          variant={isMuted ? "destructive" : "outline"}
+          onClick={onToggleMute}
+          className="text-xs w-full"
+        >
+          {isMuted ? "🔇 Unmute" : "🎤 Mute"}
+        </Button>
+      )}
 
-          <Button
-            size="sm"
-            variant={voiceInputMode === "ptt" ? "secondary" : "outline"}
-            onClick={onToggleInputMode}
-            className="text-xs"
-          >
-            {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
-          </Button>
+      <Button
+        size="sm"
+        variant={voiceInputMode === "ptt" ? "secondary" : "outline"}
+        onClick={onToggleInputMode}
+        className="text-xs w-full"
+      >
+        {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
+      </Button>
 
-          <div className="flex items-center">
+      <div className="flex items-center">
+        <Button
+          size="sm"
+          variant={isScreenSharing ? "destructive" : "outline"}
+          onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+          className="text-xs flex-1 rounded-r-none"
+        >
+          {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
               size="sm"
               variant={isScreenSharing ? "destructive" : "outline"}
-              onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
-              className="text-xs rounded-r-none"
+              className="text-xs rounded-l-none border-l-0 px-1.5"
             >
-              {isScreenSharing ? "🖥️ Stop Sharing" : `🖥️ Share (${screenFps}fps)`}
+              ▾
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant={isScreenSharing ? "destructive" : "outline"}
-                  className="text-xs rounded-l-none border-l-0 px-1.5"
-                >
-                  ▾
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
-                  <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
+              <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
-          {voiceInputMode === "ptt" && !isMuted && (
-            <span className="text-xs text-green-500 font-semibold animate-pulse">
-              🔊 Transmitting
-            </span>
-          )}
-
-          <Button
-            size="sm"
-            variant={debugOpen ? "secondary" : "ghost"}
-            onClick={onToggleDebug}
-            className="text-xs"
-          >
-            Debug
-          </Button>
-        </>
+      {voiceInputMode === "ptt" && !isMuted && (
+        <span className="text-xs text-green-500 font-semibold animate-pulse text-center">
+          🔊 Transmitting
+        </span>
       )}
+
+      <Button
+        size="sm"
+        variant={debugOpen ? "secondary" : "ghost"}
+        onClick={onToggleDebug}
+        className="text-xs w-full"
+      >
+        Debug
+      </Button>
     </div>
   );
 }

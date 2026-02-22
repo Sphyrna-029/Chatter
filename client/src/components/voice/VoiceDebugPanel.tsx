@@ -11,10 +11,7 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
   if (Object.keys(connStats).length === 0) return null;
 
   return (
-    <div className="border-b px-4 py-2 space-y-2">
-      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        WebRTC Connections
-      </p>
+    <div className="space-y-2">
       <div className="grid gap-2">
         {Object.entries(connStats).map(([key, s]) => {
           let label = key;

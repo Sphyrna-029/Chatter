@@ -21,7 +21,11 @@ import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
-export function ChatArea() {
+interface ChatAreaProps {
+  onJoinVoice?: () => void;
+}
+
+export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -625,7 +629,19 @@ export function ChatArea() {
       )}
       {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <div className="w-8" /> {/* Spacer for centering */}
+        {/* Join voice button — only visible when not already in voice */}
+        {onJoinVoice && !state.inVoiceChannel ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 text-xs"
+            onClick={onJoinVoice}
+          >
+            Join Voice
+          </Button>
+        ) : (
+          <div className="w-8" />
+        )}
         <div className="flex-1 min-w-0 text-center">
           <h2 className="text-sm font-semibold">
             {roomInfo?.name || "Unnamed Room"}
