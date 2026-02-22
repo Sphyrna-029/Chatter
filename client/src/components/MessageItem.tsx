@@ -10,6 +10,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
@@ -208,6 +214,8 @@ function LinkPreviewCard({ url }: { url: string }) {
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
   const { images, videos, audios, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
+  const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
+
   if (images.length === 0 && videos.length === 0 && audios.length === 0 && links.length === 0 && youtubeIds.length === 0) return null;
   return (
     <div className="mt-2 space-y-2">
@@ -228,7 +236,8 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
           src={url}
           alt="Image"
           loading="lazy"
-          className="max-w-full max-h-80 rounded-md"
+          className="max-w-full max-h-80 rounded-md cursor-pointer"
+          onClick={() => setLightbox({ url, type: "image" })}
           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
       ))}
@@ -238,7 +247,12 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
           src={url}
           controls
           preload="metadata"
-          className="max-w-full max-h-80 rounded-md"
+          className="max-w-full max-h-80 rounded-md cursor-pointer"
+          onClick={(e) => {
+            const video = e.currentTarget;
+            video.pause();
+            setLightbox({ url, type: "video" });
+          }}
         />
       ))}
       {audios.map((url) => (
@@ -251,6 +265,18 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
         />
       ))}
       {links.length > 0 && <LinkPreviewCard url={links[0]} />}
+
+      <Dialog open={lightbox !== null} onOpenChange={(open) => { if (!open) setLightbox(null); }}>
+        <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none flex items-center justify-center [&>button]:text-white [&>button]:bg-black/50 [&>button]:rounded-full [&>button]:p-1">
+          <VisuallyHidden.Root><DialogTitle>Media preview</DialogTitle></VisuallyHidden.Root>
+          {lightbox?.type === "image" && (
+            <img src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
+          )}
+          {lightbox?.type === "video" && (
+            <video src={lightbox.url} autoPlay controls className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 });
