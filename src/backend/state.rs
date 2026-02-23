@@ -88,6 +88,8 @@ pub(crate) struct ForumPostRecord {
     #[serde(default)]
     pub(crate) comment_count: i64,
     #[serde(default)]
+    pub(crate) last_activity: i64,
+    #[serde(default)]
     pub(crate) deleted: bool,
     #[serde(default)]
     pub(crate) edited: bool,

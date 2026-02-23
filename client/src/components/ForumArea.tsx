@@ -4,6 +4,7 @@ import {
   apiListForumPosts,
   apiCreateForumPost,
   apiDeleteForumPost,
+  apiSearchForumPosts,
   apiUploadFile,
   type ForumPost,
 } from "@/lib/api";
@@ -21,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, ImagePlus, X } from "lucide-react";
+import { Plus, ImagePlus, X, Search } from "lucide-react";
 
 export function ForumArea() {
   const { state } = useAppContext();
@@ -34,6 +35,11 @@ export function ForumArea() {
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const loadedRoomRef = useRef<string | null>(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isOwnerOrMod = useCallback(() => {
     const members = state.roomMembers;
@@ -65,15 +71,51 @@ export function ForumArea() {
       loadedRoomRef.current = roomId;
       setSelectedPostId(null);
       setPosts([]);
+      setSearchQuery("");
+      setIsSearching(false);
       loadPosts();
     }
   }, [roomId, loadPosts]);
+
+  // Debounced search
+  useEffect(() => {
+    if (!roomId) return;
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+
+    const q = searchQuery.trim();
+    if (!q) {
+      // Clear search, reload normal posts
+      if (isSearching) {
+        setIsSearching(false);
+        loadPosts();
+      }
+      return;
+    }
+
+    searchTimeoutRef.current = setTimeout(async () => {
+      setIsSearching(true);
+      setLoading(true);
+      try {
+        const data = await apiSearchForumPosts(roomId, q);
+        setPosts(data.posts);
+        setHasMore(false);
+      } catch {
+        // silent
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [searchQuery, roomId]);
 
   // Listen for real-time events
   useEffect(() => {
     const onPostCreated = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail.room_id === roomId && detail.post) {
+      if (detail.room_id === roomId && detail.post && !isSearching) {
         setPosts((prev) => [detail.post, ...prev]);
       }
     };
@@ -86,17 +128,19 @@ export function ForumArea() {
         }
       }
     };
-    // Update comment counts from real-time events
+    // Update comment counts and bump to top from real-time events
     const onCommentCreated = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail.room_id === roomId) {
-        setPosts((prev) =>
-          prev.map((p) =>
+      if (detail.room_id === roomId && !isSearching) {
+        setPosts((prev) => {
+          const updated = prev.map((p) =>
             p.post_id === detail.post_id
-              ? { ...p, comment_count: p.comment_count + 1 }
+              ? { ...p, comment_count: p.comment_count + 1, last_activity: Date.now() }
               : p
-          )
-        );
+          );
+          // Re-sort by last_activity descending
+          return updated.sort((a, b) => b.last_activity - a.last_activity);
+        });
       }
     };
     const onCommentDeleted = (e: Event) => {
@@ -137,7 +181,7 @@ export function ForumArea() {
       window.removeEventListener("forum.comment.created", onCommentCreated);
       window.removeEventListener("forum.comment.deleted", onCommentDeleted);
     };
-  }, [roomId, selectedPostId]);
+  }, [roomId, selectedPostId, isSearching]);
 
   const handleDeletePost = async (postId: string) => {
     if (!roomId || !confirm("Delete this post?")) return;
@@ -151,7 +195,7 @@ export function ForumArea() {
   const handleLoadMore = () => {
     if (posts.length > 0) {
       const oldest = posts[posts.length - 1];
-      loadPosts(true, oldest.created_at);
+      loadPosts(true, oldest.last_activity);
     }
   };
 
@@ -178,17 +222,36 @@ export function ForumArea() {
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
-        <div className="min-w-0">
+      <div className="flex items-center justify-between px-4 py-3 border-b shrink-0 gap-3">
+        <div className="min-w-0 shrink-0">
           <h2 className="font-semibold text-sm truncate">{roomInfo?.name || "Forum"}</h2>
           {roomInfo?.topic && (
             <p className="text-xs text-muted-foreground truncate">{roomInfo.topic}</p>
           )}
         </div>
-        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 shrink-0">
-          <Plus className="w-4 h-4" />
-          New Post
-        </Button>
+        <div className="flex items-center gap-2 flex-1 justify-end">
+          <div className="relative max-w-xs flex-1">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search posts..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-8 pl-8 text-xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 shrink-0">
+            <Plus className="w-4 h-4" />
+            New Post
+          </Button>
+        </div>
       </div>
 
       {/* Posts list */}
@@ -196,8 +259,14 @@ export function ForumArea() {
         <div className="max-w-3xl mx-auto space-y-2">
           {posts.length === 0 && !loading && (
             <div className="text-center py-12 text-muted-foreground">
-              <p className="text-sm">No posts yet</p>
-              <p className="text-xs mt-1">Be the first to create a post!</p>
+              {isSearching ? (
+                <p className="text-sm">No posts match your search</p>
+              ) : (
+                <>
+                  <p className="text-sm">No posts yet</p>
+                  <p className="text-xs mt-1">Be the first to create a post!</p>
+                </>
+              )}
             </div>
           )}
 
@@ -214,7 +283,7 @@ export function ForumArea() {
             );
           })}
 
-          {hasMore && (
+          {hasMore && !isSearching && (
             <div className="text-center py-2">
               <Button
                 variant="ghost"

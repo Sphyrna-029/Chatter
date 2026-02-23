@@ -134,3 +134,9 @@ pub(crate) struct ForumPostsQuery {
     pub(crate) limit: Option<i64>,
     pub(crate) before: Option<i64>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct ForumSearchQuery {
+    pub(crate) q: String,
+    pub(crate) limit: Option<i64>,
+}

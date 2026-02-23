@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{CreateForumCommentRequest, CreateForumPostRequest, EditForumCommentRequest, EditForumPostRequest, ForumPostsQuery},
+    dto::{CreateForumCommentRequest, CreateForumPostRequest, EditForumCommentRequest, EditForumPostRequest, ForumPostsQuery, ForumSearchQuery},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         is_moderator_or_owner, now_millis,
@@ -69,6 +69,7 @@ fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>
         "image_url": post.image_url,
         "created_at": post.created_at,
         "comment_count": post.comment_count,
+        "last_activity": if post.last_activity > 0 { post.last_activity } else { post.created_at },
         "reactions": reactions,
         "edited": post.edited,
         "edited_at": post.edited_at,
@@ -144,6 +145,7 @@ pub(crate) async fn create_post(
         image_url: req.image_url.clone().unwrap_or_default(),
         created_at: now,
         comment_count: 0,
+        last_activity: now,
         deleted: false,
         edited: false,
         edited_at: 0,
@@ -177,7 +179,7 @@ pub(crate) async fn list_posts(
     let coll = state.db.collection::<ForumPostRecord>("forum_posts");
 
     let filter = if let Some(before) = query.before {
-        doc! { "room_id": &room_id, "deleted": false, "created_at": { "$lt": before } }
+        doc! { "room_id": &room_id, "deleted": false, "last_activity": { "$lt": before } }
     } else {
         doc! { "room_id": &room_id, "deleted": false }
     };
@@ -185,7 +187,7 @@ pub(crate) async fn list_posts(
     let mut posts: Vec<Value> = Vec::new();
     if let Ok(mut cursor) = coll
         .find(filter)
-        .sort(doc! { "created_at": -1 })
+        .sort(doc! { "last_activity": -1 })
         .limit(limit + 1)
         .await
     {
@@ -329,11 +331,11 @@ pub(crate) async fn create_comment(
     let coll = state.db.collection::<ForumCommentRecord>("forum_comments");
     let _ = coll.insert_one(&comment).await;
 
-    // Increment comment_count
+    // Increment comment_count and bump last_activity
     let _ = posts_coll
         .update_one(
             doc! { "_id": &post_id },
-            doc! { "$inc": { "comment_count": 1 } },
+            doc! { "$inc": { "comment_count": 1 }, "$set": { "last_activity": now } },
         )
         .await;
 
@@ -538,4 +540,46 @@ pub(crate) async fn edit_comment(
     broadcast_to_room(&state, &room_id, &broadcast_msg).await;
 
     Ok(Json(json!({ "edited": true })))
+}
+
+// ─── 9. Search Posts ────────────────────────────────────────────────────────
+
+pub(crate) async fn search_posts(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<ForumSearchQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _user_id = validate_forum_member(&state, &headers, &room_id).await?;
+
+    let q = query.q.trim().to_lowercase();
+    if q.is_empty() {
+        return Ok(Json(json!({ "posts": [] })));
+    }
+
+    let limit = query.limit.unwrap_or(20).min(50) as usize;
+    let coll = state.db.collection::<ForumPostRecord>("forum_posts");
+
+    let filter = doc! { "room_id": &room_id, "deleted": false };
+    let mut results: Vec<Value> = Vec::new();
+
+    if let Ok(mut cursor) = coll
+        .find(filter)
+        .sort(doc! { "last_activity": -1 })
+        .await
+    {
+        while let Ok(Some(post)) = cursor.try_next().await {
+            if results.len() >= limit {
+                break;
+            }
+            if post.title.to_lowercase().contains(&q)
+                || post.body.to_lowercase().contains(&q)
+            {
+                let reactions = get_reactions_for_event(&state, &post.post_id).await;
+                results.push(post_to_json(&post, &reactions));
+            }
+        }
+    }
+
+    Ok(Json(json!({ "posts": results })))
 }

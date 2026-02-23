@@ -663,6 +663,7 @@ export interface ForumPost {
   image_url: string;
   created_at: number;
   comment_count: number;
+  last_activity: number;
   reactions: Record<string, string[]>;
   edited?: boolean;
   edited_at?: number;
@@ -738,6 +739,14 @@ export async function apiDeleteForumComment(roomId: string, postId: string, comm
     throw new Error(data?.error || "Failed to delete comment");
   }
   return res.json();
+}
+
+export async function apiSearchForumPosts(roomId: string, query: string, limit?: number) {
+  const params = new URLSearchParams({ q: query });
+  if (limit) params.set("limit", String(limit));
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/search?${params}`);
+  if (!res.ok) throw new Error("Failed to search posts");
+  return res.json() as Promise<{ posts: ForumPost[] }>;
 }
 
 export async function apiEditForumPost(roomId: string, postId: string, title?: string, body?: string) {
