@@ -178,8 +178,18 @@ pub(crate) async fn list_posts(
     let limit = query.limit.unwrap_or(20).min(50);
     let coll = state.db.collection::<ForumPostRecord>("forum_posts");
 
+    let sort_mode = query.sort.as_deref().unwrap_or("activity");
+    let (sort_field, sort_dir) = match sort_mode {
+        "oldest" => ("created_at", 1),
+        "newest" => ("created_at", -1),
+        "popular" => ("comment_count", -1),
+        _ => ("last_activity", -1), // "activity" default
+    };
+
+    let cursor_field = sort_field;
     let filter = if let Some(before) = query.before {
-        doc! { "room_id": &room_id, "deleted": false, "last_activity": { "$lt": before } }
+        let op = if sort_dir == -1 { "$lt" } else { "$gt" };
+        doc! { "room_id": &room_id, "deleted": false, cursor_field: { op: before } }
     } else {
         doc! { "room_id": &room_id, "deleted": false }
     };
@@ -187,7 +197,7 @@ pub(crate) async fn list_posts(
     let mut posts: Vec<Value> = Vec::new();
     if let Ok(mut cursor) = coll
         .find(filter)
-        .sort(doc! { "last_activity": -1 })
+        .sort(doc! { sort_field: sort_dir })
         .limit(limit + 1)
         .await
     {

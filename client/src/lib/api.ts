@@ -693,9 +693,10 @@ export async function apiCreateForumPost(roomId: string, title: string, body: st
   return res.json() as Promise<{ post_id: string }>;
 }
 
-export async function apiListForumPosts(roomId: string, limit?: number, before?: number) {
+export async function apiListForumPosts(roomId: string, limit?: number, before?: number, sort?: string) {
   let url = `/api/forum/${roomId}/posts?limit=${limit || 20}`;
   if (before !== undefined) url += `&before=${before}`;
+  if (sort) url += `&sort=${sort}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load posts");
   return res.json() as Promise<{ posts: ForumPost[]; has_more: boolean }>;

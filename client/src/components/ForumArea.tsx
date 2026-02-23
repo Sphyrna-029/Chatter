@@ -22,7 +22,22 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plus, ImagePlus, X, Search } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
+
+type SortMode = "activity" | "newest" | "oldest" | "popular";
+
+const sortLabels: Record<SortMode, string> = {
+  activity: "Active",
+  newest: "Newest",
+  oldest: "Oldest",
+  popular: "Popular",
+};
 
 export function ForumArea() {
   const { state } = useAppContext();
@@ -41,17 +56,20 @@ export function ForumArea() {
   const [isSearching, setIsSearching] = useState(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Sort state
+  const [sortMode, setSortMode] = useState<SortMode>("activity");
+
   const isOwnerOrMod = useCallback(() => {
     const members = state.roomMembers;
     const me = members.find((m) => m.userId === state.userId);
     return me?.role === "owner" || me?.role === "moderator";
   }, [state.roomMembers, state.userId]);
 
-  const loadPosts = useCallback(async (append = false, before?: number) => {
+  const loadPosts = useCallback(async (sort: SortMode, append = false, before?: number) => {
     if (!roomId) return;
     setLoading(true);
     try {
-      const data = await apiListForumPosts(roomId, 20, before);
+      const data = await apiListForumPosts(roomId, 20, before, sort);
       if (append) {
         setPosts((prev) => [...prev, ...data.posts]);
       } else {
@@ -73,9 +91,20 @@ export function ForumArea() {
       setPosts([]);
       setSearchQuery("");
       setIsSearching(false);
-      loadPosts();
+      setSortMode("activity");
+      loadPosts("activity");
     }
   }, [roomId, loadPosts]);
+
+  // Reload when sort mode changes
+  const handleSortChange = (mode: SortMode) => {
+    if (mode === sortMode) return;
+    setSortMode(mode);
+    setSearchQuery("");
+    setIsSearching(false);
+    setPosts([]);
+    loadPosts(mode);
+  };
 
   // Debounced search
   useEffect(() => {
@@ -84,10 +113,9 @@ export function ForumArea() {
 
     const q = searchQuery.trim();
     if (!q) {
-      // Clear search, reload normal posts
       if (isSearching) {
         setIsSearching(false);
-        loadPosts();
+        loadPosts(sortMode);
       }
       return;
     }
@@ -116,7 +144,12 @@ export function ForumArea() {
     const onPostCreated = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail.room_id === roomId && detail.post && !isSearching) {
-        setPosts((prev) => [detail.post, ...prev]);
+        if (sortMode === "oldest") {
+          // New posts go to the end for oldest-first sort
+          setPosts((prev) => [...prev, detail.post]);
+        } else {
+          setPosts((prev) => [detail.post, ...prev]);
+        }
       }
     };
     const onPostDeleted = (e: Event) => {
@@ -128,7 +161,6 @@ export function ForumArea() {
         }
       }
     };
-    // Update comment counts and bump to top from real-time events
     const onCommentCreated = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail.room_id === roomId && !isSearching) {
@@ -138,8 +170,11 @@ export function ForumArea() {
               ? { ...p, comment_count: p.comment_count + 1, last_activity: Date.now() }
               : p
           );
-          // Re-sort by last_activity descending
-          return updated.sort((a, b) => b.last_activity - a.last_activity);
+          // Only re-sort if we're in activity mode
+          if (sortMode === "activity") {
+            return updated.sort((a, b) => b.last_activity - a.last_activity);
+          }
+          return updated;
         });
       }
     };
@@ -155,7 +190,6 @@ export function ForumArea() {
         );
       }
     };
-
     const onPostEdited = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail.room_id === roomId) {
@@ -181,7 +215,7 @@ export function ForumArea() {
       window.removeEventListener("forum.comment.created", onCommentCreated);
       window.removeEventListener("forum.comment.deleted", onCommentDeleted);
     };
-  }, [roomId, selectedPostId, isSearching]);
+  }, [roomId, selectedPostId, isSearching, sortMode]);
 
   const handleDeletePost = async (postId: string) => {
     if (!roomId || !confirm("Delete this post?")) return;
@@ -193,10 +227,23 @@ export function ForumArea() {
   };
 
   const handleLoadMore = () => {
-    if (posts.length > 0) {
-      const oldest = posts[posts.length - 1];
-      loadPosts(true, oldest.last_activity);
+    if (posts.length === 0) return;
+    const last = posts[posts.length - 1];
+    // Use the correct cursor field based on sort mode
+    let cursor: number;
+    switch (sortMode) {
+      case "newest":
+      case "oldest":
+        cursor = last.created_at;
+        break;
+      case "popular":
+        cursor = last.comment_count;
+        break;
+      default: // "activity"
+        cursor = last.last_activity;
+        break;
     }
+    loadPosts(sortMode, true, cursor);
   };
 
   if (!roomId) {
@@ -247,7 +294,26 @@ export function ForumArea() {
               </button>
             )}
           </div>
-          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 shrink-0">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="gap-1.5 shrink-0 h-8 text-xs">
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                {sortLabels[sortMode]}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(Object.keys(sortLabels) as SortMode[]).map((mode) => (
+                <DropdownMenuItem
+                  key={mode}
+                  onClick={() => handleSortChange(mode)}
+                  className={sortMode === mode ? "font-semibold" : ""}
+                >
+                  {sortLabels[mode]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5 shrink-0 h-8">
             <Plus className="w-4 h-4" />
             New Post
           </Button>

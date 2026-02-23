@@ -133,6 +133,7 @@ pub(crate) struct EditForumCommentRequest {
 pub(crate) struct ForumPostsQuery {
     pub(crate) limit: Option<i64>,
     pub(crate) before: Option<i64>,
+    pub(crate) sort: Option<String>,
 }
 
 #[derive(Deserialize)]
