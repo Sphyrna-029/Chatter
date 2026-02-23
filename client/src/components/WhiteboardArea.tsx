@@ -88,11 +88,11 @@ export function WhiteboardArea() {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
+    ctx.globalCompositeOperation = "source-over";
     if (stroke.tool === "eraser") {
-      ctx.globalCompositeOperation = "destination-out";
-      ctx.strokeStyle = "rgba(0,0,0,1)";
+      ctx.strokeStyle = "#ffffff";
+      ctx.fillStyle = "#ffffff";
     } else {
-      ctx.globalCompositeOperation = "source-over";
       ctx.strokeStyle = stroke.color;
       ctx.fillStyle = stroke.color;
     }
@@ -110,6 +110,56 @@ export function WhiteboardArea() {
           ctx.lineTo(pts[i][0], pts[i][1]);
         }
         ctx.stroke();
+        break;
+      }
+      case "fill": {
+        // Fill is a pixel-level operation — replay it by flood-filling on the canvas
+        if (pts.length >= 1) {
+          const px = Math.floor(pts[0][0]);
+          const py = Math.floor(pts[0][1]);
+          const imageData = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+          const data = imageData.data;
+
+          const targetIdx = (py * CANVAS_W + px) * 4;
+          const targetR = data[targetIdx];
+          const targetG = data[targetIdx + 1];
+          const targetB = data[targetIdx + 2];
+          const targetA = data[targetIdx + 3];
+
+          const fillR = parseInt(stroke.color.slice(1, 3), 16);
+          const fillG = parseInt(stroke.color.slice(3, 5), 16);
+          const fillB = parseInt(stroke.color.slice(5, 7), 16);
+
+          if (!(targetR === fillR && targetG === fillG && targetB === fillB && targetA === 255)) {
+            const match = (idx: number) =>
+              data[idx] === targetR &&
+              data[idx + 1] === targetG &&
+              data[idx + 2] === targetB &&
+              data[idx + 3] === targetA;
+
+            const stack = [[px, py]];
+            const visited = new Uint8Array(CANVAS_W * CANVAS_H);
+
+            while (stack.length > 0) {
+              const [cx, cy] = stack.pop()!;
+              if (cx < 0 || cx >= CANVAS_W || cy < 0 || cy >= CANVAS_H) continue;
+              const ci = cy * CANVAS_W + cx;
+              if (visited[ci]) continue;
+              const idx = ci * 4;
+              if (!match(idx)) continue;
+
+              visited[ci] = 1;
+              data[idx] = fillR;
+              data[idx + 1] = fillG;
+              data[idx + 2] = fillB;
+              data[idx + 3] = 255;
+
+              stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+            }
+
+            ctx.putImageData(imageData, 0, 0);
+          }
+        }
         break;
       }
       case "line": {
@@ -152,7 +202,6 @@ export function WhiteboardArea() {
         break;
       }
     }
-    ctx.globalCompositeOperation = "source-over";
   }, []);
 
   const renderBaseCanvas = useCallback(() => {
@@ -168,62 +217,6 @@ export function WhiteboardArea() {
       drawStroke(ctx, stroke);
     }
   }, [drawStroke]);
-
-  // ─── Flood fill ─────────────────────────────────────────────────────────────
-
-  const floodFill = useCallback((x: number, y: number) => {
-    const canvas = baseCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const px = Math.floor(x);
-    const py = Math.floor(y);
-    const imageData = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
-    const data = imageData.data;
-
-    const targetIdx = (py * CANVAS_W + px) * 4;
-    const targetR = data[targetIdx];
-    const targetG = data[targetIdx + 1];
-    const targetB = data[targetIdx + 2];
-    const targetA = data[targetIdx + 3];
-
-    // Parse fill color
-    const fillR = parseInt(color.slice(1, 3), 16);
-    const fillG = parseInt(color.slice(3, 5), 16);
-    const fillB = parseInt(color.slice(5, 7), 16);
-
-    // If target is same as fill, do nothing
-    if (targetR === fillR && targetG === fillG && targetB === fillB && targetA === 255) return;
-
-    const match = (idx: number) =>
-      data[idx] === targetR &&
-      data[idx + 1] === targetG &&
-      data[idx + 2] === targetB &&
-      data[idx + 3] === targetA;
-
-    const stack = [[px, py]];
-    const visited = new Uint8Array(CANVAS_W * CANVAS_H);
-
-    while (stack.length > 0) {
-      const [cx, cy] = stack.pop()!;
-      const ci = cy * CANVAS_W + cx;
-      if (cx < 0 || cx >= CANVAS_W || cy < 0 || cy >= CANVAS_H) continue;
-      if (visited[ci]) continue;
-      const idx = ci * 4;
-      if (!match(idx)) continue;
-
-      visited[ci] = 1;
-      data[idx] = fillR;
-      data[idx + 1] = fillG;
-      data[idx + 2] = fillB;
-      data[idx + 3] = 255;
-
-      stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-  }, [color]);
 
   // ─── Load strokes on mount / room change ────────────────────────────────────
 
@@ -340,7 +333,6 @@ export function WhiteboardArea() {
         fill: true,
         timestamp: Date.now(),
       };
-      floodFill(x, y);
       setStrokes((prev) => [...prev, fillStroke]);
       sendWs({
         type: "whiteboard_stroke",
@@ -361,7 +353,7 @@ export function WhiteboardArea() {
     } else {
       shapeStart.current = [x, y];
     }
-  }, [roomId, tool, color, width, getCanvasPos, userId, floodFill, sendWs]);
+  }, [roomId, tool, color, width, getCanvasPos, userId, sendWs]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!roomId) return;
@@ -390,7 +382,7 @@ export function WhiteboardArea() {
         stroke_id: "",
         user_id: "",
         tool,
-        color: tool === "eraser" ? "#000000" : color,
+        color,
         width,
         points: currentPoints.current,
         fill: false,
@@ -444,7 +436,7 @@ export function WhiteboardArea() {
       stroke_id: `local_${Date.now()}`,
       user_id: userId || "",
       tool,
-      color: tool === "eraser" ? "#000000" : color,
+      color,
       width,
       points,
       fill: false,
@@ -457,7 +449,7 @@ export function WhiteboardArea() {
       type: "whiteboard_stroke",
       room_id: roomId,
       tool,
-      color: tool === "eraser" ? "#000000" : color,
+      color,
       width,
       points,
       fill: false,
@@ -658,7 +650,7 @@ export function WhiteboardArea() {
                     stroke_id: `local_${Date.now()}`,
                     user_id: userId || "",
                     tool,
-                    color: tool === "eraser" ? "#000000" : color,
+                    color,
                     width,
                     points,
                     fill: false,
@@ -669,7 +661,7 @@ export function WhiteboardArea() {
                     type: "whiteboard_stroke",
                     room_id: roomId,
                     tool,
-                    color: tool === "eraser" ? "#000000" : color,
+                    color,
                     width,
                     points,
                     fill: false,
