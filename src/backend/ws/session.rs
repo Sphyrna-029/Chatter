@@ -12,8 +12,8 @@ use super::{
     },
 };
 use crate::backend::{
-    helpers::{broadcast_to_room, get_user_from_token, now_secs, send_to_user},
-    state::{AppState, PresenceRecord, UserRecord, VoiceMemberState},
+    helpers::{broadcast_to_room, generate_id, get_user_from_token, is_moderator_or_owner, now_millis, now_secs, send_to_user},
+    state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
 use axum::{
     extract::ws::{Message, WebSocket},
@@ -569,6 +569,100 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
+            }
+        }
+        "whiteboard_stroke" => {
+            if !room_id.is_empty() {
+                let tool = msg.get("tool").and_then(|v| v.as_str()).unwrap_or("pen").to_string();
+                let color = msg.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
+                let width = msg.get("width").and_then(|v| v.as_f64()).unwrap_or(2.0);
+                let fill = msg.get("fill").and_then(|v| v.as_bool()).unwrap_or(false);
+                let points: Vec<Vec<f64>> = msg.get("points")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .unwrap_or_default();
+
+                let stroke_id = generate_id("stroke_");
+                let now = now_millis();
+
+                let stroke = WhiteboardStrokeRecord {
+                    stroke_id: stroke_id.clone(),
+                    room_id: room_id.to_string(),
+                    user_id: user_id.to_string(),
+                    tool: tool.clone(),
+                    color: color.clone(),
+                    width,
+                    points: points.clone(),
+                    fill,
+                    timestamp: now,
+                };
+
+                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                let _ = coll.insert_one(&stroke).await;
+
+                let event = json!({
+                    "type": "whiteboard_stroke",
+                    "room_id": room_id,
+                    "stroke": {
+                        "stroke_id": stroke_id,
+                        "user_id": user_id,
+                        "tool": tool,
+                        "color": color,
+                        "width": width,
+                        "points": points,
+                        "fill": fill,
+                        "timestamp": now,
+                    }
+                });
+                broadcast_to_room(&state, room_id, &event).await;
+            }
+        }
+        "whiteboard_cursor" => {
+            if !room_id.is_empty() {
+                let x = msg.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = msg.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let event = json!({
+                    "type": "whiteboard_cursor",
+                    "room_id": room_id,
+                    "user_id": user_id,
+                    "x": x,
+                    "y": y,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
+            }
+        }
+        "whiteboard_clear" => {
+            if !room_id.is_empty() {
+                // Only owner/moderator can clear
+                if is_moderator_or_owner(&state, room_id, user_id).await {
+                    let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                    let _ = coll.delete_many(doc! { "room_id": room_id }).await;
+                    let event = json!({
+                        "type": "whiteboard_clear",
+                        "room_id": room_id,
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "whiteboard_undo" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                // Find the user's most recent stroke in this room
+                if let Ok(Some(stroke)) = coll
+                    .find_one(doc! { "room_id": room_id, "user_id": user_id })
+                    .sort(doc! { "timestamp": -1 })
+                    .await
+                {
+                    let stroke_id = stroke.stroke_id.clone();
+                    let _ = coll.delete_one(doc! { "_id": &stroke_id }).await;
+                    let event = json!({
+                        "type": "whiteboard_undo",
+                        "room_id": room_id,
+                        "user_id": user_id,
+                        "stroke_id": stroke_id,
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
             }
         }
         "heartbeat" => {}

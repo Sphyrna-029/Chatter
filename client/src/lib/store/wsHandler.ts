@@ -238,6 +238,13 @@ export function createWsMessageHandler(
         });
       }
     }
+    // Whiteboard real-time events — dispatch as custom events for WhiteboardArea to handle
+    else if (msg.type === "whiteboard_stroke" || msg.type === "whiteboard_cursor" ||
+             msg.type === "whiteboard_clear" || msg.type === "whiteboard_undo") {
+      window.dispatchEvent(
+        new CustomEvent(msg.type, { detail: msg })
+      );
+    }
     // WebRTC signaling messages are handled by the voice/screen hooks
     // by subscribing to raw WS messages via a custom event
     window.dispatchEvent(

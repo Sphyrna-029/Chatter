@@ -4,6 +4,7 @@ import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
+import { WhiteboardArea } from "./WhiteboardArea";
 import { MembersPanel } from "./MembersPanel";
 import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
@@ -71,6 +72,9 @@ export function ChatLayout() {
 
   const isForumRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"
+    : false;
+  const isWhiteboardRoom = state.currentRoomId
+    ? state.roomInfoMap[state.currentRoomId]?.room_type === "whiteboard"
     : false;
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
@@ -307,8 +311,10 @@ export function ChatLayout() {
 
             {/* Main content: voice column + chat/forum + members */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {!isForumRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
-              {isForumRoom ? (
+              {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
+              {isWhiteboardRoom ? (
+                <WhiteboardArea />
+              ) : isForumRoom ? (
                 <ForumArea />
               ) : showViewer ? (
                 <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">

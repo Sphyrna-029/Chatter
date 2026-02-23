@@ -773,3 +773,23 @@ export async function apiEditForumComment(roomId: string, postId: string, commen
   }
   return res.json();
 }
+
+// ─── Whiteboard ──────────────────────────────────────────────────────────────
+
+export interface WhiteboardStroke {
+  stroke_id: string;
+  room_id?: string;
+  user_id: string;
+  tool: string;
+  color: string;
+  width: number;
+  points: number[][];
+  fill: boolean;
+  timestamp: number;
+}
+
+export async function apiGetWhiteboardStrokes(roomId: string) {
+  const res = await authenticatedFetch(`/api/whiteboard/${roomId}/strokes`);
+  if (!res.ok) throw new Error("Failed to load whiteboard strokes");
+  return res.json() as Promise<{ strokes: WhiteboardStroke[] }>;
+}

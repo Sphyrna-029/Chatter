@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -33,7 +33,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [unlisted, setUnlisted] = useState(false);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [roomType, setRoomType] = useState<"text" | "forum">("text");
+  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard">("text");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -131,7 +131,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
             <ToggleGroup
               type="single"
               value={roomType}
-              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum"); }}
+              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard"); }}
               className="w-full rounded-md border border-border p-0.5 bg-muted"
             >
               <ToggleGroupItem
@@ -147,6 +147,13 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               >
                 <LayoutList className="w-3.5 h-3.5" />
                 Forum
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="whiteboard"
+                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                <PenTool className="w-3.5 h-3.5" />
+                Whiteboard
               </ToggleGroupItem>
             </ToggleGroup>
           </div>

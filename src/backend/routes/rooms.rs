@@ -469,6 +469,12 @@ pub(crate) async fn delete_room(
         .collection::<super::super::state::ForumCommentRecord>("forum_comments");
     let _ = forum_comments_coll.delete_many(doc! { "room_id": &room_id }).await;
 
+    // Remove whiteboard data
+    let whiteboard_coll = state
+        .db
+        .collection::<super::super::state::WhiteboardStrokeRecord>("whiteboard_strokes");
+    let _ = whiteboard_coll.delete_many(doc! { "room_id": &room_id }).await;
+
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
     let _ = dm_coll.delete_many(doc! { "room_id": &room_id }).await;

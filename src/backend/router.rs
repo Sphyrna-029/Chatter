@@ -15,6 +15,7 @@ use super::{
         },
         static_content::{serve_client, versions},
         sync::sync,
+        whiteboard::get_strokes,
     },
     state::AppState,
     ws::session::ws_upgrade,
@@ -113,6 +114,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/invites/{code}", delete(delete_invite))
            .route("/api/invites/{code}", get(get_invite_info))
            .route("/api/invites/{code}/accept", post(accept_invite))
+           // Whiteboard
+           .route("/api/whiteboard/{room_id}/strokes", get(get_strokes))
            // Forum
            .route("/api/forum/{room_id}/posts", post(create_post).get(list_posts))
            .route("/api/forum/{room_id}/posts/search", get(search_posts))

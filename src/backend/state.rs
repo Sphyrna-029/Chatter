@@ -177,6 +177,21 @@ pub(crate) struct RefreshTokenRecord {
     pub(crate) expires_at: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct WhiteboardStrokeRecord {
+    #[serde(rename = "_id")]
+    pub(crate) stroke_id: String,
+    pub(crate) room_id: String,
+    pub(crate) user_id: String,
+    pub(crate) tool: String,
+    pub(crate) color: String,
+    pub(crate) width: f64,
+    pub(crate) points: Vec<Vec<f64>>,
+    #[serde(default)]
+    pub(crate) fill: bool,
+    pub(crate) timestamp: i64,
+}
+
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]
