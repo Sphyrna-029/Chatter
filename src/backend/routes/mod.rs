@@ -1,4 +1,5 @@
 pub(crate) mod auth;
+pub(crate) mod forum;
 pub(crate) mod invites;
 pub(crate) mod media;
 pub(crate) mod messages;

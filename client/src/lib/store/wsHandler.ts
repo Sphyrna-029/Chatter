@@ -223,6 +223,21 @@ export function createWsMessageHandler(
       // A new DM room was created — refresh rooms list so it appears instantly
       loadRoomsRef.current();
     }
+    // Forum real-time events — dispatch as custom events for ForumArea to handle
+    else if (msg.type === "forum.post.created" || msg.type === "forum.post.deleted" ||
+             msg.type === "forum.comment.created" || msg.type === "forum.comment.deleted" ||
+             msg.type === "forum.post.edited" || msg.type === "forum.comment.edited") {
+      window.dispatchEvent(
+        new CustomEvent(msg.type, { detail: msg })
+      );
+      // Set mention badge for forum posts from other rooms
+      if (msg.type === "forum.post.created" && msg.room_id !== stateRef.current.currentRoomId && msg.post?.author !== stateRef.current.userId) {
+        dispatch({
+          type: "SET_MENTION",
+          payload: { roomId: msg.room_id, hasMention: true },
+        });
+      }
+    }
     // WebRTC signaling messages are handled by the voice/screen hooks
     // by subscribing to raw WS messages via a custom event
     window.dispatchEvent(

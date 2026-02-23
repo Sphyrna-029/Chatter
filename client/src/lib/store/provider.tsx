@@ -238,6 +238,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const hasPasswordEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.has_password"
         );
+        const roomTypeEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.type"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -251,6 +254,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           mod_name_color: nameColorsEvent?.content?.mod_name_color || "",
           unlisted: unlistedEvent?.content?.unlisted || false,
           has_password: hasPasswordEvent?.content?.has_password || false,
+          room_type: roomTypeEvent?.content?.room_type || "text",
         };
       } else {
         roomInfoMap[roomId] = {
@@ -412,8 +416,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createRoom = useCallback(
-    async (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string) => {
-      const data = await apiCreateRoom(name, topic, tags, iconUrl, unlisted, password);
+    async (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string, roomType?: string) => {
+      const data = await apiCreateRoom(name, topic, tags, iconUrl, unlisted, password, roomType);
       await loadRooms();
       await selectRoom(data.room_id);
     },

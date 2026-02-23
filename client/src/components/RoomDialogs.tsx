@@ -14,7 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff } from "lucide-react";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -32,6 +33,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [unlisted, setUnlisted] = useState(false);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [roomType, setRoomType] = useState<"text" | "forum">("text");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -44,7 +46,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      await createRoom(name, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined);
+      await createRoom(name, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined, roomType !== "text" ? roomType : undefined);
       setName("");
       setTopic("");
       setTags([]);
@@ -53,6 +55,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
       setIconPreview(null);
       setUnlisted(false);
       setPassword("");
+      setRoomType("text");
       onOpenChange(false);
     } catch {
       alert("Failed to create room");
@@ -122,6 +125,30 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Room Type</Label>
+            <ToggleGroup
+              type="single"
+              value={roomType}
+              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum"); }}
+              className="w-full rounded-md border border-border p-0.5 bg-muted"
+            >
+              <ToggleGroupItem
+                value="text"
+                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                Text Chat
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="forum"
+                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                <LayoutList className="w-3.5 h-3.5" />
+                Forum
+              </ToggleGroupItem>
+            </ToggleGroup>
           </div>
           <div className="space-y-2">
             <Label htmlFor="room-topic">Topic (Optional)</Label>

@@ -2,6 +2,7 @@ use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
         auth::{login, logout, refresh, register},
+        forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
         messages::{edit_message, get_room_messages, redact_message, search_messages, send_message},
@@ -112,6 +113,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/invites/{code}", delete(delete_invite))
            .route("/api/invites/{code}", get(get_invite_info))
            .route("/api/invites/{code}/accept", post(accept_invite))
+           // Forum
+           .route("/api/forum/{room_id}/posts", post(create_post).get(list_posts))
+           .route("/api/forum/{room_id}/posts/{post_id}", get(get_post).delete(delete_post).put(edit_post))
+           .route("/api/forum/{room_id}/posts/{post_id}/comments", post(create_comment))
+           .route("/api/forum/{room_id}/posts/{post_id}/comments/{comment_id}", delete(delete_comment).put(edit_comment))
            // SPA fallback for invite pages
            .route("/invite/{code}", get(serve_client))
            // WebSocket

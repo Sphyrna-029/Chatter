@@ -88,6 +88,7 @@ pub(crate) async fn create_room(
                     mod_name_color: String::new(),
                     unlisted: false,
                     password_hash: String::new(),
+                    room_type: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -210,6 +211,7 @@ pub(crate) async fn create_room(
         mod_name_color: String::new(),
         unlisted: req.unlisted.unwrap_or(false),
         password_hash,
+        room_type: req.room_type.unwrap_or_default(),
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -457,6 +459,16 @@ pub(crate) async fn delete_room(
     // leave orphaned reactions since they won't be queried)
     let _ = react_coll; // reactions will be orphaned but harmless
 
+    // Remove forum data
+    let forum_posts_coll = state
+        .db
+        .collection::<super::super::state::ForumPostRecord>("forum_posts");
+    let _ = forum_posts_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let forum_comments_coll = state
+        .db
+        .collection::<super::super::state::ForumCommentRecord>("forum_comments");
+    let _ = forum_comments_coll.delete_many(doc! { "room_id": &room_id }).await;
+
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
     let _ = dm_coll.delete_many(doc! { "room_id": &room_id }).await;
@@ -507,7 +519,8 @@ pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<V
                 "screen_share_active": screen_share_active,
                 "tags": room.tags,
                 "icon_url": room.icon_url,
-                "has_password": !room.password_hash.is_empty()
+                "has_password": !room.password_hash.is_empty(),
+                "room_type": if room.room_type.is_empty() { "text" } else { &room.room_type }
             }));
         }
     }

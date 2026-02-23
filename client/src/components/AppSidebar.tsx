@@ -71,6 +71,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const summary = roomSummaries[roomId];
     const isActive = roomId === state.currentRoomId;
     const hasMention = !!state.roomMentions[roomId] && !isActive;
+    const isForumRoom = info?.room_type === "forum";
     const memberCount = summary?.member_count ?? 0;
     const voiceCount = summary?.voice_count ?? 0;
     const screenShareActive = summary?.screen_share_active ?? false;
@@ -142,8 +143,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         )}
 
         {/* Room name */}
-        <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground">
-          {roomName}
+        <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground flex items-center justify-center gap-1">
+          {isForumRoom && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 text-muted-foreground">
+              <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4.414a1 1 0 0 0-.707.293L1.5 14.5A.5.5 0 0 1 .5 14V2zm3.5 1a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/>
+            </svg>
+          )}
+          <span className="truncate">{roomName}</span>
         </span>
 
         {/* Stats row */}

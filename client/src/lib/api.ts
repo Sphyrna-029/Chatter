@@ -185,10 +185,10 @@ export async function apiSync() {
   return res.json();
 }
 
-export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string) {
+export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string, roomType?: string) {
   const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
     method: "POST",
-    body: JSON.stringify({ name, topic, tags, icon_url: iconUrl, unlisted, password }),
+    body: JSON.stringify({ name, topic, tags, icon_url: iconUrl, unlisted, password, room_type: roomType }),
   });
   if (!res.ok) throw new Error("Failed to create room");
   return res.json() as Promise<{ room_id: string }>;
@@ -223,6 +223,7 @@ export interface RoomSummary {
   tags?: string[];
   icon_url?: string;
   has_password?: boolean;
+  room_type?: string;
 }
 
 export async function apiGetAllRooms() {
@@ -378,6 +379,7 @@ export interface RoomInfo {
   mod_name_color?: string;
   unlisted?: boolean;
   has_password?: boolean;
+  room_type?: string;
 }
 
 // ─── Room Settings ──────────────────────────────────────────────────────────
@@ -648,4 +650,116 @@ export async function apiCreateDM(targetUserId: string) {
   });
   if (!res.ok) throw new Error("Failed to create DM");
   return res.json() as Promise<{ room_id: string }>;
+}
+
+// ─── Forum ──────────────────────────────────────────────────────────────────
+
+export interface ForumPost {
+  post_id: string;
+  room_id: string;
+  author: string;
+  title: string;
+  body: string;
+  image_url: string;
+  created_at: number;
+  comment_count: number;
+  reactions: Record<string, string[]>;
+  edited?: boolean;
+  edited_at?: number;
+}
+
+export interface ForumComment {
+  comment_id: string;
+  post_id: string;
+  room_id: string;
+  author: string;
+  body: string;
+  image_url: string;
+  created_at: number;
+  edited?: boolean;
+  edited_at?: number;
+}
+
+export async function apiCreateForumPost(roomId: string, title: string, body: string, imageUrl?: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts`, {
+    method: "POST",
+    body: JSON.stringify({ title, body, image_url: imageUrl }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to create post");
+  }
+  return res.json() as Promise<{ post_id: string }>;
+}
+
+export async function apiListForumPosts(roomId: string, limit?: number, before?: number) {
+  let url = `/api/forum/${roomId}/posts?limit=${limit || 20}`;
+  if (before !== undefined) url += `&before=${before}`;
+  const res = await authenticatedFetch(url);
+  if (!res.ok) throw new Error("Failed to load posts");
+  return res.json() as Promise<{ posts: ForumPost[]; has_more: boolean }>;
+}
+
+export async function apiGetForumPost(roomId: string, postId: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}`);
+  if (!res.ok) throw new Error("Failed to load post");
+  return res.json() as Promise<{ post: ForumPost; comments: ForumComment[] }>;
+}
+
+export async function apiDeleteForumPost(roomId: string, postId: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to delete post");
+  }
+  return res.json();
+}
+
+export async function apiCreateForumComment(roomId: string, postId: string, body: string, imageUrl?: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ body, image_url: imageUrl }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to create comment");
+  }
+  return res.json() as Promise<{ comment_id: string }>;
+}
+
+export async function apiDeleteForumComment(roomId: string, postId: string, commentId: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments/${commentId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to delete comment");
+  }
+  return res.json();
+}
+
+export async function apiEditForumPost(roomId: string, postId: string, title?: string, body?: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}`, {
+    method: "PUT",
+    body: JSON.stringify({ title, body }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to edit post");
+  }
+  return res.json();
+}
+
+export async function apiEditForumComment(roomId: string, postId: string, commentId: string, body: string) {
+  const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments/${commentId}`, {
+    method: "PUT",
+    body: JSON.stringify({ body }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to edit comment");
+  }
+  return res.json();
 }

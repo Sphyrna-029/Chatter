@@ -70,6 +70,48 @@ pub(crate) struct RoomRecord {
     pub(crate) unlisted: bool,
     #[serde(default)]
     pub(crate) password_hash: String,
+    #[serde(default)]
+    pub(crate) room_type: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ForumPostRecord {
+    #[serde(rename = "_id")]
+    pub(crate) post_id: String,
+    pub(crate) room_id: String,
+    pub(crate) author: String,
+    pub(crate) title: String,
+    pub(crate) body: String,
+    #[serde(default)]
+    pub(crate) image_url: String,
+    pub(crate) created_at: i64,
+    #[serde(default)]
+    pub(crate) comment_count: i64,
+    #[serde(default)]
+    pub(crate) deleted: bool,
+    #[serde(default)]
+    pub(crate) edited: bool,
+    #[serde(default)]
+    pub(crate) edited_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ForumCommentRecord {
+    #[serde(rename = "_id")]
+    pub(crate) comment_id: String,
+    pub(crate) post_id: String,
+    pub(crate) room_id: String,
+    pub(crate) author: String,
+    pub(crate) body: String,
+    #[serde(default)]
+    pub(crate) image_url: String,
+    pub(crate) created_at: i64,
+    #[serde(default)]
+    pub(crate) deleted: bool,
+    #[serde(default)]
+    pub(crate) edited: bool,
+    #[serde(default)]
+    pub(crate) edited_at: i64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

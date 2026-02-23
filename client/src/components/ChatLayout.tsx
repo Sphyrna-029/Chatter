@@ -3,6 +3,7 @@ import { WifiOff, ChevronRight } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
+import { ForumArea } from "./ForumArea";
 import { MembersPanel } from "./MembersPanel";
 import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
@@ -68,6 +69,9 @@ export function ChatLayout() {
     loadRooms();
   }, [loadRooms]);
 
+  const isForumRoom = state.currentRoomId
+    ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"
+    : false;
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
     state.screenViewerOpen &&
@@ -301,10 +305,12 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* Main content: voice column + chat + members */}
+            {/* Main content: voice column + chat/forum + members */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              <VoiceControls joinVoiceRef={joinVoiceRef} />
-              {showViewer ? (
+              {!isForumRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
+              {isForumRoom ? (
+                <ForumArea />
+              ) : showViewer ? (
                 <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
                   {/* Header lives outside the resizable panels — always visible */}
                   <ScreenShareHeader

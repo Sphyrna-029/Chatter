@@ -24,6 +24,7 @@ pub(crate) struct CreateRoomRequest {
     pub(crate) icon_url: Option<String>,
     pub(crate) unlisted: Option<bool>,
     pub(crate) password: Option<String>,
+    pub(crate) room_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -102,4 +103,34 @@ pub(crate) struct SetRoleRequest {
 pub(crate) struct SetNameColorRequest {
     pub(crate) owner_color: Option<String>,
     pub(crate) mod_color: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateForumPostRequest {
+    pub(crate) title: String,
+    pub(crate) body: String,
+    pub(crate) image_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateForumCommentRequest {
+    pub(crate) body: String,
+    pub(crate) image_url: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct EditForumPostRequest {
+    pub(crate) title: Option<String>,
+    pub(crate) body: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct EditForumCommentRequest {
+    pub(crate) body: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ForumPostsQuery {
+    pub(crate) limit: Option<i64>,
+    pub(crate) before: Option<i64>,
 }
