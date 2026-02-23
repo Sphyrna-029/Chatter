@@ -1,7 +1,7 @@
 use super::super::{
     dto::SyncQuery,
     helpers::{error_response, extract_token, get_user_from_token},
-    state::{AppState, RoomRecord},
+    state::{AppState, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -27,6 +27,7 @@ pub(crate) async fn sync(
     let room_roles = state.room_roles.read().await;
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let users_coll = state.db.collection::<UserRecord>("users");
 
     let mut joined_rooms_data = serde_json::Map::new();
 
@@ -58,10 +59,24 @@ pub(crate) async fn sync(
         }
         last_msgs.reverse(); // chronological order
 
+        // Build a map of display_names for members in this room
+        let mut member_display_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for mid in members {
+            if let Ok(Some(u)) = users_coll.find_one(doc! { "_id": mid }).await {
+                if !u.display_name.is_empty() {
+                    member_display_names.insert(mid.clone(), u.display_name);
+                }
+            }
+        }
+
         let member_events: Vec<Value> = members
             .iter()
             .map(|mid| {
-                let display = mid.split(':').next().unwrap_or(mid).trim_start_matches('@');
+                let display = member_display_names.get(mid)
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        mid.split(':').next().unwrap_or(mid).trim_start_matches('@')
+                    });
                 let mut role = room_roles
                     .get(room_id)
                     .and_then(|m| m.get(mid))

@@ -108,6 +108,10 @@ pub(crate) async fn get_room_presence(
                 .as_ref()
                 .map(|u| u.banner_url.as_str())
                 .unwrap_or("");
+            let display_name = user_record
+                .as_ref()
+                .map(|u| u.display_name.as_str())
+                .unwrap_or("");
 
             if let Some(presence) = up.get(member_id) {
                 let time_since_active = current_time - presence.last_active;
@@ -130,7 +134,8 @@ pub(crate) async fn get_room_presence(
                         "custom_status": presence.custom_status,
                         "avatar_url": avatar_url,
                         "about": about,
-                        "banner_url": banner_url
+                        "banner_url": banner_url,
+                        "display_name": display_name
                     }),
                 );
             } else {
@@ -142,7 +147,8 @@ pub(crate) async fn get_room_presence(
                         "last_typing": 0,
                         "avatar_url": avatar_url,
                         "about": about,
-                        "banner_url": banner_url
+                        "banner_url": banner_url,
+                        "display_name": display_name
                     }),
                 );
             }

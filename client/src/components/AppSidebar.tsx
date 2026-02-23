@@ -35,7 +35,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     Record<string, RoomSummary>
   >({});
 
-  const displayName = state.userId?.split(":")[0]?.substring(1) || "User";
+  const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || state.userId?.split(":")[0]?.substring(1) || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
 
   const fetchSummaries = useCallback(async () => {

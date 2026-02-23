@@ -328,7 +328,8 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     return walk(div).replace(/\n+$/, "");
   }, []);
   const isSystem = message.content.msgtype === "m.system";
-  const sender = message.sender.split(":")[0].substring(1);
+  const senderUsername = message.sender.split(":")[0].substring(1);
+  const sender = state.userPresence[message.sender]?.displayName || senderUsername;
   const initial = sender.substring(0, 1).toUpperCase();
   const time = new Date(message.origin_server_ts).toLocaleTimeString([], {
     hour: "2-digit",
@@ -410,7 +411,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   };
 
   const replySender = message.content.reply_to_sender
-    ? message.content.reply_to_sender.split(":")[0].substring(1)
+    ? (state.userPresence[message.content.reply_to_sender]?.displayName || message.content.reply_to_sender.split(":")[0].substring(1))
     : null;
 
   return (

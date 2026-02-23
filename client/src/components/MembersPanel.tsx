@@ -55,7 +55,8 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     const presence = state.userPresence[member.userId];
     const status = presence?.status || "offline";
     const customStatus = presence?.customStatus;
-    const initial = member.displayName[0]?.toUpperCase() || "?";
+    const effectiveName = presence?.displayName || member.displayName;
+    const initial = effectiveName[0]?.toUpperCase() || "?";
 
     const nameColor =
       member.role === "owner" && roomInfo?.owner_name_color
@@ -68,7 +69,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
       <div
         key={member.userId}
         onClick={() => {
-          setSelectedMember(member);
+          setSelectedMember({ ...member, displayName: effectiveName });
           setProfileOpen(true);
         }}
         className={cn(
@@ -102,7 +103,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
               )}
               style={nameColor ? { color: nameColor } : undefined}
             >
-              {member.displayName}
+              {effectiveName}
             </span>
             {member.role === "owner" && (
               <Crown className="h-3 w-3 text-yellow-500 shrink-0" />

@@ -47,6 +47,8 @@ pub(crate) struct UserRecord {
     pub(crate) about: String,
     #[serde(default)]
     pub(crate) banner_url: String,
+    #[serde(default)]
+    pub(crate) display_name: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

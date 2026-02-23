@@ -48,10 +48,10 @@ export function createWsMessageHandler(
               });
             }
             const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string }> = {};
+            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string }> = {};
             for (const [uid, p] of Object.entries(presData.presence)) {
               const pAny = p as any;
-              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined };
+              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined };
             }
             dispatch({ type: "SET_PRESENCE", payload: mapped });
           } catch {}
@@ -103,7 +103,7 @@ export function createWsMessageHandler(
           type: "SET_PRESENCE",
           payload: {
             ...stateRef.current.userPresence,
-            [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about },
+            [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about, displayName: existing?.displayName },
           },
         });
       }
@@ -166,6 +166,7 @@ export function createWsMessageHandler(
               avatarUrl: msg.avatar_url !== undefined ? (msg.avatar_url || undefined) : existing?.avatarUrl,
               about: msg.about !== undefined ? (msg.about || undefined) : existing?.about,
               bannerUrl: msg.banner_url !== undefined ? (msg.banner_url || undefined) : existing?.bannerUrl,
+              displayName: msg.display_name !== undefined ? (msg.display_name || undefined) : existing?.displayName,
             },
           },
         });

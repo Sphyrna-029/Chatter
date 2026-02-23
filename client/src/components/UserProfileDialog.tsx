@@ -68,6 +68,7 @@ export function UserProfileDialog({
 }: UserProfileDialogProps) {
   const { state, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole } = useAppContext();
   const isSelf = userId === state.userId;
+  const username = userId.split(":")[0]?.substring(1) || displayName;
   const presence = state.userPresence[userId];
   const status = presence?.status || "offline";
   const customStatus = presence?.customStatus || "";
@@ -76,6 +77,8 @@ export function UserProfileDialog({
   const bannerUrl = presence?.bannerUrl || "";
   const initial = displayName[0]?.toUpperCase() || "?";
 
+  const nicknameFromPresence = presence?.displayName || "";
+  const [nicknameInput, setNicknameInput] = useState(nicknameFromPresence);
   const [statusInput, setStatusInput] = useState(customStatus);
   const [aboutInput, setAboutInput] = useState(about);
   const [avatarPreview, setAvatarPreview] = useState(avatarUrl);
@@ -94,6 +97,7 @@ export function UserProfileDialog({
 
   useEffect(() => {
     if (open) {
+      setNicknameInput(nicknameFromPresence);
       setStatusInput(customStatus);
       setAboutInput(about);
       setAvatarPreview(avatarUrl);
@@ -102,7 +106,7 @@ export function UserProfileDialog({
       setPendingBannerFile(null);
       setActiveTab("profile");
     }
-  }, [open, customStatus, about, avatarUrl, bannerUrl]);
+  }, [open, customStatus, about, avatarUrl, bannerUrl, nicknameFromPresence]);
 
   const fetchUploads = useCallback(async () => {
     setLoadingUploads(true);
@@ -192,6 +196,7 @@ export function UserProfileDialog({
         bannerUrl: newBannerUrl !== undefined ? newBannerUrl : undefined,
         about: aboutInput.trim(),
         customStatus: statusInput.trim(),
+        displayName: nicknameInput.trim(),
       });
       onOpenChange(false);
     } finally {
@@ -200,6 +205,7 @@ export function UserProfileDialog({
   };
 
   const hasChanges =
+    nicknameInput.trim() !== nicknameFromPresence ||
     statusInput.trim() !== customStatus ||
     aboutInput.trim() !== about ||
     pendingAvatarFile !== null ||
@@ -266,11 +272,25 @@ export function UserProfileDialog({
       {/* Rest of profile content */}
       <div className="flex flex-col items-center gap-4 px-5 pb-5">
         <div className="text-center space-y-1 w-full">
-          <h2 className="text-lg font-semibold">{displayName}</h2>
+          <h2 className="text-lg font-semibold">{presence?.displayName || username}</h2>
+          {presence?.displayName && (
+            <p className="text-xs text-muted-foreground/70">{username}</p>
+          )}
           <p className="text-sm text-muted-foreground">{userId}</p>
         </div>
 
       {isSelf ? (
+        <>
+        <div className="w-full space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">Display Name</label>
+          <Input
+            value={nicknameInput}
+            onChange={(e) => setNicknameInput(e.target.value)}
+            placeholder="Set a display name..."
+            className="text-sm"
+            maxLength={32}
+          />
+        </div>
         <div className="w-full">
           <p className="text-xs font-medium text-muted-foreground mb-2">Status</p>
           <DropdownMenu>
@@ -310,6 +330,7 @@ export function UserProfileDialog({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        </>
       ) : (
         <div className="flex items-center gap-2">
           <span className={cn("h-2.5 w-2.5 rounded-full", statusColor(status))} />
