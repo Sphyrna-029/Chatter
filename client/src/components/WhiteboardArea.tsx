@@ -43,6 +43,128 @@ const PRESET_COLORS = [
   "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280",
 ];
 
+// ─── Pure drawing helper (no hooks, no state) ───────────────────────────────
+
+type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
+
+function drawStrokeToCtx(ctx: Ctx2D, stroke: WhiteboardStroke) {
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.globalCompositeOperation = "source-over";
+
+  if (stroke.tool === "eraser") {
+    ctx.strokeStyle = "#ffffff";
+    ctx.fillStyle = "#ffffff";
+  } else {
+    ctx.strokeStyle = stroke.color;
+    ctx.fillStyle = stroke.color;
+  }
+  ctx.lineWidth = stroke.width;
+
+  const pts = stroke.points;
+  if (!pts || pts.length === 0) return;
+
+  switch (stroke.tool) {
+    case "pen":
+    case "eraser": {
+      ctx.beginPath();
+      ctx.moveTo(pts[0][0], pts[0][1]);
+      for (let i = 1; i < pts.length; i++) {
+        ctx.lineTo(pts[i][0], pts[i][1]);
+      }
+      ctx.stroke();
+      break;
+    }
+    case "fill": {
+      if (pts.length >= 1) {
+        const px = Math.floor(pts[0][0]);
+        const py = Math.floor(pts[0][1]);
+        const imageData = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
+        const data = imageData.data;
+
+        const targetIdx = (py * CANVAS_W + px) * 4;
+        const tR = data[targetIdx], tG = data[targetIdx + 1], tB = data[targetIdx + 2], tA = data[targetIdx + 3];
+        const fR = parseInt(stroke.color.slice(1, 3), 16);
+        const fG = parseInt(stroke.color.slice(3, 5), 16);
+        const fB = parseInt(stroke.color.slice(5, 7), 16);
+
+        if (!(tR === fR && tG === fG && tB === fB && tA === 255)) {
+          const stack = [[px, py]];
+          const visited = new Uint8Array(CANVAS_W * CANVAS_H);
+
+          while (stack.length > 0) {
+            const [cx, cy] = stack.pop()!;
+            if (cx < 0 || cx >= CANVAS_W || cy < 0 || cy >= CANVAS_H) continue;
+            const ci = cy * CANVAS_W + cx;
+            if (visited[ci]) continue;
+            const idx = ci * 4;
+            if (data[idx] !== tR || data[idx + 1] !== tG || data[idx + 2] !== tB || data[idx + 3] !== tA) continue;
+
+            visited[ci] = 1;
+            data[idx] = fR;
+            data[idx + 1] = fG;
+            data[idx + 2] = fB;
+            data[idx + 3] = 255;
+
+            stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+          }
+          ctx.putImageData(imageData, 0, 0);
+        }
+      }
+      break;
+    }
+    case "line": {
+      if (pts.length >= 2) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
+        ctx.stroke();
+      }
+      break;
+    }
+    case "rect": {
+      if (pts.length >= 2) {
+        const x = Math.min(pts[0][0], pts[1][0]);
+        const y = Math.min(pts[0][1], pts[1][1]);
+        const w = Math.abs(pts[1][0] - pts[0][0]);
+        const h = Math.abs(pts[1][1] - pts[0][1]);
+        if (stroke.fill) {
+          ctx.fillRect(x, y, w, h);
+        } else {
+          ctx.strokeRect(x, y, w, h);
+        }
+      }
+      break;
+    }
+    case "circle": {
+      if (pts.length >= 2) {
+        const cx = (pts[0][0] + pts[1][0]) / 2;
+        const cy = (pts[0][1] + pts[1][1]) / 2;
+        const rx = Math.abs(pts[1][0] - pts[0][0]) / 2;
+        const ry = Math.abs(pts[1][1] - pts[0][1]) / 2;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+        if (stroke.fill) {
+          ctx.fill();
+        } else {
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+  }
+}
+
+/** Render all strokes to a context (with white bg). Used for full rebuilds. */
+function renderAllStrokes(ctx: Ctx2D, strokes: WhiteboardStroke[]) {
+  ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  for (const s of strokes) {
+    drawStrokeToCtx(ctx, s);
+  }
+}
+
 export function WhiteboardArea() {
   const { state, wsRef } = useAppContext();
   const roomId = state.currentRoomId;
@@ -51,23 +173,73 @@ export function WhiteboardArea() {
   const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(3);
-  const [strokes, setStrokes] = useState<WhiteboardStroke[]>([]);
   const [cursors, setCursors] = useState<Map<string, CursorInfo>>(new Map());
 
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const activeCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Offscreen buffer: holds the composited image of all committed strokes.
+  // We draw new strokes incrementally onto this buffer instead of replaying all.
+  const bufferRef = useRef<OffscreenCanvas | null>(null);
+  // Track strokes for undo / full rebuild
+  const strokesRef = useRef<WhiteboardStroke[]>([]);
+  // How many strokes are already rendered in the buffer
+  const renderedCountRef = useRef(0);
+  // Mounted flag to skip work after unmount
+  const mountedRef = useRef(true);
+
   const isDrawing = useRef(false);
   const currentPoints = useRef<number[][]>([]);
   const shapeStart = useRef<number[] | null>(null);
   const lastCursorSend = useRef(0);
-  const strokesRef = useRef(strokes);
-  strokesRef.current = strokes;
 
   const isOwnerOrMod = state.roomMembers.some(
     (m) => m.userId === userId && (m.role === "owner" || m.role === "moderator")
   );
+
+  // Ensure buffer exists
+  const getBuffer = useCallback(() => {
+    if (!bufferRef.current) {
+      bufferRef.current = new OffscreenCanvas(CANVAS_W, CANVAS_H);
+      const ctx = bufferRef.current.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    }
+    return bufferRef.current;
+  }, []);
+
+  // Blit the offscreen buffer onto the visible base canvas
+  const blitToScreen = useCallback(() => {
+    const canvas = baseCanvasRef.current;
+    const buffer = bufferRef.current;
+    if (!canvas || !buffer) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    ctx.drawImage(buffer, 0, 0);
+  }, []);
+
+  // Full rebuild of the buffer from the strokes array (used after undo/clear/load)
+  const fullRebuild = useCallback((strokes: WhiteboardStroke[]) => {
+    const buffer = getBuffer();
+    const ctx = buffer.getContext("2d")!;
+    renderAllStrokes(ctx, strokes);
+    renderedCountRef.current = strokes.length;
+    blitToScreen();
+  }, [getBuffer, blitToScreen]);
+
+  // Draw only the newly added strokes (incremental)
+  const drawIncremental = useCallback((strokes: WhiteboardStroke[]) => {
+    const buffer = getBuffer();
+    const ctx = buffer.getContext("2d")!;
+    const start = renderedCountRef.current;
+    for (let i = start; i < strokes.length; i++) {
+      drawStrokeToCtx(ctx, strokes[i]);
+    }
+    renderedCountRef.current = strokes.length;
+    blitToScreen();
+  }, [getBuffer, blitToScreen]);
 
   // Get canvas coordinates from mouse event
   const getCanvasPos = useCallback((e: React.MouseEvent<HTMLCanvasElement>): [number, number] => {
@@ -82,173 +254,44 @@ export function WhiteboardArea() {
     ];
   }, []);
 
-  // ─── Rendering helpers ──────────────────────────────────────────────────────
-
-  const drawStroke = useCallback((ctx: CanvasRenderingContext2D, stroke: WhiteboardStroke) => {
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-
-    ctx.globalCompositeOperation = "source-over";
-    if (stroke.tool === "eraser") {
-      ctx.strokeStyle = "#ffffff";
-      ctx.fillStyle = "#ffffff";
-    } else {
-      ctx.strokeStyle = stroke.color;
-      ctx.fillStyle = stroke.color;
-    }
-    ctx.lineWidth = stroke.width;
-
-    const pts = stroke.points;
-    if (!pts || pts.length === 0) return;
-
-    switch (stroke.tool) {
-      case "pen":
-      case "eraser": {
-        ctx.beginPath();
-        ctx.moveTo(pts[0][0], pts[0][1]);
-        for (let i = 1; i < pts.length; i++) {
-          ctx.lineTo(pts[i][0], pts[i][1]);
-        }
-        ctx.stroke();
-        break;
-      }
-      case "fill": {
-        // Fill is a pixel-level operation — replay it by flood-filling on the canvas
-        if (pts.length >= 1) {
-          const px = Math.floor(pts[0][0]);
-          const py = Math.floor(pts[0][1]);
-          const imageData = ctx.getImageData(0, 0, CANVAS_W, CANVAS_H);
-          const data = imageData.data;
-
-          const targetIdx = (py * CANVAS_W + px) * 4;
-          const targetR = data[targetIdx];
-          const targetG = data[targetIdx + 1];
-          const targetB = data[targetIdx + 2];
-          const targetA = data[targetIdx + 3];
-
-          const fillR = parseInt(stroke.color.slice(1, 3), 16);
-          const fillG = parseInt(stroke.color.slice(3, 5), 16);
-          const fillB = parseInt(stroke.color.slice(5, 7), 16);
-
-          if (!(targetR === fillR && targetG === fillG && targetB === fillB && targetA === 255)) {
-            const match = (idx: number) =>
-              data[idx] === targetR &&
-              data[idx + 1] === targetG &&
-              data[idx + 2] === targetB &&
-              data[idx + 3] === targetA;
-
-            const stack = [[px, py]];
-            const visited = new Uint8Array(CANVAS_W * CANVAS_H);
-
-            while (stack.length > 0) {
-              const [cx, cy] = stack.pop()!;
-              if (cx < 0 || cx >= CANVAS_W || cy < 0 || cy >= CANVAS_H) continue;
-              const ci = cy * CANVAS_W + cx;
-              if (visited[ci]) continue;
-              const idx = ci * 4;
-              if (!match(idx)) continue;
-
-              visited[ci] = 1;
-              data[idx] = fillR;
-              data[idx + 1] = fillG;
-              data[idx + 2] = fillB;
-              data[idx + 3] = 255;
-
-              stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
-            }
-
-            ctx.putImageData(imageData, 0, 0);
-          }
-        }
-        break;
-      }
-      case "line": {
-        if (pts.length >= 2) {
-          ctx.beginPath();
-          ctx.moveTo(pts[0][0], pts[0][1]);
-          ctx.lineTo(pts[pts.length - 1][0], pts[pts.length - 1][1]);
-          ctx.stroke();
-        }
-        break;
-      }
-      case "rect": {
-        if (pts.length >= 2) {
-          const x = Math.min(pts[0][0], pts[1][0]);
-          const y = Math.min(pts[0][1], pts[1][1]);
-          const w = Math.abs(pts[1][0] - pts[0][0]);
-          const h = Math.abs(pts[1][1] - pts[0][1]);
-          if (stroke.fill) {
-            ctx.fillRect(x, y, w, h);
-          } else {
-            ctx.strokeRect(x, y, w, h);
-          }
-        }
-        break;
-      }
-      case "circle": {
-        if (pts.length >= 2) {
-          const cx = (pts[0][0] + pts[1][0]) / 2;
-          const cy = (pts[0][1] + pts[1][1]) / 2;
-          const rx = Math.abs(pts[1][0] - pts[0][0]) / 2;
-          const ry = Math.abs(pts[1][1] - pts[0][1]) / 2;
-          ctx.beginPath();
-          ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-          if (stroke.fill) {
-            ctx.fill();
-          } else {
-            ctx.stroke();
-          }
-        }
-        break;
-      }
-    }
-  }, []);
-
-  const renderBaseCanvas = useCallback(() => {
-    const canvas = baseCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-    // White background
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-    for (const stroke of strokesRef.current) {
-      drawStroke(ctx, stroke);
-    }
-  }, [drawStroke]);
-
   // ─── Load strokes on mount / room change ────────────────────────────────────
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   useEffect(() => {
     if (!roomId) return;
     let cancelled = false;
+    // Reset buffer for new room
+    bufferRef.current = null;
+    strokesRef.current = [];
+    renderedCountRef.current = 0;
+
     apiGetWhiteboardStrokes(roomId).then((res) => {
-      if (!cancelled) {
-        setStrokes(res.strokes);
-      }
+      if (cancelled || !mountedRef.current) return;
+      strokesRef.current = res.strokes;
+      fullRebuild(res.strokes);
     }).catch(() => {});
     return () => { cancelled = true; };
-  }, [roomId]);
-
-  // Re-render base canvas when strokes change
-  useEffect(() => {
-    renderBaseCanvas();
-  }, [strokes, renderBaseCanvas]);
+  }, [roomId, fullRebuild]);
 
   // ─── WS event listeners ─────────────────────────────────────────────────────
 
   useEffect(() => {
     const onStroke = (e: Event) => {
+      if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId) return;
       const stroke = detail.stroke as WhiteboardStroke;
-      // Don't duplicate our own strokes (we already added them optimistically)
       if (stroke.user_id === userId) return;
-      setStrokes((prev) => [...prev, stroke]);
+      strokesRef.current = [...strokesRef.current, stroke];
+      drawIncremental(strokesRef.current);
     };
 
     const onCursor = (e: Event) => {
+      if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId || detail.user_id === userId) return;
       setCursors((prev) => {
@@ -264,16 +307,20 @@ export function WhiteboardArea() {
     };
 
     const onClear = (e: Event) => {
+      if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId) return;
-      setStrokes([]);
+      strokesRef.current = [];
+      fullRebuild([]);
     };
 
     const onUndo = (e: Event) => {
+      if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId) return;
-      if (detail.user_id === userId) return; // Already handled locally
-      setStrokes((prev) => prev.filter((s) => s.stroke_id !== detail.stroke_id));
+      if (detail.user_id === userId) return;
+      strokesRef.current = strokesRef.current.filter((s) => s.stroke_id !== detail.stroke_id);
+      fullRebuild(strokesRef.current);
     };
 
     window.addEventListener("whiteboard_stroke", onStroke);
@@ -286,7 +333,7 @@ export function WhiteboardArea() {
       window.removeEventListener("whiteboard_clear", onClear);
       window.removeEventListener("whiteboard_undo", onUndo);
     };
-  }, [roomId, userId]);
+  }, [roomId, userId, drawIncremental, fullRebuild]);
 
   // Fade out old cursors
   useEffect(() => {
@@ -317,12 +364,16 @@ export function WhiteboardArea() {
     }
   }, [wsRef]);
 
+  const addStrokeLocal = useCallback((stroke: WhiteboardStroke) => {
+    strokesRef.current = [...strokesRef.current, stroke];
+    drawIncremental(strokesRef.current);
+  }, [drawIncremental]);
+
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!roomId) return;
     const [x, y] = getCanvasPos(e);
 
     if (tool === "fill") {
-      // Send fill as a stroke with single point
       const fillStroke: WhiteboardStroke = {
         stroke_id: `local_${Date.now()}`,
         user_id: userId || "",
@@ -333,7 +384,7 @@ export function WhiteboardArea() {
         fill: true,
         timestamp: Date.now(),
       };
-      setStrokes((prev) => [...prev, fillStroke]);
+      addStrokeLocal(fillStroke);
       sendWs({
         type: "whiteboard_stroke",
         room_id: roomId,
@@ -353,7 +404,7 @@ export function WhiteboardArea() {
     } else {
       shapeStart.current = [x, y];
     }
-  }, [roomId, tool, color, width, getCanvasPos, userId, sendWs]);
+  }, [roomId, tool, color, getCanvasPos, userId, sendWs, addStrokeLocal]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!roomId) return;
@@ -377,33 +428,35 @@ export function WhiteboardArea() {
 
     if (tool === "pen" || tool === "eraser") {
       currentPoints.current.push([x, y]);
-      // Draw current freehand stroke on active canvas
-      const preview: WhiteboardStroke = {
-        stroke_id: "",
-        user_id: "",
-        tool,
-        color,
-        width,
-        points: currentPoints.current,
-        fill: false,
-        timestamp: 0,
-      };
-      drawStroke(ctx, preview);
+      drawStrokeToCtx(ctx, {
+        stroke_id: "", user_id: "", tool, color, width,
+        points: currentPoints.current, fill: false, timestamp: 0,
+      });
     } else if (shapeStart.current) {
-      // Shape preview
-      const preview: WhiteboardStroke = {
-        stroke_id: "",
-        user_id: "",
-        tool,
-        color,
-        width,
-        points: [shapeStart.current, [x, y]],
-        fill: false,
-        timestamp: 0,
-      };
-      drawStroke(ctx, preview);
+      drawStrokeToCtx(ctx, {
+        stroke_id: "", user_id: "", tool, color, width,
+        points: [shapeStart.current, [x, y]], fill: false, timestamp: 0,
+      });
     }
-  }, [roomId, tool, color, width, getCanvasPos, sendWs, drawStroke]);
+  }, [roomId, tool, color, width, getCanvasPos, sendWs]);
+
+  const finishStroke = useCallback((points: number[][]) => {
+    if (!roomId || points.length === 0) return;
+    const localStroke: WhiteboardStroke = {
+      stroke_id: `local_${Date.now()}`,
+      user_id: userId || "",
+      tool, color, width, points,
+      fill: false,
+      timestamp: Date.now(),
+    };
+    addStrokeLocal(localStroke);
+    sendWs({
+      type: "whiteboard_stroke",
+      room_id: roomId,
+      tool, color, width, points,
+      fill: false,
+    });
+  }, [roomId, tool, color, width, userId, sendWs, addStrokeLocal]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current || !roomId) return;
@@ -411,7 +464,6 @@ export function WhiteboardArea() {
 
     const [x, y] = getCanvasPos(e);
 
-    // Clear active canvas
     const activeCanvas = activeCanvasRef.current;
     if (activeCanvas) {
       const ctx = activeCanvas.getContext("2d");
@@ -429,50 +481,28 @@ export function WhiteboardArea() {
       return;
     }
 
-    if (points.length === 0) return;
-
-    // Add locally (optimistic)
-    const localStroke: WhiteboardStroke = {
-      stroke_id: `local_${Date.now()}`,
-      user_id: userId || "",
-      tool,
-      color,
-      width,
-      points,
-      fill: false,
-      timestamp: Date.now(),
-    };
-    setStrokes((prev) => [...prev, localStroke]);
-
-    // Send over WS
-    sendWs({
-      type: "whiteboard_stroke",
-      room_id: roomId,
-      tool,
-      color,
-      width,
-      points,
-      fill: false,
-    });
-  }, [roomId, tool, color, width, getCanvasPos, userId, sendWs]);
+    finishStroke(points);
+  }, [roomId, tool, getCanvasPos, finishStroke]);
 
   const handleUndo = useCallback(() => {
     if (!roomId || !userId) return;
-    // Remove user's last stroke locally
-    setStrokes((prev) => {
-      const idx = [...prev].reverse().findIndex((s) => s.user_id === userId);
-      if (idx === -1) return prev;
-      const actualIdx = prev.length - 1 - idx;
-      return [...prev.slice(0, actualIdx), ...prev.slice(actualIdx + 1)];
-    });
+    const idx = [...strokesRef.current].reverse().findIndex((s) => s.user_id === userId);
+    if (idx === -1) return;
+    const actualIdx = strokesRef.current.length - 1 - idx;
+    strokesRef.current = [
+      ...strokesRef.current.slice(0, actualIdx),
+      ...strokesRef.current.slice(actualIdx + 1),
+    ];
+    fullRebuild(strokesRef.current);
     sendWs({ type: "whiteboard_undo", room_id: roomId });
-  }, [roomId, userId, sendWs]);
+  }, [roomId, userId, sendWs, fullRebuild]);
 
   const handleClear = useCallback(() => {
     if (!roomId) return;
     sendWs({ type: "whiteboard_clear", room_id: roomId });
-    setStrokes([]);
-  }, [roomId, sendWs]);
+    strokesRef.current = [];
+    fullRebuild([]);
+  }, [roomId, sendWs, fullRebuild]);
 
   // ─── Render cursors on active canvas ────────────────────────────────────────
 
@@ -482,7 +512,6 @@ export function WhiteboardArea() {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Only redraw cursors if not currently drawing (don't clear active preview)
     if (isDrawing.current) return;
 
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
@@ -493,7 +522,6 @@ export function WhiteboardArea() {
       if (age > CURSOR_FADE_MS) return;
       const opacity = Math.max(0, 1 - age / CURSOR_FADE_MS);
 
-      // Cursor dot
       ctx.globalAlpha = opacity;
       ctx.beginPath();
       ctx.arc(cursor.x, cursor.y, 5, 0, Math.PI * 2);
@@ -503,7 +531,6 @@ export function WhiteboardArea() {
       ctx.lineWidth = 2;
       ctx.stroke();
 
-      // Username label
       const displayName = state.roomMembers.find((m) => m.userId === cursor.userId)?.displayName
         || cursor.userId.replace(/^@/, "");
       ctx.font = "bold 16px sans-serif";
@@ -512,10 +539,6 @@ export function WhiteboardArea() {
       ctx.globalAlpha = 1;
     });
   }, [cursors, state.roomMembers]);
-
-  // ─── Cursor style ──────────────────────────────────────────────────────────
-
-  const cursorStyle = tool === "fill" ? "crosshair" : "crosshair";
 
   if (!roomId) return null;
 
@@ -629,43 +652,22 @@ export function WhiteboardArea() {
             width={CANVAS_W}
             height={CANVAS_H}
             className="absolute inset-0 w-full h-full"
-            style={{ cursor: cursorStyle, imageRendering: "auto" }}
+            style={{ cursor: "crosshair", imageRendering: "auto" }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={() => {
               if (isDrawing.current) {
-                // Treat leaving canvas as mouseup
                 isDrawing.current = false;
                 const activeCanvas = activeCanvasRef.current;
                 if (activeCanvas) {
                   const ctx = activeCanvas.getContext("2d");
                   ctx?.clearRect(0, 0, CANVAS_W, CANVAS_H);
                 }
-                // Send whatever was drawn
-                if (currentPoints.current.length > 0 && roomId) {
+                if (currentPoints.current.length > 0) {
                   const points = currentPoints.current;
                   currentPoints.current = [];
-                  const localStroke: WhiteboardStroke = {
-                    stroke_id: `local_${Date.now()}`,
-                    user_id: userId || "",
-                    tool,
-                    color,
-                    width,
-                    points,
-                    fill: false,
-                    timestamp: Date.now(),
-                  };
-                  setStrokes((prev) => [...prev, localStroke]);
-                  sendWs({
-                    type: "whiteboard_stroke",
-                    room_id: roomId,
-                    tool,
-                    color,
-                    width,
-                    points,
-                    fill: false,
-                  });
+                  finishStroke(points);
                 }
               }
             }}
