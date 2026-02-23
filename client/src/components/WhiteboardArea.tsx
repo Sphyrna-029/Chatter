@@ -13,6 +13,7 @@ import {
   PaintBucket,
   Undo2,
   Trash2,
+  Loader2,
 } from "lucide-react";
 
 type Tool = "pen" | "eraser" | "line" | "rect" | "circle" | "fill";
@@ -173,6 +174,7 @@ export function WhiteboardArea() {
   const [tool, setTool] = useState<Tool>("pen");
   const [color, setColor] = useState("#000000");
   const [width, setWidth] = useState(3);
+  const [loading, setLoading] = useState(true);
   const [cursors, setCursors] = useState<Map<string, CursorInfo>>(new Map());
 
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -268,12 +270,15 @@ export function WhiteboardArea() {
     bufferRef.current = null;
     strokesRef.current = [];
     renderedCountRef.current = 0;
+    setLoading(true);
 
     apiGetWhiteboardStrokes(roomId).then((res) => {
       if (cancelled || !mountedRef.current) return;
       strokesRef.current = res.strokes;
       fullRebuild(res.strokes);
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      if (!cancelled && mountedRef.current) setLoading(false);
+    });
     return () => { cancelled = true; };
   }, [roomId, fullRebuild]);
 
@@ -640,6 +645,14 @@ export function WhiteboardArea() {
         className="flex-1 min-h-0 min-w-0 overflow-auto bg-muted/30 flex items-center justify-center"
       >
         <div className="relative" style={{ width: "100%", height: "100%" }}>
+          {loading && (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
+              <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                <Loader2 className="h-8 w-8 animate-spin" />
+                <span className="text-sm">Loading canvas...</span>
+              </div>
+            </div>
+          )}
           <canvas
             ref={baseCanvasRef}
             width={CANVAS_W}
