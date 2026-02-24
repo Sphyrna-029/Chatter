@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
+import { useThemeSettings, THEMES } from "@/hooks/useThemeSettings";
 
 interface VoiceSettingsDialogProps {
   open: boolean;
@@ -22,6 +23,7 @@ export function VoiceSettingsDialog({
   onOpenChange,
 }: VoiceSettingsDialogProps) {
   const { settings, updateSettings } = useVoiceSettings();
+  const { themeId, setTheme } = useThemeSettings();
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [micLevel, setMicLevel] = useState(0);
@@ -163,7 +165,7 @@ export function VoiceSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Voice &amp; Audio Settings</DialogTitle>
+          <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
 
         <Tabs defaultValue="input">
@@ -176,6 +178,9 @@ export function VoiceSettingsDialog({
             </TabsTrigger>
             <TabsTrigger value="advanced" className="flex-1">
               Advanced
+            </TabsTrigger>
+            <TabsTrigger value="theme" className="flex-1">
+              Theme
             </TabsTrigger>
           </TabsList>
 
@@ -377,6 +382,40 @@ export function VoiceSettingsDialog({
                   updateSettings({ inputMode: v ? "ptt" : "open" })
                 }
               />
+            </div>
+          </TabsContent>
+
+          {/* ── Theme Tab ── */}
+          <TabsContent value="theme" className="mt-4">
+            <div className="grid grid-cols-2 gap-3">
+              {THEMES.map((theme) => (
+                <button
+                  key={theme.id}
+                  onClick={() => setTheme(theme.id)}
+                  className={`rounded-lg border-2 p-3 text-left transition-colors ${
+                    themeId === theme.id
+                      ? "border-primary"
+                      : "border-muted-foreground/20 hover:border-muted-foreground/40"
+                  }`}
+                  style={{ backgroundColor: theme.colors.background }}
+                >
+                  <span
+                    className="block text-sm font-medium mb-2"
+                    style={{ color: theme.colors.primary }}
+                  >
+                    {theme.name}
+                  </span>
+                  <div className="flex gap-1.5">
+                    {Object.values(theme.colors).map((color, i) => (
+                      <div
+                        key={i}
+                        className="h-4 w-4 rounded-full border border-white/10"
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
+                  </div>
+                </button>
+              ))}
             </div>
           </TabsContent>
         </Tabs>

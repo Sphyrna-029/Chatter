@@ -3,6 +3,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { ChatLayout } from "@/components/ChatLayout";
 import { InvitePage } from "@/components/InvitePage";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useThemeSettings } from "@/hooks/useThemeSettings";
 
 function getInviteCode(): string | null {
   const match = window.location.pathname.match(/^\/invite\/([A-Za-z0-9]+)$/);
@@ -25,6 +26,8 @@ function AppContent() {
 }
 
 function App() {
+  useThemeSettings();
+
   return (
     <AppProvider>
       <TooltipProvider>
