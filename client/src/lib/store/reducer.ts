@@ -229,6 +229,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ...(action.payload.icon_url !== undefined && { icon_url: action.payload.icon_url }),
             ...(action.payload.tags !== undefined && { tags: action.payload.tags }),
             ...(action.payload.custom_emojis !== undefined && { custom_emojis: action.payload.custom_emojis }),
+            ...(action.payload.emoji_aliases !== undefined && { emoji_aliases: action.payload.emoji_aliases }),
             ...(action.payload.unlisted !== undefined && { unlisted: action.payload.unlisted }),
             ...(action.payload.has_password !== undefined && { has_password: action.payload.has_password }),
           },

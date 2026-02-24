@@ -181,6 +181,7 @@ export function createWsMessageHandler(
           icon_url: msg.content?.icon_url,
           tags: msg.content?.tags,
           custom_emojis: msg.content?.custom_emojis,
+          emoji_aliases: msg.content?.emoji_aliases,
           unlisted: msg.content?.unlisted,
           has_password: msg.content?.has_password,
         },

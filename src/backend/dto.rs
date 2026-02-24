@@ -72,6 +72,7 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) icon_url: Option<String>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) custom_emojis: Option<Vec<String>>,
+    pub(crate) emoji_aliases: Option<std::collections::HashMap<String, String>>,
     pub(crate) unlisted: Option<bool>,
     pub(crate) password: Option<String>,
     pub(crate) remove_password: Option<bool>,

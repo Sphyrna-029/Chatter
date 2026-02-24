@@ -375,6 +375,7 @@ export interface RoomInfo {
   icon_url?: string;
   creator?: string;
   custom_emojis?: string[];
+  emoji_aliases?: Record<string, string>;
   owner_name_color?: string;
   mod_name_color?: string;
   unlisted?: boolean;
@@ -478,7 +479,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }
 ) {
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,

@@ -154,6 +154,12 @@ pub(crate) async fn sync(
                 "sender": room_data.creator
             }),
             json!({
+                "type": "m.room.emoji_aliases",
+                "state_key": "",
+                "content": {"emoji_aliases": room_data.emoji_aliases},
+                "sender": room_data.creator
+            }),
+            json!({
                 "type": "m.room.name_colors",
                 "state_key": "",
                 "content": {

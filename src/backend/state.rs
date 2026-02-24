@@ -63,6 +63,8 @@ pub(crate) struct RoomRecord {
     pub(crate) icon_url: String,
     pub(crate) custom_emojis: Vec<String>,
     #[serde(default)]
+    pub(crate) emoji_aliases: HashMap<String, String>,
+    #[serde(default)]
     pub(crate) owner_name_color: String,
     #[serde(default)]
     pub(crate) mod_name_color: String,

@@ -428,6 +428,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [customEmojis, setCustomEmojis] = useState<string[]>([]);
   const [emojiInput, setEmojiInput] = useState("");
   const [emojiUploading, setEmojiUploading] = useState(false);
+  const [emojiAliases, setEmojiAliases] = useState<Record<string, string>>({});
+  const [aliasNameInput, setAliasNameInput] = useState("");
+  const [aliasValueInput, setAliasValueInput] = useState("");
   const [invites, setInvites] = useState<{ code: string; click_count: number; created_at: number }[]>([]);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -452,6 +455,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setTagInput("");
       setCustomEmojis(info.custom_emojis || []);
       setEmojiInput("");
+      setEmojiAliases(info.emoji_aliases || {});
+      setAliasNameInput("");
+      setAliasValueInput("");
       setIconFile(null);
       setIconPreview(info.icon_url || null);
       setInvites([]);
@@ -475,13 +481,15 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
       if (JSON.stringify(tags) !== JSON.stringify(infoTags)) settings.tags = tags;
       const infoEmojis = info?.custom_emojis || [];
       if (JSON.stringify(customEmojis) !== JSON.stringify(infoEmojis)) settings.custom_emojis = customEmojis;
+      const infoAliases = info?.emoji_aliases || {};
+      if (JSON.stringify(emojiAliases) !== JSON.stringify(infoAliases)) settings.emoji_aliases = emojiAliases;
       if (settingsUnlisted !== (info?.unlisted || false)) settings.unlisted = settingsUnlisted;
       if (settingsPassword) settings.password = settingsPassword;
       if (Object.keys(settings).length > 0) {
@@ -544,6 +552,24 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       reader.onload = () => setIconPreview(reader.result as string);
       reader.readAsDataURL(file);
     }
+  };
+
+  const addAlias = () => {
+    const name = aliasNameInput.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const value = aliasValueInput.trim();
+    if (name && value) {
+      setEmojiAliases((prev) => ({ ...prev, [name]: value }));
+    }
+    setAliasNameInput("");
+    setAliasValueInput("");
+  };
+
+  const removeAlias = (name: string) => {
+    setEmojiAliases((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
   };
 
   return (
@@ -676,6 +702,77 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     </button>
                   </Badge>
                 ))}
+              </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label>Emoji Aliases</Label>
+            <p className="text-xs text-muted-foreground">Map shortcodes like :salute: to an emoji or custom image</p>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Alias name"
+                value={aliasNameInput}
+                onChange={(e) => setAliasNameInput(e.target.value)}
+                className="flex-1"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAlias();
+                  }
+                }}
+              />
+              <Input
+                placeholder="Emoji or URL"
+                value={aliasValueInput}
+                onChange={(e) => setAliasValueInput(e.target.value)}
+                className="flex-1"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addAlias();
+                  }
+                }}
+              />
+              <Button type="button" variant="outline" size="sm" onClick={addAlias} disabled={!aliasNameInput.trim() || !aliasValueInput.trim()}>
+                Add
+              </Button>
+            </div>
+            {customEmojis.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground">Or pick from room emojis:</p>
+                <div className="flex flex-wrap gap-1">
+                  {customEmojis.filter((e) => e.startsWith("/") || e.startsWith("http")).map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      className="h-7 w-7 rounded border border-border flex items-center justify-center hover:bg-accent/50 cursor-pointer"
+                      onClick={() => setAliasValueInput(emoji)}
+                      title="Click to use as alias value"
+                    >
+                      <img src={emoji} alt="emoji" className="w-5 h-5 object-contain" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {Object.keys(emojiAliases).length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1">
+                {Object.entries(emojiAliases).map(([name, value]) => {
+                  const isUrl = value.startsWith("/") || value.startsWith("http");
+                  return (
+                    <Badge key={name} variant="secondary" className="gap-1 pr-1">
+                      <span className="text-xs font-mono">:{name}:</span>
+                      <span className="mx-0.5">{isUrl ? <img src={value} alt={name} className="w-4 h-4 object-contain inline" /> : value}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeAlias(name)}
+                        className="ml-0.5 hover:text-destructive cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  );
+                })}
               </div>
             )}
           </div>

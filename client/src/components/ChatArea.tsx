@@ -1,6 +1,7 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
+import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { Search, X } from "lucide-react";
 import { CommandBar } from "./CommandBar";
@@ -33,6 +34,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
   const [selectedMentionIdx, setSelectedMentionIdx] = useState(0);
+  const [emojiAutocompleteOpen, setEmojiAutocompleteOpen] = useState(false);
+  const [emojiSearch, setEmojiSearch] = useState("");
+  const [emojiStart, setEmojiStart] = useState(-1);
+  const [selectedEmojiIdx, setSelectedEmojiIdx] = useState(0);
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState("");
   const topicInputRef = useRef<HTMLInputElement>(null);
@@ -47,6 +52,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
   const [displayLength, setDisplayLength] = useState(0);
+
+  // Merge standard shortcodes + room emoji aliases (room overrides standard)
+  const mergedShortcodes = useMemo(() => {
+    const roomAliases = state.currentRoomId
+      ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
+      : {};
+    return { ...STANDARD_SHORTCODES, ...roomAliases };
+  }, [state.currentRoomId, state.roomInfoMap]);
 
   // --- Contenteditable helpers ---
 
@@ -240,11 +253,43 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
     // Send the text message (with reply context if set)
     if (body) {
-      await sendMessage(body, replyEventId);
+      // Auto-resolve :shortcode: patterns to emoji
+      const resolved = body.replace(/:([a-zA-Z0-9_]+):/g, (match: string, name: string) => {
+        const value = mergedShortcodes[name];
+        if (!value) return match;
+        // If value is a URL (custom emoji), convert to :emoji{url}: format
+        if (value.startsWith("/") || value.startsWith("http")) return `:emoji{${value}}:`;
+        return value;
+      });
+      await sendMessage(resolved, replyEventId);
     }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (emojiAutocompleteOpen) {
+      const matches = Object.entries(mergedShortcodes)
+        .filter(([name]) => name.toLowerCase().startsWith(emojiSearch.toLowerCase()))
+        .slice(0, 8);
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedEmojiIdx((i) => Math.min(i + 1, matches.length - 1));
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedEmojiIdx((i) => Math.max(i - 1, 0));
+        return;
+      }
+      if ((e.key === "Enter" || e.key === "Tab") && matches.length > 0) {
+        e.preventDefault();
+        completeEmojiShortcode(matches[selectedEmojiIdx][0], matches[selectedEmojiIdx][1]);
+        return;
+      }
+      if (e.key === "Escape") {
+        setEmojiAutocompleteOpen(false);
+        return;
+      }
+    }
     if (mentionOpen) {
       const matches = state.roomMembers.filter((m) =>
         m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
@@ -346,6 +391,42 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     } catch {
       setMentionOpen(false);
     }
+
+    // Emoji shortcode detection (only when mention popup is closed)
+    if (!mentionOpen) {
+      try {
+        const range = sel.getRangeAt(0);
+        const preRange = document.createRange();
+        preRange.setStart(inputRef.current, 0);
+        preRange.setEnd(range.startContainer, range.startOffset);
+        const before = preRange.toString();
+        // Find last unmatched : (not part of ://)
+        const lastColon = before.lastIndexOf(":");
+        if (
+          lastColon !== -1 &&
+          // Guard: don't trigger on :// (URLs)
+          !(lastColon > 0 && before[lastColon - 1] === "/") &&
+          // Only match alphanumeric/underscore after the colon
+          /^:[a-zA-Z0-9_]*$/.test(before.substring(lastColon))
+        ) {
+          const search = before.substring(lastColon + 1);
+          if (search.length > 0) {
+            setEmojiSearch(search);
+            setEmojiStart(lastColon);
+            setEmojiAutocompleteOpen(true);
+            setSelectedEmojiIdx(0);
+          } else {
+            setEmojiAutocompleteOpen(false);
+          }
+        } else {
+          setEmojiAutocompleteOpen(false);
+        }
+      } catch {
+        setEmojiAutocompleteOpen(false);
+      }
+    } else {
+      setEmojiAutocompleteOpen(false);
+    }
   };
 
   const completeMention = (username: string) => {
@@ -379,6 +460,55 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       // ignore
     }
     setMentionOpen(false);
+    syncFromDiv();
+    inputRef.current?.focus();
+  };
+
+  const completeEmojiShortcode = (name: string, value: string) => {
+    if (!inputRef.current) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    try {
+      const range = sel.getRangeAt(0);
+      const div = inputRef.current;
+      const preRange = document.createRange();
+      preRange.setStart(div, 0);
+      preRange.setEnd(range.startContainer, range.startOffset);
+      const before = preRange.toString();
+      const lastColon = before.lastIndexOf(":");
+      if (lastColon === -1) return;
+      // Build a range from the : to the current cursor
+      const colonRange = findRangeAtOffset(div, lastColon);
+      if (!colonRange) return;
+      colonRange.setEnd(range.startContainer, range.startOffset);
+      colonRange.deleteContents();
+      // Insert the emoji
+      const isImageUrl = value.startsWith("/") || value.startsWith("http");
+      if (isImageUrl) {
+        const img = document.createElement("img");
+        img.src = value;
+        img.dataset.emojiUrl = value;
+        img.alt = `:emoji{${value}}:`;
+        img.className = "inline-block h-5 w-5 object-contain align-middle mx-0.5";
+        colonRange.insertNode(img);
+        const newRange = document.createRange();
+        newRange.setStartAfter(img);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      } else {
+        const textNode = document.createTextNode(value);
+        colonRange.insertNode(textNode);
+        const newRange = document.createRange();
+        newRange.setStartAfter(textNode);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+      }
+    } catch {
+      // ignore
+    }
+    setEmojiAutocompleteOpen(false);
     syncFromDiv();
     inputRef.current?.focus();
   };
@@ -599,6 +729,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
         )
         .slice(0, 5)
+    : [];
+
+  const emojiMatches = emojiAutocompleteOpen
+    ? Object.entries(mergedShortcodes)
+        .filter(([name]) => name.toLowerCase().startsWith(emojiSearch.toLowerCase()))
+        .slice(0, 8)
     : [];
 
   if (!state.currentRoomId) {
@@ -927,6 +1063,36 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     <span>{m.displayName}</span>
                   </button>
                 ))}
+              </div>
+            )}
+
+            {/* Emoji shortcode autocomplete */}
+            {emojiAutocompleteOpen && emojiMatches.length > 0 && (
+              <div className="absolute bottom-full left-0 mb-1 w-64 rounded-md border bg-popover p-1 shadow-lg z-50 max-h-72 overflow-y-auto">
+                {emojiMatches.map(([name, value], i) => {
+                  const isUrl = value.startsWith("/") || value.startsWith("http");
+                  return (
+                    <button
+                      key={name}
+                      className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer transition-colors ${
+                        i === selectedEmojiIdx ? "bg-accent" : "hover:bg-accent/50"
+                      }`}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        completeEmojiShortcode(name, value);
+                      }}
+                    >
+                      <span className="flex h-6 w-6 items-center justify-center text-base">
+                        {isUrl ? (
+                          <img src={value} alt={name} className="h-5 w-5 object-contain" />
+                        ) : (
+                          value
+                        )}
+                      </span>
+                      <span className="text-muted-foreground">:{name}:</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
 

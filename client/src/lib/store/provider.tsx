@@ -229,6 +229,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const customEmojisEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.custom_emojis"
         );
+        const emojiAliasesEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.emoji_aliases"
+        );
         const nameColorsEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.name_colors"
         );
@@ -250,6 +253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           icon_url: iconEvent?.content?.icon_url || "",
           creator: nameEvent?.sender || "",
           custom_emojis: customEmojisEvent?.content?.custom_emojis || [],
+          emoji_aliases: emojiAliasesEvent?.content?.emoji_aliases || {},
           owner_name_color: nameColorsEvent?.content?.owner_name_color || "",
           mod_name_color: nameColorsEvent?.content?.mod_name_color || "",
           unlisted: unlistedEvent?.content?.unlisted || false,
@@ -508,7 +512,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateRoomSettings = useCallback(
-    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }) => {
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }) => {
       await apiUpdateRoomSettings(roomId, settings);
     },
     []

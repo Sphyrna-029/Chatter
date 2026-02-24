@@ -84,6 +84,7 @@ pub(crate) async fn create_room(
                     tags: vec![],
                     icon_url: String::new(),
                     custom_emojis: vec![],
+                    emoji_aliases: std::collections::HashMap::new(),
                     owner_name_color: String::new(),
                     mod_name_color: String::new(),
                     unlisted: false,
@@ -207,6 +208,7 @@ pub(crate) async fn create_room(
         tags: req.tags.unwrap_or_default(),
         icon_url: req.icon_url.unwrap_or_default(),
         custom_emojis: vec![],
+        emoji_aliases: std::collections::HashMap::new(),
         owner_name_color: String::new(),
         mod_name_color: String::new(),
         unlisted: req.unlisted.unwrap_or(false),
@@ -655,6 +657,13 @@ pub(crate) async fn update_room_settings(
             mongodb::bson::to_bson(custom_emojis).unwrap_or(mongodb::bson::Bson::Null),
         );
         content.insert("custom_emojis".to_string(), json!(custom_emojis));
+    }
+    if let Some(ref emoji_aliases) = req.emoji_aliases {
+        set_doc.insert(
+            "emoji_aliases",
+            mongodb::bson::to_bson(emoji_aliases).unwrap_or(mongodb::bson::Bson::Null),
+        );
+        content.insert("emoji_aliases".to_string(), json!(emoji_aliases));
     }
     if let Some(unlisted) = req.unlisted {
         set_doc.insert("unlisted", unlisted);

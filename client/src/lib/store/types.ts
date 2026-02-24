@@ -79,7 +79,7 @@ export type Action =
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
-  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; has_password?: boolean } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean }
@@ -140,7 +140,7 @@ export interface AppContextValue {
   getAllRooms: () => Promise<import("../api").RoomSummary[]>;
   openDM: (targetUserId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
-  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; unlisted?: boolean; password?: string; remove_password?: boolean }) => Promise<void>;
+  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
   updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string }) => void;
