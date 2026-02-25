@@ -1,7 +1,7 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
-        admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_reset_password, admin_list_rooms, admin_delete_room},
+        admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room},
         auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
@@ -134,6 +134,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/admin/users", get(admin_list_users))
            .route("/api/admin/users/{user_id}/disable", post(admin_disable_user))
            .route("/api/admin/users/{user_id}/enable", post(admin_enable_user))
+           .route("/api/admin/users/{user_id}", delete(admin_delete_user))
            .route("/api/admin/users/{user_id}/reset-password", post(admin_reset_password))
            .route("/api/admin/rooms", get(admin_list_rooms))
            .route("/api/admin/rooms/{room_id}", delete(admin_delete_room))

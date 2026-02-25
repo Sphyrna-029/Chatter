@@ -175,6 +175,68 @@ pub(crate) async fn admin_enable_user(
     Ok(Json(json!({ "enabled": true })))
 }
 
+/// DELETE /api/admin/users/{user_id}
+pub(crate) async fn admin_delete_user(
+    State(state): State<Arc<AppState>>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let admin_id = require_admin(&state, &headers).await?;
+
+    let target_id = format!("@{}:localhost", user_id);
+    if target_id == admin_id {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot delete yourself"));
+    }
+
+    let users = state.db.collection::<UserRecord>("users");
+    let result = users
+        .delete_one(doc! { "_id": &target_id })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+
+    if result.deleted_count == 0 {
+        return Err(error_response(StatusCode::NOT_FOUND, "User not found"));
+    }
+
+    // Remove user from all rooms
+    let _ = state
+        .db
+        .collection::<mongodb::bson::Document>("room_members")
+        .delete_many(doc! { "user_id": &target_id })
+        .await;
+
+    // Update room_members cache
+    {
+        let mut rm = state.room_members.write().await;
+        for members in rm.values_mut() {
+            members.retain(|m| m != &target_id);
+        }
+    }
+
+    // Remove from room_roles cache
+    {
+        let mut roles = state.room_roles.write().await;
+        for role_map in roles.values_mut() {
+            role_map.remove(&target_id);
+        }
+    }
+
+    // Delete refresh tokens
+    let _ = state
+        .db
+        .collection::<mongodb::bson::Document>("refresh_tokens")
+        .delete_many(doc! { "user_id": &target_id })
+        .await;
+
+    // Close active WebSocket
+    state.active_websockets.write().await.remove(&target_id);
+
+    // Remove presence
+    state.user_presence.write().await.remove(&target_id);
+
+    Ok(Json(json!({ "deleted": true })))
+}
+
 /// POST /api/admin/users/{user_id}/reset-password
 pub(crate) async fn admin_reset_password(
     State(state): State<Arc<AppState>>,

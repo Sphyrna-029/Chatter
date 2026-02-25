@@ -935,6 +935,17 @@ export async function apiAdminListUsers(): Promise<AdminUser[]> {
   return data.users;
 }
 
+export async function apiAdminDeleteUser(userId: string): Promise<void> {
+  const username = userId.replace(/^@/, "").split(":")[0];
+  const res = await authenticatedFetch(`/api/admin/users/${username}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete user");
+  }
+}
+
 export async function apiAdminDisableUser(userId: string): Promise<void> {
   const username = userId.replace(/^@/, "").split(":")[0];
   const res = await authenticatedFetch(`/api/admin/users/${username}/disable`, {

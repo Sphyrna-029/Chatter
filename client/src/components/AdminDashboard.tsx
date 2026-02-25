@@ -4,6 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   apiAdminGetStats,
   apiAdminListUsers,
+  apiAdminDeleteUser,
   apiAdminDisableUser,
   apiAdminEnableUser,
   apiAdminResetPassword,
@@ -60,6 +61,16 @@ export function AdminDashboard() {
   }, [loadData]);
 
   const close = () => dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: false });
+
+  const handleDeleteUser = async (userId: string) => {
+    if (!confirm(`Permanently delete user ${userId}? This will remove them from all rooms and cannot be undone.`)) return;
+    try {
+      await apiAdminDeleteUser(userId);
+      setUsers((prev) => prev.filter((u) => u.user_id !== userId));
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
 
   const handleDisable = async (userId: string) => {
     if (!confirm(`Disable user ${userId}? They will be disconnected and unable to log in.`)) return;
@@ -154,6 +165,7 @@ export function AdminDashboard() {
               users={users}
               onDisable={handleDisable}
               onEnable={handleEnable}
+              onDelete={handleDeleteUser}
               onResetPassword={handleResetPassword}
               displayName={displayName}
             />
@@ -215,12 +227,14 @@ function UsersTab({
   users,
   onDisable,
   onEnable,
+  onDelete,
   onResetPassword,
   displayName,
 }: {
   users: AdminUser[];
   onDisable: (id: string) => void;
   onEnable: (id: string) => void;
+  onDelete: (id: string) => void;
   onResetPassword: (id: string) => void;
   displayName: (id: string) => string;
 }) {
@@ -276,6 +290,9 @@ function UsersTab({
               )}
               <Button variant="outline" size="sm" className="text-xs h-7" onClick={() => onResetPassword(user.user_id)}>
                 Reset PW
+              </Button>
+              <Button variant="outline" size="sm" className="text-xs h-7 text-destructive hover:text-destructive" onClick={() => onDelete(user.user_id)}>
+                Delete
               </Button>
             </div>
           )}
