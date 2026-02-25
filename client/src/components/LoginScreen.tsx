@@ -46,7 +46,14 @@ const TOTAL_DELAY_MS = 3500;
 
 export function LoginScreen() {
   const { login, register, dispatch } = useAppContext();
-  const [step, setStep] = useState<Step>("login");
+  const [step, setStep] = useState<Step>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("action") === "register") {
+      window.history.replaceState({}, "", "/");
+      return "register";
+    }
+    return "login";
+  });
 
   // Login fields
   const [username, setUsername] = useState("");
