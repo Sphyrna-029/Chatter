@@ -20,7 +20,8 @@ A lightweight, performant, self-hosted chat application built with Rust. Chatter
 - **Custom emojis**
 - **Room invite links**
 - **2FA (TOTP)**
-- **Server admin dashboard** (user & room management)
+- **Themes**
+- **Server admin dashboard**
 
 ## Prerequisites
 
@@ -153,14 +154,11 @@ The first user to register (or log in on an existing database with no admin) is 
 - **Users** -- view all users, disable/enable accounts, reset passwords (clears 2FA), delete users
 - **Rooms** -- view all rooms with member/message counts, force-delete rooms
 
-Admin status is stored in MongoDB and persists across restarts.
 
 ## Notes
 
 - Data is stored in MongoDB. A running MongoDB instance is required.
 - HTTPS context is required for WebRTC (screen share, voice)
-- There is no built-in TLS. Use a reverse proxy for HTTPS in production.
-- Voice chat and screen sharing require a secure context (HTTPS) in most browsers.
 
 ## License
 
