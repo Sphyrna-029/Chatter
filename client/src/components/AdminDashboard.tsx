@@ -320,12 +320,12 @@ function RoomsTab({
         <div key={room.room_id} className="flex items-center gap-3 border rounded-lg p-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-medium truncate">{room.name || "Unnamed"}</span>
+              <span className="text-sm font-medium truncate max-w-[200px]">{room.name || "Unnamed"}</span>
               <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground">
                 {room.is_dm ? "DM" : room.room_type || "text"}
               </span>
             </div>
-            <p className="text-xs text-muted-foreground truncate">
+            <p className="text-xs text-muted-foreground truncate max-w-[300px]">
               Created by {displayName(room.creator)} &middot; {room.member_count} member{room.member_count !== 1 ? "s" : ""} &middot; {room.message_count} message{room.message_count !== 1 ? "s" : ""}
             </p>
           </div>
