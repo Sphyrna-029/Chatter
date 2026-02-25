@@ -906,8 +906,8 @@ pub(crate) async fn unban_member(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
-    if caller_role != "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can unban"));
+    if caller_role != "owner" && caller_role != "moderator" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can unban"));
     }
 
     let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
@@ -1065,4 +1065,39 @@ pub(crate) async fn set_name_colors(
     broadcast_to_room(&state, &room_id, &event).await;
 
     Ok(Json(json!({"updated": true})))
+}
+
+pub(crate) async fn list_banned_users(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    if caller_role != "owner" && caller_role != "moderator" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can view bans"));
+    }
+
+    let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
+    let mut cursor = ban_coll
+        .find(doc! { "room_id": &room_id })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to query bans"))?;
+
+    let mut bans = Vec::new();
+    while cursor.advance().await.unwrap_or(false) {
+        if let Ok(record) = cursor.deserialize_current() {
+            bans.push(json!({
+                "user_id": record.user_id,
+                "banned_by": record.banned_by,
+                "banned_at": record.banned_at,
+            }));
+        }
+    }
+
+    Ok(Json(json!({ "bans": bans })))
 }

@@ -4,6 +4,7 @@ use serde::Deserialize;
 pub(crate) struct RegisterRequest {
     pub(crate) username: String,
     pub(crate) password: String,
+    pub(crate) password_confirm: Option<String>,
     pub(crate) device_id: Option<String>,
 }
 
@@ -11,7 +12,29 @@ pub(crate) struct RegisterRequest {
 pub(crate) struct LoginRequest {
     pub(crate) username: String,
     pub(crate) password: String,
+    pub(crate) totp_code: Option<String>,
     pub(crate) device_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CheckUsernameRequest {
+    pub(crate) username: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TotpVerifyRequest {
+    pub(crate) code: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct ChangePasswordRequest {
+    pub(crate) totp_code: String,
+    pub(crate) new_password: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeleteAccountRequest {
+    pub(crate) totp_code: String,
 }
 
 #[derive(Deserialize)]

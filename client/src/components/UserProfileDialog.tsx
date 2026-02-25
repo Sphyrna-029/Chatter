@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole } = useAppContext();
+  const { state, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount } = useAppContext();
   const isSelf = userId === state.userId;
   const username = userId.split(":")[0]?.substring(1) || displayName;
   const presence = state.userPresence[userId];
@@ -95,6 +95,17 @@ export function UserProfileDialog({
   const [loadingUploads, setLoadingUploads] = useState(false);
   const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
 
+  // Account tab state
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [passwordTotpCode, setPasswordTotpCode] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [deleteTotpCode, setDeleteTotpCode] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   useEffect(() => {
     if (open) {
       setNicknameInput(nicknameFromPresence);
@@ -105,6 +116,13 @@ export function UserProfileDialog({
       setBannerPreview(bannerUrl);
       setPendingBannerFile(null);
       setActiveTab("profile");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setPasswordTotpCode("");
+      setPasswordMessage(null);
+      setDeleteTotpCode("");
+      setDeleteError(null);
+      setConfirmDelete(false);
     }
   }, [open, customStatus, about, avatarUrl, bannerUrl, nicknameFromPresence]);
 
@@ -544,6 +562,147 @@ export function UserProfileDialog({
     </div>
   );
 
+  const handleChangePassword = async () => {
+    setPasswordMessage(null);
+    if (newPassword.length < 6) {
+      setPasswordMessage({ type: "error", text: "Password must be at least 6 characters" });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordMessage({ type: "error", text: "Passwords do not match" });
+      return;
+    }
+    if (!passwordTotpCode || passwordTotpCode.length !== 6) {
+      setPasswordMessage({ type: "error", text: "Enter a 6-digit authenticator code" });
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await apiChangePassword(passwordTotpCode, newPassword);
+      setPasswordMessage({ type: "success", text: "Password changed successfully" });
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setPasswordTotpCode("");
+    } catch (err: any) {
+      setPasswordMessage({ type: "error", text: err.message || "Failed to change password" });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    setDeleteError(null);
+    if (!deleteTotpCode || deleteTotpCode.length !== 6) {
+      setDeleteError("Enter a 6-digit authenticator code");
+      return;
+    }
+    setDeletingAccount(true);
+    try {
+      await deleteAccount(deleteTotpCode);
+      onOpenChange(false);
+    } catch (err: any) {
+      setDeleteError(err.message || "Failed to delete account");
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const accountContent = (
+    <div className="px-5 py-4 space-y-6">
+      {/* Change Password */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Change Password</h3>
+        <div className="space-y-2">
+          <Input
+            type="password"
+            placeholder="New password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            className="text-sm"
+          />
+          <Input
+            type="password"
+            placeholder="Confirm new password"
+            value={confirmNewPassword}
+            onChange={(e) => setConfirmNewPassword(e.target.value)}
+            className="text-sm"
+          />
+          <Input
+            placeholder="Authenticator code"
+            value={passwordTotpCode}
+            onChange={(e) => setPasswordTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            maxLength={6}
+            className="text-sm font-mono tracking-widest"
+          />
+        </div>
+        {passwordMessage && (
+          <p className={cn("text-xs", passwordMessage.type === "success" ? "text-green-500" : "text-destructive")}>
+            {passwordMessage.text}
+          </p>
+        )}
+        <Button
+          onClick={handleChangePassword}
+          disabled={changingPassword}
+          className="w-full"
+          variant="outline"
+        >
+          {changingPassword ? "Changing..." : "Change Password"}
+        </Button>
+      </div>
+
+      {/* Delete Account */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-sm font-semibold text-destructive">Danger Zone</h3>
+        <p className="text-xs text-muted-foreground">
+          Permanently delete your account. This action cannot be undone.
+        </p>
+        {!confirmDelete ? (
+          <Button
+            onClick={() => setConfirmDelete(true)}
+            variant="outline"
+            className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
+          >
+            Delete Account
+          </Button>
+        ) : (
+          <div className="space-y-2">
+            <Input
+              placeholder="Authenticator code"
+              value={deleteTotpCode}
+              onChange={(e) => setDeleteTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              maxLength={6}
+              className="text-sm font-mono tracking-widest"
+            />
+            {deleteError && (
+              <p className="text-xs text-destructive">{deleteError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  setConfirmDelete(false);
+                  setDeleteTotpCode("");
+                  setDeleteError(null);
+                }}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleDeleteAccount}
+                disabled={deletingAccount}
+                variant="destructive"
+                className="flex-1"
+              >
+                {deletingAccount ? "Deleting..." : "Confirm Delete"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
@@ -557,10 +716,12 @@ export function UserProfileDialog({
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsContent value="profile" className="mt-0">{profileContent}</TabsContent>
             <TabsContent value="files" className="mt-0 px-5 pb-5">{filesContent}</TabsContent>
+            <TabsContent value="account" className="mt-0">{accountContent}</TabsContent>
             <div className="px-5 pb-4 border-t pt-3">
               <TabsList className="w-full">
                 <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
                 <TabsTrigger value="files" className="flex-1">My Files</TabsTrigger>
+                <TabsTrigger value="account" className="flex-1">Account</TabsTrigger>
               </TabsList>
             </div>
           </Tabs>

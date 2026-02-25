@@ -103,13 +103,13 @@ async function authenticatedFetch(
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
-export async function apiLogin(username: string, password: string) {
+export async function apiLogin(username: string, password: string, totpCode?: string) {
   let res: Response;
   try {
     res = await fetch("/_matrix/client/r0/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, totp_code: totpCode }),
     });
   } catch {
     throw new Error("Cannot reach server. Is the backend running on :8000?");
@@ -131,16 +131,17 @@ export async function apiLogin(username: string, password: string) {
     access_token: string;
     refresh_token: string;
     user_id: string;
+    requires_totp?: boolean;
   }>;
 }
 
-export async function apiRegister(username: string, password: string) {
+export async function apiRegister(username: string, password: string, passwordConfirm: string) {
   let res: Response;
   try {
     res = await fetch("/_matrix/client/r0/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, password_confirm: passwordConfirm }),
     });
   } catch {
     throw new Error("Cannot reach server. Is the backend running on :8000?");
@@ -162,7 +163,56 @@ export async function apiRegister(username: string, password: string) {
     access_token: string;
     refresh_token: string;
     user_id: string;
+    totp_secret: string;
+    totp_uri: string;
+    totp_qr_base64: string;
   }>;
+}
+
+export async function apiCheckUsername(username: string) {
+  const res = await fetch("/api/check-username", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username }),
+  });
+  if (!res.ok) throw new Error("Failed to check username");
+  return res.json() as Promise<{ available: boolean }>;
+}
+
+export async function apiVerifyTotp(code: string) {
+  const res = await authenticatedFetch("/api/totp/verify", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "TOTP verification failed");
+  }
+  return res.json() as Promise<{ verified: boolean }>;
+}
+
+export async function apiChangePassword(totpCode: string, newPassword: string) {
+  const res = await authenticatedFetch("/api/account/password", {
+    method: "POST",
+    body: JSON.stringify({ totp_code: totpCode, new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to change password");
+  }
+  return res.json() as Promise<{ success: boolean }>;
+}
+
+export async function apiDeleteAccount(totpCode: string) {
+  const res = await authenticatedFetch("/api/account/delete", {
+    method: "POST",
+    body: JSON.stringify({ totp_code: totpCode }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete account");
+  }
+  return res.json() as Promise<{ deleted: boolean }>;
 }
 
 export async function apiLogout() {
@@ -607,6 +657,21 @@ export async function apiBanMember(roomId: string, userId: string) {
     throw new Error(body?.error || "Failed to ban member");
   }
   return res.json();
+}
+
+export interface BannedUser {
+  user_id: string;
+  banned_by: string;
+  banned_at: number;
+}
+
+export async function apiGetBannedUsers(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/bans`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to load banned users");
+  }
+  return res.json() as Promise<{ bans: BannedUser[] }>;
 }
 
 export async function apiUnbanMember(roomId: string, userId: string) {

@@ -1,7 +1,7 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
-        auth::{login, logout, refresh, register},
+        auth::{change_password, check_username, delete_account, login, logout, refresh, register, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
@@ -10,8 +10,8 @@ use super::{
         reactions::{add_reaction, get_reactions},
         rooms::{
             ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
-            leave_room, list_all_rooms, set_member_role, set_name_colors, unban_member,
-            update_room_settings, update_room_topic,
+            leave_room, list_all_rooms, list_banned_users, set_member_role, set_name_colors,
+            unban_member, update_room_settings, update_room_topic,
         },
         static_content::{serve_client, versions},
         sync::sync,
@@ -46,6 +46,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/_matrix/client/r0/login", post(login))
            .route("/_matrix/client/r0/logout", post(logout))
            .route("/_matrix/client/r0/refresh", post(refresh))
+           .route("/api/check-username", post(check_username))
+           .route("/api/totp/verify", post(totp_verify))
+           .route("/api/account/password", post(change_password))
+           .route("/api/account/delete", post(delete_account))
            // Rooms
            .route("/_matrix/client/r0/createRoom", post(create_room))
            .route("/_matrix/client/r0/rooms/{room_id}/join", post(join_room))
@@ -97,6 +101,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            )
            // Permissions
            .route("/api/rooms/{room_id}/members/{user_id}", delete(kick_member))
+           .route("/api/rooms/{room_id}/bans", get(list_banned_users))
            .route("/api/rooms/{room_id}/ban/{user_id}", post(ban_member))
            .route("/api/rooms/{room_id}/ban/{user_id}", delete(unban_member))
            .route("/api/rooms/{room_id}/members/{user_id}/role", put(set_member_role))

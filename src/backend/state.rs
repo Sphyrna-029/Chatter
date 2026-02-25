@@ -49,6 +49,10 @@ pub(crate) struct UserRecord {
     pub(crate) banner_url: String,
     #[serde(default)]
     pub(crate) display_name: String,
+    #[serde(default)]
+    pub(crate) totp_secret: String,
+    #[serde(default)]
+    pub(crate) totp_verified: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

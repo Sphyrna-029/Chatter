@@ -16,6 +16,7 @@ import {
   apiLogin,
   apiRegister,
   apiLogout,
+  apiDeleteAccount,
   apiGetJoinedRooms,
   apiSync,
   apiCreateRoom,
@@ -171,30 +172,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ─── Actions ───────────────────────────────────────────────────────────────
 
-  const login = useCallback(async (username: string, password: string) => {
-    const data = await apiLogin(username, password);
+  const login = useCallback(async (username: string, password: string, totpCode?: string) => {
+    const data = await apiLogin(username, password, totpCode);
+    if (data.requires_totp) {
+      return { requires_totp: true };
+    }
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
     });
+    return {};
   }, []);
 
-  const register = useCallback(async (username: string, password: string) => {
-    const data = await apiRegister(username, password);
+  const register = useCallback(async (username: string, password: string, passwordConfirm: string) => {
+    const data = await apiRegister(username, password, passwordConfirm);
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
-    dispatch({
-      type: "LOGIN",
-      payload: { accessToken: data.access_token, userId: data.user_id },
-    });
+    // Don't dispatch LOGIN yet - user needs to verify TOTP first
+    // But we store the tokens so apiVerifyTotp works
+    return {
+      totp_secret: data.totp_secret,
+      totp_uri: data.totp_uri,
+      totp_qr_base64: data.totp_qr_base64,
+    };
   }, []);
 
   const logout = useCallback(async () => {
     try {
       await apiLogout();
     } catch {}
+    clearTokens();
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    dispatch({ type: "LOGOUT" });
+  }, []);
+
+  const deleteAccount = useCallback(async (totpCode: string) => {
+    await apiDeleteAccount(totpCode);
     clearTokens();
     if (wsRef.current) {
       wsRef.current.onclose = null;
@@ -574,6 +593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         login,
         register,
         logout,
+        deleteAccount,
         loadRooms,
         selectRoom,
         loadOlderMessages,

@@ -122,8 +122,9 @@ export interface AppContextValue {
   dispatch: Dispatch<Action>;
   wsRef: React.MutableRefObject<WebSocket | null>;
   // Actions
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, totpCode?: string) => Promise<{ requires_totp?: boolean }>;
+  register: (username: string, password: string, passwordConfirm: string) => Promise<{ totp_secret: string; totp_uri: string; totp_qr_base64: string }>;
+  deleteAccount: (totpCode: string) => Promise<void>;
   logout: () => Promise<void>;
   loadRooms: () => Promise<void>;
   selectRoom: (roomId: string) => Promise<void>;

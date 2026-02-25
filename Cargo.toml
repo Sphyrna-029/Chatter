@@ -26,6 +26,7 @@ rtcp = "0.11"
 mongodb = "3"
 jsonwebtoken = "9"
 argon2 = "0.5"
+totp-rs = { version = "5", features = ["qr", "otpauth"] }
 dotenvy = "0.15"
 
 [dev-dependencies]

@@ -20,9 +20,6 @@ import {
   validateUsername,
 } from "@/lib/username";
 
-const DEV_PASSWORD = "chatter-dev-pass";
-const ACCESS_CODE = "ZGAF";
-
 const CONNECTION_STEPS = [
   { ms: 0, text: "initializing handshake..." },
   { ms: 500, text: "verifying access credentials..." },
@@ -38,7 +35,7 @@ interface InvitePageProps {
 }
 
 export function InvitePage({ inviteCode }: InvitePageProps) {
-  const { state, login, register, loadRooms, selectRoom } = useAppContext();
+  const { state, login, loadRooms, selectRoom } = useAppContext();
   const [inviteInfo, setInviteInfo] = useState<{
     room_name: string;
     icon_url: string;
@@ -51,6 +48,8 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
   // Login form state
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
+  const [totpCode, setTotpCode] = useState("");
+  const [needsTotp, setNeedsTotp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nicknameError, setNicknameError] = useState<string | null>(null);
   const [nicknameWarning, setNicknameWarning] = useState<string | null>(null);
@@ -123,8 +122,13 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
       setNicknameError(null);
       setNicknameWarning(null);
 
-      if (password !== ACCESS_CODE) {
-        setError("Invalid access code");
+      if (!password) {
+        setError("Password is required");
+        return;
+      }
+
+      if (needsTotp && !totpCode) {
+        setError("Authenticator code is required");
         return;
       }
 
@@ -142,17 +146,12 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
       clearStepTimeouts();
 
       try {
-        let registered = false;
-        try {
-          await register(name, DEV_PASSWORD);
-          registered = true;
-        } catch (regErr: any) {
-          if (regErr.message?.includes("Cannot reach server")) {
-            throw regErr;
-          }
-        }
-        if (!registered) {
-          await login(name, DEV_PASSWORD);
+        const result = await login(name, password, needsTotp ? totpCode : undefined);
+        if (result.requires_totp) {
+          setNeedsTotp(true);
+          setLoading(false);
+          setVisibleSteps(0);
+          return;
         }
         // The useEffect above will handle invite acceptance after login
       } catch (err: any) {
@@ -161,7 +160,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
         setVisibleSteps(0);
       }
     },
-    [nickname, password, login, register, clearStepTimeouts],
+    [nickname, password, totpCode, needsTotp, login, clearStepTimeouts],
   );
 
   useEffect(() => () => clearStepTimeouts(), [clearStepTimeouts]);
@@ -395,7 +394,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                     className="text-[10px] uppercase tracking-[0.2em]"
                     style={{ color: "rgba(180, 210, 255, 0.4)" }}
                   >
-                    access code
+                    password
                   </Label>
                   <Input
                     id="password"
@@ -404,7 +403,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
-                      if (error === "Invalid access code") setError(null);
+                      if (error) setError(null);
                     }}
                     disabled={loading}
                     className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.15em]"
@@ -415,6 +414,36 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                     }}
                   />
                 </div>
+                {needsTotp && (
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="totp"
+                      className="text-[10px] uppercase tracking-[0.2em]"
+                      style={{ color: "rgba(180, 210, 255, 0.4)" }}
+                    >
+                      authenticator code
+                    </Label>
+                    <Input
+                      id="totp"
+                      placeholder="000000"
+                      value={totpCode}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                        setTotpCode(v);
+                        if (error) setError(null);
+                      }}
+                      maxLength={6}
+                      autoFocus
+                      disabled={loading}
+                      className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                      style={{
+                        borderColor: "rgba(180, 210, 255, 0.12)",
+                        color: "rgba(220, 230, 255, 0.85)",
+                        caretColor: "rgba(180, 210, 255, 0.6)",
+                      }}
+                    />
+                  </div>
+                )}
                 {error && (
                   <div
                     className="p-3 text-[11px] uppercase tracking-[0.08em] border-[1px]"
