@@ -55,6 +55,10 @@ pub(crate) struct UserRecord {
     pub(crate) totp_verified: bool,
     #[serde(default)]
     pub(crate) recovery_codes: Vec<String>,
+    #[serde(default)]
+    pub(crate) is_admin: bool,
+    #[serde(default)]
+    pub(crate) disabled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

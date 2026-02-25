@@ -145,6 +145,10 @@ pub(crate) async fn register(
     let password_hash = hash_password(&req.password);
     let device_id = req.device_id.unwrap_or_else(|| generate_id("DEVICE"));
 
+    // First user to register becomes admin
+    let user_count = users.count_documents(doc! {}).await.unwrap_or(0);
+    let is_admin = user_count == 0;
+
     // Generate TOTP secret (20 random bytes, base32-encoded)
     let mut secret_bytes = [0u8; 20];
     rand::Rng::fill(&mut rand::thread_rng(), &mut secret_bytes[..]);
@@ -160,6 +164,8 @@ pub(crate) async fn register(
         totp_secret: totp_secret.clone(),
         totp_verified: false,
         recovery_codes: Vec::new(),
+        is_admin,
+        disabled: false,
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(
@@ -189,7 +195,8 @@ pub(crate) async fn register(
         "device_id": device_id,
         "totp_secret": totp_secret,
         "totp_uri": totp_uri,
-        "totp_qr_base64": qr_base64
+        "totp_qr_base64": qr_base64,
+        "is_admin": is_admin
     })))
 }
 
@@ -259,6 +266,11 @@ pub(crate) async fn login(
         return Err(error_response(StatusCode::FORBIDDEN, "Invalid credentials"));
     }
 
+    // Reject disabled accounts
+    if user.disabled {
+        return Err(error_response(StatusCode::FORBIDDEN, "Account is disabled"));
+    }
+
     // If TOTP is set up and verified, require a TOTP code or recovery code
     if user.totp_verified && !user.totp_secret.is_empty() {
         match &req.totp_code {
@@ -281,7 +293,8 @@ pub(crate) async fn login(
         "user_id": user_id,
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "device_id": device_id
+        "device_id": device_id,
+        "is_admin": user.is_admin
     })))
 }
 
@@ -429,6 +442,15 @@ pub(crate) async fn refresh(
         ));
     }
 
+    // Look up user to include is_admin
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten();
+    let is_admin = user.map(|u| u.is_admin).unwrap_or(false);
+
     // Issue new token pair
     let new_access = create_access_token(&user_id, &state.jwt_secret);
     let new_refresh = create_refresh_token(&user_id, &state.jwt_secret);
@@ -436,7 +458,8 @@ pub(crate) async fn refresh(
 
     Ok(Json(json!({
         "access_token": new_access,
-        "refresh_token": new_refresh
+        "refresh_token": new_refresh,
+        "is_admin": is_admin
     })))
 }
 

@@ -1,3 +1,4 @@
+pub(crate) mod admin;
 pub(crate) mod auth;
 pub(crate) mod forum;
 pub(crate) mod invites;

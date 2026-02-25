@@ -44,6 +44,9 @@ export interface AppState {
   typingUsers: string[];
   // Connection
   wsConnected: boolean;
+  // Admin
+  isAdmin: boolean;
+  adminDashboardOpen: boolean;
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -84,7 +87,9 @@ export type Action =
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean }
   | { type: "UPDATE_MEMBER_ROLE"; payload: { userId: string; role: string } }
-  | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } };
+  | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } }
+  | { type: "SET_IS_ADMIN"; payload: boolean }
+  | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean };
 
 export const initialState: AppState = {
   accessToken: null,
@@ -115,6 +120,8 @@ export const initialState: AppState = {
   replyingTo: null,
   typingUsers: [],
   wsConnected: false,
+  isAdmin: false,
+  adminDashboardOpen: false,
 };
 
 export interface AppContextValue {

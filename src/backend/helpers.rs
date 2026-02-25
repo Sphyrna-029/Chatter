@@ -158,6 +158,29 @@ pub(crate) fn error_response(status: StatusCode, detail: &str) -> (StatusCode, J
     )
 }
 
+// ─── Admin helper ────────────────────────────────────────────────────────
+
+pub(crate) async fn require_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let token = extract_token(headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+    let users = state.db.collection::<super::state::UserRecord>("users");
+    let user = users
+        .find_one(mongodb::bson::doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
+    if !user.is_admin {
+        return Err(error_response(StatusCode::FORBIDDEN, "Admin access required"));
+    }
+    Ok(user_id)
+}
+
 // ─── Role helpers ────────────────────────────────────────────────────────────
 
 pub(crate) async fn get_user_role(state: &AppState, room_id: &str, user_id: &str) -> String {

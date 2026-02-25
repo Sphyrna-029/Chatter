@@ -40,6 +40,15 @@ export function clearTokens() {
   _refreshToken = null;
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
+  localStorage.removeItem("is_admin");
+}
+
+export function setIsAdmin(value: boolean) {
+  localStorage.setItem("is_admin", JSON.stringify(value));
+}
+
+export function getIsAdmin(): boolean {
+  return JSON.parse(localStorage.getItem("is_admin") || "false");
 }
 
 function authHeaders(): Record<string, string> {
@@ -132,6 +141,7 @@ export async function apiLogin(username: string, password: string, totpCode?: st
     refresh_token: string;
     user_id: string;
     requires_totp?: boolean;
+    is_admin?: boolean;
   }>;
 }
 
@@ -166,6 +176,7 @@ export async function apiRegister(username: string, password: string, passwordCo
     totp_secret: string;
     totp_uri: string;
     totp_qr_base64: string;
+    is_admin?: boolean;
   }>;
 }
 
@@ -870,4 +881,110 @@ export async function apiGetWhiteboardStrokes(roomId: string) {
   const res = await authenticatedFetch(`/api/whiteboard/${roomId}/strokes`);
   if (!res.ok) throw new Error("Failed to load whiteboard strokes");
   return res.json() as Promise<{ strokes: WhiteboardStroke[] }>;
+}
+
+// ─── Admin ──────────────────────────────────────────────────────────────────
+
+export interface AdminStats {
+  users: number;
+  rooms: number;
+  messages: number;
+  uploads: number;
+  total_file_size: number;
+  online_users: number;
+}
+
+export interface AdminUser {
+  user_id: string;
+  display_name: string;
+  avatar_url: string;
+  is_admin: boolean;
+  disabled: boolean;
+  totp_verified: boolean;
+  room_count: number;
+  online: boolean;
+}
+
+export interface AdminRoom {
+  room_id: string;
+  name: string;
+  creator: string;
+  is_dm: boolean;
+  room_type: string;
+  member_count: number;
+  message_count: number;
+}
+
+export async function apiAdminGetStats(): Promise<AdminStats> {
+  const res = await authenticatedFetch("/api/admin/stats");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get stats");
+  }
+  return res.json();
+}
+
+export async function apiAdminListUsers(): Promise<AdminUser[]> {
+  const res = await authenticatedFetch("/api/admin/users");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to list users");
+  }
+  const data = await res.json();
+  return data.users;
+}
+
+export async function apiAdminDisableUser(userId: string): Promise<void> {
+  const username = userId.replace(/^@/, "").split(":")[0];
+  const res = await authenticatedFetch(`/api/admin/users/${username}/disable`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to disable user");
+  }
+}
+
+export async function apiAdminEnableUser(userId: string): Promise<void> {
+  const username = userId.replace(/^@/, "").split(":")[0];
+  const res = await authenticatedFetch(`/api/admin/users/${username}/enable`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to enable user");
+  }
+}
+
+export async function apiAdminResetPassword(userId: string): Promise<string> {
+  const username = userId.replace(/^@/, "").split(":")[0];
+  const res = await authenticatedFetch(`/api/admin/users/${username}/reset-password`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to reset password");
+  }
+  const data = await res.json();
+  return data.temporary_password;
+}
+
+export async function apiAdminListRooms(): Promise<AdminRoom[]> {
+  const res = await authenticatedFetch("/api/admin/rooms");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to list rooms");
+  }
+  const data = await res.json();
+  return data.rooms;
+}
+
+export async function apiAdminDeleteRoom(roomId: string): Promise<void> {
+  const res = await authenticatedFetch(`/api/admin/rooms/${roomId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete room");
+  }
 }

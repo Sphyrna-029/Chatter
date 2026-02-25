@@ -1,6 +1,7 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
+        admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_reset_password, admin_list_rooms, admin_delete_room},
         auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
@@ -128,6 +129,14 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/forum/{room_id}/posts/{post_id}", get(get_post).delete(delete_post).put(edit_post))
            .route("/api/forum/{room_id}/posts/{post_id}/comments", post(create_comment))
            .route("/api/forum/{room_id}/posts/{post_id}/comments/{comment_id}", delete(delete_comment).put(edit_comment))
+           // Admin
+           .route("/api/admin/stats", get(admin_stats))
+           .route("/api/admin/users", get(admin_list_users))
+           .route("/api/admin/users/{user_id}/disable", post(admin_disable_user))
+           .route("/api/admin/users/{user_id}/enable", post(admin_enable_user))
+           .route("/api/admin/users/{user_id}/reset-password", post(admin_reset_password))
+           .route("/api/admin/rooms", get(admin_list_rooms))
+           .route("/api/admin/rooms/{room_id}", delete(admin_delete_room))
            // SPA fallback for invite pages
            .route("/invite/{code}", get(serve_client))
            // WebSocket

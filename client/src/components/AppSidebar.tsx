@@ -26,7 +26,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
-  const { state, selectRoom, leaveRoom, logout } = useAppContext();
+  const { state, dispatch, selectRoom, leaveRoom, logout } = useAppContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
@@ -355,6 +355,19 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="p-2">
+        {state.isAdmin && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-muted-foreground justify-start gap-2"
+            onClick={() => dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: true })}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Server Dashboard
+          </Button>
+        )}
         <div className="flex gap-1">
           <Button
             variant="ghost"

@@ -13,6 +13,8 @@ import {
   restoreTokens,
   clearTokens,
   getAccessToken,
+  setIsAdmin,
+  getIsAdmin,
   apiLogin,
   apiRegister,
   apiLogout,
@@ -77,6 +79,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             type: "LOGIN",
             payload: { accessToken: token, userId: payload.sub },
           });
+          dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
         } else {
           clearTokens();
         }
@@ -179,10 +182,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
+    setIsAdmin(!!data.is_admin);
     dispatch({
       type: "LOGIN",
       payload: { accessToken: data.access_token, userId: data.user_id },
     });
+    dispatch({ type: "SET_IS_ADMIN", payload: !!data.is_admin });
     return {};
   }, []);
 
@@ -190,6 +195,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const data = await apiRegister(username, password, passwordConfirm);
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
+    setIsAdmin(!!data.is_admin);
+    dispatch({ type: "SET_IS_ADMIN", payload: !!data.is_admin });
     // Don't dispatch LOGIN yet - user needs to verify TOTP first
     // But we store the tokens so apiVerifyTotp works
     return {

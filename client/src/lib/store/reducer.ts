@@ -35,6 +35,7 @@ export function reducer(state: AppState, action: Action): AppState {
         selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
         screenViewers: preserveVoice ? state.screenViewers : {},
         typingUsers: [],
+        adminDashboardOpen: false,
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
@@ -276,6 +277,10 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     }
+    case "SET_IS_ADMIN":
+      return { ...state, isAdmin: action.payload };
+    case "SET_ADMIN_DASHBOARD_OPEN":
+      return { ...state, adminDashboardOpen: action.payload };
     default:
       return state;
   }

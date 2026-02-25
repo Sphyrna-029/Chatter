@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, ChevronRight } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
+import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
@@ -309,7 +310,10 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* Main content: voice column + chat/forum + members */}
+            {/* Main content: admin dashboard or voice column + chat/forum + members */}
+            {state.adminDashboardOpen ? (
+              <AdminDashboard />
+            ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
               {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
               {isWhiteboardRoom ? (
@@ -350,6 +354,7 @@ export function ChatLayout() {
                 onToggle={() => setMembersCollapsed((v) => !v)}
               />
             </div>
+            )}
           </SidebarInset>
         </div>
       </SidebarProvider>
