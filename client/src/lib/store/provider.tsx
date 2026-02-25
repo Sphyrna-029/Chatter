@@ -79,7 +79,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
             type: "LOGIN",
             payload: { accessToken: token, userId: payload.sub },
           });
+          // Use localStorage value immediately, then verify from server
           dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
+          // Fetch actual admin status from server (handles pre-existing users)
+          fetch("/api/admin/stats", {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then((res) => {
+            const isAdmin = res.ok; // 200 = admin, 403 = not admin
+            setIsAdmin(isAdmin);
+            dispatch({ type: "SET_IS_ADMIN", payload: isAdmin });
+          }).catch(() => {});
         } else {
           clearTokens();
         }

@@ -271,6 +271,21 @@ pub(crate) async fn login(
         return Err(error_response(StatusCode::FORBIDDEN, "Account is disabled"));
     }
 
+    // Auto-promote: if no admin exists yet, make this user admin (handles pre-existing DBs)
+    let mut is_admin = user.is_admin;
+    if !is_admin {
+        let admin_count = users
+            .count_documents(doc! { "is_admin": true })
+            .await
+            .unwrap_or(1);
+        if admin_count == 0 {
+            let _ = users
+                .update_one(doc! { "_id": &user_id }, doc! { "$set": { "is_admin": true } })
+                .await;
+            is_admin = true;
+        }
+    }
+
     // If TOTP is set up and verified, require a TOTP code or recovery code
     if user.totp_verified && !user.totp_secret.is_empty() {
         match &req.totp_code {
@@ -294,7 +309,7 @@ pub(crate) async fn login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "device_id": device_id,
-        "is_admin": user.is_admin
+        "is_admin": is_admin
     })))
 }
 

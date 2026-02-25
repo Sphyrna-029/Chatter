@@ -75,6 +75,7 @@ async function apiRefreshToken(): Promise<boolean> {
     const data = await res.json();
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
+    if (data.is_admin !== undefined) setIsAdmin(data.is_admin);
     return true;
   } catch {
     return false;
