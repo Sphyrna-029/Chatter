@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -106,6 +106,13 @@ export function UserProfileDialog({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // Recovery codes state
+  const [recoveryTotpCode, setRecoveryTotpCode] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
+  const [recoveryError, setRecoveryError] = useState<string | null>(null);
+  const [showRecoveryInput, setShowRecoveryInput] = useState(false);
+
   useEffect(() => {
     if (open) {
       setNicknameInput(nicknameFromPresence);
@@ -123,6 +130,10 @@ export function UserProfileDialog({
       setDeleteTotpCode("");
       setDeleteError(null);
       setConfirmDelete(false);
+      setRecoveryTotpCode("");
+      setRecoveryCodes(null);
+      setRecoveryError(null);
+      setShowRecoveryInput(false);
     }
   }, [open, customStatus, about, avatarUrl, bannerUrl, nicknameFromPresence]);
 
@@ -607,6 +618,24 @@ export function UserProfileDialog({
     }
   };
 
+  const handleGetRecoveryCodes = async () => {
+    setRecoveryError(null);
+    if (!recoveryTotpCode || recoveryTotpCode.length !== 6) {
+      setRecoveryError("Enter a 6-digit authenticator code");
+      return;
+    }
+    setRecoveryLoading(true);
+    try {
+      const result = await apiGetRecoveryCodes(recoveryTotpCode);
+      setRecoveryCodes(result.recovery_codes);
+      setRecoveryTotpCode("");
+    } catch (err: any) {
+      setRecoveryError(err.message || "Failed to get recovery codes");
+    } finally {
+      setRecoveryLoading(false);
+    }
+  };
+
   const accountContent = (
     <div className="px-5 py-4 space-y-6">
       {/* Change Password */}
@@ -648,6 +677,88 @@ export function UserProfileDialog({
         >
           {changingPassword ? "Changing..." : "Change Password"}
         </Button>
+      </div>
+
+      {/* Recovery Codes */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-sm font-semibold">Recovery Codes</h3>
+        <p className="text-xs text-muted-foreground">
+          Recovery codes let you sign in if you lose access to your authenticator app. Each code can only be used once.
+        </p>
+        {recoveryCodes ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
+              {recoveryCodes.map((code, i) => (
+                <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
+                  {code}
+                </div>
+              ))}
+            </div>
+            <Button
+              onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
+              variant="outline"
+              className="w-full"
+              size="sm"
+            >
+              Copy All Codes
+            </Button>
+            <Button
+              onClick={() => {
+                setRecoveryCodes(null);
+                setShowRecoveryInput(true);
+              }}
+              variant="outline"
+              className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
+              size="sm"
+            >
+              Regenerate Codes
+            </Button>
+          </div>
+        ) : showRecoveryInput ? (
+          <div className="space-y-2">
+            <Input
+              placeholder="Authenticator code"
+              value={recoveryTotpCode}
+              onChange={(e) => setRecoveryTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              maxLength={6}
+              className="text-sm font-mono tracking-widest"
+            />
+            {recoveryError && (
+              <p className="text-xs text-destructive">{recoveryError}</p>
+            )}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  setShowRecoveryInput(false);
+                  setRecoveryTotpCode("");
+                  setRecoveryError(null);
+                }}
+                variant="outline"
+                className="flex-1"
+                size="sm"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleGetRecoveryCodes}
+                disabled={recoveryLoading}
+                variant="outline"
+                className="flex-1"
+                size="sm"
+              >
+                {recoveryLoading ? "Loading..." : "Confirm"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <Button
+            onClick={() => setShowRecoveryInput(true)}
+            variant="outline"
+            className="w-full"
+          >
+            View Recovery Codes
+          </Button>
+        )}
       </div>
 
       {/* Delete Account */}

@@ -1,7 +1,7 @@
 use super::super::{
     dto::{
         ChangePasswordRequest, CheckUsernameRequest, DeleteAccountRequest, LoginRequest,
-        RefreshTokenRequest, RegisterRequest, TotpVerifyRequest,
+        RecoveryCodesRequest, RefreshTokenRequest, RegisterRequest, TotpVerifyRequest,
     },
     helpers::{
         create_access_token, create_refresh_token, decode_token, error_response, extract_token,
@@ -17,6 +17,7 @@ use axum::{
 };
 use mongodb::bson::doc;
 use serde_json::{json, Value};
+use sha2::{Sha256, Digest};
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
 
@@ -26,6 +27,61 @@ fn build_totp(secret_base32: &str, username: &str) -> Result<TOTP, String> {
         .map_err(|e| format!("Invalid TOTP secret: {}", e))?;
     TOTP::new(Algorithm::SHA1, 6, 1, 30, secret_bytes, Some("Chatter".to_string()), username.to_string())
         .map_err(|e| format!("TOTP error: {}", e))
+}
+
+fn hash_recovery_code(code: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(code.as_bytes());
+    hex::encode(hasher.finalize())
+}
+
+fn generate_recovery_codes(count: usize) -> (Vec<String>, Vec<String>) {
+    use rand::Rng;
+    let chars: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let mut rng = rand::thread_rng();
+    let mut plaintext = Vec::with_capacity(count);
+    let mut hashed = Vec::with_capacity(count);
+    for _ in 0..count {
+        let code: String = (0..8).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect();
+        let hash = hash_recovery_code(&code);
+        plaintext.push(code);
+        hashed.push(hash);
+    }
+    (plaintext, hashed)
+}
+
+/// Try TOTP first, then recovery codes. Returns Ok(true) if recovery code was used (and consumed).
+async fn verify_totp_or_recovery(
+    code: &str,
+    user: &UserRecord,
+    username: &str,
+    state: &AppState,
+) -> Result<bool, (StatusCode, Json<Value>)> {
+    // Try TOTP first
+    if let Ok(totp) = build_totp(&user.totp_secret, username) {
+        if totp.check_current(code).unwrap_or(false) {
+            return Ok(false);
+        }
+    }
+
+    // Try recovery codes
+    let code_hash = hash_recovery_code(&code.to_uppercase());
+    if let Some(pos) = user.recovery_codes.iter().position(|h| h == &code_hash) {
+        // Remove used recovery code from DB
+        let mut remaining = user.recovery_codes.clone();
+        remaining.remove(pos);
+        let users = state.db.collection::<UserRecord>("users");
+        let bson_codes: Vec<mongodb::bson::Bson> = remaining.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let _ = users
+            .update_one(
+                doc! { "_id": &user.user_id },
+                doc! { "$set": { "recovery_codes": bson_codes } },
+            )
+            .await;
+        return Ok(true);
+    }
+
+    Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"))
 }
 
 pub(crate) async fn check_username(
@@ -103,6 +159,7 @@ pub(crate) async fn register(
         display_name: String::new(),
         totp_secret: totp_secret.clone(),
         totp_verified: false,
+        recovery_codes: Vec::new(),
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(
@@ -166,15 +223,17 @@ pub(crate) async fn totp_verify(
         return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
     }
 
-    // Mark TOTP as verified
+    // Mark TOTP as verified and generate recovery codes
+    let (plaintext_codes, hashed_codes) = generate_recovery_codes(5);
+    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
     let _ = users
         .update_one(
             doc! { "_id": &user_id },
-            doc! { "$set": { "totp_verified": true } },
+            doc! { "$set": { "totp_verified": true, "recovery_codes": bson_codes } },
         )
         .await;
 
-    Ok(Json(json!({ "verified": true })))
+    Ok(Json(json!({ "verified": true, "recovery_codes": plaintext_codes })))
 }
 
 pub(crate) async fn login(
@@ -200,18 +259,14 @@ pub(crate) async fn login(
         return Err(error_response(StatusCode::FORBIDDEN, "Invalid credentials"));
     }
 
-    // If TOTP is set up and verified, require a TOTP code
+    // If TOTP is set up and verified, require a TOTP code or recovery code
     if user.totp_verified && !user.totp_secret.is_empty() {
         match &req.totp_code {
             None => {
                 return Ok(Json(json!({ "requires_totp": true })));
             }
             Some(code) => {
-                let totp = build_totp(&user.totp_secret, username)
-                    .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-                if !totp.check_current(code).unwrap_or(false) {
-                    return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
-                }
+                verify_totp_or_recovery(code, &user, username, &state).await?;
             }
         }
     }
@@ -252,13 +307,9 @@ pub(crate) async fn change_password(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
-    // Verify TOTP
+    // Verify TOTP or recovery code
     let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
-    let totp = build_totp(&user.totp_secret, username)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    if !totp.check_current(&req.totp_code).unwrap_or(false) {
-        return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
-    }
+    verify_totp_or_recovery(&req.totp_code, &user, username, &state).await?;
 
     let new_hash = hash_password(&req.new_password);
     let _ = users
@@ -289,13 +340,9 @@ pub(crate) async fn delete_account(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
-    // Verify TOTP
+    // Verify TOTP or recovery code
     let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
-    let totp = build_totp(&user.totp_secret, username)
-        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
-    if !totp.check_current(&req.totp_code).unwrap_or(false) {
-        return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
-    }
+    verify_totp_or_recovery(&req.totp_code, &user, username, &state).await?;
 
     // Remove user from all rooms (room_members collection)
     let room_members = state.db.collection::<mongodb::bson::Document>("room_members");
@@ -391,6 +438,45 @@ pub(crate) async fn refresh(
         "access_token": new_access,
         "refresh_token": new_refresh
     })))
+}
+
+pub(crate) async fn get_recovery_codes(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<RecoveryCodesRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
+
+    // Verify TOTP code (not recovery code - must use real TOTP)
+    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let totp = build_totp(&user.totp_secret, username)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    if !totp.check_current(&req.totp_code).unwrap_or(false) {
+        return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
+    }
+
+    // Generate new recovery codes (replaces old ones)
+    let (plaintext_codes, hashed_codes) = generate_recovery_codes(5);
+    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+    let _ = users
+        .update_one(
+            doc! { "_id": &user_id },
+            doc! { "$set": { "recovery_codes": bson_codes } },
+        )
+        .await;
+
+    Ok(Json(json!({ "recovery_codes": plaintext_codes })))
 }
 
 async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {

@@ -1,7 +1,7 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
-        auth::{change_password, check_username, delete_account, login, logout, refresh, register, totp_verify},
+        auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
@@ -50,6 +50,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/totp/verify", post(totp_verify))
            .route("/api/account/password", post(change_password))
            .route("/api/account/delete", post(delete_account))
+           .route("/api/recovery-codes", post(get_recovery_codes))
            // Rooms
            .route("/_matrix/client/r0/createRoom", post(create_room))
            .route("/_matrix/client/r0/rooms/{room_id}/join", post(join_room))

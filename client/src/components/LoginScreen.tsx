@@ -32,7 +32,7 @@ import {
   validateUsername,
 } from "@/lib/username";
 
-type Step = "login" | "register" | "totp-setup";
+type Step = "login" | "register" | "totp-setup" | "recovery-codes";
 
 const CONNECTION_STEPS = [
   { ms: 0, text: "initializing handshake..." },
@@ -74,6 +74,8 @@ export function LoginScreen() {
   const [totpQrBase64, setTotpQrBase64] = useState("");
   const [totpVerifyCode, setTotpVerifyCode] = useState("");
   const [registeredUserId, setRegisteredUserId] = useState("");
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
 
   // Common
   const [error, setError] = useState<string | null>(null);
@@ -239,8 +241,16 @@ export function LoginScreen() {
       await runConnectionAnimation();
 
       try {
-        await apiVerifyTotp(totpVerifyCode);
-        // TOTP verified, complete the login
+        const result = await apiVerifyTotp(totpVerifyCode);
+        // Show recovery codes before completing login
+        if (result.recovery_codes && result.recovery_codes.length > 0) {
+          setRecoveryCodes(result.recovery_codes);
+          setStep("recovery-codes");
+          setLoading(false);
+          setVisibleSteps(0);
+          return;
+        }
+        // No recovery codes, complete login directly
         if (registeredUserId) {
           const token = getAccessToken();
           if (token) {
@@ -461,23 +471,57 @@ export function LoginScreen() {
             {needsTotp && (
               <div className="space-y-1.5">
                 <Label htmlFor="totp" className={labelClass} style={labelStyle}>
-                  authenticator code
+                  {useRecoveryCode ? "recovery code" : "authenticator code"}
                 </Label>
-                <Input
-                  id="totp"
-                  placeholder="000000"
-                  value={totpCode}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/\D/g, "").slice(0, 6);
-                    setTotpCode(v);
-                    if (error) setError(null);
-                  }}
-                  maxLength={6}
-                  autoFocus
-                  disabled={loading}
-                  className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
-                  style={inputStyle}
-                />
+                {useRecoveryCode ? (
+                  <Input
+                    id="totp"
+                    placeholder="A3K9M2X7"
+                    value={totpCode}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8);
+                      setTotpCode(v);
+                      if (error) setError(null);
+                    }}
+                    maxLength={8}
+                    autoFocus
+                    disabled={loading}
+                    className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                    style={inputStyle}
+                  />
+                ) : (
+                  <Input
+                    id="totp"
+                    placeholder="000000"
+                    value={totpCode}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                      setTotpCode(v);
+                      if (error) setError(null);
+                    }}
+                    maxLength={6}
+                    autoFocus
+                    disabled={loading}
+                    className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                    style={inputStyle}
+                  />
+                )}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUseRecoveryCode(!useRecoveryCode);
+                      setTotpCode("");
+                      setError(null);
+                    }}
+                    className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+                    style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
+                  >
+                    {useRecoveryCode ? "use authenticator" : "use recovery code"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -651,15 +695,85 @@ export function LoginScreen() {
             {renderButton("verify & connect")}
           </form>
         );
+
+      case "recovery-codes":
+        return (
+          <div className="space-y-5">
+            <div className="text-center space-y-3">
+              <p className="text-[11px] tracking-wide" style={{ color: "rgba(200, 220, 255, 0.7)" }}>
+                Save these recovery codes in a safe place. Each code can only be used once to sign in if you lose access to your authenticator app.
+              </p>
+            </div>
+
+            <div
+              className="grid grid-cols-1 gap-1.5 p-3 border-[1px]"
+              style={{
+                borderColor: "rgba(180, 210, 255, 0.12)",
+                background: "rgba(180, 210, 255, 0.03)",
+              }}
+            >
+              {recoveryCodes.map((code, i) => (
+                <div
+                  key={i}
+                  className="text-center text-sm font-mono tracking-[0.3em] py-1"
+                  style={{ color: "rgba(220, 230, 255, 0.85)" }}
+                >
+                  {code}
+                </div>
+              ))}
+            </div>
+
+            <Button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(recoveryCodes.join("\n"));
+              }}
+              className="w-full rounded-none h-8 text-[10px] uppercase tracking-[0.2em] font-normal border-[1px]"
+              variant="outline"
+              style={{
+                borderColor: "rgba(180, 210, 255, 0.15)",
+                color: "rgba(180, 210, 255, 0.6)",
+                background: "rgba(180, 210, 255, 0.03)",
+              }}
+            >
+              copy all codes
+            </Button>
+
+            <Button
+              type="button"
+              onClick={() => {
+                if (registeredUserId) {
+                  const token = getAccessToken();
+                  if (token) {
+                    dispatch({
+                      type: "LOGIN",
+                      payload: { accessToken: token, userId: registeredUserId },
+                    });
+                  }
+                }
+              }}
+              className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
+              variant="outline"
+              style={{
+                borderColor: "rgba(120, 230, 160, 0.25)",
+                color: "rgba(120, 230, 160, 0.85)",
+                background: "rgba(120, 230, 160, 0.04)",
+              }}
+            >
+              I've saved my codes - continue
+            </Button>
+          </div>
+        );
     }
   };
 
   const subtitle = () => {
     if (loading) return "authenticating...";
     switch (step) {
-      case "login": return needsTotp ? "enter authenticator code" : "what will you chat about?";
+      case "login": return needsTotp ? (useRecoveryCode ? "enter recovery code" : "enter authenticator code") : "what will you chat about?";
       case "register": return "create your account";
       case "totp-setup": return "set up two-factor auth";
+      case "recovery-codes": return "save your recovery codes";
     }
   };
 

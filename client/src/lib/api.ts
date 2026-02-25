@@ -188,7 +188,7 @@ export async function apiVerifyTotp(code: string) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "TOTP verification failed");
   }
-  return res.json() as Promise<{ verified: boolean }>;
+  return res.json() as Promise<{ verified: boolean; recovery_codes?: string[] }>;
 }
 
 export async function apiChangePassword(totpCode: string, newPassword: string) {
@@ -213,6 +213,18 @@ export async function apiDeleteAccount(totpCode: string) {
     throw new Error(body?.error || "Failed to delete account");
   }
   return res.json() as Promise<{ deleted: boolean }>;
+}
+
+export async function apiGetRecoveryCodes(totpCode: string) {
+  const res = await authenticatedFetch("/api/recovery-codes", {
+    method: "POST",
+    body: JSON.stringify({ totp_code: totpCode }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get recovery codes");
+  }
+  return res.json() as Promise<{ recovery_codes: string[] }>;
 }
 
 export async function apiLogout() {

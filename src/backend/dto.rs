@@ -38,6 +38,11 @@ pub(crate) struct DeleteAccountRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct RecoveryCodesRequest {
+    pub(crate) totp_code: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct CreateRoomRequest {
     pub(crate) name: Option<String>,
     pub(crate) topic: Option<String>,

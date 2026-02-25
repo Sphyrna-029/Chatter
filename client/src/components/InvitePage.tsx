@@ -58,6 +58,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [hovered, setHovered] = useState(false);
   const [btnHovered, setBtnHovered] = useState(false);
+  const [useRecoveryCode, setUseRecoveryCode] = useState(false);
 
   const clearStepTimeouts = useCallback(() => {
     timeoutsRef.current.forEach(clearTimeout);
@@ -421,27 +422,65 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                       className="text-[10px] uppercase tracking-[0.2em]"
                       style={{ color: "rgba(180, 210, 255, 0.4)" }}
                     >
-                      authenticator code
+                      {useRecoveryCode ? "recovery code" : "authenticator code"}
                     </Label>
-                    <Input
-                      id="totp"
-                      placeholder="000000"
-                      value={totpCode}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 6);
-                        setTotpCode(v);
-                        if (error) setError(null);
-                      }}
-                      maxLength={6}
-                      autoFocus
-                      disabled={loading}
-                      className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
-                      style={{
-                        borderColor: "rgba(180, 210, 255, 0.12)",
-                        color: "rgba(220, 230, 255, 0.85)",
-                        caretColor: "rgba(180, 210, 255, 0.6)",
-                      }}
-                    />
+                    {useRecoveryCode ? (
+                      <Input
+                        id="totp"
+                        placeholder="A3K9M2X7"
+                        value={totpCode}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8);
+                          setTotpCode(v);
+                          if (error) setError(null);
+                        }}
+                        maxLength={8}
+                        autoFocus
+                        disabled={loading}
+                        className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                        style={{
+                          borderColor: "rgba(180, 210, 255, 0.12)",
+                          color: "rgba(220, 230, 255, 0.85)",
+                          caretColor: "rgba(180, 210, 255, 0.6)",
+                        }}
+                      />
+                    ) : (
+                      <Input
+                        id="totp"
+                        placeholder="000000"
+                        value={totpCode}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, "").slice(0, 6);
+                          setTotpCode(v);
+                          if (error) setError(null);
+                        }}
+                        maxLength={6}
+                        autoFocus
+                        disabled={loading}
+                        className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                        style={{
+                          borderColor: "rgba(180, 210, 255, 0.12)",
+                          color: "rgba(220, 230, 255, 0.85)",
+                          caretColor: "rgba(180, 210, 255, 0.6)",
+                        }}
+                      />
+                    )}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUseRecoveryCode(!useRecoveryCode);
+                          setTotpCode("");
+                          setError(null);
+                        }}
+                        className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+                        style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
+                      >
+                        {useRecoveryCode ? "use authenticator" : "use recovery code"}
+                      </button>
+                    </div>
                   </div>
                 )}
                 {error && (
