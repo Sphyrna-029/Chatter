@@ -476,10 +476,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                 <div className="flex justify-center pt-1">
                   <button
                     type="button"
-                    onClick={() => {
-                      window.history.replaceState({}, "", "/");
-                      window.location.reload();
-                    }}
+                    onClick={() => setShowLogin(true)}
                     className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
                     style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
