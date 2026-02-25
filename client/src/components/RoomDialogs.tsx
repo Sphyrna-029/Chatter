@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, type RoomSummary } from "@/lib/api";
+import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, type RoomSummary, type BannedUser } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, ShieldBan } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -442,14 +443,25 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [settingsUnlisted, setSettingsUnlisted] = useState(false);
   const [settingsPassword, setSettingsPassword] = useState("");
   const [showSettingsPassword, setShowSettingsPassword] = useState(false);
+  const [activeTab, setActiveTab] = useState("general");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Banned users state
+  const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
+  const [loadingBans, setLoadingBans] = useState(false);
+  const [unbanningUser, setUnbanningUser] = useState<string | null>(null);
+
   const isOwner = info?.creator === state.userId;
+  const myMember = state.roomMembers.find(m => m.userId === state.userId);
+  const myRole = myMember?.role || "member";
+  const isModerator = myRole === "moderator";
+  const canManageBans = isOwner || isModerator;
 
   // Pre-populate when dialog opens
   useEffect(() => {
     if (open && info) {
+      setActiveTab("general");
       setName(info.name || "");
       setTags(info.tags || []);
       setTagInput("");
@@ -468,6 +480,13 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setShowSettingsPassword(false);
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
+      }
+      if (canManageBans) {
+        setLoadingBans(true);
+        apiGetBannedUsers(roomId)
+          .then((data) => setBannedUsers(data.bans))
+          .catch(() => setBannedUsers([]))
+          .finally(() => setLoadingBans(false));
       }
     }
   }, [open, roomId]);
@@ -581,388 +600,466 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             Edit the room name, icon, and tags.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-2">
-          <div className="flex items-start gap-4">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="shrink-0 w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center overflow-hidden hover:border-muted-foreground/60 transition-colors cursor-pointer"
-            >
-              {iconPreview ? (
-                <img src={iconPreview} alt="Room icon" className="w-full h-full object-cover" />
-              ) : (
-                <ImagePlus className="w-5 h-5 text-muted-foreground" />
-              )}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handleIconSelect}
-            />
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="settings-room-name">Room Name</Label>
-              <Input
-                id="settings-room-name"
-                placeholder="Room name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSave()}
-              />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-room-tags">Tags</Label>
-            <div className="flex gap-2">
-              <Input
-                id="settings-room-tags"
-                placeholder="Add a tag and press Enter"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addTag();
-                  }
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addTag} disabled={!tagInput.trim()}>
-                Add
-              </Button>
-            </div>
-            {tags.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {tags.map((tag) => (
-                  <Badge key={tag} variant="secondary" className="gap-1 pr-1">
-                    {tag}
-                    <button
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      className="ml-0.5 hover:text-destructive cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="settings-room-emojis">Room Emojis</Label>
-            <div className="flex gap-2">
-              <Input
-                id="settings-room-emojis"
-                placeholder="Paste a Unicode emoji and press Enter"
-                value={emojiInput}
-                onChange={(e) => setEmojiInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addEmoji();
-                  }
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addEmoji} disabled={!emojiInput.trim()}>
-                Add
-              </Button>
-              <input
-                ref={emojiFileInputRef}
-                type="file"
-                accept=".webp,.png,image/webp,image/png"
-                className="hidden"
-                onChange={handleEmojiFileSelect}
-              />
-              <Button
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="py-2">
+          <TabsList className="w-full">
+            <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
+            <TabsTrigger value="emojis" className="flex-1">Emojis</TabsTrigger>
+            {isOwner && <TabsTrigger value="invites" className="flex-1">Invites</TabsTrigger>}
+            {canManageBans && <TabsTrigger value="moderation" className="flex-1">Moderation</TabsTrigger>}
+          </TabsList>
+
+          <TabsContent value="general" className="space-y-4 mt-4">
+            <div className="flex items-start gap-4">
+              <button
                 type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => emojiFileInputRef.current?.click()}
-                disabled={emojiUploading}
-                title="Upload .png or .webp image"
+                onClick={() => fileInputRef.current?.click()}
+                className="shrink-0 w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center overflow-hidden hover:border-muted-foreground/60 transition-colors cursor-pointer"
               >
-                <ImagePlus className="w-4 h-4" />
-              </Button>
-            </div>
-            {customEmojis.length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {customEmojis.map((emoji) => (
-                  <Badge key={emoji} variant="secondary" className="gap-1 pr-1 text-base">
-                    {emoji.startsWith("/") || emoji.startsWith("http") ? (
-                      <img src={emoji} alt="custom emoji" className="w-5 h-5 object-contain" />
-                    ) : (
-                      emoji
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeEmoji(emoji)}
-                      className="ml-0.5 hover:text-destructive cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </Badge>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="space-y-2">
-            <Label>Emoji Aliases</Label>
-            <p className="text-xs text-muted-foreground">Map shortcodes like :salute: to an emoji or custom image</p>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Alias name"
-                value={aliasNameInput}
-                onChange={(e) => setAliasNameInput(e.target.value)}
-                className="flex-1"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addAlias();
-                  }
-                }}
+                {iconPreview ? (
+                  <img src={iconPreview} alt="Room icon" className="w-full h-full object-cover" />
+                ) : (
+                  <ImagePlus className="w-5 h-5 text-muted-foreground" />
+                )}
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleIconSelect}
               />
-              <Input
-                placeholder="Emoji or URL"
-                value={aliasValueInput}
-                onChange={(e) => setAliasValueInput(e.target.value)}
-                className="flex-1"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addAlias();
-                  }
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" onClick={addAlias} disabled={!aliasNameInput.trim() || !aliasValueInput.trim()}>
-                Add
-              </Button>
-            </div>
-            {customEmojis.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Or pick from room emojis:</p>
-                <div className="flex flex-wrap gap-1">
-                  {customEmojis.filter((e) => e.startsWith("/") || e.startsWith("http")).map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      className="h-7 w-7 rounded border border-border flex items-center justify-center hover:bg-accent/50 cursor-pointer"
-                      onClick={() => setAliasValueInput(emoji)}
-                      title="Click to use as alias value"
-                    >
-                      <img src={emoji} alt="emoji" className="w-5 h-5 object-contain" />
-                    </button>
-                  ))}
-                </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="settings-room-name">Room Name</Label>
+                <Input
+                  id="settings-room-name"
+                  placeholder="Room name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                />
               </div>
-            )}
-            {Object.keys(emojiAliases).length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-1">
-                {Object.entries(emojiAliases).map(([name, value]) => {
-                  const isUrl = value.startsWith("/") || value.startsWith("http");
-                  return (
-                    <Badge key={name} variant="secondary" className="gap-1 pr-1">
-                      <span className="text-xs font-mono">:{name}:</span>
-                      <span className="mx-0.5">{isUrl ? <img src={value} alt={name} className="w-4 h-4 object-contain inline" /> : value}</span>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-room-tags">Tags</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="settings-room-tags"
+                  placeholder="Add a tag and press Enter"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTag();
+                    }
+                  }}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addTag} disabled={!tagInput.trim()}>
+                  Add
+                </Button>
+              </div>
+              {tags.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {tags.map((tag) => (
+                    <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                      {tag}
                       <button
                         type="button"
-                        onClick={() => removeAlias(name)}
+                        onClick={() => removeTag(tag)}
                         className="ml-0.5 hover:text-destructive cursor-pointer"
                       >
                         <X className="w-3 h-3" />
                       </button>
                     </Badge>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-          {isOwner && (
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label>Unlisted</Label>
-                <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
-              </div>
-              <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
-            </div>
-          )}
-          {isOwner && (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5" />
-                Password Protection
-              </Label>
-              {info?.has_password ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">This room is currently password-protected.</p>
-                  <div className="relative">
-                    <Input
-                      type={showSettingsPassword ? "text" : "password"}
-                      placeholder="Change password (leave empty to keep)"
-                      value={settingsPassword}
-                      onChange={(e) => setSettingsPassword(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                      onClick={() => setShowSettingsPassword(!showSettingsPassword)}
-                    >
-                      {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={async () => {
-                      try {
-                        await updateRoomSettings(roomId, { remove_password: true });
-                      } catch (e: any) {
-                        alert(e.message || "Failed to remove password");
-                      }
-                    }}
-                  >
-                    Remove Password
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">No password set. Add one to require a password to join.</p>
-                  <div className="relative">
-                    <Input
-                      type={showSettingsPassword ? "text" : "password"}
-                      placeholder="Set a password"
-                      value={settingsPassword}
-                      onChange={(e) => setSettingsPassword(e.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                      onClick={() => setShowSettingsPassword(!showSettingsPassword)}
-                    >
-                      {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
+                  ))}
                 </div>
               )}
             </div>
-          )}
-          {isOwner && (
-            <div className="space-y-2">
+            {isOwner && (
               <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Unlisted</Label>
+                  <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
+                </div>
+                <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
+              </div>
+            )}
+            {isOwner && (
+              <div className="space-y-2">
                 <Label className="flex items-center gap-1.5">
-                  <Link className="w-3.5 h-3.5" />
-                  Invite Links
+                  <Lock className="w-3.5 h-3.5" />
+                  Password Protection
                 </Label>
+                {info?.has_password ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">This room is currently password-protected.</p>
+                    <div className="relative">
+                      <Input
+                        type={showSettingsPassword ? "text" : "password"}
+                        placeholder="Change password (leave empty to keep)"
+                        value={settingsPassword}
+                        onChange={(e) => setSettingsPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                        onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                      >
+                        {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        try {
+                          await updateRoomSettings(roomId, { remove_password: true });
+                        } catch (e: any) {
+                          alert(e.message || "Failed to remove password");
+                        }
+                      }}
+                    >
+                      Remove Password
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">No password set. Add one to require a password to join.</p>
+                    <div className="relative">
+                      <Input
+                        type={showSettingsPassword ? "text" : "password"}
+                        placeholder="Set a password"
+                        value={settingsPassword}
+                        onChange={(e) => setSettingsPassword(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                        onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                      >
+                        {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="emojis" className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label htmlFor="settings-room-emojis">Room Emojis</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="settings-room-emojis"
+                  placeholder="Paste a Unicode emoji and press Enter"
+                  value={emojiInput}
+                  onChange={(e) => setEmojiInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addEmoji();
+                    }
+                  }}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addEmoji} disabled={!emojiInput.trim()}>
+                  Add
+                </Button>
+                <input
+                  ref={emojiFileInputRef}
+                  type="file"
+                  accept=".webp,.png,image/webp,image/png"
+                  className="hidden"
+                  onChange={handleEmojiFileSelect}
+                />
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={inviteLoading}
-                  onClick={async () => {
-                    setInviteLoading(true);
-                    try {
-                      const { code } = await apiCreateInvite(roomId);
-                      setInvites((prev) => [...prev, { code, click_count: 0, created_at: Date.now() }]);
-                    } catch (e: any) {
-                      alert(e.message || "Failed to create invite");
-                    } finally {
-                      setInviteLoading(false);
-                    }
-                  }}
+                  onClick={() => emojiFileInputRef.current?.click()}
+                  disabled={emojiUploading}
+                  title="Upload .png or .webp image"
                 >
-                  {inviteLoading ? "Creating..." : "Create Invite"}
+                  <ImagePlus className="w-4 h-4" />
                 </Button>
               </div>
-              {invites.length > 0 && (
-                <div className="space-y-2 max-h-[160px] overflow-y-auto">
-                  {invites.map((inv) => {
-                    const url = `${window.location.origin}/invite/${inv.code}`;
-                    return (
-                      <div
-                        key={inv.code}
-                        className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+              {customEmojis.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {customEmojis.map((emoji) => (
+                    <Badge key={emoji} variant="secondary" className="gap-1 pr-1 text-base">
+                      {emoji.startsWith("/") || emoji.startsWith("http") ? (
+                        <img src={emoji} alt="custom emoji" className="w-5 h-5 object-contain" />
+                      ) : (
+                        emoji
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeEmoji(emoji)}
+                        className="ml-0.5 hover:text-destructive cursor-pointer"
                       >
-                        <div className="flex-1 min-w-0 truncate font-mono text-xs text-muted-foreground">
-                          {url}
-                        </div>
-                        <span className="text-[10px] text-muted-foreground shrink-0">
-                          {inv.click_count} click{inv.click_count !== 1 ? "s" : ""}
-                        </span>
-                        <Button
+                        <X className="w-3 h-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="space-y-2">
+              <Label>Emoji Aliases</Label>
+              <p className="text-xs text-muted-foreground">Map shortcodes like :salute: to an emoji or custom image</p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Alias name"
+                  value={aliasNameInput}
+                  onChange={(e) => setAliasNameInput(e.target.value)}
+                  className="flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addAlias();
+                    }
+                  }}
+                />
+                <Input
+                  placeholder="Emoji or URL"
+                  value={aliasValueInput}
+                  onChange={(e) => setAliasValueInput(e.target.value)}
+                  className="flex-1"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addAlias();
+                    }
+                  }}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addAlias} disabled={!aliasNameInput.trim() || !aliasValueInput.trim()}>
+                  Add
+                </Button>
+              </div>
+              {customEmojis.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Or pick from room emojis:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {customEmojis.filter((e) => e.startsWith("/") || e.startsWith("http")).map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="h-7 w-7 rounded border border-border flex items-center justify-center hover:bg-accent/50 cursor-pointer"
+                        onClick={() => setAliasValueInput(emoji)}
+                        title="Click to use as alias value"
+                      >
+                        <img src={emoji} alt="emoji" className="w-5 h-5 object-contain" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {Object.keys(emojiAliases).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {Object.entries(emojiAliases).map(([name, value]) => {
+                    const isUrl = value.startsWith("/") || value.startsWith("http");
+                    return (
+                      <Badge key={name} variant="secondary" className="gap-1 pr-1">
+                        <span className="text-xs font-mono">:{name}:</span>
+                        <span className="mx-0.5">{isUrl ? <img src={value} alt={name} className="w-4 h-4 object-contain inline" /> : value}</span>
+                        <button
                           type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          title="Copy link"
-                          onClick={() => {
-                            navigator.clipboard.writeText(url);
-                            setCopiedCode(inv.code);
-                            setTimeout(() => setCopiedCode(null), 2000);
-                          }}
+                          onClick={() => removeAlias(name)}
+                          className="ml-0.5 hover:text-destructive cursor-pointer"
                         >
-                          {copiedCode === inv.code ? (
-                            <span className="text-[10px] text-green-400">ok</span>
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 shrink-0 hover:text-destructive"
-                          title="Delete invite"
-                          onClick={async () => {
-                            try {
-                              await apiDeleteInvite(inv.code);
-                              setInvites((prev) => prev.filter((i) => i.code !== inv.code));
-                            } catch {
-                              alert("Failed to delete invite");
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
                     );
                   })}
                 </div>
               )}
             </div>
-          )}
+          </TabsContent>
+
           {isOwner && (
-            <div className="space-y-2 border-t pt-4">
-              <Label className="text-destructive">Danger Zone</Label>
-              <p className="text-xs text-muted-foreground">
-                Deleting a room is permanent. Type the room name <span className="font-semibold text-foreground">{info?.name}</span> to confirm.
-              </p>
-              <Input
-                placeholder="Enter room name to confirm"
-                value={deleteConfirmName}
-                onChange={(e) => setDeleteConfirmName(e.target.value)}
-                className="text-sm"
-              />
-              <Button
-                variant="destructive"
-                className="w-full"
-                disabled={deleteConfirmName !== info?.name || deleting}
-                onClick={async () => {
-                  setDeleting(true);
-                  try {
-                    await apiDeleteRoom(roomId);
-                    onOpenChange(false);
-                  } catch (e: any) {
-                    alert(e.message || "Failed to delete room");
-                  } finally {
-                    setDeleting(false);
-                  }
-                }}
-              >
-                {deleting ? "Deleting..." : "Delete Room"}
-              </Button>
-            </div>
+            <TabsContent value="invites" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-1.5">
+                    <Link className="w-3.5 h-3.5" />
+                    Invite Links
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={inviteLoading}
+                    onClick={async () => {
+                      setInviteLoading(true);
+                      try {
+                        const { code } = await apiCreateInvite(roomId);
+                        setInvites((prev) => [...prev, { code, click_count: 0, created_at: Date.now() }]);
+                      } catch (e: any) {
+                        alert(e.message || "Failed to create invite");
+                      } finally {
+                        setInviteLoading(false);
+                      }
+                    }}
+                  >
+                    {inviteLoading ? "Creating..." : "Create Invite"}
+                  </Button>
+                </div>
+                {invites.length > 0 ? (
+                  <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                    {invites.map((inv) => {
+                      const url = `${window.location.origin}/invite/${inv.code}`;
+                      return (
+                        <div
+                          key={inv.code}
+                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                        >
+                          <div className="flex-1 min-w-0 truncate font-mono text-xs text-muted-foreground">
+                            {url}
+                          </div>
+                          <span className="text-[10px] text-muted-foreground shrink-0">
+                            {inv.click_count} click{inv.click_count !== 1 ? "s" : ""}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            title="Copy link"
+                            onClick={() => {
+                              navigator.clipboard.writeText(url);
+                              setCopiedCode(inv.code);
+                              setTimeout(() => setCopiedCode(null), 2000);
+                            }}
+                          >
+                            {copiedCode === inv.code ? (
+                              <span className="text-[10px] text-green-400">ok</span>
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 hover:text-destructive"
+                            title="Delete invite"
+                            onClick={async () => {
+                              try {
+                                await apiDeleteInvite(inv.code);
+                                setInvites((prev) => prev.filter((i) => i.code !== inv.code));
+                              } catch {
+                                alert("Failed to delete invite");
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-2">No invite links yet. Create one to share with others.</p>
+                )}
+              </div>
+            </TabsContent>
           )}
-        </div>
+
+          {canManageBans && (
+            <TabsContent value="moderation" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <ShieldBan className="w-3.5 h-3.5" />
+                  Banned Users
+                </Label>
+                {loadingBans ? (
+                  <p className="text-xs text-muted-foreground py-2">Loading...</p>
+                ) : bannedUsers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-2">No banned users</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
+                    {bannedUsers.map((ban) => {
+                      const username = ban.user_id.split(":")[0]?.substring(1) || ban.user_id;
+                      const bannedByName = ban.banned_by.split(":")[0]?.substring(1) || ban.banned_by;
+                      const bannedDate = new Date(ban.banned_at).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      });
+                      return (
+                        <div
+                          key={ban.user_id}
+                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{username}</div>
+                            <div className="text-[10px] text-muted-foreground">
+                              banned by {bannedByName} on {bannedDate}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 text-xs h-7"
+                            disabled={unbanningUser === ban.user_id}
+                            onClick={async () => {
+                              setUnbanningUser(ban.user_id);
+                              try {
+                                await apiUnbanMember(roomId, ban.user_id);
+                                setBannedUsers((prev) => prev.filter((b) => b.user_id !== ban.user_id));
+                              } catch (e: any) {
+                                alert(e.message || "Failed to unban user");
+                              } finally {
+                                setUnbanningUser(null);
+                              }
+                            }}
+                          >
+                            {unbanningUser === ban.user_id ? "..." : "Unban"}
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {isOwner && (
+                <div className="space-y-2 border-t pt-4">
+                  <Label className="text-destructive">Danger Zone</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Deleting a room is permanent. Type the room name <span className="font-semibold text-foreground">{info?.name}</span> to confirm.
+                  </p>
+                  <Input
+                    placeholder="Enter room name to confirm"
+                    value={deleteConfirmName}
+                    onChange={(e) => setDeleteConfirmName(e.target.value)}
+                    className="text-sm"
+                  />
+                  <Button
+                    variant="destructive"
+                    className="w-full"
+                    disabled={deleteConfirmName !== info?.name || deleting}
+                    onClick={async () => {
+                      setDeleting(true);
+                      try {
+                        await apiDeleteRoom(roomId);
+                        onOpenChange(false);
+                      } catch (e: any) {
+                        alert(e.message || "Failed to delete room");
+                      } finally {
+                        setDeleting(false);
+                      }
+                    }}
+                  >
+                    {deleting ? "Deleting..." : "Delete Room"}
+                  </Button>
+                </div>
+              )}
+            </TabsContent>
+          )}
+        </Tabs>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
