@@ -13,10 +13,14 @@ A lightweight, performant, self-hosted chat application built with Rust. Chatter
 - **Voice chat** 
 - **Multi Screen sharing (Requires HTTPS for WebRTC)**
 - **File sharing**
+- **Forums**
+- **Whiteboard**
 - **Code snippets with syntax highlighting**
 - **Direct messages** 
 - **Custom emojis**
 - **Room invite links**
+- **2FA (TOTP)**
+- **Server admin dashboard** (user & room management)
 
 ## Prerequisites
 
@@ -141,9 +145,19 @@ docker ps
 docker stop chatter && docker rm chatter
 ```
 
+## Admin Dashboard
+
+The first user to register (or log in on an existing database with no admin) is automatically promoted to **server admin**. Admins get a "Server Dashboard" button in the sidebar with:
+
+- **Overview** -- server stats (users, rooms, messages, files, storage)
+- **Users** -- view all users, disable/enable accounts, reset passwords (clears 2FA), delete users
+- **Rooms** -- view all rooms with member/message counts, force-delete rooms
+
+Admin status is stored in MongoDB and persists across restarts.
+
 ## Notes
 
-- All data is stored in memory. Restarting the server clears all rooms, messages, and accounts.
+- Data is stored in MongoDB. A running MongoDB instance is required.
 - HTTPS context is required for WebRTC (screen share, voice)
 - There is no built-in TLS. Use a reverse proxy for HTTPS in production.
 - Voice chat and screen sharing require a secure context (HTTPS) in most browsers.
