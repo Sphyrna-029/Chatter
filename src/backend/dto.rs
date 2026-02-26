@@ -5,7 +5,6 @@ pub(crate) struct RegisterRequest {
     pub(crate) username: String,
     pub(crate) password: String,
     pub(crate) password_confirm: Option<String>,
-    pub(crate) device_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -23,6 +22,7 @@ pub(crate) struct CheckUsernameRequest {
 
 #[derive(Deserialize)]
 pub(crate) struct TotpVerifyRequest {
+    pub(crate) user_id: String,
     pub(crate) code: String,
 }
 

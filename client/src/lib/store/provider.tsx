@@ -202,13 +202,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(async (username: string, password: string, passwordConfirm: string) => {
     const data = await apiRegister(username, password, passwordConfirm);
-    setAccessToken(data.access_token);
-    setRefreshToken(data.refresh_token);
-    setIsAdmin(!!data.is_admin);
-    dispatch({ type: "SET_IS_ADMIN", payload: !!data.is_admin });
-    // Don't dispatch LOGIN yet - user needs to verify TOTP first
-    // But we store the tokens so apiVerifyTotp works
+    // Don't store tokens - they aren't issued until TOTP verification
     return {
+      user_id: data.user_id,
       totp_secret: data.totp_secret,
       totp_uri: data.totp_uri,
       totp_qr_base64: data.totp_qr_base64,

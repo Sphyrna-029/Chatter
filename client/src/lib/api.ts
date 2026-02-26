@@ -171,8 +171,6 @@ export async function apiRegister(username: string, password: string, passwordCo
     }
   }
   return res.json() as Promise<{
-    access_token: string;
-    refresh_token: string;
     user_id: string;
     totp_secret: string;
     totp_uri: string;
@@ -191,16 +189,24 @@ export async function apiCheckUsername(username: string) {
   return res.json() as Promise<{ available: boolean }>;
 }
 
-export async function apiVerifyTotp(code: string) {
-  const res = await authenticatedFetch("/api/totp/verify", {
+export async function apiVerifyTotp(userId: string, code: string) {
+  const res = await fetch("/api/totp/verify", {
     method: "POST",
-    body: JSON.stringify({ code }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, code }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "TOTP verification failed");
   }
-  return res.json() as Promise<{ verified: boolean; recovery_codes?: string[] }>;
+  return res.json() as Promise<{
+    verified: boolean;
+    recovery_codes?: string[];
+    access_token: string;
+    refresh_token: string;
+    user_id: string;
+    is_admin?: boolean;
+  }>;
 }
 
 export async function apiChangePassword(totpCode: string, newPassword: string) {

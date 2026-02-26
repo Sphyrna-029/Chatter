@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiCheckUsername, apiVerifyTotp, getAccessToken } from "@/lib/api";
+import { apiCheckUsername, apiVerifyTotp, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -207,14 +207,7 @@ export function LoginScreen() {
         const data = await register(name, regPassword, regConfirm);
         setTotpSecret(data.totp_secret);
         setTotpQrBase64(data.totp_qr_base64);
-        // Decode user_id from the stored token
-        const token = getAccessToken();
-        if (token) {
-          try {
-            const payload = JSON.parse(atob(token.split(".")[1]));
-            setRegisteredUserId(payload.sub);
-          } catch { /* ignore */ }
-        }
+        setRegisteredUserId(data.user_id);
         setStep("totp-setup");
         setError(null);
       } catch (err: any) {
@@ -241,7 +234,11 @@ export function LoginScreen() {
       await runConnectionAnimation();
 
       try {
-        const result = await apiVerifyTotp(totpVerifyCode);
+        const result = await apiVerifyTotp(registeredUserId, totpVerifyCode);
+        // Store tokens from verify response
+        setAccessToken(result.access_token);
+        setRefreshToken(result.refresh_token);
+        if (result.is_admin !== undefined) setIsAdmin(result.is_admin);
         // Show recovery codes before completing login
         if (result.recovery_codes && result.recovery_codes.length > 0) {
           setRecoveryCodes(result.recovery_codes);
@@ -251,15 +248,11 @@ export function LoginScreen() {
           return;
         }
         // No recovery codes, complete login directly
-        if (registeredUserId) {
-          const token = getAccessToken();
-          if (token) {
-            dispatch({
-              type: "LOGIN",
-              payload: { accessToken: token, userId: registeredUserId },
-            });
-          }
-        }
+        dispatch({
+          type: "LOGIN",
+          payload: { accessToken: result.access_token, userId: result.user_id },
+        });
+        dispatch({ type: "SET_IS_ADMIN", payload: !!result.is_admin });
       } catch (err: any) {
         setError(err.message || "Verification failed");
         setLoading(false);
@@ -742,14 +735,12 @@ export function LoginScreen() {
             <Button
               type="button"
               onClick={() => {
-                if (registeredUserId) {
-                  const token = getAccessToken();
-                  if (token) {
-                    dispatch({
-                      type: "LOGIN",
-                      payload: { accessToken: token, userId: registeredUserId },
-                    });
-                  }
+                const token = getAccessToken();
+                if (token && registeredUserId) {
+                  dispatch({
+                    type: "LOGIN",
+                    payload: { accessToken: token, userId: registeredUserId },
+                  });
                 }
               }}
               className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"

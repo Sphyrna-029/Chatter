@@ -143,7 +143,6 @@ pub(crate) async fn register(
     }
 
     let password_hash = hash_password(&req.password);
-    let device_id = req.device_id.unwrap_or_else(|| generate_id("DEVICE"));
 
     // First user to register becomes admin
     let user_count = users.count_documents(doc! {}).await.unwrap_or(0);
@@ -174,12 +173,6 @@ pub(crate) async fn register(
         )
     })?;
 
-    let access_token = create_access_token(&user_id, &state.jwt_secret);
-    let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
-
-    // Store refresh token in MongoDB
-    store_refresh_token(&state, &refresh_token, &user_id).await;
-
     // Build TOTP URI for QR code
     let totp = build_totp(&totp_secret, username)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
@@ -188,11 +181,9 @@ pub(crate) async fn register(
     // Generate QR code as base64 PNG
     let qr_base64 = totp.get_qr_base64().unwrap_or_default();
 
+    // Don't issue tokens yet - user must verify TOTP first
     Ok(Json(json!({
         "user_id": user_id,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "device_id": device_id,
         "totp_secret": totp_secret,
         "totp_uri": totp_uri,
         "totp_qr_base64": qr_base64,
@@ -202,13 +193,9 @@ pub(crate) async fn register(
 
 pub(crate) async fn totp_verify(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     Json(req): Json<TotpVerifyRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let token = extract_token(&headers)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+    let user_id = req.user_id;
 
     let users = state.db.collection::<UserRecord>("users");
     let user = users
@@ -240,7 +227,19 @@ pub(crate) async fn totp_verify(
         )
         .await;
 
-    Ok(Json(json!({ "verified": true, "recovery_codes": plaintext_codes })))
+    // Now that TOTP is verified, issue tokens
+    let access_token = create_access_token(&user_id, &state.jwt_secret);
+    let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
+    store_refresh_token(&state, &refresh_token, &user_id).await;
+
+    Ok(Json(json!({
+        "verified": true,
+        "recovery_codes": plaintext_codes,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user_id": user_id,
+        "is_admin": user.is_admin
+    })))
 }
 
 pub(crate) async fn login(
