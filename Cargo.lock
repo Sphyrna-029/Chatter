@@ -464,6 +464,7 @@ dependencies = [
  "tokio-tungstenite 0.24.0",
  "totp-rs",
  "tower-http",
+ "url",
  "urlencoding",
  "webrtc",
 ]

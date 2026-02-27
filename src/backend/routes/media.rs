@@ -13,6 +13,7 @@ use axum::{
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 use serde_json::json;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 pub(crate) async fn upload_file(
@@ -124,6 +125,70 @@ pub(crate) async fn upload_file(
 // Link preview
 // ---------------------------------------------------------------------------
 
+/// Returns true if the IP address is private, loopback, link-local, or otherwise
+/// reserved — i.e. should NOT be reachable from a server-side fetch.
+fn is_private_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            v4.is_loopback()          // 127.0.0.0/8
+            || v4.is_private()        // 10/8, 172.16/12, 192.168/16
+            || v4.is_link_local()     // 169.254/16
+            || v4.is_broadcast()      // 255.255.255.255
+            || v4.is_unspecified()    // 0.0.0.0
+            || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64  // 100.64/10 (CGNAT)
+            || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0 // 192.0.0/24 (IETF)
+            || v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19) // 198.18/15 (benchmark)
+        }
+        IpAddr::V6(v6) => {
+            v6.is_loopback()          // ::1
+            || v6.is_unspecified()    // ::
+            || {
+                let segments = v6.segments();
+                // fc00::/7  (unique local)
+                (segments[0] & 0xFE00) == 0xFC00
+                // fe80::/10 (link-local)
+                || (segments[0] & 0xFFC0) == 0xFE80
+                // ::ffff:0:0/96 (IPv4-mapped — check the embedded v4)
+                || matches!(v6.to_ipv4_mapped(), Some(v4) if is_private_ip(&IpAddr::V4(v4)))
+            }
+        }
+    }
+}
+
+/// Validate that a URL is safe for server-side fetching (no SSRF).
+/// Returns Ok(()) or an error message.
+fn validate_url_for_ssrf(url: &str) -> Result<(), &'static str> {
+    let parsed = url::Url::parse(url).map_err(|_| "Invalid URL")?;
+
+    // Only allow http/https
+    match parsed.scheme() {
+        "http" | "https" => {}
+        _ => return Err("Only HTTP(S) URLs are allowed"),
+    }
+
+    let host = parsed.host_str().ok_or("URL has no host")?;
+
+    // Resolve hostname to IPs and check every one
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let addr_str = format!("{}:{}", host, port);
+    let addrs: Vec<_> = addr_str
+        .to_socket_addrs()
+        .map_err(|_| "Could not resolve hostname")?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err("Hostname resolved to no addresses");
+    }
+
+    for addr in &addrs {
+        if is_private_ip(&addr.ip()) {
+            return Err("URL resolves to a private/internal IP address");
+        }
+    }
+
+    Ok(())
+}
+
 pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
     let pattern = format!("property=\"{}\"", property);
     let pos = html.find(&pattern)?;
@@ -149,6 +214,41 @@ pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
     Some(title)
 }
 
+/// Fetch a URL following redirects, validating each hop against SSRF.
+async fn safe_fetch(
+    client: &reqwest::Client,
+    initial_url: &str,
+    ua: &str,
+    accept: &str,
+) -> Result<reqwest::Response, String> {
+    let mut current_url = initial_url.to_string();
+    for _ in 0..5u8 {
+        let resp = client
+            .get(&current_url)
+            .header("User-Agent", ua)
+            .header("Accept", accept)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        if resp.status().is_redirection() {
+            if let Some(loc) = resp.headers().get("location").and_then(|v| v.to_str().ok()) {
+                let next = if loc.starts_with('/') {
+                    let base = url::Url::parse(&current_url).map_err(|e| e.to_string())?;
+                    base.join(loc).map_err(|e| e.to_string())?.to_string()
+                } else {
+                    loc.to_string()
+                };
+                validate_url_for_ssrf(&next).map_err(|e| e.to_string())?;
+                current_url = next;
+                continue;
+            }
+        }
+        return Ok(resp);
+    }
+    Err("Too many redirects".to_string())
+}
+
 pub(crate) async fn link_preview(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -172,9 +272,14 @@ pub(crate) async fn link_preview(
         }
     }
 
+    // SSRF protection: block requests to private/internal IPs
+    if let Err(msg) = validate_url_for_ssrf(&url) {
+        return error_response(StatusCode::BAD_REQUEST, msg);
+    }
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::limited(5))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -186,13 +291,7 @@ pub(crate) async fn link_preview(
             "https://publish.twitter.com/oembed?url={}&omit_script=true",
             urlencoding::encode(&url)
         );
-        match client
-            .get(&oembed_url)
-            .header("User-Agent", browser_ua)
-            .header("Accept", "application/json")
-            .send()
-            .await
-        {
+        match safe_fetch(&client, &oembed_url, browser_ua, "application/json").await {
             Ok(resp) => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     CachedPreview {
@@ -228,12 +327,13 @@ pub(crate) async fn link_preview(
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
         }
     } else {
-        let response = match client
-            .get(&url)
-            .header("User-Agent", browser_ua)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-            .send()
-            .await
+        let response = match safe_fetch(
+            &client,
+            &url,
+            browser_ua,
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .await
         {
             Ok(r) => r,
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
