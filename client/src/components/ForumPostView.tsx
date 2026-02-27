@@ -11,7 +11,8 @@ import {
   type ForumPost,
   type ForumComment,
 } from "@/lib/api";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-react";
@@ -350,22 +351,31 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
           <div className="flex items-center gap-1.5 flex-wrap">
             {reactionEntries.map(([emoji, userIds]) =>
               userIds.length > 0 ? (
-                <button
-                  key={emoji}
-                  onClick={() => handleReaction(emoji)}
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors cursor-pointer ${
-                    userIds.includes(state.userId ?? "")
-                      ? "border-primary/50 bg-primary/10"
-                      : "border-border hover:bg-accent"
-                  }`}
-                >
-                  {isCustomEmojiUrl(emoji) ? (
-                    <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
-                  ) : (
-                    emoji
-                  )}
-                  <span>{userIds.length}</span>
-                </button>
+                <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    key={emoji}
+                    onClick={() => handleReaction(emoji)}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors cursor-pointer ${
+                      userIds.includes(state.userId ?? "")
+                        ? "border-primary/50 bg-primary/10"
+                        : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    {isCustomEmojiUrl(emoji) ? (
+                      <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
+                    ) : (
+                      emoji
+                    )}
+                    <span className="text-muted-foreground font-medium">{userIds.length}</span>
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {userIds.map(id => (
+                    <p key={id}>{id}</p>
+                  ))}
+                </TooltipContent>
+              </Tooltip>
               ) : null
             )}
             <div className="relative">

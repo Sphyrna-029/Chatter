@@ -2,6 +2,7 @@ import { useAppContext } from "@/lib/store";
 import type { ForumPost } from "@/lib/api";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -82,6 +83,8 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
             <div className="flex flex-wrap gap-1">
               {reactionEntries.map(([emoji, userIds]) =>
                 userIds.length > 0 ? (
+                  <Tooltip>
+                <TooltipTrigger asChild>
                   <button
                     key={emoji}
                     onClick={(e) => {
@@ -99,8 +102,15 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
                     ) : (
                       emoji
                     )}
-                    <span>{userIds.length}</span>
+                    <span className="text-muted-foreground font-medium">{userIds.length}</span>
                   </button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {userIds.map(id => (
+                    <p key={id}>{id}</p>
+                  ))}
+                </TooltipContent>
+              </Tooltip>
                 ) : null
               )}
             </div>
