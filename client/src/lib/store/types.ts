@@ -49,6 +49,11 @@ export interface AppState {
   adminDashboardOpen: boolean;
   // 2FA
   totpVerified: boolean;
+  // Friends
+  friends: string[];
+  incomingFriendRequests: { userId: string; requestId: string }[];
+  outgoingFriendRequests: { userId: string; requestId: string }[];
+  blockedUsers: string[];
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -92,7 +97,16 @@ export type Action =
   | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } }
   | { type: "SET_IS_ADMIN"; payload: boolean }
   | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean }
-  | { type: "SET_TOTP_VERIFIED"; payload: boolean };
+  | { type: "SET_TOTP_VERIFIED"; payload: boolean }
+  | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
+  | { type: "ADD_FRIEND"; payload: string }
+  | { type: "REMOVE_FRIEND"; payload: string }
+  | { type: "ADD_INCOMING_REQUEST"; payload: { userId: string; requestId: string } }
+  | { type: "REMOVE_INCOMING_REQUEST"; payload: string }
+  | { type: "ADD_OUTGOING_REQUEST"; payload: { userId: string; requestId: string } }
+  | { type: "REMOVE_OUTGOING_REQUEST"; payload: string }
+  | { type: "ADD_BLOCKED_USER"; payload: string }
+  | { type: "REMOVE_BLOCKED_USER"; payload: string };
 
 export const initialState: AppState = {
   accessToken: null,
@@ -126,6 +140,10 @@ export const initialState: AppState = {
   isAdmin: false,
   adminDashboardOpen: false,
   totpVerified: false,
+  friends: [],
+  incomingFriendRequests: [],
+  outgoingFriendRequests: [],
+  blockedUsers: [],
 };
 
 export interface AppContextValue {
@@ -161,4 +179,12 @@ export interface AppContextValue {
   unbanMember: (roomId: string, userId: string) => Promise<void>;
   setMemberRole: (roomId: string, userId: string, role: string) => Promise<void>;
   setNameColors: (roomId: string, ownerColor?: string, modColor?: string) => Promise<void>;
+  // Friends
+  loadFriends: () => Promise<void>;
+  sendFriendRequest: (userId: string) => Promise<void>;
+  acceptFriendRequest: (userId: string) => Promise<void>;
+  rejectFriendRequest: (userId: string) => Promise<void>;
+  removeFriend: (userId: string) => Promise<void>;
+  blockUser: (userId: string) => Promise<void>;
+  unblockUser: (userId: string) => Promise<void>;
 }

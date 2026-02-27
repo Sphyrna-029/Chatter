@@ -4,6 +4,7 @@ import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
+import { LayoutDashboard } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -368,6 +369,23 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             Server Dashboard
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs text-muted-foreground justify-start gap-2"
+          onClick={() => {
+            dispatch({ type: "SELECT_ROOM", payload: null });
+            dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: false });
+          }}
+        >
+          <span className="relative">
+            <LayoutDashboard className="h-3.5 w-3.5" />
+            {Object.values(state.roomMentions).some((c) => c > 0) && (
+              <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-blue-500" />
+            )}
+          </span>
+          Activity
+        </Button>
         <div className="flex gap-1">
           <Button
             variant="ghost"

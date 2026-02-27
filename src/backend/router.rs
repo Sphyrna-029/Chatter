@@ -4,6 +4,7 @@ use super::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room},
         auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, totp_setup, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
+        friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
         messages::{edit_message, get_room_messages, redact_message, search_messages, send_message},
@@ -130,6 +131,15 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/forum/{room_id}/posts/{post_id}", get(get_post).delete(delete_post).put(edit_post))
            .route("/api/forum/{room_id}/posts/{post_id}/comments", post(create_comment))
            .route("/api/forum/{room_id}/posts/{post_id}/comments/{comment_id}", delete(delete_comment).put(edit_comment))
+           // Friends
+           .route("/api/friends", get(get_friends))
+           .route("/api/friends/status/{user_id}", get(get_friend_status))
+           .route("/api/friends/request", post(send_friend_request))
+           .route("/api/friends/accept", post(accept_friend_request))
+           .route("/api/friends/reject", post(reject_friend_request))
+           .route("/api/friends/remove", post(remove_friend))
+           .route("/api/friends/block", post(block_user))
+           .route("/api/friends/unblock", post(unblock_user))
            // Admin
            .route("/api/admin/stats", get(admin_stats))
            .route("/api/admin/users", get(admin_list_users))

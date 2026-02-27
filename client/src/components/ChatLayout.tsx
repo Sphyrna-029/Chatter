@@ -6,6 +6,7 @@ import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
 import { WhiteboardArea } from "./WhiteboardArea";
+import { ActivityPage } from "./ActivityPage";
 import { MembersPanel } from "./MembersPanel";
 import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
@@ -53,7 +54,7 @@ function LeftPanelRestoreButton() {
 }
 
 export function ChatLayout() {
-  const { state, loadRooms, selectRoom } = useAppContext();
+  const { state, loadRooms, loadFriends, selectRoom } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
@@ -66,10 +67,11 @@ export function ChatLayout() {
   // Flag to distinguish our code exiting PiP vs the user clicking "back to tab" / close
   const programmaticPipExitRef = useRef(false);
 
-  // Load rooms on mount
+  // Load rooms and friends on mount
   useEffect(() => {
     loadRooms();
-  }, [loadRooms]);
+    loadFriends();
+  }, [loadRooms, loadFriends]);
 
   const isForumRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"
@@ -310,9 +312,11 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* Main content: admin dashboard or voice column + chat/forum + members */}
+            {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
             {state.adminDashboardOpen ? (
               <AdminDashboard />
+            ) : !state.currentRoomId ? (
+              <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
               {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}

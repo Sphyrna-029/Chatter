@@ -42,6 +42,13 @@ import {
   apiUnbanMember,
   apiSetMemberRole,
   apiSetNameColors,
+  apiGetFriends,
+  apiSendFriendRequest,
+  apiAcceptFriendRequest,
+  apiRejectFriendRequest,
+  apiRemoveFriend,
+  apiBlockUser,
+  apiUnblockUser,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -608,6 +615,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiSetNameColors(roomId, ownerColor, modColor);
   }, []);
 
+  const loadFriends = useCallback(async () => {
+    try {
+      const data = await apiGetFriends();
+      dispatch({
+        type: "SET_FRIENDS_DATA",
+        payload: {
+          friends: data.friends,
+          incomingRequests: data.incoming_requests,
+          outgoingRequests: data.outgoing_requests,
+          blocked: data.blocked,
+        },
+      });
+    } catch {}
+  }, []);
+
+  const sendFriendRequest = useCallback(async (userId: string) => {
+    const result = await apiSendFriendRequest(userId);
+    if (result.auto_accepted) {
+      dispatch({ type: "ADD_FRIEND", payload: userId });
+    } else {
+      dispatch({ type: "ADD_OUTGOING_REQUEST", payload: { userId, requestId: "" } });
+    }
+  }, []);
+
+  const acceptFriendRequest = useCallback(async (userId: string) => {
+    await apiAcceptFriendRequest(userId);
+    dispatch({ type: "REMOVE_INCOMING_REQUEST", payload: userId });
+    dispatch({ type: "ADD_FRIEND", payload: userId });
+  }, []);
+
+  const rejectFriendRequest = useCallback(async (userId: string) => {
+    await apiRejectFriendRequest(userId);
+    dispatch({ type: "REMOVE_INCOMING_REQUEST", payload: userId });
+  }, []);
+
+  const removeFriend = useCallback(async (userId: string) => {
+    await apiRemoveFriend(userId);
+    dispatch({ type: "REMOVE_FRIEND", payload: userId });
+  }, []);
+
+  const blockUser = useCallback(async (userId: string) => {
+    await apiBlockUser(userId);
+    dispatch({ type: "REMOVE_FRIEND", payload: userId });
+    dispatch({ type: "REMOVE_INCOMING_REQUEST", payload: userId });
+    dispatch({ type: "REMOVE_OUTGOING_REQUEST", payload: userId });
+    dispatch({ type: "ADD_BLOCKED_USER", payload: userId });
+  }, []);
+
+  const unblockUser = useCallback(async (userId: string) => {
+    await apiUnblockUser(userId);
+    dispatch({ type: "REMOVE_BLOCKED_USER", payload: userId });
+  }, []);
+
   const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -655,6 +715,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         unbanMember,
         setMemberRole,
         setNameColors,
+        loadFriends,
+        sendFriendRequest,
+        acceptFriendRequest,
+        rejectFriendRequest,
+        removeFriend,
+        blockUser,
+        unblockUser,
       }}
     >
       {children}

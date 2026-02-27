@@ -170,3 +170,8 @@ pub(crate) struct ForumSearchQuery {
     pub(crate) q: String,
     pub(crate) limit: Option<i64>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct FriendActionRequest {
+    pub(crate) user_id: String,
+}

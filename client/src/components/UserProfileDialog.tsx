@@ -66,7 +66,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount } = useAppContext();
+  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser } = useAppContext();
   const isSelf = userId === state.userId;
   const username = userId.split(":")[0]?.substring(1) || displayName;
   const presence = state.userPresence[userId];
@@ -443,6 +443,89 @@ export function UserProfileDialog({
           <Button className="w-full mt-2" onClick={handleMessage}>
             Message
           </Button>
+
+          {/* Friend / Block actions */}
+          {(() => {
+            const isFriend = state.friends.includes(userId);
+            const isBlocked = state.blockedUsers.includes(userId);
+            const hasOutgoing = state.outgoingFriendRequests.some((r) => r.userId === userId);
+            const hasIncoming = state.incomingFriendRequests.some((r) => r.userId === userId);
+
+            return (
+              <div className="w-full space-y-1.5">
+                {isBlocked ? (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                      await unblockUser(userId);
+                    }}
+                  >
+                    Unblock
+                  </Button>
+                ) : isFriend ? (
+                  <Button
+                    variant="outline"
+                    className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
+                    onClick={async () => {
+                      await removeFriend(userId);
+                    }}
+                  >
+                    Remove Friend
+                  </Button>
+                ) : hasIncoming ? (
+                  <div className="flex gap-2 w-full">
+                    <Button
+                      variant="outline"
+                      className="flex-1"
+                      onClick={async () => {
+                        await rejectFriendRequest(userId);
+                      }}
+                    >
+                      Reject
+                    </Button>
+                    <Button
+                      className="flex-1"
+                      onClick={async () => {
+                        await acceptFriendRequest(userId);
+                      }}
+                    >
+                      Accept Request
+                    </Button>
+                  </div>
+                ) : hasOutgoing ? (
+                  <Button variant="outline" className="w-full" disabled>
+                    Request Sent
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={async () => {
+                      await sendFriendRequest(userId);
+                    }}
+                  >
+                    Add Friend
+                  </Button>
+                )}
+                {!isBlocked && (
+                  <Button
+                    variant="outline"
+                    className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
+                    onClick={async () => {
+                      if (confirm(`Block ${displayName}? This will also remove any friendship or pending requests.`)) {
+                        await blockUser(userId);
+                        onOpenChange(false);
+                      }
+                    }}
+                  >
+                    Block User
+                  </Button>
+                )}
+              </div>
+            );
+          })()}
+
           {state.currentRoomId && (() => {
             const myRole = state.roomMembers.find(m => m.userId === state.userId)?.role;
             const targetRole = state.roomMembers.find(m => m.userId === userId)?.role;

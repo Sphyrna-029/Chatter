@@ -129,6 +129,58 @@ async fn create_indexes(db: &mongodb::Database) {
                 .build(),
         )
         .await;
+
+    // friend_requests: unique compound {from_user, to_user}
+    let _ = db
+        .collection::<mongodb::bson::Document>("friend_requests")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "from_user": 1, "to_user": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await;
+
+    // friend_requests: index on to_user (for incoming lookups)
+    let _ = db
+        .collection::<mongodb::bson::Document>("friend_requests")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "to_user": 1 })
+                .build(),
+        )
+        .await;
+
+    // friendships: index on user_a
+    let _ = db
+        .collection::<mongodb::bson::Document>("friendships")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "user_a": 1 })
+                .build(),
+        )
+        .await;
+
+    // friendships: index on user_b
+    let _ = db
+        .collection::<mongodb::bson::Document>("friendships")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "user_b": 1 })
+                .build(),
+        )
+        .await;
+
+    // blocks: unique compound {blocker, blocked}
+    let _ = db
+        .collection::<mongodb::bson::Document>("blocks")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "blocker": 1, "blocked": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await;
 }
 
 async fn load_room_members_cache(

@@ -283,6 +283,62 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, adminDashboardOpen: action.payload };
     case "SET_TOTP_VERIFIED":
       return { ...state, totpVerified: action.payload };
+    case "SET_FRIENDS_DATA":
+      return {
+        ...state,
+        friends: action.payload.friends,
+        incomingFriendRequests: action.payload.incomingRequests,
+        outgoingFriendRequests: action.payload.outgoingRequests,
+        blockedUsers: action.payload.blocked,
+      };
+    case "ADD_FRIEND":
+      return {
+        ...state,
+        friends: state.friends.includes(action.payload)
+          ? state.friends
+          : [...state.friends, action.payload],
+      };
+    case "REMOVE_FRIEND":
+      return {
+        ...state,
+        friends: state.friends.filter((id) => id !== action.payload),
+      };
+    case "ADD_INCOMING_REQUEST":
+      return {
+        ...state,
+        incomingFriendRequests: state.incomingFriendRequests.some((r) => r.userId === action.payload.userId)
+          ? state.incomingFriendRequests
+          : [...state.incomingFriendRequests, action.payload],
+      };
+    case "REMOVE_INCOMING_REQUEST":
+      return {
+        ...state,
+        incomingFriendRequests: state.incomingFriendRequests.filter((r) => r.userId !== action.payload),
+      };
+    case "ADD_OUTGOING_REQUEST":
+      return {
+        ...state,
+        outgoingFriendRequests: state.outgoingFriendRequests.some((r) => r.userId === action.payload.userId)
+          ? state.outgoingFriendRequests
+          : [...state.outgoingFriendRequests, action.payload],
+      };
+    case "REMOVE_OUTGOING_REQUEST":
+      return {
+        ...state,
+        outgoingFriendRequests: state.outgoingFriendRequests.filter((r) => r.userId !== action.payload),
+      };
+    case "ADD_BLOCKED_USER":
+      return {
+        ...state,
+        blockedUsers: state.blockedUsers.includes(action.payload)
+          ? state.blockedUsers
+          : [...state.blockedUsers, action.payload],
+      };
+    case "REMOVE_BLOCKED_USER":
+      return {
+        ...state,
+        blockedUsers: state.blockedUsers.filter((id) => id !== action.payload),
+      };
     default:
       return state;
   }

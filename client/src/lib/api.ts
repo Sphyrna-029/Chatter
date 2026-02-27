@@ -1032,3 +1032,94 @@ export async function apiAdminDeleteRoom(roomId: string): Promise<void> {
     throw new Error(body?.error || "Failed to delete room");
   }
 }
+
+// ─── Friends ─────────────────────────────────────────────────────────────────
+
+export async function apiGetFriends() {
+  const res = await authenticatedFetch("/api/friends");
+  if (!res.ok) throw new Error("Failed to load friends");
+  return res.json() as Promise<{
+    friends: string[];
+    incoming_requests: { userId: string; requestId: string }[];
+    outgoing_requests: { userId: string; requestId: string }[];
+    blocked: string[];
+  }>;
+}
+
+export async function apiGetFriendStatus(userId: string) {
+  const res = await authenticatedFetch(`/api/friends/status/${userId}`);
+  if (!res.ok) throw new Error("Failed to get friend status");
+  return res.json() as Promise<{ status: string }>;
+}
+
+export async function apiSendFriendRequest(userId: string) {
+  const res = await authenticatedFetch("/api/friends/request", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to send friend request");
+  }
+  return res.json() as Promise<{ status: string; auto_accepted?: boolean }>;
+}
+
+export async function apiAcceptFriendRequest(userId: string) {
+  const res = await authenticatedFetch("/api/friends/accept", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to accept friend request");
+  }
+  return res.json();
+}
+
+export async function apiRejectFriendRequest(userId: string) {
+  const res = await authenticatedFetch("/api/friends/reject", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to reject friend request");
+  }
+  return res.json();
+}
+
+export async function apiRemoveFriend(userId: string) {
+  const res = await authenticatedFetch("/api/friends/remove", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to remove friend");
+  }
+  return res.json();
+}
+
+export async function apiBlockUser(userId: string) {
+  const res = await authenticatedFetch("/api/friends/block", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to block user");
+  }
+  return res.json();
+}
+
+export async function apiUnblockUser(userId: string) {
+  const res = await authenticatedFetch("/api/friends/unblock", {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to unblock user");
+  }
+  return res.json();
+}

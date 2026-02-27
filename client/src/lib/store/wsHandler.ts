@@ -246,6 +246,22 @@ export function createWsMessageHandler(
         new CustomEvent(msg.type, { detail: msg })
       );
     }
+    // Friend events
+    else if (msg.type === "friend_request") {
+      dispatch({
+        type: "ADD_INCOMING_REQUEST",
+        payload: { userId: msg.from_user, requestId: msg.request_id },
+      });
+    }
+    else if (msg.type === "friend_request_accepted") {
+      const friendUserId = msg.user_id;
+      dispatch({ type: "ADD_FRIEND", payload: friendUserId });
+      dispatch({ type: "REMOVE_INCOMING_REQUEST", payload: friendUserId });
+      dispatch({ type: "REMOVE_OUTGOING_REQUEST", payload: friendUserId });
+    }
+    else if (msg.type === "friend_removed") {
+      dispatch({ type: "REMOVE_FRIEND", payload: msg.user_id });
+    }
     // WebRTC signaling messages are handled by the voice/screen hooks
     // by subscribing to raw WS messages via a custom event
     window.dispatchEvent(

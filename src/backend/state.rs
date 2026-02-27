@@ -211,6 +211,31 @@ pub(crate) struct WhiteboardStrokeRecord {
     pub(crate) timestamp: i64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct FriendshipRecord {
+    #[serde(rename = "_id")]
+    pub(crate) pair_key: String, // sorted "userA|userB"
+    pub(crate) user_a: String,
+    pub(crate) user_b: String,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct FriendRequestRecord {
+    #[serde(rename = "_id")]
+    pub(crate) request_id: String,
+    pub(crate) from_user: String,
+    pub(crate) to_user: String,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct BlockRecord {
+    pub(crate) blocker: String,
+    pub(crate) blocked: String,
+    pub(crate) created_at: i64,
+}
+
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]
