@@ -253,6 +253,7 @@ export function LoginScreen() {
           payload: { accessToken: result.access_token, userId: result.user_id },
         });
         dispatch({ type: "SET_IS_ADMIN", payload: !!result.is_admin });
+        dispatch({ type: "SET_TOTP_VERIFIED", payload: true });
       } catch (err: any) {
         setError(err.message || "Verification failed");
         setLoading(false);
@@ -741,6 +742,7 @@ export function LoginScreen() {
                     type: "LOGIN",
                     payload: { accessToken: token, userId: registeredUserId },
                   });
+                  dispatch({ type: "SET_TOTP_VERIFIED", payload: true });
                 }
               }}
               className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"

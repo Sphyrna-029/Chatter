@@ -238,7 +238,8 @@ pub(crate) async fn totp_verify(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "user_id": user_id,
-        "is_admin": user.is_admin
+        "is_admin": user.is_admin,
+        "totp_verified": true
     })))
 }
 
@@ -308,7 +309,8 @@ pub(crate) async fn login(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "device_id": device_id,
-        "is_admin": is_admin
+        "is_admin": is_admin,
+        "totp_verified": user.totp_verified
     })))
 }
 
@@ -514,6 +516,53 @@ pub(crate) async fn get_recovery_codes(
         .await;
 
     Ok(Json(json!({ "recovery_codes": plaintext_codes })))
+}
+
+pub(crate) async fn totp_setup(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
+
+    if user.totp_verified {
+        return Err(error_response(StatusCode::BAD_REQUEST, "2FA is already set up"));
+    }
+
+    // Generate a new 20-byte TOTP secret
+    let mut secret_bytes = [0u8; 20];
+    rand::Rng::fill(&mut rand::thread_rng(), &mut secret_bytes[..]);
+    let totp_secret = Secret::Raw(secret_bytes.to_vec()).to_encoded().to_string();
+
+    // Save the new secret to DB
+    let _ = users
+        .update_one(
+            doc! { "_id": &user_id },
+            doc! { "$set": { "totp_secret": &totp_secret } },
+        )
+        .await;
+
+    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let totp = build_totp(&totp_secret, username)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+    let totp_uri = totp.get_url();
+    let qr_base64 = totp.get_qr_base64().unwrap_or_default();
+
+    Ok(Json(json!({
+        "totp_secret": totp_secret,
+        "totp_uri": totp_uri,
+        "totp_qr_base64": qr_base64
+    })))
 }
 
 async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {

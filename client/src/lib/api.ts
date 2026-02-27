@@ -41,6 +41,7 @@ export function clearTokens() {
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("is_admin");
+  localStorage.removeItem("totp_verified");
 }
 
 export function setIsAdmin(value: boolean) {
@@ -49,6 +50,14 @@ export function setIsAdmin(value: boolean) {
 
 export function getIsAdmin(): boolean {
   return JSON.parse(localStorage.getItem("is_admin") || "false");
+}
+
+export function setTotpVerified(value: boolean) {
+  localStorage.setItem("totp_verified", JSON.stringify(value));
+}
+
+export function getTotpVerified(): boolean {
+  return JSON.parse(localStorage.getItem("totp_verified") || "false");
 }
 
 function authHeaders(): Record<string, string> {
@@ -143,6 +152,7 @@ export async function apiLogin(username: string, password: string, totpCode?: st
     user_id: string;
     requires_totp?: boolean;
     is_admin?: boolean;
+    totp_verified?: boolean;
   }>;
 }
 
@@ -206,6 +216,22 @@ export async function apiVerifyTotp(userId: string, code: string) {
     refresh_token: string;
     user_id: string;
     is_admin?: boolean;
+    totp_verified?: boolean;
+  }>;
+}
+
+export async function apiSetupTotp() {
+  const res = await authenticatedFetch("/api/totp/setup", {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set up 2FA");
+  }
+  return res.json() as Promise<{
+    totp_secret: string;
+    totp_uri: string;
+    totp_qr_base64: string;
   }>;
 }
 

@@ -47,6 +47,8 @@ export interface AppState {
   // Admin
   isAdmin: boolean;
   adminDashboardOpen: boolean;
+  // 2FA
+  totpVerified: boolean;
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -89,7 +91,8 @@ export type Action =
   | { type: "UPDATE_MEMBER_ROLE"; payload: { userId: string; role: string } }
   | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } }
   | { type: "SET_IS_ADMIN"; payload: boolean }
-  | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean };
+  | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean }
+  | { type: "SET_TOTP_VERIFIED"; payload: boolean };
 
 export const initialState: AppState = {
   accessToken: null,
@@ -122,6 +125,7 @@ export const initialState: AppState = {
   wsConnected: false,
   isAdmin: false,
   adminDashboardOpen: false,
+  totpVerified: false,
 };
 
 export interface AppContextValue {

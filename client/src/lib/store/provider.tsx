@@ -15,6 +15,8 @@ import {
   getAccessToken,
   setIsAdmin,
   getIsAdmin,
+  setTotpVerified,
+  getTotpVerified,
   apiLogin,
   apiRegister,
   apiLogout,
@@ -81,6 +83,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
           // Use localStorage value immediately, then verify from server
           dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
+          dispatch({ type: "SET_TOTP_VERIFIED", payload: getTotpVerified() });
           // Fetch actual admin status from server (handles pre-existing users)
           fetch("/api/admin/stats", {
             headers: { Authorization: `Bearer ${token}` },
@@ -197,6 +200,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       payload: { accessToken: data.access_token, userId: data.user_id },
     });
     dispatch({ type: "SET_IS_ADMIN", payload: !!data.is_admin });
+    setTotpVerified(!!data.totp_verified);
+    dispatch({ type: "SET_TOTP_VERIFIED", payload: !!data.totp_verified });
     return {};
   }, []);
 

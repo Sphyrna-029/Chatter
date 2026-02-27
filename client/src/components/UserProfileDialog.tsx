@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -66,7 +66,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount } = useAppContext();
+  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount } = useAppContext();
   const isSelf = userId === state.userId;
   const username = userId.split(":")[0]?.substring(1) || displayName;
   const presence = state.userPresence[userId];
@@ -113,6 +113,14 @@ export function UserProfileDialog({
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [showRecoveryInput, setShowRecoveryInput] = useState(false);
 
+  // 2FA setup state
+  const [totpSetupData, setTotpSetupData] = useState<{ totp_secret: string; totp_uri: string; totp_qr_base64: string } | null>(null);
+  const [totpSetupCode, setTotpSetupCode] = useState("");
+  const [totpSetupStep, setTotpSetupStep] = useState<"idle" | "qr" | "recovery">("idle");
+  const [totpSetupLoading, setTotpSetupLoading] = useState(false);
+  const [totpSetupError, setTotpSetupError] = useState<string | null>(null);
+  const [totpSetupRecoveryCodes, setTotpSetupRecoveryCodes] = useState<string[] | null>(null);
+
   useEffect(() => {
     if (open) {
       setNicknameInput(nicknameFromPresence);
@@ -134,6 +142,12 @@ export function UserProfileDialog({
       setRecoveryCodes(null);
       setRecoveryError(null);
       setShowRecoveryInput(false);
+      setTotpSetupData(null);
+      setTotpSetupCode("");
+      setTotpSetupStep("idle");
+      setTotpSetupError(null);
+      setTotpSetupRecoveryCodes(null);
+      setTotpSetupLoading(false);
     }
   }, [open, customStatus, about, avatarUrl, bannerUrl, nicknameFromPresence]);
 
@@ -636,8 +650,153 @@ export function UserProfileDialog({
     }
   };
 
+  const handleTotpSetupStart = async () => {
+    setTotpSetupLoading(true);
+    setTotpSetupError(null);
+    try {
+      const data = await apiSetupTotp();
+      setTotpSetupData(data);
+      setTotpSetupStep("qr");
+    } catch (err: any) {
+      setTotpSetupError(err.message || "Failed to set up 2FA");
+    } finally {
+      setTotpSetupLoading(false);
+    }
+  };
+
+  const handleTotpSetupVerify = async () => {
+    if (!totpSetupCode || totpSetupCode.length !== 6) {
+      setTotpSetupError("Enter a 6-digit code");
+      return;
+    }
+    setTotpSetupLoading(true);
+    setTotpSetupError(null);
+    try {
+      const result = await apiVerifyTotp(state.userId!, totpSetupCode);
+      // Update tokens from verify response
+      setAccessToken(result.access_token);
+      setRefreshToken(result.refresh_token);
+      if (result.is_admin !== undefined) setIsAdmin(result.is_admin);
+      dispatch({ type: "LOGIN", payload: { accessToken: result.access_token, userId: result.user_id } });
+      dispatch({ type: "SET_IS_ADMIN", payload: !!result.is_admin });
+      setTotpVerified(true);
+      dispatch({ type: "SET_TOTP_VERIFIED", payload: true });
+      if (result.recovery_codes && result.recovery_codes.length > 0) {
+        setTotpSetupRecoveryCodes(result.recovery_codes);
+        setTotpSetupStep("recovery");
+      } else {
+        setTotpSetupStep("idle");
+        setTotpSetupData(null);
+      }
+    } catch (err: any) {
+      setTotpSetupError(err.message || "Verification failed");
+    } finally {
+      setTotpSetupLoading(false);
+      setTotpSetupCode("");
+    }
+  };
+
   const accountContent = (
     <div className="px-5 py-4 space-y-6">
+      {/* Two-Factor Authentication */}
+      <div className="space-y-3">
+        <h3 className="text-sm font-semibold">Two-Factor Authentication</h3>
+        {state.totpVerified ? (
+          <div className="flex items-center gap-2 text-sm text-green-500">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+            </svg>
+            2FA is enabled
+          </div>
+        ) : totpSetupStep === "idle" ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Your account does not have two-factor authentication enabled. Set it up to add an extra layer of security.
+            </p>
+            {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
+            <Button
+              onClick={handleTotpSetupStart}
+              disabled={totpSetupLoading}
+              variant="outline"
+              className="w-full"
+            >
+              {totpSetupLoading ? "Setting up..." : "Set Up 2FA"}
+            </Button>
+          </div>
+        ) : totpSetupStep === "qr" && totpSetupData ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Scan this QR code with your authenticator app, then enter the 6-digit code below.
+            </p>
+            <div className="flex justify-center">
+              <img
+                src={`data:image/png;base64,${totpSetupData.totp_qr_base64}`}
+                alt="TOTP QR Code"
+                className="w-40 h-40 rounded border bg-white p-1"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] text-muted-foreground text-center">Or enter this key manually:</p>
+              <p className="text-xs font-mono text-center break-all select-all bg-muted/30 rounded px-2 py-1">
+                {totpSetupData.totp_secret}
+              </p>
+            </div>
+            <Input
+              placeholder="6-digit code"
+              value={totpSetupCode}
+              onChange={(e) => setTotpSetupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              maxLength={6}
+              className="text-sm font-mono tracking-widest text-center"
+            />
+            {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
+            <div className="flex gap-2">
+              <Button
+                onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupError(null); }}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleTotpSetupVerify}
+                disabled={totpSetupLoading}
+                className="flex-1"
+              >
+                {totpSetupLoading ? "Verifying..." : "Verify"}
+              </Button>
+            </div>
+          </div>
+        ) : totpSetupStep === "recovery" && totpSetupRecoveryCodes ? (
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              2FA is now enabled! Save these recovery codes in a safe place. Each code can only be used once.
+            </p>
+            <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
+              {totpSetupRecoveryCodes.map((code, i) => (
+                <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
+                  {code}
+                </div>
+              ))}
+            </div>
+            <Button
+              onClick={() => navigator.clipboard.writeText(totpSetupRecoveryCodes.join("\n"))}
+              variant="outline"
+              className="w-full"
+              size="sm"
+            >
+              Copy All Codes
+            </Button>
+            <Button
+              onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupRecoveryCodes(null); }}
+              className="w-full"
+              size="sm"
+            >
+              Done
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
       {/* Change Password */}
       <div className="space-y-3">
         <h3 className="text-sm font-semibold">Change Password</h3>

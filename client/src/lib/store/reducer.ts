@@ -281,6 +281,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, isAdmin: action.payload };
     case "SET_ADMIN_DASHBOARD_OPEN":
       return { ...state, adminDashboardOpen: action.payload };
+    case "SET_TOTP_VERIFIED":
+      return { ...state, totpVerified: action.payload };
     default:
       return state;
   }
