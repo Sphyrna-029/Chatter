@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useState, useMemo, useRef, useEffect, type ReactNode } from "react";
+import { STANDARD_SHORTCODES } from "../lib/emojiShortcodes";
 
 /** Check if a string is a custom emoji URL */
 export function isCustomEmojiUrl(s: string): boolean {
@@ -39,21 +40,86 @@ const emojiCategories: Record<string, string[]> = {
   Symbols: ["✅","❌","❓","❗","💯","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪","🟤","🔶","🔷","🔸","🔹","🔺","🔻","♻️","⭕","🚫","⛔","📵","🔞","🔃","🔄","🔙","🔚","🔛","🔜","🔝","🏧","♿","💤","🔔","🔕","🎵","🎶","💱","💲","Ⓜ️","🅰️","🅱️","🆎","🆑","🅾️","🆘","🆒","🆓","🆕","🆖","🆗","🆙","🆚","🈺","🈷️","✴️","🌐","💠","🔱","📛","🔰","⚜️","🏁","🚩","🎌","🏴","🏳️"],
 };
 
+// Build a reverse map: emoji → shortcode names for searching
+const emojiToNames: Record<string, string[]> = {};
+for (const [name, emoji] of Object.entries(STANDARD_SHORTCODES)) {
+  if (!emojiToNames[emoji]) emojiToNames[emoji] = [];
+  emojiToNames[emoji].push(name);
+}
+
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   roomCustomEmojis?: string[];
+  emojiAliases?: Record<string, string>;
 }
 
-export function EmojiPicker({ onSelect, roomCustomEmojis }: EmojiPickerProps) {
+export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiPickerProps) {
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const query = search.toLowerCase().replace(/[_\s]/g, "");
+
+  useEffect(() => {
+    // Auto-focus the search input when the picker opens
+    inputRef.current?.focus();
+  }, []);
+
+  // Build a reverse map from custom emoji value → alias names for searching
+  const customEmojiToAliases = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    if (emojiAliases) {
+      for (const [name, value] of Object.entries(emojiAliases)) {
+        if (!map[value]) map[value] = [];
+        map[value].push(name);
+      }
+    }
+    return map;
+  }, [emojiAliases]);
+
+  const filteredCategories = useMemo(() => {
+    if (!query) return Object.entries(emojiCategories);
+    return Object.entries(emojiCategories)
+      .map(([cat, emojis]) => {
+        const filtered = emojis.filter((e) => {
+          const names = emojiToNames[e];
+          const aliases = customEmojiToAliases[e];
+          const allNames = [...(names || []), ...(aliases || [])];
+          if (allNames.length === 0) return false;
+          return allNames.some((n) => n.replace(/_/g, "").includes(query));
+        });
+        return [cat, filtered] as [string, string[]];
+      })
+      .filter(([, emojis]) => emojis.length > 0);
+  }, [query, customEmojiToAliases]);
+
+  const filteredCustomEmojis = useMemo(() => {
+    if (!roomCustomEmojis || roomCustomEmojis.length === 0) return [];
+    if (!query) return roomCustomEmojis;
+    return roomCustomEmojis.filter((e) => {
+      const aliases = customEmojiToAliases[e];
+      if (!aliases || aliases.length === 0) return false;
+      return aliases.some((n) => n.replace(/_/g, "").includes(query));
+    });
+  }, [query, roomCustomEmojis, customEmojiToAliases]);
+
   return (
     <div className="w-72 max-h-64 overflow-y-auto p-3">
-      {roomCustomEmojis && roomCustomEmojis.length > 0 && (
+      <div className="sticky top-0 bg-popover pb-2 z-10">
+        <input
+          ref={inputRef}
+          type="text"
+          placeholder="Search emoji..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full px-2 py-1 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </div>
+      {filteredCustomEmojis.length > 0 && (
         <div className="mb-3">
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
             Room
           </p>
           <div className="grid grid-cols-8 gap-0.5">
-            {roomCustomEmojis.map((e) => (
+            {filteredCustomEmojis.map((e) => (
               <button
                 key={e}
                 className="p-1 rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110 flex items-center justify-center"
@@ -69,7 +135,7 @@ export function EmojiPicker({ onSelect, roomCustomEmojis }: EmojiPickerProps) {
           </div>
         </div>
       )}
-      {Object.entries(emojiCategories).map(([cat, emojis]) => (
+      {filteredCategories.map(([cat, emojis]) => (
         <div key={cat} className="mb-3">
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
             {cat}
@@ -87,6 +153,9 @@ export function EmojiPicker({ onSelect, roomCustomEmojis }: EmojiPickerProps) {
           </div>
         </div>
       ))}
+      {query && filteredCategories.length === 0 && filteredCustomEmojis.length === 0 && (
+        <p className="text-sm text-muted-foreground text-center py-4">No emoji found</p>
+      )}
     </div>
   );
 }

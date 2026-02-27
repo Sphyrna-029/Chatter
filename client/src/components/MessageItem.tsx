@@ -620,6 +620,11 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                       ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
                       : []
                   }
+                  emojiAliases={
+                    state.currentRoomId
+                      ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
+                      : {}
+                  }
                 />
               </PopoverContent>
             </Popover>

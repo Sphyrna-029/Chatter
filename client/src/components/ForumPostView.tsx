@@ -268,6 +268,9 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const customEmojis = state.currentRoomId
     ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
     : [];
+  const emojiAliases = state.currentRoomId
+    ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
+    : {};
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -386,10 +389,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                 +
               </button>
               {showEmojiPicker && (
-                <div className="absolute bottom-full left-0 mb-1 z-50">
+                <div className="absolute top-full left-0 mt-1 z-50 rounded-md border bg-popover shadow-md">
                   <EmojiPicker
                     onSelect={handleReaction}
                     roomCustomEmojis={customEmojis}
+                    emojiAliases={emojiAliases}
                   />
                 </div>
               )}
