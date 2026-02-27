@@ -191,8 +191,13 @@ pub(crate) async fn create_room(
             .count_documents(doc! {})
             .await
             .unwrap_or(0);
-        req.name
-            .unwrap_or_else(|| format!("Room {}", room_count + 1))
+        let raw_name = req.name
+            .unwrap_or_else(|| format!("Room {}", room_count + 1));
+        let sanitized: String = raw_name.trim().chars().take(18).collect();
+        if sanitized.is_empty() {
+            return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
+        }
+        sanitized
     };
 
     let password_hash = req.password
@@ -637,8 +642,12 @@ pub(crate) async fn update_room_settings(
     let mut content = serde_json::Map::new();
 
     if let Some(ref name) = req.name {
-        set_doc.insert("name", name.as_str());
-        content.insert("name".to_string(), json!(name));
+        let sanitized: String = name.trim().chars().take(18).collect();
+        if sanitized.is_empty() {
+            return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
+        }
+        set_doc.insert("name", sanitized.as_str());
+        content.insert("name".to_string(), json!(sanitized));
     }
     if let Some(ref icon_url) = req.icon_url {
         set_doc.insert("icon_url", icon_url.as_str());

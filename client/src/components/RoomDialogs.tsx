@@ -39,7 +39,8 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleCreate = async () => {
-    if (!name) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
     setLoading(true);
     try {
       let iconUrl: string | undefined;
@@ -47,7 +48,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      await createRoom(name, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined, roomType !== "text" ? roomType : undefined);
+      await createRoom(trimmedName, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined, roomType !== "text" ? roomType : undefined);
       setName("");
       setTopic("");
       setTags([]);
@@ -122,9 +123,11 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
                 id="room-name"
                 placeholder="My Awesome Room"
                 value={name}
+                maxLength={22}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
+              <p className="text-xs text-muted-foreground">{name.length}/18</p>
             </div>
           </div>
           <div className="space-y-2">
@@ -634,9 +637,11 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   id="settings-room-name"
                   placeholder="Room name"
                   value={name}
+                  maxLength={22}
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSave()}
                 />
+                <p className="text-xs text-muted-foreground">{name.length}/18</p>
               </div>
             </div>
             <div className="space-y-2">
