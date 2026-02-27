@@ -1,6 +1,6 @@
 use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
-    state::{AppState, RoomMemberRecord},
+    state::{AppState, ReactionRecord, RoomMemberRecord},
 };
 use axum::{
     extract::ws::Message,
@@ -353,4 +353,43 @@ pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Valu
     if let Some(tx) = ws_map.get(user_id) {
         let _ = tx.send(Message::Text(message.to_string().into()));
     }
+}
+
+/// Batch-query reactions for multiple event IDs.
+/// Returns a map from event_id -> { emoji -> [user_id, ...] }.
+pub(crate) async fn get_reactions_for_events(
+    state: &AppState,
+    event_ids: &[String],
+) -> std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let mut result: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> =
+        std::collections::HashMap::new();
+
+    if event_ids.is_empty() {
+        return result;
+    }
+
+    let react_coll = state.db.collection::<ReactionRecord>("reactions");
+    let bson_ids: Vec<mongodb::bson::Bson> = event_ids
+        .iter()
+        .map(|id| mongodb::bson::Bson::String(id.clone()))
+        .collect();
+
+    if let Ok(mut cursor) = react_coll
+        .find(doc! { "event_id": { "$in": bson_ids } })
+        .await
+    {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            result
+                .entry(record.event_id)
+                .or_default()
+                .entry(record.emoji)
+                .or_default()
+                .push(record.user_id);
+        }
+    }
+
+    result
 }

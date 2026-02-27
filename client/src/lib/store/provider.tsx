@@ -316,14 +316,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SELECT_ROOM", payload: roomId });
       // Load messages
       const msgData = await apiGetMessages(roomId);
+      const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
         type: "SET_MESSAGES",
         payload: {
-          messages: msgData.chunk.filter((m) => m.type === "m.room.message"),
+          messages,
           start: msgData.start,
           hasMore: msgData.has_more,
         },
       });
+      // Populate reactions from loaded messages
+      for (const msg of messages) {
+        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+          dispatch({
+            type: "SET_REACTIONS",
+            payload: { eventId: msg.event_id, reactions: msg.reactions },
+          });
+        }
+      }
       // Load members
       const syncData = await apiSync();
       const roomData = syncData.rooms?.join?.[roomId];
@@ -389,14 +399,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_LOADING_OLDER", payload: true });
     try {
       const msgData = await apiGetMessages(cur.currentRoomId, 50, cur.oldestMessageIndex);
+      const olderMessages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
         type: "PREPEND_MESSAGES",
         payload: {
-          messages: msgData.chunk.filter((m) => m.type === "m.room.message"),
+          messages: olderMessages,
           start: msgData.start,
           hasMore: msgData.has_more,
         },
       });
+      // Populate reactions from older messages
+      for (const msg of olderMessages) {
+        if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+          dispatch({
+            type: "SET_REACTIONS",
+            payload: { eventId: msg.event_id, reactions: msg.reactions },
+          });
+        }
+      }
     } catch {
       dispatch({ type: "SET_LOADING_OLDER", payload: false });
     }

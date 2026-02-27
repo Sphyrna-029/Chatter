@@ -1,6 +1,6 @@
 use super::super::{
     dto::SyncQuery,
-    helpers::{error_response, extract_token, get_user_from_token},
+    helpers::{error_response, extract_token, get_reactions_for_events, get_user_from_token},
     state::{AppState, RoomRecord, UserRecord},
 };
 use axum::{
@@ -58,6 +58,25 @@ pub(crate) async fn sync(
             }
         }
         last_msgs.reverse(); // chronological order
+
+        // Batch-fetch reactions for these messages
+        let event_ids: Vec<String> = last_msgs
+            .iter()
+            .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
+            .collect();
+        let reactions_map = get_reactions_for_events(&state, &event_ids).await;
+        for msg in last_msgs.iter_mut() {
+            if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
+                if let Some(reactions) = reactions_map.get(eid) {
+                    if !reactions.is_empty() {
+                        msg.as_object_mut().unwrap().insert(
+                            "reactions".to_string(),
+                            serde_json::to_value(reactions).unwrap(),
+                        );
+                    }
+                }
+            }
+        }
 
         // Build a map of display_names for members in this room
         let mut member_display_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();

@@ -1,8 +1,8 @@
 use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest},
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
-        get_user_role, is_moderator_or_owner, now_millis, send_to_user,
+        broadcast_to_room, error_response, extract_token, generate_id, get_reactions_for_events,
+        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, send_to_user,
     },
     state::{AppState, RoomRecord},
 };
@@ -197,6 +197,27 @@ pub(crate) async fn get_room_messages(
         doc.remove("_id");
         if let Ok(val) = serde_json::to_value(&doc) {
             chunk.push(val);
+        }
+    }
+
+    // Batch-fetch reactions for all messages in the chunk
+    let event_ids: Vec<String> = chunk
+        .iter()
+        .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let reactions_map = get_reactions_for_events(&state, &event_ids).await;
+
+    // Attach reactions to each message
+    for msg in chunk.iter_mut() {
+        if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
+            if let Some(reactions) = reactions_map.get(eid) {
+                if !reactions.is_empty() {
+                    msg.as_object_mut().unwrap().insert(
+                        "reactions".to_string(),
+                        serde_json::to_value(reactions).unwrap(),
+                    );
+                }
+            }
         }
     }
 
