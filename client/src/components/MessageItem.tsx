@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
 
@@ -550,31 +551,40 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
             <div className="flex flex-wrap gap-1 mt-1.5">
               {Object.entries(reactions).map(
                 ([emoji, userIds]) =>
-                  userIds.length > 0 && (
-                    <button
-                      key={emoji}
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors cursor-pointer hover:bg-accent",
-                        userIds.includes(state.userId || "")
-                          ? "border-primary/50 bg-primary/10"
-                          : "border-border"
-                      )}
-                      onClick={() =>
-                        addReaction(message.event_id, emoji)
-                      }
-                    >
-                      <span>
-                        {isCustomEmojiUrl(emoji) ? (
-                          <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
-                        ) : (
-                          emoji
-                        )}
-                      </span>
-                      <span className="text-muted-foreground font-medium">
-                        {userIds.length}
-                      </span>
-                    </button>
-                  )
+  userIds.length > 0 && (
+    <Tooltip key={emoji}>
+      <TooltipTrigger asChild>
+        <button
+          key={emoji}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors cursor-pointer hover:bg-accent",
+            userIds.includes(state.userId || "")
+              ? "border-primary/50 bg-primary/10"
+              : "border-border"
+          )}
+          onClick={() =>
+            addReaction(message.event_id, emoji)
+          }
+        >
+          <span>
+            {isCustomEmojiUrl(emoji) ? (
+              <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
+            ) : (
+              emoji
+            )}
+          </span>
+          <span className="text-muted-foreground font-medium">
+            {userIds.length}
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>
+        {userIds
+          .map((id) => state.userPresence[id]?.displayName || id.split(":")[0].substring(1))
+          .join(", ")}
+      </TooltipContent>
+    </Tooltip>
+  )
               )}
             </div>
           )}
