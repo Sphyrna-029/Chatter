@@ -127,7 +127,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               />
-              <p className="text-xs text-muted-foreground">{name.length}/18</p>
+              <p className="text-xs text-muted-foreground">{name.length}/22</p>
             </div>
           </div>
           <div className="space-y-2">
@@ -641,7 +641,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   onChange={(e) => setName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSave()}
                 />
-                <p className="text-xs text-muted-foreground">{name.length}/18</p>
+                <p className="text-xs text-muted-foreground">{name.length}/22</p>
               </div>
             </div>
             <div className="space-y-2">
