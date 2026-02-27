@@ -3,6 +3,8 @@ import { useAppContext } from "@/lib/store";
 import { apiSync, apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { UserProfileDialog } from "./UserProfileDialog";
 import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown } from "lucide-react";
 
 interface RoomActivity {
@@ -39,6 +41,7 @@ export function ActivityPage() {
   const [activities, setActivities] = useState<RoomActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [blockedExpanded, setBlockedExpanded] = useState(false);
+  const [profileUserId, setProfileUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,7 +121,7 @@ export function ActivityPage() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="mx-auto max-w-2xl px-6 py-8 space-y-8">
+      <div className="mx-auto max-w-5xl px-6 py-8 space-y-8">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Activity</h1>
@@ -127,7 +130,7 @@ export function ActivityPage() {
           </p>
         </div>
 
-        {/* Unread Mentions */}
+        {/* Unread Mentions — full width above the two-column layout */}
         {mentionedRooms.length > 0 && (
           <section className="space-y-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -161,204 +164,229 @@ export function ActivityPage() {
           </section>
         )}
 
-        {/* Friend Requests */}
-        {state.incomingFriendRequests.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              <UserPlus className="h-4 w-4" />
-              Friend Requests
-            </h2>
-            <div className="grid gap-2">
-              {state.incomingFriendRequests.map((req) => (
-                <div
-                  key={req.userId}
-                  className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0">
-                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${statusColor(state.userPresence[req.userId]?.status || "offline")}`} />
-                    <span className="font-medium truncate text-sm">
-                      {state.userPresence[req.userId]?.displayName || senderName(req.userId)}
-                    </span>
-                  </div>
-                  <div className="flex gap-2 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => rejectFriendRequest(req.userId)}
-                    >
-                      Reject
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="h-7 text-xs"
-                      onClick={() => acceptFriendRequest(req.userId)}
-                    >
-                      Accept
-                    </Button>
-                  </div>
+        {/* Two-column layout: Rooms left, Friends right */}
+        <div className="flex gap-8 items-start">
+          {/* Left column — Your Rooms */}
+          <div className="flex-1 min-w-0 space-y-3">
+            <section className="space-y-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                <MessageSquare className="h-4 w-4" />
+                Your Rooms
+              </h2>
+
+              {loading ? (
+                <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
+                  <Clock className="h-4 w-4 animate-spin mr-2" />
+                  Loading activity…
                 </div>
-              ))}
-            </div>
-          </section>
-        )}
+              ) : activities.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">
+                  No rooms joined yet. Create or join a room to get started.
+                </p>
+              ) : (
+                <div className="grid gap-2">
+                  {activities.map(({ roomId, lastMessage, memberCount }) => {
+                    const info = state.roomInfoMap[roomId];
+                    const name = info?.name || "Unnamed";
+                    const hasMention = !!state.roomMentions[roomId];
 
-        {/* Friends */}
-        {sortedFriends.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              <UserCheck className="h-4 w-4" />
-              Friends
-              <span className="text-xs font-normal">({sortedFriends.length})</span>
-            </h2>
-            <div className="grid gap-1">
-              {sortedFriends.map((friendId) => {
-                const presence = state.userPresence[friendId];
-                const displayName = presence?.displayName || senderName(friendId);
-                const status = presence?.status || "offline";
-
-                return (
-                  <button
-                    key={friendId}
-                    onClick={() => openDM(friendId)}
-                    className="flex items-center gap-3 rounded-lg px-4 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
-                  >
-                    <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${statusColor(status)}`} />
-                    <span className="font-medium text-sm truncate">{displayName}</span>
-                    {presence?.customStatus && (
-                      <span className="text-xs text-muted-foreground truncate italic">
-                        {presence.customStatus}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Blocked Users */}
-        {state.blockedUsers.length > 0 && (
-          <section className="space-y-3">
-            <button
-              onClick={() => setBlockedExpanded(!blockedExpanded)}
-              className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer hover:text-foreground transition-colors"
-            >
-              <Ban className="h-4 w-4" />
-              Blocked Users
-              <span className="text-xs font-normal">({state.blockedUsers.length})</span>
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${blockedExpanded ? "rotate-180" : ""}`} />
-            </button>
-            {blockedExpanded && (
-              <div className="grid gap-2">
-                {state.blockedUsers.map((userId) => (
-                  <div
-                    key={userId}
-                    className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
-                  >
-                    <span className="font-medium text-sm truncate">
-                      {senderName(userId)}
-                    </span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs"
-                      onClick={() => unblockUser(userId)}
-                    >
-                      Unblock
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {/* Your Rooms */}
-        <section className="space-y-3">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            <MessageSquare className="h-4 w-4" />
-            Your Rooms
-          </h2>
-
-          {loading ? (
-            <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-              <Clock className="h-4 w-4 animate-spin mr-2" />
-              Loading activity…
-            </div>
-          ) : activities.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4">
-              No rooms joined yet. Create or join a room to get started.
-            </p>
-          ) : (
-            <div className="grid gap-2">
-              {activities.map(({ roomId, lastMessage, memberCount }) => {
-                const info = state.roomInfoMap[roomId];
-                const name = info?.name || "Unnamed";
-                const hasMention = !!state.roomMentions[roomId];
-
-                return (
-                  <button
-                    key={roomId}
-                    onClick={() => selectRoom(roomId)}
-                    className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer"
-                  >
-                    {/* Room icon */}
-                    <span className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-bold shrink-0 mt-0.5">
-                      {info?.icon_url ? (
-                        <img src={info.icon_url} alt="" className="h-9 w-9 rounded-md object-cover" />
-                      ) : (
-                        name.charAt(0).toUpperCase()
-                      )}
-                    </span>
-
-                    {/* Content */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium truncate">{name}</span>
-                        {hasMention && (
-                          <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
-                        )}
-                        {info?.room_type === "forum" && (
-                          <span className="text-[10px] text-muted-foreground border border-border rounded px-1">forum</span>
-                        )}
-                        {info?.room_type === "whiteboard" && (
-                          <span className="text-[10px] text-muted-foreground border border-border rounded px-1">whiteboard</span>
-                        )}
-                      </div>
-
-                      {lastMessage ? (
-                        <p className="text-xs text-muted-foreground truncate mt-0.5">
-                          <span className="font-medium">{senderName(lastMessage.sender)}</span>
-                          {": "}
-                          {lastMessage.body}
-                        </p>
-                      ) : (
-                        <p className="text-xs text-muted-foreground mt-0.5 italic">
-                          No messages yet
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Meta */}
-                    <div className="flex flex-col items-end gap-1 shrink-0 text-xs text-muted-foreground">
-                      {lastMessage && (
-                        <span>{relativeTime(lastMessage.timestamp)}</span>
-                      )}
-                      {memberCount > 0 && (
-                        <span className="flex items-center gap-1">
-                          <Users className="h-3 w-3" />
-                          {memberCount}
+                    return (
+                      <button
+                        key={roomId}
+                        onClick={() => selectRoom(roomId)}
+                        className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                      >
+                        {/* Room icon */}
+                        <span className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-bold shrink-0 mt-0.5">
+                          {info?.icon_url ? (
+                            <img src={info.icon_url} alt="" className="h-9 w-9 rounded-md object-cover" />
+                          ) : (
+                            name.charAt(0).toUpperCase()
+                          )}
                         </span>
-                      )}
+
+                        {/* Content */}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium truncate">{name}</span>
+                            {hasMention && (
+                              <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
+                            )}
+                            {info?.room_type === "forum" && (
+                              <span className="text-[10px] text-muted-foreground border border-border rounded px-1">forum</span>
+                            )}
+                            {info?.room_type === "whiteboard" && (
+                              <span className="text-[10px] text-muted-foreground border border-border rounded px-1">whiteboard</span>
+                            )}
+                          </div>
+
+                          {lastMessage ? (
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">
+                              <span className="font-medium">{senderName(lastMessage.sender)}</span>
+                              {": "}
+                              {lastMessage.body}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground mt-0.5 italic">
+                              No messages yet
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Meta */}
+                        <div className="flex flex-col items-end gap-1 shrink-0 text-xs text-muted-foreground">
+                          {lastMessage && (
+                            <span>{relativeTime(lastMessage.timestamp)}</span>
+                          )}
+                          {memberCount > 0 && (
+                            <span className="flex items-center gap-1">
+                              <Users className="h-3 w-3" />
+                              {memberCount}
+                            </span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* Right column — Friends */}
+          <div className="w-64 shrink-0 space-y-6">
+            {/* Friend Requests */}
+            {state.incomingFriendRequests.length > 0 && (
+              <section className="space-y-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  <UserPlus className="h-4 w-4" />
+                  Requests
+                </h2>
+                <div className="grid gap-2">
+                  {state.incomingFriendRequests.map((req) => (
+                    <div
+                      key={req.userId}
+                      className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${statusColor(state.userPresence[req.userId]?.status || "offline")}`} />
+                        <span className="font-medium truncate text-sm">
+                          {state.userPresence[req.userId]?.displayName || senderName(req.userId)}
+                        </span>
+                      </div>
+                      <div className="flex gap-1.5 shrink-0">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => rejectFriendRequest(req.userId)}
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => acceptFriendRequest(req.userId)}
+                        >
+                          Accept
+                        </Button>
+                      </div>
                     </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Friends */}
+            <section className="space-y-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                <UserCheck className="h-4 w-4" />
+                Friends
+                {sortedFriends.length > 0 && (
+                  <span className="text-xs font-normal">({sortedFriends.length})</span>
+                )}
+              </h2>
+              {sortedFriends.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">
+                  No friends yet. Add friends from their profile.
+                </p>
+              ) : (
+                <div className="grid gap-0.5">
+                  {sortedFriends.map((friendId) => {
+                    const presence = state.userPresence[friendId];
+                    const displayName = presence?.displayName || senderName(friendId);
+                    const status = presence?.status || "offline";
+                    const avatarUrl = presence?.avatarUrl || "";
+                    const initial = displayName[0]?.toUpperCase() || "?";
+
+                    return (
+                      <button
+                        key={friendId}
+                        onClick={() => setProfileUserId(friendId)}
+                        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                      >
+                        <div className="relative shrink-0">
+                          <Avatar className="h-7 w-7">
+                            {avatarUrl && <AvatarImage src={avatarUrl} />}
+                            <AvatarFallback className="text-xs bg-secondary">{initial}</AvatarFallback>
+                          </Avatar>
+                          <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background ${statusColor(status)}`} />
+                        </div>
+                        <span className="font-medium text-sm truncate">{displayName}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* Blocked Users */}
+            {state.blockedUsers.length > 0 && (
+              <section className="space-y-3">
+                <button
+                  onClick={() => setBlockedExpanded(!blockedExpanded)}
+                  className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide cursor-pointer hover:text-foreground transition-colors"
+                >
+                  <Ban className="h-4 w-4" />
+                  Blocked
+                  <span className="text-xs font-normal">({state.blockedUsers.length})</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${blockedExpanded ? "rotate-180" : ""}`} />
+                </button>
+                {blockedExpanded && (
+                  <div className="grid gap-2">
+                    {state.blockedUsers.map((userId) => (
+                      <div
+                        key={userId}
+                        className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
+                      >
+                        <span className="font-medium text-sm truncate">
+                          {senderName(userId)}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[11px] px-2"
+                          onClick={() => unblockUser(userId)}
+                        >
+                          Unblock
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </div>
       </div>
+      {profileUserId && (
+        <UserProfileDialog
+          open={!!profileUserId}
+          onOpenChange={(open) => { if (!open) setProfileUserId(null); }}
+          userId={profileUserId}
+          displayName={state.userPresence[profileUserId]?.displayName || senderName(profileUserId)}
+        />
+      )}
     </ScrollArea>
   );
 }
