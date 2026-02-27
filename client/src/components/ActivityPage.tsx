@@ -165,9 +165,9 @@ export function ActivityPage() {
         )}
 
         {/* Two-column layout: Rooms left, Friends right */}
-        <div className="flex gap-8 items-start">
+        <div className="flex gap-8 items-start overflow-hidden">
           {/* Left column — Your Rooms */}
-          <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex-1 min-w-0 overflow-hidden space-y-3">
             <section className="space-y-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                 <MessageSquare className="h-4 w-4" />
