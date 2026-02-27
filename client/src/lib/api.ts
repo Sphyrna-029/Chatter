@@ -333,7 +333,7 @@ export interface RoomSummary {
 }
 
 export async function apiGetAllRooms() {
-  const res = await fetch("/api/rooms");
+  const res = await authenticatedFetch("/api/rooms");
   if (!res.ok) throw new Error("Failed to load rooms");
   return res.json() as Promise<{
     rooms: RoomSummary[];

@@ -197,6 +197,36 @@ pub(crate) async fn totp_verify(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let user_id = req.user_id;
 
+    // Rate limit: max 5 attempts per 5-minute window per user_id
+    {
+        use super::super::helpers::now_secs;
+        use super::super::state::TotpAttemptRecord;
+        let now = now_secs();
+        let window = 300.0; // 5 minutes
+        let max_attempts = 5u32;
+
+        let mut attempts = state.totp_attempts.write().await;
+        let entry = attempts.entry(user_id.clone()).or_insert(TotpAttemptRecord {
+            count: 0,
+            window_start: now,
+        });
+
+        if now - entry.window_start > window {
+            // Reset window
+            entry.count = 0;
+            entry.window_start = now;
+        }
+
+        if entry.count >= max_attempts {
+            return Err(error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many TOTP attempts. Try again in a few minutes.",
+            ));
+        }
+
+        entry.count += 1;
+    }
+
     let users = state.db.collection::<UserRecord>("users");
     let user = users
         .find_one(doc! { "_id": &user_id })
@@ -215,6 +245,12 @@ pub(crate) async fn totp_verify(
 
     if !totp.check_current(&req.code).unwrap_or(false) {
         return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
+    }
+
+    // Clear attempts on success
+    {
+        let mut attempts = state.totp_attempts.write().await;
+        attempts.remove(&user_id);
     }
 
     // Mark TOTP as verified and generate recovery codes

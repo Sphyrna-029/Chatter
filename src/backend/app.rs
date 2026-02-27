@@ -45,6 +45,7 @@ pub async fn build_state() -> Arc<AppState> {
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
+        totp_attempts: RwLock::new(HashMap::new()),
     })
 }
 

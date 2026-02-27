@@ -507,8 +507,16 @@ pub(crate) async fn delete_room(
     Ok(Json(json!({"deleted": true})))
 }
 
-pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<Value> {
+pub(crate) async fn list_all_rooms(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     use futures_util::TryStreamExt;
+
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let _user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let rm = state.room_members.read().await;
@@ -538,7 +546,7 @@ pub(crate) async fn list_all_rooms(State(state): State<Arc<AppState>>) -> Json<V
         }
     }
 
-    Json(json!({"rooms": room_list}))
+    Ok(Json(json!({"rooms": room_list})))
 }
 
 pub(crate) async fn update_room_topic(

@@ -34,6 +34,13 @@ pub struct AppState {
     pub(crate) voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
+    pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct TotpAttemptRecord {
+    pub(crate) count: u32,
+    pub(crate) window_start: f64,
 }
 
 // ─── MongoDB document types ──────────────────────────────────────────────────
