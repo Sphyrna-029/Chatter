@@ -1,5 +1,6 @@
 import type { AppState } from "./store";
 import type { RoomSummary } from "./api";
+import { displayUserId } from "./utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +191,7 @@ const commands: Command[] = [
     usage: "/ping",
     execute: async (_args, ctx) => {
       const lines: string[] = [];
-      lines.push(`User: ${ctx.state.userId || "unknown"}`);
+      lines.push(`User: ${ctx.state.userId ? displayUserId(ctx.state.userId) : "unknown"}`);
       if (ctx.state.currentRoomId) {
         const info = ctx.state.roomInfoMap[ctx.state.currentRoomId];
         lines.push(`Room: ${info?.name || ctx.state.currentRoomId}`);

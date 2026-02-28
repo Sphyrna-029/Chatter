@@ -418,9 +418,13 @@ export async function apiAddReaction(
 export async function apiSearchMessages(
   roomId: string,
   query: string,
-  filter: string = "all"
+  filter: string = "all",
+  fileType: string = "all"
 ): Promise<MatrixMessage[]> {
   const params = new URLSearchParams({ q: query, filter });
+  if (filter === "file" && fileType !== "all") {
+    params.set("file_type", fileType);
+  }
   const res = await authenticatedFetch(`/api/rooms/${roomId}/search?${params}`);
   if (!res.ok) throw new Error("Search failed");
   const data = await res.json();

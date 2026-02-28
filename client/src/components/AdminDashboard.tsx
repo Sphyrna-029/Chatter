@@ -309,7 +309,7 @@ function UsersTab({
                 <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-500/20 text-blue-500">2FA</span>
               )}
             </div>
-            <p className="text-xs text-muted-foreground truncate">{user.user_id}</p>
+            <p className="text-xs text-muted-foreground truncate">{displayUserId(user.user_id)}</p>
             <p className="text-xs text-muted-foreground">{user.room_count} room{user.room_count !== 1 ? "s" : ""}</p>
           </div>
 

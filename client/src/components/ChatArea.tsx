@@ -3,7 +3,7 @@ import { useAppContext } from "@/lib/store";
 import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +45,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const prevScrollHeightRef = useRef<number>(0);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -171,6 +172,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchFilter, setSearchFilter] = useState<"all" | "user" | "file">("all");
+  const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "video" | "audio" | "document">("all");
   const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,7 +194,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     if (!viewport) return;
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = viewport;
-      isNearBottomRef.current = scrollHeight - scrollTop - clientHeight < 100;
+      const nearBottom = scrollHeight - scrollTop - clientHeight < 100;
+      isNearBottomRef.current = nearBottom;
+      setShowScrollToBottom(!nearBottom);
       if (scrollTop < 100) {
         loadOlderMessages();
       }
@@ -703,7 +707,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         const results = await apiSearchMessages(
           state.currentRoomId!,
           searchQuery.trim(),
-          searchFilter
+          searchFilter,
+          fileTypeFilter
         );
         setSearchResults(results);
       } catch {
@@ -715,13 +720,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
-  }, [searchQuery, searchFilter, searchOpen, state.currentRoomId]);
+  }, [searchQuery, searchFilter, fileTypeFilter, searchOpen, state.currentRoomId]);
 
   const closeSearch = () => {
     setSearchOpen(false);
     setSearchQuery("");
     setSearchResults([]);
     setSearchFilter("all");
+    setFileTypeFilter("all");
   };
 
   const mentionMatches = mentionOpen
@@ -849,14 +855,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                   searchFilter === "user"
                     ? "Search by username..."
                     : searchFilter === "file"
-                    ? "Showing file attachments..."
+                    ? "Search by filename..."
                     : "Search messages..."
                 }
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full rounded-md border border-input bg-transparent pl-8 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 autoFocus
-                disabled={searchFilter === "file"}
               />
             </div>
             <button
@@ -873,17 +878,42 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 variant={searchFilter === f ? "default" : "outline"}
                 size="sm"
                 className="h-6 text-xs px-2"
-                onClick={() => setSearchFilter(f)}
+                onClick={() => {
+                  setSearchFilter(f);
+                  if (f !== "file") setFileTypeFilter("all");
+                }}
               >
                 {f === "all" ? "All" : f === "user" ? "Users" : "Files"}
               </Button>
             ))}
           </div>
+          {searchFilter === "file" && (
+            <div className="flex gap-1">
+              {([
+                { key: "all", label: "All types", icon: null },
+                { key: "image", label: "Images", icon: Image },
+                { key: "video", label: "Videos", icon: Film },
+                { key: "audio", label: "Audio", icon: Music },
+                { key: "document", label: "Docs", icon: FileText },
+              ] as const).map(({ key, label, icon: Icon }) => (
+                <Button
+                  key={key}
+                  variant={fileTypeFilter === key ? "default" : "outline"}
+                  size="sm"
+                  className="h-6 text-xs px-2 gap-1"
+                  onClick={() => setFileTypeFilter(key)}
+                >
+                  {Icon && <Icon className="h-3 w-3" />}
+                  {label}
+                </Button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
       {/* Messages */}
-      <div ref={scrollWrapperRef} className="flex-1 overflow-hidden">
+      <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
         <ScrollArea className="h-full px-2 py-2">
           <div>
             {searchOpen ? (
@@ -895,7 +925,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 )}
                 {!searchLoading && searchResults.length === 0 && (searchQuery.trim() || searchFilter === "file") && (
                   <div className="text-center text-xs text-muted-foreground py-4">
-                    No results found
+                    {searchFilter === "file" ? "No files found" : "No results found"}
                   </div>
                 )}
                 {!searchLoading && searchResults.length === 0 && !searchQuery.trim() && searchFilter !== "file" && (
@@ -945,6 +975,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             )}
           </div>
         </ScrollArea>
+        {showScrollToBottom && (
+          <Button
+            variant="secondary"
+            size="icon"
+            className="absolute bottom-3 right-5 h-8 w-8 rounded-full shadow-lg border opacity-80 hover:opacity-100 transition-opacity z-10"
+            onClick={() => {
+              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+            }}
+          >
+            <ArrowDown className="h-4 w-4" />
+          </Button>
+        )}
       </div>
 
       {/* Reply preview */}

@@ -293,7 +293,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             <div className="flex-1 overflow-hidden">
               <p className="truncate text-sm font-semibold">{displayName}</p>
               <p className="truncate text-xs text-muted-foreground">
-                {state.userId}
+                {displayUserId(state.userId ?? "")}
               </p>
             </div>
           </div>

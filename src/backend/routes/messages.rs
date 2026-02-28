@@ -466,14 +466,25 @@ pub(crate) async fn search_messages(
             }
         }
         "file" => {
-            // Match file-type messages or body containing common file extensions
-            doc! {
-                "room_id": &room_id,
-                "$or": [
-                    { "content.msgtype": { "$in": ["m.file", "m.image", "m.video", "m.audio"] } },
-                    { "content.body": { "$regex": r"(?i)\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|mp3|ogg|wav|zip|tar|gz|doc|docx|xls|xlsx|txt)(\?|$|\s)", "$options": "i" } }
-                ]
+            let file_type = query.file_type.as_deref().unwrap_or("all");
+            let type_condition = match file_type {
+                "image" => doc! { "content.msgtype": "m.image" },
+                "video" => doc! { "content.msgtype": "m.video" },
+                "audio" => doc! { "content.msgtype": "m.audio" },
+                "document" => doc! { "content.msgtype": { "$in": ["m.file"] } },
+                _ => doc! { "content.msgtype": { "$in": ["m.file", "m.image", "m.video", "m.audio"] } },
+            };
+
+            let mut conditions = vec![
+                doc! { "room_id": &room_id },
+                type_condition,
+            ];
+
+            if !q.is_empty() {
+                conditions.push(doc! { "content.body": { "$regex": q, "$options": "i" } });
             }
+
+            doc! { "$and": conditions }
         }
         _ => {
             // "all" — search by message body

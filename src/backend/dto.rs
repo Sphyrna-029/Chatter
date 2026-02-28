@@ -122,6 +122,7 @@ pub(crate) struct SearchQuery {
     pub(crate) q: String,
     pub(crate) filter: Option<String>,
     pub(crate) limit: Option<i64>,
+    pub(crate) file_type: Option<String>,
 }
 
 #[derive(Deserialize)]
