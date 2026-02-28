@@ -3,6 +3,7 @@ import type { ForumPost } from "@/lib/api";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { displayUserId } from "@/lib/utils";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -28,7 +29,7 @@ interface ForumPostCardProps {
 export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostCardProps) {
   const { state, addReaction } = useAppContext();
   const roomId = post.room_id;
-  const authorDisplay = post.author.split(":")[0]?.substring(1) || post.author;
+  const authorDisplay = displayUserId(post.author);
   const reactionEntries = Object.entries(post.reactions || {});
 
   return (

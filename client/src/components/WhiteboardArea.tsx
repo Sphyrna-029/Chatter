@@ -4,6 +4,7 @@ import { apiGetWhiteboardStrokes, type WhiteboardStroke } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { displayUserId } from "@/lib/utils";
 import {
   Pen,
   Eraser,
@@ -537,7 +538,7 @@ export function WhiteboardArea() {
       ctx.stroke();
 
       const displayName = state.roomMembers.find((m) => m.userId === cursor.userId)?.displayName
-        || cursor.userId.replace(/^@/, "");
+        || displayUserId(cursor.userId);
       ctx.font = "bold 16px sans-serif";
       ctx.fillStyle = "#3b82f6";
       ctx.fillText(displayName, cursor.x + 10, cursor.y - 10);

@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
+import { displayUserId } from "@/lib/utils";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -1157,8 +1158,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 ) : (
                   <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
                     {bannedUsers.map((ban) => {
-                      const username = ban.user_id.split(":")[0]?.substring(1) || ban.user_id;
-                      const bannedByName = ban.banned_by.split(":")[0]?.substring(1) || ban.banned_by;
+                      const username = displayUserId(ban.user_id);
+                      const bannedByName = displayUserId(ban.banned_by);
                       const bannedDate = new Date(ban.banned_at).toLocaleDateString(undefined, {
                         month: "short",
                         day: "numeric",

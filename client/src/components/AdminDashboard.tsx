@@ -20,7 +20,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 
 type Tab = "overview" | "users" | "rooms" | "settings";
 
@@ -132,7 +132,6 @@ export function AdminDashboard() {
     }
   };
 
-  const displayName = (userId: string) => userId.replace(/^@/, "").split(":")[0];
 
   return (
     <div className="flex flex-1 flex-col min-h-0 min-w-0">
@@ -218,7 +217,7 @@ export function AdminDashboard() {
           <div className="bg-background border rounded-lg p-6 max-w-sm w-full mx-4 shadow-lg" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-sm font-semibold mb-1">Password Reset</h3>
             <p className="text-xs text-muted-foreground mb-3">
-              Temporary password for {tempPasswordUser ? displayName(tempPasswordUser) : "user"}:
+              Temporary password for {tempPasswordUser ? displayUserId(tempPasswordUser) : "user"}:
             </p>
             <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2 mb-3">
               <code className="flex-1 text-sm font-mono select-all">{tempPassword}</code>
@@ -288,14 +287,14 @@ function UsersTab({
           <Avatar className="h-9 w-9 shrink-0">
             {user.avatar_url && <AvatarImage src={user.avatar_url} />}
             <AvatarFallback className="text-xs">
-              {displayName(user.user_id).substring(0, 2).toUpperCase()}
+              {displayUserId(user.user_id).substring(0, 2).toUpperCase()}
             </AvatarFallback>
           </Avatar>
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-sm font-medium truncate">
-                {user.display_name || displayName(user.user_id)}
+                {user.display_name || displayUserId(user.user_id)}
               </span>
               {user.is_admin && (
                 <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-primary/20 text-primary">Admin</span>
@@ -363,7 +362,7 @@ function RoomsTab({
               </span>
             </div>
             <p className="text-xs text-muted-foreground truncate max-w-[300px]">
-              Created by {displayName(room.creator)} &middot; {room.member_count} member{room.member_count !== 1 ? "s" : ""} &middot; {room.message_count} message{room.message_count !== 1 ? "s" : ""}
+              Created by {displayUserId(room.creator)} &middot; {room.member_count} member{room.member_count !== 1 ? "s" : ""} &middot; {room.message_count} message{room.message_count !== 1 ? "s" : ""}
             </p>
           </div>
 

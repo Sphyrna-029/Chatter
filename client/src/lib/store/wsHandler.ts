@@ -1,6 +1,7 @@
 import type { Dispatch, MutableRefObject } from "react";
 import type { Action, AppState } from "./types";
 import { apiSync, apiGetPresence } from "../api";
+import { displayUserId } from "@/lib/utils";
 
 export function createWsMessageHandler(
   dispatch: Dispatch<Action>,
@@ -14,7 +15,7 @@ export function createWsMessageHandler(
         dispatch({ type: "ADD_MESSAGE", payload: msg });
       } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
         const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
-        const myUsername = stateRef.current.userId?.split(":")[0]?.substring(1) ?? "";
+        const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
         const hasMention = myUsername !== "" && msg.content?.body?.includes(`@${myUsername}`) === true;
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
         if (isDm || hasMention) {
@@ -42,7 +43,7 @@ export function createWsMessageHandler(
                 payload: memberEvents.map((e: any) => ({
                   userId: e.state_key,
                   displayName:
-                    e.content.displayname || e.state_key.split(":")[0].substring(1),
+                    e.content.displayname || displayUserId(e.state_key),
                   role: e.content.role || "member",
                   joinedAt: e.content.joined_at || undefined,
                 })),

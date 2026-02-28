@@ -13,6 +13,7 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { displayUserId } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-react";
@@ -262,7 +263,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     );
   }
 
-  const authorDisplay = post.author.split(":")[0]?.substring(1) || post.author;
+  const authorDisplay = displayUserId(post.author);
   const isPostAuthor = post.author === state.userId;
   const reactionEntries = Object.entries(post.reactions || {});
   const customEmojis = state.currentRoomId
@@ -375,7 +376,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                 </TooltipTrigger>
                 <TooltipContent>
                   {userIds.map(id => (
-                    <p key={id}>{id}</p>
+                    <p key={id}>{displayUserId(id)}</p>
                   ))}
                 </TooltipContent>
               </Tooltip>
@@ -409,7 +410,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             {/* Comment list */}
             <div className="space-y-3">
               {comments.map((comment) => {
-                const cAuthor = comment.author.split(":")[0]?.substring(1) || comment.author;
+                const cAuthor = displayUserId(comment.author);
                 const canDeleteComment = comment.author === state.userId || isOwnerOrMod();
                 const isCommentAuthor = comment.author === state.userId;
                 const isEditing = editingCommentId === comment.comment_id;

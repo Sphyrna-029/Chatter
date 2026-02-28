@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import type { PeerStats } from "@/lib/webrtc";
 
 interface VoiceMemberListProps {
@@ -20,7 +20,6 @@ interface VoiceMemberListProps {
   onWatchUser: (sharerId: string) => void;
 }
 
-const shortenId = (id: string) => id.split(":")[0]?.replace("@", "") || id;
 
 export function VoiceMemberList({
   inVoiceChannel,
@@ -43,7 +42,7 @@ export function VoiceMemberList({
     <div className="flex-1 overflow-y-auto px-2 py-2">
       <div className="flex flex-col gap-1">
         {voiceMembers.map((memberId) => {
-          const name = shortenId(memberId);
+          const name = displayUserId(memberId);
           const isSelf = memberId === userId;
           const memberState = voiceMemberStates[memberId];
           const isMutedMember = memberState?.muted || (isSelf && isMuted);

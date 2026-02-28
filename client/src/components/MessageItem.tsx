@@ -9,7 +9,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -332,7 +332,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const isWebhook = message.content.webhook === true;
   const senderUsername = isWebhook
     ? (message.content.webhook_name || "Webhook")
-    : message.sender.split(":")[0].substring(1);
+    : displayUserId(message.sender);
   const sender = isWebhook
     ? (message.content.webhook_name || "Webhook")
     : (state.userPresence[message.sender]?.displayName || senderUsername);
@@ -419,7 +419,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   };
 
   const replySender = message.content.reply_to_sender
-    ? (state.userPresence[message.content.reply_to_sender]?.displayName || message.content.reply_to_sender.split(":")[0].substring(1))
+    ? (state.userPresence[message.content.reply_to_sender]?.displayName || displayUserId(message.content.reply_to_sender))
     : null;
 
   return (
@@ -590,7 +590,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
       </TooltipTrigger>
       <TooltipContent>
         {userIds
-          .map((id) => state.userPresence[id]?.displayName || id.split(":")[0].substring(1))
+          .map((id) => state.userPresence[id]?.displayName || displayUserId(id))
           .join(", ")}
       </TooltipContent>
     </Tooltip>

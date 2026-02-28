@@ -2,10 +2,8 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 
-const shortenId = (id: string) =>
-  id.split(":")[0]?.replace("@", "") || id;
 
 /** Header bar shown above the resizable panel group — always visible */
 export function ScreenShareHeader({
@@ -64,7 +62,7 @@ export function ScreenShareHeader({
           {state.selectedScreenSharer
             ? state.selectedScreenSharer === state.userId
               ? "Your screen (preview)"
-              : `${shortenId(state.selectedScreenSharer)}'s screen`
+              : `${displayUserId(state.selectedScreenSharer)}'s screen`
             : "Screen Share"}
         </p>
         {state.isScreenSharing && (() => {
@@ -74,7 +72,7 @@ export function ScreenShareHeader({
           );
           if (viewers.length <= 3) return (
             <span className="text-xs text-purple-400">
-              {viewers.map(shortenId).join(", ")}
+              {viewers.map(displayUserId).join(", ")}
             </span>
           );
           return (
@@ -103,7 +101,7 @@ export function ScreenShareHeader({
                     : "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30"
                 )}
               >
-                {sharerId === state.userId ? "You" : shortenId(sharerId)}
+                {sharerId === state.userId ? "You" : displayUserId(sharerId)}
               </button>
             ))}
           </div>
@@ -395,7 +393,7 @@ export function ScreenShareViewer() {
               />
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5">
                 <p className="text-[10px] text-purple-300 font-semibold truncate">
-                  {sharerId === state.userId ? "You" : shortenId(sharerId)}
+                  {sharerId === state.userId ? "You" : displayUserId(sharerId)}
                 </p>
               </div>
             </button>

@@ -18,6 +18,7 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
+import { displayUserId } from "@/lib/utils";
 
 // ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
 function pipEnabled(): boolean {
@@ -210,7 +211,7 @@ export function ChatLayout() {
   const sharerName = state.selectedScreenSharer
     ? state.selectedScreenSharer === state.userId
       ? "Your screen"
-      : (state.selectedScreenSharer.split(":")[0]?.replace("@", "") || state.selectedScreenSharer) + "'s screen"
+      : displayUserId(state.selectedScreenSharer) + "'s screen"
     : "Screen share";
   const voiceRoomName = state.voiceRoomId
     ? state.roomInfoMap[state.voiceRoomId]?.name || "voice channel"

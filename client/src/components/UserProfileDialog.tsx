@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -68,7 +68,7 @@ export function UserProfileDialog({
 }: UserProfileDialogProps) {
   const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser } = useAppContext();
   const isSelf = userId === state.userId;
-  const username = userId.split(":")[0]?.substring(1) || displayName;
+  const username = displayUserId(userId) || displayName;
   const presence = state.userPresence[userId];
   const status = presence?.status || "offline";
   const customStatus = presence?.customStatus || "";

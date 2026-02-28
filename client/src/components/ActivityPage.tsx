@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
+import { displayUserId } from "@/lib/utils";
 import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown } from "lucide-react";
 
 interface RoomActivity {
@@ -23,10 +24,6 @@ function relativeTime(ts: number): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
-}
-
-function senderName(userId: string): string {
-  return userId.split(":")[0]?.substring(1) || userId;
 }
 
 function statusColor(status: string) {
@@ -222,7 +219,7 @@ export function ActivityPage() {
 
                           {lastMessage ? (
                             <p className="text-xs text-muted-foreground truncate mt-0.5">
-                              <span className="font-medium">{senderName(lastMessage.sender)}</span>
+                              <span className="font-medium">{displayUserId(lastMessage.sender)}</span>
                               {": "}
                               {lastMessage.body}
                             </p>
@@ -271,7 +268,7 @@ export function ActivityPage() {
                       <div className="flex items-center gap-2 min-w-0">
                         <span className={`h-2 w-2 rounded-full shrink-0 ${statusColor(state.userPresence[req.userId]?.status || "offline")}`} />
                         <span className="font-medium truncate text-sm">
-                          {state.userPresence[req.userId]?.displayName || senderName(req.userId)}
+                          {state.userPresence[req.userId]?.displayName || displayUserId(req.userId)}
                         </span>
                       </div>
                       <div className="flex gap-1.5 shrink-0">
@@ -314,7 +311,7 @@ export function ActivityPage() {
                 <div className="grid gap-0.5">
                   {sortedFriends.map((friendId) => {
                     const presence = state.userPresence[friendId];
-                    const displayName = presence?.displayName || senderName(friendId);
+                    const displayName = presence?.displayName || displayUserId(friendId);
                     const status = presence?.status || "offline";
                     const avatarUrl = presence?.avatarUrl || "";
                     const initial = displayName[0]?.toUpperCase() || "?";
@@ -360,7 +357,7 @@ export function ActivityPage() {
                         className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5"
                       >
                         <span className="font-medium text-sm truncate">
-                          {senderName(userId)}
+                          {displayUserId(userId)}
                         </span>
                         <Button
                           size="sm"
@@ -384,7 +381,7 @@ export function ActivityPage() {
           open={!!profileUserId}
           onOpenChange={(open) => { if (!open) setProfileUserId(null); }}
           userId={profileUserId}
-          displayName={state.userPresence[profileUserId]?.displayName || senderName(profileUserId)}
+          displayName={state.userPresence[profileUserId]?.displayName || displayUserId(profileUserId)}
         />
       )}
     </ScrollArea>

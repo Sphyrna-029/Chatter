@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
+import { displayUserId } from "@/lib/utils";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -951,7 +952,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         <div className="border-t border-l-2 border-l-primary mx-3 mt-2 px-3 py-2 bg-accent/30 rounded-sm flex items-center justify-between gap-2">
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold text-primary">
-              Replying to {state.userPresence[state.replyingTo.sender]?.displayName || state.replyingTo.sender.split(":")[0].substring(1)}
+              Replying to {state.userPresence[state.replyingTo.sender]?.displayName || displayUserId(state.replyingTo.sender)}
             </p>
             <p className="text-xs text-muted-foreground truncate inline-flex items-center gap-0.5">
               {renderInlineEmojis(state.replyingTo.content.body)}
@@ -970,7 +971,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       {state.typingUsers.length > 0 && (() => {
         const names = state.typingUsers.map((uid) => {
           const member = state.roomMembers.find((m) => m.userId === uid);
-          return member?.displayName || uid.split(":")[0].substring(1);
+          return member?.displayName || displayUserId(uid);
         });
         let text: string;
         if (names.length === 1) {

@@ -7,6 +7,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { displayUserId } from "@/lib/utils";
 import {
   setAccessToken,
   setRefreshToken,
@@ -353,7 +354,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           payload: memberEvents.map((e: any) => ({
             userId: e.state_key,
             displayName:
-              e.content.displayname || e.state_key.split(":")[0].substring(1),
+              e.content.displayname || displayUserId(e.state_key),
             role: e.content.role || "member",
             joinedAt: e.content.joined_at || undefined,
           })),

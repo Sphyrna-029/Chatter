@@ -19,7 +19,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 
 interface AppSidebarProps {
   onCreateRoom: () => void;
@@ -36,7 +36,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     Record<string, RoomSummary>
   >({});
 
-  const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || state.userId?.split(":")[0]?.substring(1) || "User";
+  const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || displayUserId(state.userId ?? "") || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
 
   const fetchSummaries = useCallback(async () => {
@@ -110,9 +110,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           animation: screenShareActive ? "pulse-border 2s ease-in-out infinite" : undefined,
         }}
       >
-        {/* Mention ping */}
+        {/* Mention count badge */}
         {hasMention && (
-          <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+            {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
+          </span>
         )}
 
         {/* Room icon / initial */}

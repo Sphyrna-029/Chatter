@@ -1,11 +1,10 @@
-import { cn } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import type { PeerStats } from "@/lib/webrtc";
 
 interface VoiceDebugPanelProps {
   connStats: Record<string, PeerStats>;
 }
 
-const shortenId = (id: string) => id.split(":")[0]?.replace("@", "") || id;
 
 export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
   if (Object.keys(connStats).length === 0) return null;
@@ -17,8 +16,8 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
           let label = key;
           if (key === "voice-pub") label = "Voice Pub";
           else if (key === "screen-pub") label = "Screen Pub";
-          else if (key.startsWith("voice-sub:")) label = `Voice Sub: ${shortenId(key.replace("voice-sub:", ""))}`;
-          else if (key.startsWith("screen-sub:")) label = `Screen Sub: ${shortenId(key.replace("screen-sub:", ""))}`;
+          else if (key.startsWith("voice-sub:")) label = `Voice Sub: ${displayUserId(key.replace("voice-sub:", ""))}`;
+          else if (key.startsWith("screen-sub:")) label = `Screen Sub: ${displayUserId(key.replace("screen-sub:", ""))}`;
 
           const stateColor =
             s.connectionState === "connected" ? "text-green-500" :
