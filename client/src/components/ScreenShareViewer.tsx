@@ -222,7 +222,8 @@ export function ScreenShareHeader({
 export function ScreenShareViewer() {
   const { state, dispatch } = useAppContext();
   const mainVideoRef = useRef<HTMLVideoElement>(null);
-  const videoContainerRef = useRef<HTMLDivElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement | null>(null);
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
   const thumbVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const [, setStreamVersion] = useState(0);
 
@@ -254,11 +255,19 @@ export function ScreenShareViewer() {
   }, []);
 
   // Wheel zoom handler — must be non-passive to preventDefault
-  const handleWheelRef = useRef(clampPan);
-  handleWheelRef.current = clampPan;
-  useEffect(() => {
-    const container = videoContainerRef.current;
-    if (!container) return;
+  // Use a callback ref so the listener attaches when the DOM element appears
+  const clampPanRef = useRef(clampPan);
+  clampPanRef.current = clampPan;
+
+  const videoContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    // Clean up previous listener
+    if (wheelCleanupRef.current) {
+      wheelCleanupRef.current();
+      wheelCleanupRef.current = null;
+    }
+    videoContainerRef.current = node;
+    if (!node) return;
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       setZoom((prevZoom) => {
@@ -267,13 +276,13 @@ export function ScreenShareViewer() {
         if (newZoom <= 1) {
           setPan({ x: 0, y: 0 });
         } else {
-          setPan((prev) => handleWheelRef.current(prev.x, prev.y, newZoom));
+          setPan((prev) => clampPanRef.current(prev.x, prev.y, newZoom));
         }
         return newZoom;
       });
     };
-    container.addEventListener("wheel", onWheel, { passive: false });
-    return () => container.removeEventListener("wheel", onWheel);
+    node.addEventListener("wheel", onWheel, { passive: false });
+    wheelCleanupRef.current = () => node.removeEventListener("wheel", onWheel);
   }, []);
 
   // Mouse drag pan handlers
@@ -368,7 +377,7 @@ export function ScreenShareViewer() {
     <div className="flex flex-col min-h-0 h-full bg-black/95">
       {/* Main video */}
       <div
-        ref={videoContainerRef}
+        ref={videoContainerCallbackRef}
         className={cn(
           "flex-1 flex items-center justify-center bg-black min-h-0 relative group overflow-hidden",
           zoom > 1 && "cursor-grab",
