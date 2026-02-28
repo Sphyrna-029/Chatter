@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, type RoomSummary, type BannedUser } from "@/lib/api";
+import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, apiCreateWebhook, apiListWebhooks, apiDeleteWebhook, type RoomSummary, type BannedUser, type Webhook } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, ShieldBan } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -450,6 +450,15 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiFileInputRef = useRef<HTMLInputElement>(null);
 
+  // Webhook state
+  const [webhooks, setWebhooks] = useState<Webhook[]>([]);
+  const [webhookName, setWebhookName] = useState("");
+  const [webhookAvatarUrl, setWebhookAvatarUrl] = useState("");
+  const [webhookAvatarUploading, setWebhookAvatarUploading] = useState(false);
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
+  const webhookAvatarInputRef = useRef<HTMLInputElement>(null);
+
   // Banned users state
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [loadingBans, setLoadingBans] = useState(false);
@@ -481,8 +490,12 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setSettingsUnlisted(info.unlisted || false);
       setSettingsPassword("");
       setShowSettingsPassword(false);
+      setWebhooks([]);
+      setWebhookName("");
+      setWebhookAvatarUrl("");
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
+        apiListWebhooks(roomId).then((data) => setWebhooks(data.webhooks)).catch(() => {});
       }
       if (canManageBans) {
         setLoadingBans(true);
@@ -608,6 +621,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
             <TabsTrigger value="emojis" className="flex-1">Emojis</TabsTrigger>
             {isOwner && <TabsTrigger value="invites" className="flex-1">Invites</TabsTrigger>}
+            {isOwner && <TabsTrigger value="webhooks" className="flex-1">Webhooks</TabsTrigger>}
             {canManageBans && <TabsTrigger value="moderation" className="flex-1">Moderation</TabsTrigger>}
           </TabsList>
 
@@ -967,6 +981,163 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground py-2">No invite links yet. Create one to share with others.</p>
+                )}
+              </div>
+            </TabsContent>
+          )}
+
+          {isOwner && (
+            <TabsContent value="webhooks" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <WebhookIcon className="w-3.5 h-3.5" />
+                  Create Webhook
+                </Label>
+                <div className="space-y-2">
+                  <Input
+                    placeholder="Webhook name (required)"
+                    value={webhookName}
+                    maxLength={64}
+                    onChange={(e) => setWebhookName(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    {webhookAvatarUrl ? (
+                      <img src={webhookAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                        <WebhookIcon className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <Input
+                      placeholder="Avatar URL (optional)"
+                      value={webhookAvatarUrl}
+                      onChange={(e) => setWebhookAvatarUrl(e.target.value)}
+                      className="flex-1"
+                    />
+                    <input
+                      ref={webhookAvatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        setWebhookAvatarUploading(true);
+                        try {
+                          const { url } = await apiUploadFile(file);
+                          setWebhookAvatarUrl(url);
+                        } catch {
+                          alert("Failed to upload image");
+                        } finally {
+                          setWebhookAvatarUploading(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      title="Upload avatar image"
+                      disabled={webhookAvatarUploading}
+                      onClick={() => webhookAvatarInputRef.current?.click()}
+                    >
+                      <ImagePlus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!webhookName.trim() || webhookLoading}
+                    onClick={async () => {
+                      setWebhookLoading(true);
+                      try {
+                        const result = await apiCreateWebhook(roomId, webhookName.trim(), webhookAvatarUrl.trim() || undefined);
+                        setWebhooks((prev) => [...prev, {
+                          webhook_id: result.webhook_id,
+                          name: webhookName.trim(),
+                          avatar_url: webhookAvatarUrl.trim(),
+                          created_at: Date.now(),
+                          url: result.url,
+                        }]);
+                        setWebhookName("");
+                        setWebhookAvatarUrl("");
+                      } catch (e: any) {
+                        alert(e.message || "Failed to create webhook");
+                      } finally {
+                        setWebhookLoading(false);
+                      }
+                    }}
+                  >
+                    {webhookLoading ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Existing Webhooks</Label>
+                {webhooks.length > 0 ? (
+                  <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                    {webhooks.map((wh) => {
+                      const fullUrl = `${window.location.origin}${wh.url}`;
+                      return (
+                        <div
+                          key={wh.webhook_id}
+                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                        >
+                          {wh.avatar_url ? (
+                            <img src={wh.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                          ) : (
+                            <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                              <WebhookIcon className="w-3 h-3 text-muted-foreground" />
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-sm truncate">{wh.name}</div>
+                            <div className="font-mono text-[10px] text-muted-foreground truncate">{fullUrl}</div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0"
+                            title="Copy webhook URL"
+                            onClick={() => {
+                              navigator.clipboard.writeText(fullUrl);
+                              setCopiedWebhookId(wh.webhook_id);
+                              setTimeout(() => setCopiedWebhookId(null), 2000);
+                            }}
+                          >
+                            {copiedWebhookId === wh.webhook_id ? (
+                              <span className="text-[10px] text-green-400">ok</span>
+                            ) : (
+                              <Copy className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 shrink-0 hover:text-destructive"
+                            title="Delete webhook"
+                            onClick={async () => {
+                              try {
+                                await apiDeleteWebhook(wh.webhook_id);
+                                setWebhooks((prev) => prev.filter((w) => w.webhook_id !== wh.webhook_id));
+                              } catch {
+                                alert("Failed to delete webhook");
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground py-2">No webhooks yet. Create one to allow external services to post messages.</p>
                 )}
               </div>
             </TabsContent>

@@ -171,6 +171,16 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
+    // webhooks: index on room_id
+    let _ = db
+        .collection::<mongodb::bson::Document>("webhooks")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1 })
+                .build(),
+        )
+        .await;
+
     // blocks: unique compound {blocker, blocked}
     let _ = db
         .collection::<mongodb::bson::Document>("blocks")

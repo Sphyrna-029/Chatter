@@ -238,6 +238,17 @@ pub(crate) struct BlockRecord {
     pub(crate) created_at: i64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct WebhookRecord {
+    #[serde(rename = "_id")]
+    pub(crate) webhook_id: String,
+    pub(crate) room_id: String,
+    pub(crate) creator: String,
+    pub(crate) name: String,
+    pub(crate) avatar_url: String,
+    pub(crate) created_at: i64,
+}
+
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]

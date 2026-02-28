@@ -6,6 +6,7 @@ use super::{
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
+        webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
         messages::{edit_message, get_room_messages, redact_message, search_messages, send_message},
         presence::{get_room_presence, get_voice_channel_status},
@@ -123,6 +124,9 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/invites/{code}", delete(delete_invite))
            .route("/api/invites/{code}", get(get_invite_info))
            .route("/api/invites/{code}/accept", post(accept_invite))
+           // Webhooks
+           .route("/api/rooms/{room_id}/webhooks", post(create_webhook).get(list_webhooks))
+           .route("/api/webhooks/{webhook_id}", delete(delete_webhook).post(execute_webhook))
            // Whiteboard
            .route("/api/whiteboard/{room_id}/strokes", get(get_strokes))
            // Forum

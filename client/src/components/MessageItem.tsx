@@ -329,14 +329,21 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     return walk(div).replace(/\n+$/, "");
   }, []);
   const isSystem = message.content.msgtype === "m.system";
-  const senderUsername = message.sender.split(":")[0].substring(1);
-  const sender = state.userPresence[message.sender]?.displayName || senderUsername;
+  const isWebhook = message.content.webhook === true;
+  const senderUsername = isWebhook
+    ? (message.content.webhook_name || "Webhook")
+    : message.sender.split(":")[0].substring(1);
+  const sender = isWebhook
+    ? (message.content.webhook_name || "Webhook")
+    : (state.userPresence[message.sender]?.displayName || senderUsername);
   const initial = sender.substring(0, 1).toUpperCase();
   const time = new Date(message.origin_server_ts).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const avatarUrl = state.userPresence[message.sender]?.avatarUrl;
+  const avatarUrl = isWebhook
+    ? (message.content.webhook_avatar_url || undefined)
+    : state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
 
@@ -421,7 +428,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
         {grouped ? (
           <span className="w-8 flex-shrink-0" />
         ) : (
-          <Avatar className="h-8 w-8 mt-0.5 flex-shrink-0 cursor-pointer" onClick={() => setProfileOpen(true)}>
+          <Avatar className={cn("h-8 w-8 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
             {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
             <AvatarFallback className="text-xs font-semibold bg-secondary">
               {initial}
@@ -446,12 +453,15 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           {!grouped && (
             <div className="flex items-baseline gap-2">
               <span
-                className="text-sm font-semibold cursor-pointer hover:underline"
+                className={cn("text-sm font-semibold", !isWebhook && "cursor-pointer hover:underline")}
                 style={senderNameColor ? { color: senderNameColor } : undefined}
-                onClick={() => setProfileOpen(true)}
+                onClick={() => !isWebhook && setProfileOpen(true)}
               >
                 {sender}
               </span>
+              {isWebhook && (
+                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">BOT</span>
+              )}
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>
           )}
@@ -657,7 +667,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           </div>
         )}
       </div>
-      <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />
+      {!isWebhook && <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />}
     </div>
   );
 }

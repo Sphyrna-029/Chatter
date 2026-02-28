@@ -10,4 +10,5 @@ pub(crate) mod reactions;
 pub(crate) mod rooms;
 pub(crate) mod static_content;
 pub(crate) mod sync;
+pub(crate) mod webhooks;
 pub(crate) mod whiteboard;

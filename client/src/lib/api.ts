@@ -459,6 +459,9 @@ export interface MatrixMessage {
     in_reply_to?: string;
     reply_to_sender?: string;
     reply_to_body?: string;
+    webhook?: boolean;
+    webhook_name?: string;
+    webhook_avatar_url?: string;
   };
   redacted?: boolean;
   edited?: boolean;
@@ -1031,6 +1034,48 @@ export async function apiAdminDeleteRoom(roomId: string): Promise<void> {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "Failed to delete room");
   }
+}
+
+// ─── Webhooks ────────────────────────────────────────────────────────────────
+
+export interface Webhook {
+  webhook_id: string;
+  name: string;
+  avatar_url: string;
+  created_at: number;
+  url: string;
+}
+
+export async function apiCreateWebhook(roomId: string, name: string, avatarUrl?: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/webhooks`, {
+    method: "POST",
+    body: JSON.stringify({ name, avatar_url: avatarUrl }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to create webhook");
+  }
+  return res.json() as Promise<{ webhook_id: string; url: string }>;
+}
+
+export async function apiListWebhooks(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/webhooks`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to list webhooks");
+  }
+  return res.json() as Promise<{ webhooks: Webhook[] }>;
+}
+
+export async function apiDeleteWebhook(webhookId: string) {
+  const res = await authenticatedFetch(`/api/webhooks/${webhookId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete webhook");
+  }
+  return res.json();
 }
 
 // ─── Friends ─────────────────────────────────────────────────────────────────
