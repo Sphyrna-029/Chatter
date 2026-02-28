@@ -8,7 +8,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface RoomGroupDialogProps {
@@ -114,9 +113,11 @@ export function RoomGroupDialog({ open, onOpenChange, mode, groupId, groupName }
                       key={roomId}
                       className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent cursor-pointer"
                     >
-                      <Checkbox
+                      <input
+                        type="checkbox"
                         checked={checked}
-                        onCheckedChange={() => toggleRoom(roomId)}
+                        onChange={() => toggleRoom(roomId)}
+                        className="h-4 w-4 rounded border-border accent-primary shrink-0"
                       />
                       {info?.icon_url && (
                         <img src={info.icon_url} alt="" className="h-5 w-5 rounded object-cover" />
