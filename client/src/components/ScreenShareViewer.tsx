@@ -243,10 +243,14 @@ export function ScreenShareViewer() {
     setPan({ x: 0, y: 0 });
   }, [state.selectedScreenSharer]);
 
-  // Clamp pan so the video doesn't go out of bounds
+  // Clamp pan so the video edge can reach the container edge but not beyond.
+  // The CSS applies: scale(z) translate(px/z %, py/z %).
+  // At zoom z, the visible portion is 1/z of the total. To pan the edge
+  // of the content to the edge of the viewport: max translate = (z-1)/z * 50%.
+  // Since CSS divides by z: maxPan = (z-1) * 50.
   const clampPan = useCallback((px: number, py: number, z: number) => {
     if (z <= 1) return { x: 0, y: 0 };
-    const maxPan = ((z - 1) / (2 * z)) * 100;
+    const maxPan = (z - 1) * 50;
     return {
       x: Math.max(-maxPan, Math.min(maxPan, px)),
       y: Math.max(-maxPan, Math.min(maxPan, py)),
@@ -426,53 +430,26 @@ export function ScreenShareViewer() {
           </div>
         )}
 
-      {/* Volume controls overlay + zoom — visible when hovering anywhere on the video */}
+      {/* Zoom indicator */}
+      {zoom > 1 && (
+        <div className="absolute left-3 bottom-3 flex items-center gap-1.5 px-2 py-1 bg-black/60 rounded-lg text-xs text-white/80">
+          <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
+          <button
+            className="text-white/60 hover:text-white cursor-pointer"
+            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+            title="Reset zoom (or double-click)"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Volume controls overlay */}
       {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) && (
         <div className="absolute right-3 bottom-3 flex flex-col items-center gap-2 px-2 py-2.5 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-          {/* Zoom controls */}
-          <div className="flex items-center gap-1">
-            <button
-              className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/20 cursor-pointer"
-              onClick={() => {
-                setZoom((z) => {
-                  const nz = Math.max(1, z - 0.5);
-                  if (nz <= 1) setPan({ x: 0, y: 0 });
-                  else setPan((p) => clampPan(p.x, p.y, nz));
-                  return nz;
-                });
-              }}
-              title="Zoom out"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-            </button>
-            <span className="tabular-nums text-xs text-white/80">{Math.round(zoom * 100)}%</span>
-            <button
-              className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/20 cursor-pointer"
-              onClick={() => {
-                setZoom((z) => Math.min(10, z + 0.5));
-              }}
-              title="Zoom in"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-            </button>
-            {zoom > 1 && (
-              <button
-                className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/20 cursor-pointer"
-                onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
-                title="Reset zoom"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            )}
-          </div>
-          <div className="w-full h-px bg-white/20" />
           <span className="text-xs text-white/60 tabular-nums">
             {currentMuted ? 0 : currentVolume}%
           </span>
