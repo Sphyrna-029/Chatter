@@ -181,9 +181,3 @@ pub(crate) struct CreateWebhookRequest {
     pub(crate) name: String,
     pub(crate) avatar_url: Option<String>,
 }
-
-#[derive(Deserialize)]
-pub(crate) struct WebhookMessageRequest {
-    pub(crate) content: Option<String>,
-    pub(crate) text: Option<String>,
-}

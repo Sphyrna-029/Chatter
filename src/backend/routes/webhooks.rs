@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{CreateWebhookRequest, WebhookMessageRequest},
+    dto::CreateWebhookRequest,
     helpers::{broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token, now_millis},
     state::{AppState, RoomRecord, WebhookRecord},
 };
@@ -147,16 +147,117 @@ pub(crate) async fn delete_webhook(
     Ok(Json(json!({ "success": true })))
 }
 
+fn format_github_event(event_type: &str, payload: &Value) -> String {
+    match event_type {
+        "ping" => {
+            let zen = payload["zen"].as_str().unwrap_or("connected");
+            format!("GitHub webhook connected: {zen}")
+        }
+        "push" => {
+            let pusher = payload["pusher"]["name"].as_str().unwrap_or("unknown");
+            let full_ref = payload["ref"].as_str().unwrap_or("unknown");
+            let branch = full_ref.strip_prefix("refs/heads/").unwrap_or(full_ref);
+            let commits = payload["commits"].as_array();
+            let count = commits.map_or(0, |c| c.len());
+            let mut msg = format!("**{pusher}** pushed {count} commit(s) to `{branch}`:");
+            if let Some(commits) = commits {
+                for c in commits.iter().take(5) {
+                    let m = c["message"].as_str().unwrap_or("");
+                    let first_line = m.lines().next().unwrap_or("");
+                    let truncated = if first_line.len() > 72 {
+                        format!("{}...", &first_line[..72])
+                    } else {
+                        first_line.to_string()
+                    };
+                    msg.push_str(&format!("\n• {truncated}"));
+                }
+                if count > 5 {
+                    msg.push_str(&format!("\n• ...and {} more", count - 5));
+                }
+            }
+            msg
+        }
+        "pull_request" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let action = payload["action"].as_str().unwrap_or("updated");
+            let pr = &payload["pull_request"];
+            let number = pr["number"].as_u64().unwrap_or(0);
+            let title = pr["title"].as_str().unwrap_or("");
+            let url = pr["html_url"].as_str().unwrap_or("");
+            format!("**{user}** {action} PR **#{number}**: {title} ({url})")
+        }
+        "issues" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let action = payload["action"].as_str().unwrap_or("updated");
+            let issue = &payload["issue"];
+            let number = issue["number"].as_u64().unwrap_or(0);
+            let title = issue["title"].as_str().unwrap_or("");
+            let url = issue["html_url"].as_str().unwrap_or("");
+            format!("**{user}** {action} issue **#{number}**: {title} ({url})")
+        }
+        "issue_comment" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let issue = &payload["issue"];
+            let number = issue["number"].as_u64().unwrap_or(0);
+            let title = issue["title"].as_str().unwrap_or("");
+            let url = issue["html_url"].as_str().unwrap_or("");
+            format!("**{user}** commented on issue **#{number}**: {title} ({url})")
+        }
+        "create" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let ref_type = payload["ref_type"].as_str().unwrap_or("ref");
+            let ref_name = payload["ref"].as_str().unwrap_or("unknown");
+            format!("**{user}** created {ref_type} `{ref_name}`")
+        }
+        "delete" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let ref_type = payload["ref_type"].as_str().unwrap_or("ref");
+            let ref_name = payload["ref"].as_str().unwrap_or("unknown");
+            format!("**{user}** deleted {ref_type} `{ref_name}`")
+        }
+        "star" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            format!("**{user}** starred the repository")
+        }
+        "release" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            let action = payload["action"].as_str().unwrap_or("published");
+            let release = &payload["release"];
+            let tag = release["tag_name"].as_str().unwrap_or("");
+            let name = release["name"].as_str().unwrap_or(tag);
+            let url = release["html_url"].as_str().unwrap_or("");
+            format!("**{user}** {action} release **{tag}**: {name} ({url})")
+        }
+        "fork" => {
+            let user = payload["sender"]["login"].as_str().unwrap_or("unknown");
+            format!("**{user}** forked the repository")
+        }
+        _ => format!("GitHub event: {event_type}"),
+    }
+}
+
 pub(crate) async fn execute_webhook(
     State(state): State<Arc<AppState>>,
     Path(webhook_id): Path<String>,
-    Json(body): Json<WebhookMessageRequest>,
+    headers: HeaderMap,
+    body: String,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let text = body
-        .content
-        .or(body.text)
-        .unwrap_or_default();
-    let text = text.trim().to_string();
+    let text = if let Some(event_type) = headers.get("X-GitHub-Event") {
+        let event_type = event_type.to_str().unwrap_or("unknown");
+        let payload: Value = serde_json::from_str(&body)
+            .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid JSON body"))?;
+        format_github_event(event_type, &payload)
+    } else {
+        let payload: Value = serde_json::from_str(&body)
+            .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid JSON body"))?;
+        let text = payload["content"]
+            .as_str()
+            .or_else(|| payload["text"].as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        text
+    };
 
     if text.is_empty() {
         return Err(error_response(
