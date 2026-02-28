@@ -13,7 +13,7 @@ use axum::{
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 use serde_json::json;
-use std::net::{IpAddr, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 
 pub(crate) async fn upload_file(
@@ -156,8 +156,9 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 }
 
 /// Validate that a URL is safe for server-side fetching (no SSRF).
-/// Returns Ok(()) or an error message.
-fn validate_url_for_ssrf(url: &str) -> Result<(), &'static str> {
+/// Returns the validated resolved addresses so they can be pinned for the actual fetch,
+/// preventing DNS rebinding attacks.
+fn validate_url_for_ssrf(url: &str) -> Result<Vec<SocketAddr>, &'static str> {
     let parsed = url::Url::parse(url).map_err(|_| "Invalid URL")?;
 
     // Only allow http/https
@@ -186,7 +187,7 @@ fn validate_url_for_ssrf(url: &str) -> Result<(), &'static str> {
         }
     }
 
-    Ok(())
+    Ok(addrs)
 }
 
 pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
@@ -214,15 +215,37 @@ pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
     Some(title)
 }
 
+/// Build a reqwest client with DNS pinned to the validated addresses, preventing
+/// DNS rebinding attacks (the client will connect to the exact IPs we already checked).
+fn build_pinned_client(url: &str, validated_addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
+    let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
+    let host = parsed.host_str().ok_or("URL has no host")?;
+
+    let mut builder = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::none());
+
+    for addr in validated_addrs {
+        builder = builder.resolve(host, *addr);
+    }
+
+    builder.build().map_err(|e| e.to_string())
+}
+
 /// Fetch a URL following redirects, validating each hop against SSRF.
+/// Uses pre-validated addresses pinned into the client to prevent DNS rebinding.
 async fn safe_fetch(
-    client: &reqwest::Client,
     initial_url: &str,
+    validated_addrs: &[SocketAddr],
     ua: &str,
     accept: &str,
 ) -> Result<reqwest::Response, String> {
     let mut current_url = initial_url.to_string();
+    let mut current_addrs = validated_addrs.to_vec();
+
     for _ in 0..5u8 {
+        let client = build_pinned_client(&current_url, &current_addrs)?;
+
         let resp = client
             .get(&current_url)
             .header("User-Agent", ua)
@@ -239,7 +262,8 @@ async fn safe_fetch(
                 } else {
                     loc.to_string()
                 };
-                validate_url_for_ssrf(&next).map_err(|e| e.to_string())?;
+                // Resolve and validate the redirect target, getting fresh pinned addrs
+                current_addrs = validate_url_for_ssrf(&next).map_err(|e| e.to_string())?;
                 current_url = next;
                 continue;
             }
@@ -272,16 +296,11 @@ pub(crate) async fn link_preview(
         }
     }
 
-    // SSRF protection: block requests to private/internal IPs
-    if let Err(msg) = validate_url_for_ssrf(&url) {
-        return error_response(StatusCode::BAD_REQUEST, msg);
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+    // SSRF protection: resolve DNS once and validate all IPs, then pin them for the fetch
+    let validated_addrs = match validate_url_for_ssrf(&url) {
+        Ok(addrs) => addrs,
+        Err(msg) => return error_response(StatusCode::BAD_REQUEST, msg),
+    };
 
     let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
@@ -291,7 +310,13 @@ pub(crate) async fn link_preview(
             "https://publish.twitter.com/oembed?url={}&omit_script=true",
             urlencoding::encode(&url)
         );
-        match safe_fetch(&client, &oembed_url, browser_ua, "application/json").await {
+        // The oembed URL goes to publish.twitter.com which is a known safe host;
+        // validate and pin it separately
+        let oembed_addrs = match validate_url_for_ssrf(&oembed_url) {
+            Ok(addrs) => addrs,
+            Err(msg) => return error_response(StatusCode::BAD_REQUEST, msg),
+        };
+        match safe_fetch(&oembed_url, &oembed_addrs, browser_ua, "application/json").await {
             Ok(resp) => {
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     CachedPreview {
@@ -328,8 +353,8 @@ pub(crate) async fn link_preview(
         }
     } else {
         let response = match safe_fetch(
-            &client,
             &url,
+            &validated_addrs,
             browser_ua,
             "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         )

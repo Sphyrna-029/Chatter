@@ -79,17 +79,26 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .await
         .insert(user_id.clone(), tx);
 
-    // Update presence
-    state.user_presence.write().await.insert(
-        user_id.clone(),
-        PresenceRecord {
-            last_active: now_secs(),
-            last_typing: 0.0,
-            connected: true,
-            custom_status: String::new(),
-            manual_status: None,
-        },
-    );
+    // Update presence – preserve custom_status and manual_status on reconnect
+    {
+        let mut up = state.user_presence.write().await;
+        if let Some(p) = up.get_mut(&user_id) {
+            p.last_active = now_secs();
+            p.last_typing = 0.0;
+            p.connected = true;
+        } else {
+            up.insert(
+                user_id.clone(),
+                PresenceRecord {
+                    last_active: now_secs(),
+                    last_typing: 0.0,
+                    connected: true,
+                    custom_status: String::new(),
+                    manual_status: None,
+                },
+            );
+        }
+    }
 
     // Broadcast presence to all rooms this user is in
     {
