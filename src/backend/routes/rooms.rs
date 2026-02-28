@@ -96,11 +96,13 @@ pub(crate) async fn create_room(
 
                 // Add both members to MongoDB and cache
                 let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+                let ts = now_millis();
                 let _ = members_coll
                     .insert_one(RoomMemberRecord {
                         room_id: room_id.clone(),
                         user_id: user_id.clone(),
                         role: "owner".to_string(),
+                        joined_at: ts,
                     })
                     .await;
                 let _ = members_coll
@@ -108,6 +110,7 @@ pub(crate) async fn create_room(
                         room_id: room_id.clone(),
                         user_id: other_user.clone(),
                         role: "member".to_string(),
+                        joined_at: ts,
                     })
                     .await;
 
@@ -250,6 +253,7 @@ pub(crate) async fn create_room(
                 room_id: room_id.clone(),
                 user_id: member.clone(),
                 role,
+                joined_at: now_millis(),
             })
             .await;
     }

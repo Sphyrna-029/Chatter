@@ -44,6 +44,7 @@ export function createWsMessageHandler(
                   displayName:
                     e.content.displayname || e.state_key.split(":")[0].substring(1),
                   role: e.content.role || "member",
+                  joinedAt: e.content.joined_at || undefined,
                 })),
               });
             }

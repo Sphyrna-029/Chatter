@@ -1,7 +1,7 @@
 use super::super::{
     dto::SyncQuery,
     helpers::{error_response, extract_token, get_reactions_for_events, get_user_from_token},
-    state::{AppState, RoomRecord, UserRecord},
+    state::{AppState, RoomMemberRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -88,6 +88,20 @@ pub(crate) async fn sync(
             }
         }
 
+        // Fetch joined_at timestamps from MongoDB
+        let member_records_coll = state.db.collection::<RoomMemberRecord>("room_members");
+        let mut joined_at_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        if let Ok(mut cursor) = member_records_coll
+            .find(doc! { "room_id": room_id })
+            .await
+        {
+            while let Ok(Some(rec)) = cursor.try_next().await {
+                if rec.joined_at != 0 {
+                    joined_at_map.insert(rec.user_id, rec.joined_at);
+                }
+            }
+        }
+
         let member_events: Vec<Value> = members
             .iter()
             .map(|mid| {
@@ -105,14 +119,18 @@ pub(crate) async fn sync(
                 if role == "member" && *mid == room_data.creator {
                     role = "owner";
                 }
+                let mut content = json!({
+                    "membership": "join",
+                    "displayname": display,
+                    "role": role
+                });
+                if let Some(&ts) = joined_at_map.get(mid) {
+                    content["joined_at"] = json!(ts);
+                }
                 json!({
                     "type": "m.room.member",
                     "state_key": mid,
-                    "content": {
-                        "membership": "join",
-                        "displayname": display,
-                        "role": role
-                    },
+                    "content": content,
                     "sender": mid
                 })
             })

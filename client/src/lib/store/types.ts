@@ -18,7 +18,7 @@ export interface AppState {
   oldestMessageIndex: number | null;
   loadingOlderMessages: boolean;
   // Members
-  roomMembers: { userId: string; displayName: string; role: string }[];
+  roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
   userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string }>;
   // Voice
   inVoiceChannel: boolean;
@@ -72,7 +72,7 @@ export type Action =
   | { type: "REDACT_MESSAGE"; payload: string }
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
-  | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string }[] }
+  | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }

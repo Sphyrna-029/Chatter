@@ -141,6 +141,8 @@ pub(crate) struct RoomMemberRecord {
     pub(crate) user_id: String,
     #[serde(default = "default_member_role")]
     pub(crate) role: String,
+    #[serde(default)]
+    pub(crate) joined_at: i64,
 }
 
 fn default_member_role() -> String {

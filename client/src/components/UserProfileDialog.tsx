@@ -182,15 +182,10 @@ export function UserProfileDialog({
   };
 
   const joinDate = useMemo(() => {
-    const joinMsg = state.messages.find(
-      (m) =>
-        m.content.msgtype === "m.system" &&
-        m.sender === userId &&
-        m.content.body.includes("has joined")
-    );
-    if (!joinMsg) return null;
-    return new Date(joinMsg.origin_server_ts);
-  }, [state.messages, userId]);
+    const member = state.roomMembers.find((m) => m.userId === userId);
+    if (member?.joinedAt) return new Date(member.joinedAt);
+    return null;
+  }, [state.roomMembers, userId]);
 
   const handleMessage = async () => {
     await openDM(userId);

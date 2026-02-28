@@ -287,6 +287,7 @@ pub(crate) async fn do_join_room(
         room_id: room_id.to_string(),
         user_id: user_id.to_string(),
         role: "member".to_string(),
+        joined_at: now_millis(),
     };
     // Use insert, ignore duplicate errors
     let _ = collection.insert_one(record).await;
