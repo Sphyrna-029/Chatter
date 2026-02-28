@@ -9,7 +9,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -21,20 +21,36 @@ jobs:
           script: |
             # Navigate to the container directory
             cd /home/mok/containers/zgaf-matrix-rust
-            
+
             rm -rf Chatter
-            
+
             # Clone the repository
             git clone https://github.com/Sphyrna-029/Chatter
 
             cd Chatter
-            
+
             # Checkout rust branch
             # git checkout refactor/rust-rewrite
 
             cp ../control.sh .
-            
+
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh build
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh stop
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh start
+
+      - name: Notify deploy success
+        if: success() && vars.WEBHOOK_URL != ''
+        run: |
+          COMMIT_MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
+          curl -s -X POST "${{ vars.WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"Deploy succeeded: ${COMMIT_MSG} (${{ github.sha }})\"}"
+
+      - name: Notify deploy failure
+        if: failure() && vars.WEBHOOK_URL != ''
+        run: |
+          COMMIT_MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
+          curl -s -X POST "${{ vars.WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"content\": \"Deploy failed: ${COMMIT_MSG} (${{ github.sha }})\"}"
             
