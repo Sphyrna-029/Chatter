@@ -253,20 +253,28 @@ export function ScreenShareViewer() {
     };
   }, []);
 
-  // Wheel zoom handler
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom((prevZoom) => {
-      const delta = e.deltaY > 0 ? -0.2 : 0.2;
-      const newZoom = Math.max(1, Math.min(10, prevZoom + delta * prevZoom * 0.3));
-      if (newZoom <= 1) {
-        setPan({ x: 0, y: 0 });
-      } else {
-        setPan((prev) => clampPan(prev.x, prev.y, newZoom));
-      }
-      return newZoom;
-    });
-  }, [clampPan]);
+  // Wheel zoom handler — must be non-passive to preventDefault
+  const handleWheelRef = useRef(clampPan);
+  handleWheelRef.current = clampPan;
+  useEffect(() => {
+    const container = videoContainerRef.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((prevZoom) => {
+        const delta = e.deltaY > 0 ? -0.2 : 0.2;
+        const newZoom = Math.max(1, Math.min(10, prevZoom + delta * prevZoom * 0.3));
+        if (newZoom <= 1) {
+          setPan({ x: 0, y: 0 });
+        } else {
+          setPan((prev) => handleWheelRef.current(prev.x, prev.y, newZoom));
+        }
+        return newZoom;
+      });
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, []);
 
   // Mouse drag pan handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -366,7 +374,6 @@ export function ScreenShareViewer() {
           zoom > 1 && "cursor-grab",
           zoom > 1 && isDragging.current && "cursor-grabbing",
         )}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
