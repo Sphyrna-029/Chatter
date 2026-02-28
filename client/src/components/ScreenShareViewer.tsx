@@ -222,12 +222,78 @@ export function ScreenShareHeader({
 export function ScreenShareViewer() {
   const { state, dispatch } = useAppContext();
   const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const videoContainerRef = useRef<HTMLDivElement>(null);
   const thumbVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const [, setStreamVersion] = useState(0);
 
   // Per-sharer volume state (persists when switching between sharers)
   const [screenVolumes, setScreenVolumes] = useState<Record<string, number>>({});
   const [screenMuted, setScreenMuted] = useState<Record<string, boolean>>({});
+
+  // Zoom & pan state
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  const dragStart = useRef({ x: 0, y: 0 });
+  const panStart = useRef({ x: 0, y: 0 });
+
+  // Reset zoom/pan when switching sharers
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [state.selectedScreenSharer]);
+
+  // Clamp pan so the video doesn't go out of bounds
+  const clampPan = useCallback((px: number, py: number, z: number) => {
+    if (z <= 1) return { x: 0, y: 0 };
+    const maxPan = ((z - 1) / (2 * z)) * 100;
+    return {
+      x: Math.max(-maxPan, Math.min(maxPan, px)),
+      y: Math.max(-maxPan, Math.min(maxPan, py)),
+    };
+  }, []);
+
+  // Wheel zoom handler
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom((prevZoom) => {
+      const delta = e.deltaY > 0 ? -0.2 : 0.2;
+      const newZoom = Math.max(1, Math.min(10, prevZoom + delta * prevZoom * 0.3));
+      if (newZoom <= 1) {
+        setPan({ x: 0, y: 0 });
+      } else {
+        setPan((prev) => clampPan(prev.x, prev.y, newZoom));
+      }
+      return newZoom;
+    });
+  }, [clampPan]);
+
+  // Mouse drag pan handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    isDragging.current = true;
+    dragStart.current = { x: e.clientX, y: e.clientY };
+    panStart.current = { ...pan };
+  }, [zoom, pan]);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isDragging.current || !videoContainerRef.current) return;
+    const rect = videoContainerRef.current.getBoundingClientRect();
+    const dx = ((e.clientX - dragStart.current.x) / rect.width) * 100;
+    const dy = ((e.clientY - dragStart.current.y) / rect.height) * 100;
+    setPan(clampPan(panStart.current.x + dx, panStart.current.y + dy, zoom));
+  }, [zoom, clampPan]);
+
+  const handleMouseUp = useCallback(() => {
+    isDragging.current = false;
+  }, []);
+
+  // Reset zoom on double-click
+  const handleDoubleClick = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
 
   const sharers = state.activeScreenSharers;
 
@@ -293,14 +359,35 @@ export function ScreenShareViewer() {
   return (
     <div className="flex flex-col min-h-0 h-full bg-black/95">
       {/* Main video */}
-      <div className="flex-1 flex items-center justify-center bg-black min-h-0 relative group">
+      <div
+        ref={videoContainerRef}
+        className={cn(
+          "flex-1 flex items-center justify-center bg-black min-h-0 relative group overflow-hidden",
+          zoom > 1 && "cursor-grab",
+          zoom > 1 && isDragging.current && "cursor-grabbing",
+        )}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        onDoubleClick={handleDoubleClick}
+      >
         {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) ? (
           <video
             ref={mainVideoRef}
             autoPlay
             playsInline
-            className="object-contain w-full h-full bg-black"
+            className="object-contain w-full h-full bg-black select-none"
+            draggable={false}
+            style={{
+              transform: zoom > 1
+                ? `scale(${zoom}) translate(${pan.x / zoom}%, ${pan.y / zoom}%)`
+                : undefined,
+              transformOrigin: "center center",
+              willChange: zoom > 1 ? "transform" : undefined,
+            }}
           />
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -323,6 +410,22 @@ export function ScreenShareViewer() {
             <p className="text-sm">Connecting to stream...</p>
           </div>
         )}
+
+      {/* Zoom indicator */}
+      {zoom > 1 && (
+        <div className="absolute left-3 bottom-3 flex items-center gap-1.5 px-2 py-1 bg-black/60 rounded-lg text-xs text-white/80">
+          <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
+          <button
+            className="ml-1 text-white/60 hover:text-white cursor-pointer"
+            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+            title="Reset zoom"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Volume controls overlay — vertical slider, visible when hovering anywhere on the video */}
       {state.selectedScreenSharer &&
