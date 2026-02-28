@@ -80,6 +80,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .insert(user_id.clone(), tx);
 
     // Update presence – preserve custom_status and manual_status on reconnect
+    // On first connect (no existing PresenceRecord), load persisted values from MongoDB
     {
         let mut up = state.user_presence.write().await;
         if let Some(p) = up.get_mut(&user_id) {
@@ -87,14 +88,22 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             p.last_typing = 0.0;
             p.connected = true;
         } else {
+            // Load persisted custom_status and manual_status from user record
+            let (saved_custom_status, saved_manual_status) = {
+                let users_coll = state.db.collection::<UserRecord>("users");
+                match users_coll.find_one(doc! { "_id": &user_id }).await {
+                    Ok(Some(u)) => (u.custom_status, u.manual_status),
+                    _ => (String::new(), None),
+                }
+            };
             up.insert(
                 user_id.clone(),
                 PresenceRecord {
                     last_active: now_secs(),
                     last_typing: 0.0,
                     connected: true,
-                    custom_status: String::new(),
-                    manual_status: None,
+                    custom_status: saved_custom_status,
+                    manual_status: saved_manual_status,
                 },
             );
         }
@@ -444,6 +453,12 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            // Persist to MongoDB
+            let users_coll = state.db.collection::<UserRecord>("users");
+            let _ = users_coll.update_one(
+                doc! { "_id": user_id },
+                doc! { "$set": { "custom_status": &custom_status } },
+            ).await;
             let effective_status = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
@@ -478,6 +493,22 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "set_status" => {
             let manual_status = msg.get("status").and_then(|v| v.as_str()).map(|s| s.to_string());
+            // Persist to MongoDB
+            let users_coll = state.db.collection::<UserRecord>("users");
+            match &manual_status {
+                Some(ms) => {
+                    let _ = users_coll.update_one(
+                        doc! { "_id": user_id },
+                        doc! { "$set": { "manual_status": ms } },
+                    ).await;
+                }
+                None => {
+                    let _ = users_coll.update_one(
+                        doc! { "_id": user_id },
+                        doc! { "$unset": { "manual_status": "" } },
+                    ).await;
+                }
+            }
             let (effective_status, custom_status) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
@@ -536,8 +567,13 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     .await;
             }
 
-            // Update custom_status in PresenceRecord if provided
+            // Update custom_status in PresenceRecord and MongoDB if provided
             if let Some(cs) = msg.get("custom_status").and_then(|v| v.as_str()) {
+                let users_coll2 = state.db.collection::<UserRecord>("users");
+                let _ = users_coll2.update_one(
+                    doc! { "_id": user_id },
+                    doc! { "$set": { "custom_status": cs } },
+                ).await;
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = cs.to_string();

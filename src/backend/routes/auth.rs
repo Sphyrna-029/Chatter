@@ -182,6 +182,8 @@ pub(crate) async fn register(
         totp_secret: totp_secret.clone(),
         totp_verified: false,
         recovery_codes: Vec::new(),
+        custom_status: String::new(),
+        manual_status: None,
         is_admin,
         disabled: false,
     };

@@ -71,6 +71,10 @@ pub(crate) struct UserRecord {
     #[serde(default)]
     pub(crate) recovery_codes: Vec<String>,
     #[serde(default)]
+    pub(crate) custom_status: String,
+    #[serde(default)]
+    pub(crate) manual_status: Option<String>,
+    #[serde(default)]
     pub(crate) is_admin: bool,
     #[serde(default)]
     pub(crate) disabled: bool,
