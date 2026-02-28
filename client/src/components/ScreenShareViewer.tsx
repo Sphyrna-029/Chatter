@@ -223,7 +223,6 @@ export function ScreenShareViewer() {
   const { state, dispatch } = useAppContext();
   const mainVideoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement | null>(null);
-  const wheelCleanupRef = useRef<(() => void) | null>(null);
   const thumbVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const [, setStreamVersion] = useState(0);
 
@@ -254,36 +253,8 @@ export function ScreenShareViewer() {
     };
   }, []);
 
-  // Wheel zoom handler — must be non-passive to preventDefault
-  // Use a callback ref so the listener attaches when the DOM element appears
   const clampPanRef = useRef(clampPan);
   clampPanRef.current = clampPan;
-
-  const videoContainerCallbackRef = useCallback((node: HTMLDivElement | null) => {
-    // Clean up previous listener
-    if (wheelCleanupRef.current) {
-      wheelCleanupRef.current();
-      wheelCleanupRef.current = null;
-    }
-    videoContainerRef.current = node;
-    if (!node) return;
-
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      setZoom((prevZoom) => {
-        const delta = e.deltaY > 0 ? -0.2 : 0.2;
-        const newZoom = Math.max(1, Math.min(10, prevZoom + delta * prevZoom * 0.3));
-        if (newZoom <= 1) {
-          setPan({ x: 0, y: 0 });
-        } else {
-          setPan((prev) => clampPanRef.current(prev.x, prev.y, newZoom));
-        }
-        return newZoom;
-      });
-    };
-    node.addEventListener("wheel", onWheel, { passive: false });
-    wheelCleanupRef.current = () => node.removeEventListener("wheel", onWheel);
-  }, []);
 
   // Mouse drag pan handlers
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -365,6 +336,30 @@ export function ScreenShareViewer() {
     }
   }, [currentSharer, currentMuted, currentVolume]);
 
+  // Wheel zoom — non-passive listener, attached after the DOM renders
+  const viewerVisible = state.screenViewerOpen && sharers.length > 0 && state.inVoiceChannel;
+  useEffect(() => {
+    const container = videoContainerRef.current;
+    if (!viewerVisible || !container) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setZoom((prevZoom) => {
+        const delta = e.deltaY > 0 ? -0.2 : 0.2;
+        const newZoom = Math.max(1, Math.min(10, prevZoom + delta * prevZoom * 0.3));
+        if (newZoom <= 1) {
+          setPan({ x: 0, y: 0 });
+        } else {
+          setPan((prev) => clampPanRef.current(prev.x, prev.y, newZoom));
+        }
+        return newZoom;
+      });
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
+  }, [viewerVisible]);
+
   if (
     !state.screenViewerOpen ||
     sharers.length === 0 ||
@@ -377,7 +372,7 @@ export function ScreenShareViewer() {
     <div className="flex flex-col min-h-0 h-full bg-black/95">
       {/* Main video */}
       <div
-        ref={videoContainerCallbackRef}
+        ref={videoContainerRef}
         className={cn(
           "flex-1 flex items-center justify-center bg-black min-h-0 relative group overflow-hidden",
           zoom > 1 && "cursor-grab",
@@ -391,12 +386,8 @@ export function ScreenShareViewer() {
       >
         {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) ? (
-          <video
-            ref={mainVideoRef}
-            autoPlay
-            playsInline
-            className="object-contain w-full h-full bg-black select-none"
-            draggable={false}
+          <div
+            className="w-full h-full"
             style={{
               transform: zoom > 1
                 ? `scale(${zoom}) translate(${pan.x / zoom}%, ${pan.y / zoom}%)`
@@ -404,7 +395,15 @@ export function ScreenShareViewer() {
               transformOrigin: "center center",
               willChange: zoom > 1 ? "transform" : undefined,
             }}
-          />
+          >
+            <video
+              ref={mainVideoRef}
+              autoPlay
+              playsInline
+              className="object-contain w-full h-full bg-black select-none"
+              draggable={false}
+            />
+          </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
             <svg
