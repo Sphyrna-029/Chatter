@@ -427,7 +427,7 @@ export function ScreenShareViewer() {
         )}
 
       {/* Zoom controls — always visible on hover */}
-      <div className="absolute left-3 bottom-3 flex items-center gap-1 px-1.5 py-1 bg-black/60 rounded-lg text-xs text-white/80 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute left-3 bottom-3 z-50 flex items-center gap-1 px-1.5 py-1 bg-red-600 rounded-lg text-xs text-white">
         <button
           className="h-6 w-6 flex items-center justify-center rounded hover:bg-white/20 cursor-pointer"
           onClick={() => {
