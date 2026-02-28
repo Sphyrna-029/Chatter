@@ -467,17 +467,17 @@ pub(crate) async fn search_messages(
         }
         "file" => {
             let file_type = query.file_type.as_deref().unwrap_or("all");
-            let type_condition = match file_type {
-                "image" => doc! { "content.msgtype": "m.image" },
-                "video" => doc! { "content.msgtype": "m.video" },
-                "audio" => doc! { "content.msgtype": "m.audio" },
-                "document" => doc! { "content.msgtype": { "$in": ["m.file"] } },
-                _ => doc! { "content.msgtype": { "$in": ["m.file", "m.image", "m.video", "m.audio"] } },
+            let ext_pattern = match file_type {
+                "image" => r"\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?|$|\s)",
+                "video" => r"\.(mp4|webm|ogg|mov)(\?|$|\s)",
+                "audio" => r"\.(mp3|wav|flac|aac|m4a)(\?|$|\s)",
+                "document" => r"\.(pdf|doc|docx|xls|xlsx|txt|zip|tar|gz|rar|7z|csv)(\?|$|\s)",
+                _ => r"\.(jpg|jpeg|png|gif|webp|bmp|svg|mp4|webm|ogg|mov|mp3|wav|flac|aac|m4a|pdf|doc|docx|xls|xlsx|txt|zip|tar|gz|rar|7z|csv)(\?|$|\s)",
             };
 
             let mut conditions = vec![
                 doc! { "room_id": &room_id },
-                type_condition,
+                doc! { "content.body": { "$regex": ext_pattern, "$options": "i" } },
             ];
 
             if !q.is_empty() {
