@@ -1,4 +1,4 @@
-use super::{router, state::AppState, webrtc::build_webrtc_api};
+use super::{router, state::{AppState, ServerSettings}, webrtc::build_webrtc_api};
 use axum::Router;
 use mongodb::{Client, IndexModel, options::IndexOptions};
 use std::{collections::HashMap, sync::Arc};
@@ -27,12 +27,14 @@ pub async fn build_state() -> Arc<AppState> {
     // Load caches from MongoDB
     let (room_members, room_roles) = load_room_members_cache(&db).await;
     let banned_users = load_banned_users_cache(&db).await;
+    let server_settings = load_server_settings(&db).await;
 
     let webrtc_api = build_webrtc_api();
 
     Arc::new(AppState {
         db,
         jwt_secret,
+        server_settings: RwLock::new(server_settings),
         room_members: RwLock::new(room_members),
         room_roles: RwLock::new(room_roles),
         banned_users: RwLock::new(banned_users),
@@ -239,6 +241,34 @@ async fn load_banned_users_cache(db: &mongodb::Database) -> HashMap<String, Vec<
     }
 
     cache
+}
+
+async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
+    use mongodb::bson::doc;
+
+    let coll = db.collection::<mongodb::bson::Document>("server_settings");
+    if let Ok(Some(doc)) = coll.find_one(doc! { "_id": "global" }).await {
+        let invite_only = doc.get_bool("invite_only").unwrap_or(false);
+        let invite_code = doc.get_str("invite_code").unwrap_or("").to_string();
+        return ServerSettings { invite_only, invite_code };
+    }
+
+    // Create default settings
+    let code = generate_invite_code();
+    let default_doc = doc! {
+        "_id": "global",
+        "invite_only": false,
+        "invite_code": &code,
+    };
+    let _ = coll.insert_one(default_doc).await;
+    ServerSettings { invite_only: false, invite_code: code }
+}
+
+pub(crate) fn generate_invite_code() -> String {
+    use rand::Rng;
+    let chars: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    (0..8).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect()
 }
 
 pub async fn run() {

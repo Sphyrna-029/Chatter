@@ -212,8 +212,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return {};
   }, []);
 
-  const register = useCallback(async (username: string, password: string, passwordConfirm: string) => {
-    const data = await apiRegister(username, password, passwordConfirm);
+  const register = useCallback(async (username: string, password: string, passwordConfirm: string, inviteCode?: string) => {
+    const data = await apiRegister(username, password, passwordConfirm, inviteCode);
     // Don't store tokens - they aren't issued until TOTP verification
     return {
       user_id: data.user_id,

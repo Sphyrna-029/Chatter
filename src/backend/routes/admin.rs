@@ -1,4 +1,5 @@
 use super::super::{
+    app::generate_invite_code,
     helpers::{error_response, hash_password, require_admin},
     state::{AppState, UploadRecord, UserRecord},
 };
@@ -384,4 +385,75 @@ pub(crate) async fn admin_delete_room(
     state.voice_channels.write().await.remove(&room_id);
 
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// GET /api/admin/settings
+pub(crate) async fn admin_get_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+
+    let settings = state.server_settings.read().await;
+    Ok(Json(json!({
+        "invite_only": settings.invite_only,
+        "invite_code": settings.invite_code
+    })))
+}
+
+/// PUT /api/admin/settings
+pub(crate) async fn admin_update_settings(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+
+    let invite_only = body.get("invite_only")
+        .and_then(|v| v.as_bool())
+        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "invite_only (bool) is required"))?;
+
+    // Update DB
+    let coll = state.db.collection::<mongodb::bson::Document>("server_settings");
+    coll.update_one(
+        doc! { "_id": "global" },
+        doc! { "$set": { "invite_only": invite_only } },
+    )
+    .await
+    .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+
+    // Update cache
+    {
+        let mut settings = state.server_settings.write().await;
+        settings.invite_only = invite_only;
+    }
+
+    Ok(Json(json!({ "invite_only": invite_only })))
+}
+
+/// POST /api/admin/settings/refresh-invite
+pub(crate) async fn admin_refresh_invite(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+
+    let new_code = generate_invite_code();
+
+    // Update DB
+    let coll = state.db.collection::<mongodb::bson::Document>("server_settings");
+    coll.update_one(
+        doc! { "_id": "global" },
+        doc! { "$set": { "invite_code": &new_code } },
+    )
+    .await
+    .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+
+    // Update cache
+    {
+        let mut settings = state.server_settings.write().await;
+        settings.invite_code = new_code.clone();
+    }
+
+    Ok(Json(json!({ "invite_code": new_code })))
 }

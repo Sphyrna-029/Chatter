@@ -1,8 +1,8 @@
 use super::{
     constants::MAX_UPLOAD_SIZE,
     routes::{
-        admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room},
-        auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, totp_setup, totp_verify},
+        admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
+        auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, server_info, totp_setup, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
@@ -144,7 +144,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/friends/remove", post(remove_friend))
            .route("/api/friends/block", post(block_user))
            .route("/api/friends/unblock", post(unblock_user))
+           // Server info (public)
+           .route("/api/server/info", get(server_info))
            // Admin
+           .route("/api/admin/settings", get(admin_get_settings).put(admin_update_settings))
+           .route("/api/admin/settings/refresh-invite", post(admin_refresh_invite))
            .route("/api/admin/stats", get(admin_stats))
            .route("/api/admin/users", get(admin_list_users))
            .route("/api/admin/users/{user_id}/disable", post(admin_disable_user))

@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiCheckUsername, apiVerifyTotp, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin } from "@/lib/api";
+import { apiCheckUsername, apiVerifyTotp, apiGetServerInfo, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,6 +65,8 @@ export function LoginScreen() {
   const [regUsername, setRegUsername] = useState("");
   const [regPassword, setRegPassword] = useState("");
   const [regConfirm, setRegConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [serverInviteOnly, setServerInviteOnly] = useState(false);
   const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
   const [checkingUsername, setCheckingUsername] = useState(false);
   const usernameCheckTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -91,6 +93,13 @@ export function LoginScreen() {
     timeoutsRef.current.forEach(clearTimeout);
     timeoutsRef.current = [];
   }, []);
+
+  // Fetch server info when switching to register step
+  useEffect(() => {
+    if (step === "register") {
+      apiGetServerInfo().then((info) => setServerInviteOnly(info.invite_only)).catch(() => {});
+    }
+  }, [step]);
 
   // Username availability check (debounced)
   const checkUsernameAvailability = useCallback((name: string) => {
@@ -204,7 +213,7 @@ export function LoginScreen() {
       setLoading(true);
 
       try {
-        const data = await register(name, regPassword, regConfirm);
+        const data = await register(name, regPassword, regConfirm, serverInviteOnly ? inviteCode : undefined);
         setTotpSecret(data.totp_secret);
         setTotpQrBase64(data.totp_qr_base64);
         setRegisteredUserId(data.user_id);
@@ -610,6 +619,29 @@ export function LoginScreen() {
 
             {renderPasswordInput("reg-password", "password", regPassword, setRegPassword)}
             {renderPasswordInput("reg-confirm", "confirm password", regConfirm, setRegConfirm)}
+
+            {serverInviteOnly && (
+              <div className="space-y-1.5">
+                <Label htmlFor="invite-code" className={labelClass} style={labelStyle}>
+                  invite code
+                </Label>
+                <Input
+                  id="invite-code"
+                  placeholder=">"
+                  value={inviteCode}
+                  onChange={(e) => {
+                    setInviteCode(e.target.value);
+                    if (error) setError(null);
+                  }}
+                  disabled={loading}
+                  className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.15em] font-mono"
+                  style={inputStyle}
+                />
+                <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(180, 210, 255, 0.4)" }}>
+                  this server requires an invite code to register
+                </p>
+              </div>
+            )}
 
             {renderError()}
             {renderButton("register")}

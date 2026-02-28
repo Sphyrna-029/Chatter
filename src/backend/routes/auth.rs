@@ -105,10 +105,29 @@ pub(crate) async fn check_username(
     Ok(Json(json!({ "available": !exists })))
 }
 
+/// GET /api/server/info
+pub(crate) async fn server_info(
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let settings = state.server_settings.read().await;
+    Json(json!({ "invite_only": settings.invite_only }))
+}
+
 pub(crate) async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Check invite-only mode
+    {
+        let settings = state.server_settings.read().await;
+        if settings.invite_only {
+            match &req.invite_code {
+                Some(code) if code == &settings.invite_code => {}
+                _ => return Err(error_response(StatusCode::FORBIDDEN, "Valid invite code required")),
+            }
+        }
+    }
+
     let username = req.username.trim();
     if let Err(detail) = validate_username(username) {
         return Err(error_response(StatusCode::BAD_REQUEST, detail));

@@ -156,13 +156,13 @@ export async function apiLogin(username: string, password: string, totpCode?: st
   }>;
 }
 
-export async function apiRegister(username: string, password: string, passwordConfirm: string) {
+export async function apiRegister(username: string, password: string, passwordConfirm: string, inviteCode?: string) {
   let res: Response;
   try {
     res = await fetch("/_matrix/client/r0/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password, password_confirm: passwordConfirm }),
+      body: JSON.stringify({ username, password, password_confirm: passwordConfirm, invite_code: inviteCode || undefined }),
     });
   } catch {
     throw new Error("Cannot reach server. Is the backend running on :8000?");
@@ -949,6 +949,43 @@ export interface AdminRoom {
   room_type: string;
   member_count: number;
   message_count: number;
+}
+
+export async function apiGetServerInfo(): Promise<{ invite_only: boolean }> {
+  const res = await fetch("/api/server/info");
+  if (!res.ok) throw new Error("Failed to get server info");
+  return res.json();
+}
+
+export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string }> {
+  const res = await authenticatedFetch("/api/admin/settings");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get settings");
+  }
+  return res.json();
+}
+
+export async function apiAdminUpdateSettings(inviteOnly: boolean): Promise<void> {
+  const res = await authenticatedFetch("/api/admin/settings", {
+    method: "PUT",
+    body: JSON.stringify({ invite_only: inviteOnly }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to update settings");
+  }
+}
+
+export async function apiAdminRefreshInvite(): Promise<{ invite_code: string }> {
+  const res = await authenticatedFetch("/api/admin/settings/refresh-invite", {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to refresh invite code");
+  }
+  return res.json();
 }
 
 export async function apiAdminGetStats(): Promise<AdminStats> {

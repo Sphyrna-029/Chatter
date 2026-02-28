@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check } from "lucide-react";
+import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import {
   apiAdminGetStats,
@@ -10,6 +10,9 @@ import {
   apiAdminResetPassword,
   apiAdminListRooms,
   apiAdminDeleteRoom,
+  apiAdminGetSettings,
+  apiAdminUpdateSettings,
+  apiAdminRefreshInvite,
   type AdminStats,
   type AdminUser,
   type AdminRoom,
@@ -19,7 +22,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 
-type Tab = "overview" | "users" | "rooms";
+type Tab = "overview" | "users" | "rooms" | "settings";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -35,6 +38,9 @@ export function AdminDashboard() {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [rooms, setRooms] = useState<AdminRoom[]>([]);
+  const [inviteOnly, setInviteOnly] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
+  const [inviteCopied, setInviteCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordUser, setTempPasswordUser] = useState<string | null>(null);
@@ -49,6 +55,10 @@ export function AdminDashboard() {
         setUsers(await apiAdminListUsers());
       } else if (tab === "rooms") {
         setRooms(await apiAdminListRooms());
+      } else if (tab === "settings") {
+        const s = await apiAdminGetSettings();
+        setInviteOnly(s.invite_only);
+        setInviteCode(s.invite_code);
       }
     } catch (e: any) {
       console.error("Admin load error:", e.message);
@@ -139,7 +149,7 @@ export function AdminDashboard() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b px-4 py-1 shrink-0">
-        {(["overview", "users", "rooms"] as Tab[]).map((t) => (
+        {(["overview", "users", "rooms", "settings"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -171,6 +181,33 @@ export function AdminDashboard() {
             />
           ) : tab === "rooms" ? (
             <RoomsTab rooms={rooms} onDelete={handleDeleteRoom} displayName={displayName} />
+          ) : tab === "settings" ? (
+            <SettingsTab
+              inviteOnly={inviteOnly}
+              inviteCode={inviteCode}
+              inviteCopied={inviteCopied}
+              onToggleInviteOnly={async (val) => {
+                try {
+                  await apiAdminUpdateSettings(val);
+                  setInviteOnly(val);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onRefreshInvite={async () => {
+                try {
+                  const result = await apiAdminRefreshInvite();
+                  setInviteCode(result.invite_code);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onCopyInvite={() => {
+                navigator.clipboard.writeText(inviteCode);
+                setInviteCopied(true);
+                setTimeout(() => setInviteCopied(false), 2000);
+              }}
+            />
           ) : null}
         </div>
       </ScrollArea>
@@ -343,6 +380,74 @@ function RoomsTab({
       {rooms.length === 0 && (
         <p className="text-sm text-muted-foreground">No rooms found.</p>
       )}
+    </div>
+  );
+}
+
+function SettingsTab({
+  inviteOnly,
+  inviteCode,
+  inviteCopied,
+  onToggleInviteOnly,
+  onRefreshInvite,
+  onCopyInvite,
+}: {
+  inviteOnly: boolean;
+  inviteCode: string;
+  inviteCopied: boolean;
+  onToggleInviteOnly: (val: boolean) => void;
+  onRefreshInvite: () => void;
+  onCopyInvite: () => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Invite-Only Mode</h3>
+            <p className="text-xs text-muted-foreground">
+              When enabled, new users must enter a valid invite code to register.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={inviteOnly}
+            onClick={() => onToggleInviteOnly(!inviteOnly)}
+            className={cn(
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0",
+              inviteOnly ? "bg-primary" : "bg-muted"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 transform rounded-full bg-background transition-transform",
+                inviteOnly ? "translate-x-6" : "translate-x-1"
+              )}
+            />
+          </button>
+        </div>
+
+        {inviteOnly && (
+          <div className="space-y-2 pt-2 border-t">
+            <p className="text-xs text-muted-foreground">Current invite code:</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 bg-muted rounded-md px-3 py-2 text-sm font-mono select-all">
+                {inviteCode}
+              </code>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onCopyInvite}>
+                {inviteCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onRefreshInvite}>
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Share this code with people you want to allow to register. Refreshing generates a new code and invalidates the old one.
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

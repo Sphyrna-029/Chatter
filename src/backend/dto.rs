@@ -5,6 +5,7 @@ pub(crate) struct RegisterRequest {
     pub(crate) username: String,
     pub(crate) password: String,
     pub(crate) password_confirm: Option<String>,
+    pub(crate) invite_code: Option<String>,
 }
 
 #[derive(Deserialize)]

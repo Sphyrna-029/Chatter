@@ -12,10 +12,18 @@ use webrtc::{
 
 pub(crate) type WsSender = mpsc::UnboundedSender<Message>;
 
+pub(crate) struct ServerSettings {
+    pub(crate) invite_only: bool,
+    pub(crate) invite_code: String,
+}
+
 pub struct AppState {
     // MongoDB
     pub(crate) db: Database,
     pub(crate) jwt_secret: String,
+
+    // Server settings cache
+    pub(crate) server_settings: RwLock<ServerSettings>,
 
     // Write-through cache for room members (avoids DB query on every broadcast)
     pub(crate) room_members: RwLock<HashMap<String, Vec<String>>>,
