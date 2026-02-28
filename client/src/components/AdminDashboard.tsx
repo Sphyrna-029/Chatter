@@ -176,10 +176,10 @@ export function AdminDashboard() {
               onEnable={handleEnable}
               onDelete={handleDeleteUser}
               onResetPassword={handleResetPassword}
-              displayName={displayName}
+              displayName={displayUserId}
             />
           ) : tab === "rooms" ? (
-            <RoomsTab rooms={rooms} onDelete={handleDeleteRoom} displayName={displayName} />
+            <RoomsTab rooms={rooms} onDelete={handleDeleteRoom} displayName={displayUserId} />
           ) : tab === "settings" ? (
             <SettingsTab
               inviteOnly={inviteOnly}
