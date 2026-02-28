@@ -28,7 +28,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
-  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup } = useAppContext();
+  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms } = useAppContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
@@ -43,6 +43,9 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const [groupDialogName, setGroupDialogName] = useState<string | undefined>();
   // Track which group has its context menu open
   const [groupMenuOpen, setGroupMenuOpen] = useState<string | null>(null);
+  // Drag-and-drop state
+  const [draggedRoomId, setDraggedRoomId] = useState<string | null>(null);
+  const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
 
   const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || displayUserId(state.userId ?? "") || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
@@ -99,7 +102,21 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       <button
         key={roomId}
         onClick={() => selectRoom(roomId)}
-        className="group/card relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer"
+        draggable={!isDm}
+        onDragStart={(e) => {
+          if (isDm) return;
+          setDraggedRoomId(roomId);
+          e.dataTransfer.setData("text/plain", roomId);
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onDragEnd={() => {
+          setDraggedRoomId(null);
+          setDragOverGroupId(null);
+        }}
+        className={cn(
+          "group/card relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer",
+          draggedRoomId === roomId && "opacity-50",
+        )}
         style={{
           minHeight: "5.5rem",
           borderColor: screenShareActive
@@ -368,8 +385,33 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                             <div key={group.group_id} className="mb-1">
                               {/* Group header */}
                               <div
-                                className="group/header relative flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-sm mx-1"
+                                className={cn(
+                                  "group/header relative flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-sm mx-1",
+                                  dragOverGroupId === group.group_id && "ring-2 ring-primary bg-accent/50",
+                                )}
                                 onClick={() => toggleGroupCollapsed(group.group_id, !group.collapsed)}
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  e.dataTransfer.dropEffect = "move";
+                                  setDragOverGroupId(group.group_id);
+                                }}
+                                onDragLeave={() => setDragOverGroupId(null)}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  const roomId = e.dataTransfer.getData("text/plain");
+                                  if (!roomId) return;
+                                  // Remove from any existing group first
+                                  const sourceGroup = state.roomGroups.find((g) => g.room_ids.includes(roomId));
+                                  if (sourceGroup && sourceGroup.group_id !== group.group_id) {
+                                    setGroupRooms(sourceGroup.group_id, sourceGroup.room_ids.filter((id) => id !== roomId));
+                                  }
+                                  // Add to target group if not already there
+                                  if (!group.room_ids.includes(roomId)) {
+                                    setGroupRooms(group.group_id, [...group.room_ids, roomId]);
+                                  }
+                                  setDraggedRoomId(null);
+                                  setDragOverGroupId(null);
+                                }}
                               >
                                 {group.collapsed ? (
                                   <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
@@ -440,14 +482,68 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                         })}
                         {/* Ungrouped rooms */}
                         {ungroupedRoomIds.length > 0 && sortedGroups.length > 0 && (
-                          <div className="mb-1">
-                            <div className="px-2 py-1">
+                          <div
+                            className="mb-1"
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = "move";
+                              setDragOverGroupId("__ungrouped__");
+                            }}
+                            onDragLeave={() => setDragOverGroupId(null)}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const roomId = e.dataTransfer.getData("text/plain");
+                              if (!roomId) return;
+                              const sourceGroup = state.roomGroups.find((g) => g.room_ids.includes(roomId));
+                              if (sourceGroup) {
+                                setGroupRooms(sourceGroup.group_id, sourceGroup.room_ids.filter((id) => id !== roomId));
+                              }
+                              setDraggedRoomId(null);
+                              setDragOverGroupId(null);
+                            }}
+                          >
+                            <div className={cn(
+                              "px-2 py-1 rounded-sm mx-1",
+                              dragOverGroupId === "__ungrouped__" && "ring-2 ring-primary bg-accent/50",
+                            )}>
                               <span className="text-[11px] font-semibold text-muted-foreground/50">
                                 Ungrouped
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2 px-2 pb-2">
                               {ungroupedRoomIds.map((roomId) => renderRoomCard(roomId, false))}
+                            </div>
+                          </div>
+                        )}
+                        {/* Ungrouped drop zone when all rooms are in groups */}
+                        {ungroupedRoomIds.length === 0 && sortedGroups.length > 0 && draggedRoomId && (
+                          <div
+                            className="mb-1"
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = "move";
+                              setDragOverGroupId("__ungrouped__");
+                            }}
+                            onDragLeave={() => setDragOverGroupId(null)}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              const roomId = e.dataTransfer.getData("text/plain");
+                              if (!roomId) return;
+                              const sourceGroup = state.roomGroups.find((g) => g.room_ids.includes(roomId));
+                              if (sourceGroup) {
+                                setGroupRooms(sourceGroup.group_id, sourceGroup.room_ids.filter((id) => id !== roomId));
+                              }
+                              setDraggedRoomId(null);
+                              setDragOverGroupId(null);
+                            }}
+                          >
+                            <div className={cn(
+                              "px-2 py-1 rounded-sm mx-1",
+                              dragOverGroupId === "__ungrouped__" && "ring-2 ring-primary bg-accent/50",
+                            )}>
+                              <span className="text-[11px] font-semibold text-muted-foreground/50">
+                                Ungrouped
+                              </span>
                             </div>
                           </div>
                         )}
