@@ -164,7 +164,7 @@ export function ActivityPage() {
         {/* Two-column layout: Rooms left, Friends right */}
         <div className="flex gap-8 items-start">
           {/* Left column — Your Rooms */}
-          <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex-1 min-w-0 overflow-hidden space-y-3">
             <section className="space-y-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
                 <MessageSquare className="h-4 w-4" />
@@ -191,7 +191,7 @@ export function ActivityPage() {
                       <button
                         key={roomId}
                         onClick={() => selectRoom(roomId)}
-                        className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                        className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full overflow-hidden"
                       >
                         {/* Room icon */}
                         <span className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-bold shrink-0 mt-0.5">
