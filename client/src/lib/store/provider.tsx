@@ -43,6 +43,12 @@ import {
   apiUnbanMember,
   apiSetMemberRole,
   apiSetNameColors,
+  apiGetRoomGroups,
+  apiCreateRoomGroup,
+  apiDeleteRoomGroup,
+  apiUpdateRoomGroup,
+  apiSetGroupRooms,
+  apiSetGroupCollapsed,
   apiGetFriends,
   apiSendFriendRequest,
   apiAcceptFriendRequest,
@@ -617,6 +623,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiSetNameColors(roomId, ownerColor, modColor);
   }, []);
 
+  const loadRoomGroups = useCallback(async () => {
+    try {
+      const groups = await apiGetRoomGroups();
+      dispatch({ type: "SET_ROOM_GROUPS", payload: groups });
+    } catch {}
+  }, []);
+
+  const createRoomGroup = useCallback(async (name: string) => {
+    await apiCreateRoomGroup(name);
+    await loadRoomGroups();
+  }, [loadRoomGroups]);
+
+  const deleteRoomGroup = useCallback(async (groupId: string) => {
+    await apiDeleteRoomGroup(groupId);
+    dispatch({ type: "REMOVE_ROOM_GROUP", payload: groupId });
+  }, []);
+
+  const renameRoomGroup = useCallback(async (groupId: string, name: string) => {
+    await apiUpdateRoomGroup(groupId, { name });
+    await loadRoomGroups();
+  }, [loadRoomGroups]);
+
+  const setGroupRooms = useCallback(async (groupId: string, roomIds: string[]) => {
+    await apiSetGroupRooms(groupId, roomIds);
+    await loadRoomGroups();
+  }, [loadRoomGroups]);
+
+  const toggleGroupCollapsed = useCallback(async (groupId: string, collapsed: boolean) => {
+    dispatch({ type: "TOGGLE_GROUP_COLLAPSED", payload: { groupId, collapsed } });
+    await apiSetGroupCollapsed(groupId, collapsed);
+  }, []);
+
   const loadFriends = useCallback(async () => {
     try {
       const data = await apiGetFriends();
@@ -717,6 +755,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         unbanMember,
         setMemberRole,
         setNameColors,
+        loadRoomGroups,
+        createRoomGroup,
+        deleteRoomGroup,
+        renameRoomGroup,
+        setGroupRooms,
+        toggleGroupCollapsed,
         loadFriends,
         sendFriendRequest,
         acceptFriendRequest,

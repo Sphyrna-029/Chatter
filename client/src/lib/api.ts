@@ -1115,6 +1115,79 @@ export async function apiDeleteWebhook(webhookId: string) {
   return res.json();
 }
 
+// ─── Room Groups ─────────────────────────────────────────────────────
+
+export interface RoomGroup {
+  group_id: string;
+  name: string;
+  position: number;
+  collapsed: boolean;
+  room_ids: string[];
+}
+
+export async function apiGetRoomGroups(): Promise<RoomGroup[]> {
+  const res = await authenticatedFetch("/api/room-groups");
+  if (!res.ok) throw new Error("Failed to load room groups");
+  const data = await res.json();
+  return data.groups;
+}
+
+export async function apiCreateRoomGroup(name: string): Promise<string> {
+  const res = await authenticatedFetch("/api/room-groups", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to create group");
+  }
+  const data = await res.json();
+  return data.group_id;
+}
+
+export async function apiUpdateRoomGroup(groupId: string, updates: { name?: string; position?: number }): Promise<void> {
+  const res = await authenticatedFetch(`/api/room-groups/${groupId}`, {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to update group");
+  }
+}
+
+export async function apiDeleteRoomGroup(groupId: string): Promise<void> {
+  const res = await authenticatedFetch(`/api/room-groups/${groupId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete group");
+  }
+}
+
+export async function apiSetGroupRooms(groupId: string, roomIds: string[]): Promise<void> {
+  const res = await authenticatedFetch(`/api/room-groups/${groupId}/rooms`, {
+    method: "PUT",
+    body: JSON.stringify({ room_ids: roomIds }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to set group rooms");
+  }
+}
+
+export async function apiSetGroupCollapsed(groupId: string, collapsed: boolean): Promise<void> {
+  const res = await authenticatedFetch(`/api/room-groups/${groupId}/collapsed`, {
+    method: "PUT",
+    body: JSON.stringify({ collapsed }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to toggle group collapsed");
+  }
+}
+
 // ─── Friends ─────────────────────────────────────────────────────────────────
 
 export async function apiGetFriends() {

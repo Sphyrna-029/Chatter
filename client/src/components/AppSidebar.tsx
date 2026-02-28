@@ -4,7 +4,8 @@ import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
-import { LayoutDashboard } from "lucide-react";
+import { RoomGroupDialog } from "@/components/RoomGroupDialog";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2, Settings2 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -27,7 +28,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
-  const { state, dispatch, selectRoom, leaveRoom, logout } = useAppContext();
+  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup } = useAppContext();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
@@ -35,6 +36,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const [roomSummaries, setRoomSummaries] = useState<
     Record<string, RoomSummary>
   >({});
+  // Room group dialog state
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupDialogMode, setGroupDialogMode] = useState<"create" | "rename" | "manage">("create");
+  const [groupDialogId, setGroupDialogId] = useState<string | undefined>();
+  const [groupDialogName, setGroupDialogName] = useState<string | undefined>();
+  // Track which group has its context menu open
+  const [groupMenuOpen, setGroupMenuOpen] = useState<string | null>(null);
 
   const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || displayUserId(state.userId ?? "") || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
@@ -331,14 +339,134 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             <ScrollArea className="h-[calc(100vh-280px)]">
               {activeTab === "rooms" ? (
                 <>
-                  {regularRoomIds.length === 0 && (
-                    <p className="px-3 py-3 text-xs text-muted-foreground">
-                      No rooms joined yet
-                    </p>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 px-2 pb-2">
-                    {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
+                  {/* + Group button */}
+                  <div className="px-2 pb-1">
+                    <button
+                      onClick={() => {
+                        setGroupDialogMode("create");
+                        setGroupDialogId(undefined);
+                        setGroupDialogName(undefined);
+                        setGroupDialogOpen(true);
+                      }}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <FolderPlus className="h-3 w-3" />
+                      Group
+                    </button>
                   </div>
+                  {/* Sorted group sections */}
+                  {(() => {
+                    const sortedGroups = [...state.roomGroups].sort((a, b) => a.position - b.position);
+                    const groupedRoomIds = new Set(sortedGroups.flatMap((g) => g.room_ids));
+                    const ungroupedRoomIds = regularRoomIds.filter((id) => !groupedRoomIds.has(id));
+
+                    return (
+                      <>
+                        {sortedGroups.map((group) => {
+                          const groupRooms = group.room_ids.filter((id) => regularRoomIds.includes(id));
+                          return (
+                            <div key={group.group_id} className="mb-1">
+                              {/* Group header */}
+                              <div
+                                className="group/header relative flex items-center gap-1 px-2 py-1 cursor-pointer hover:bg-accent/50 rounded-sm mx-1"
+                                onClick={() => toggleGroupCollapsed(group.group_id, !group.collapsed)}
+                              >
+                                {group.collapsed ? (
+                                  <ChevronRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                                ) : (
+                                  <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+                                )}
+                                <span className="text-[11px] font-semibold text-muted-foreground truncate">
+                                  {group.name}
+                                </span>
+                                <span className="text-[9px] text-muted-foreground/60 ml-auto mr-5 shrink-0">
+                                  {groupRooms.length}
+                                </span>
+                                {/* Hover menu */}
+                                <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/header:opacity-100 flex items-center gap-0.5 transition-opacity">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setGroupDialogMode("manage");
+                                      setGroupDialogId(group.group_id);
+                                      setGroupDialogName(group.name);
+                                      setGroupDialogOpen(true);
+                                    }}
+                                    className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                                    title="Manage rooms"
+                                  >
+                                    <Settings2 className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setGroupDialogMode("rename");
+                                      setGroupDialogId(group.group_id);
+                                      setGroupDialogName(group.name);
+                                      setGroupDialogOpen(true);
+                                    }}
+                                    className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+                                    title="Rename"
+                                  >
+                                    <Pencil className="h-2.5 w-2.5" />
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm(`Delete group "${group.name}"? Rooms will become ungrouped.`)) {
+                                        deleteRoomGroup(group.group_id);
+                                      }
+                                    }}
+                                    className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                                    title="Delete group"
+                                  >
+                                    <Trash2 className="h-2.5 w-2.5" />
+                                  </button>
+                                </div>
+                              </div>
+                              {/* Group rooms */}
+                              {!group.collapsed && (
+                                <div className="grid grid-cols-2 gap-2 px-2 pb-1">
+                                  {groupRooms.map((roomId) => renderRoomCard(roomId, false))}
+                                </div>
+                              )}
+                              {!group.collapsed && groupRooms.length === 0 && (
+                                <p className="px-3 py-1 text-[10px] text-muted-foreground/50 italic">
+                                  No rooms
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {/* Ungrouped rooms */}
+                        {ungroupedRoomIds.length > 0 && sortedGroups.length > 0 && (
+                          <div className="mb-1">
+                            <div className="px-2 py-1">
+                              <span className="text-[11px] font-semibold text-muted-foreground/50">
+                                Ungrouped
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                              {ungroupedRoomIds.map((roomId) => renderRoomCard(roomId, false))}
+                            </div>
+                          </div>
+                        )}
+                        {/* No groups — show flat grid */}
+                        {sortedGroups.length === 0 && (
+                          <>
+                            {regularRoomIds.length === 0 && (
+                              <p className="px-3 py-3 text-xs text-muted-foreground">
+                                No rooms joined yet
+                              </p>
+                            )}
+                            <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                              {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </>
               ) : (
                 <>
@@ -419,6 +547,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             displayName={displayName}
           />
         )}
+        <RoomGroupDialog
+          open={groupDialogOpen}
+          onOpenChange={setGroupDialogOpen}
+          mode={groupDialogMode}
+          groupId={groupDialogId}
+          groupName={groupDialogName}
+        />
         {settingsRoomId && (
           <RoomSettingsDialog
             open={!!settingsRoomId}

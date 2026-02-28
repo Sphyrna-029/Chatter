@@ -5,6 +5,7 @@ use super::{
         auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, server_info, totp_setup, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
+        room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
         media::{delete_upload, link_preview, list_uploads, serve_upload, upload_file},
@@ -135,6 +136,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/forum/{room_id}/posts/{post_id}", get(get_post).delete(delete_post).put(edit_post))
            .route("/api/forum/{room_id}/posts/{post_id}/comments", post(create_comment))
            .route("/api/forum/{room_id}/posts/{post_id}/comments/{comment_id}", delete(delete_comment).put(edit_comment))
+           // Room Groups
+           .route("/api/room-groups", get(get_room_groups).post(create_room_group))
+           .route("/api/room-groups/{group_id}", put(update_room_group).delete(delete_room_group))
+           .route("/api/room-groups/{group_id}/rooms", put(set_group_rooms))
+           .route("/api/room-groups/{group_id}/collapsed", put(set_group_collapsed))
            // Friends
            .route("/api/friends", get(get_friends))
            .route("/api/friends/status/{user_id}", get(get_friend_status))

@@ -55,7 +55,7 @@ function LeftPanelRestoreButton() {
 }
 
 export function ChatLayout() {
-  const { state, loadRooms, loadFriends, selectRoom } = useAppContext();
+  const { state, loadRooms, loadFriends, loadRoomGroups, selectRoom } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
@@ -68,11 +68,12 @@ export function ChatLayout() {
   // Flag to distinguish our code exiting PiP vs the user clicking "back to tab" / close
   const programmaticPipExitRef = useRef(false);
 
-  // Load rooms and friends on mount
+  // Load rooms, friends, and room groups on mount
   useEffect(() => {
     loadRooms();
     loadFriends();
-  }, [loadRooms, loadFriends]);
+    loadRoomGroups();
+  }, [loadRooms, loadFriends, loadRoomGroups]);
 
   const isForumRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"

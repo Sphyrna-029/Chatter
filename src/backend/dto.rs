@@ -182,3 +182,24 @@ pub(crate) struct CreateWebhookRequest {
     pub(crate) name: String,
     pub(crate) avatar_url: Option<String>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct CreateRoomGroupRequest {
+    pub(crate) name: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateRoomGroupRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) position: Option<i32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetGroupRoomsRequest {
+    pub(crate) room_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetGroupCollapsedRequest {
+    pub(crate) collapsed: bool,
+}

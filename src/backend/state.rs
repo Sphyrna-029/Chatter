@@ -257,6 +257,25 @@ pub(crate) struct WebhookRecord {
     pub(crate) created_at: i64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct RoomGroupEntry {
+    pub(crate) group_id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) position: i32,
+    #[serde(default)]
+    pub(crate) collapsed: bool,
+    #[serde(default)]
+    pub(crate) room_ids: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct UserRoomGroupsRecord {
+    #[serde(rename = "_id")]
+    pub(crate) user_id: String,
+    pub(crate) groups: Vec<RoomGroupEntry>,
+}
+
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]

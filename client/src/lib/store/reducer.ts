@@ -283,6 +283,29 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, adminDashboardOpen: action.payload };
     case "SET_TOTP_VERIFIED":
       return { ...state, totpVerified: action.payload };
+    case "SET_ROOM_GROUPS":
+      return { ...state, roomGroups: action.payload };
+    case "UPDATE_ROOM_GROUP":
+      return {
+        ...state,
+        roomGroups: state.roomGroups.map((g) =>
+          g.group_id === action.payload.group_id ? action.payload : g
+        ),
+      };
+    case "REMOVE_ROOM_GROUP":
+      return {
+        ...state,
+        roomGroups: state.roomGroups.filter((g) => g.group_id !== action.payload),
+      };
+    case "TOGGLE_GROUP_COLLAPSED":
+      return {
+        ...state,
+        roomGroups: state.roomGroups.map((g) =>
+          g.group_id === action.payload.groupId
+            ? { ...g, collapsed: action.payload.collapsed }
+            : g
+        ),
+      };
     case "SET_FRIENDS_DATA":
       return {
         ...state,

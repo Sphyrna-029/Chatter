@@ -1,4 +1,4 @@
-import type { MatrixMessage, RoomInfo } from "../api";
+import type { MatrixMessage, RoomInfo, RoomGroup } from "../api";
 import type { Dispatch } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -49,6 +49,8 @@ export interface AppState {
   adminDashboardOpen: boolean;
   // 2FA
   totpVerified: boolean;
+  // Room Groups
+  roomGroups: RoomGroup[];
   // Friends
   friends: string[];
   incomingFriendRequests: { userId: string; requestId: string }[];
@@ -99,6 +101,10 @@ export type Action =
   | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean }
   | { type: "SET_TOTP_VERIFIED"; payload: boolean }
   | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
+  | { type: "SET_ROOM_GROUPS"; payload: RoomGroup[] }
+  | { type: "UPDATE_ROOM_GROUP"; payload: RoomGroup }
+  | { type: "REMOVE_ROOM_GROUP"; payload: string }
+  | { type: "TOGGLE_GROUP_COLLAPSED"; payload: { groupId: string; collapsed: boolean } }
   | { type: "ADD_FRIEND"; payload: string }
   | { type: "REMOVE_FRIEND"; payload: string }
   | { type: "ADD_INCOMING_REQUEST"; payload: { userId: string; requestId: string } }
@@ -140,6 +146,7 @@ export const initialState: AppState = {
   isAdmin: false,
   adminDashboardOpen: false,
   totpVerified: false,
+  roomGroups: [],
   friends: [],
   incomingFriendRequests: [],
   outgoingFriendRequests: [],
@@ -179,6 +186,13 @@ export interface AppContextValue {
   unbanMember: (roomId: string, userId: string) => Promise<void>;
   setMemberRole: (roomId: string, userId: string, role: string) => Promise<void>;
   setNameColors: (roomId: string, ownerColor?: string, modColor?: string) => Promise<void>;
+  // Room Groups
+  loadRoomGroups: () => Promise<void>;
+  createRoomGroup: (name: string) => Promise<void>;
+  deleteRoomGroup: (groupId: string) => Promise<void>;
+  renameRoomGroup: (groupId: string, name: string) => Promise<void>;
+  setGroupRooms: (groupId: string, roomIds: string[]) => Promise<void>;
+  toggleGroupCollapsed: (groupId: string, collapsed: boolean) => Promise<void>;
   // Friends
   loadFriends: () => Promise<void>;
   sendFriendRequest: (userId: string) => Promise<void>;
