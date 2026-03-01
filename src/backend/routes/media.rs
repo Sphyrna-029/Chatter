@@ -1,6 +1,6 @@
 use super::super::{
     constants::MAX_UPLOAD_SIZE,
-    dto::LinkPreviewQuery,
+    dto::{GifSearchQuery, LinkPreviewQuery},
     helpers::{error_response, extract_token, get_user_from_token},
     state::{AppState, CachedPreview, UploadRecord},
 };
@@ -481,6 +481,63 @@ fn is_dangerous_extension(ext: &str) -> bool {
             | "css" | "svg" | "xml" | "xsl" | "xslt"
             | "wasm" | "crx" | "swf"
     )
+}
+
+// ---------------------------------------------------------------------------
+// GIF search (Klipy proxy)
+// ---------------------------------------------------------------------------
+
+pub(crate) async fn gif_search(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(query): Query<GifSearchQuery>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    if get_user_from_token(&state, &token).is_none() {
+        return error_response(StatusCode::UNAUTHORIZED, "Invalid token");
+    }
+
+    if state.klipy_api_key.is_empty() {
+        return error_response(StatusCode::SERVICE_UNAVAILABLE, "GIF search not configured");
+    }
+
+    let page = query.page.unwrap_or(1);
+    let per_page = query.per_page.unwrap_or(24).min(50);
+    let q = query.q.unwrap_or_default();
+
+    let url = if q.trim().is_empty() {
+        format!(
+            "https://api.klipy.com/api/v1/{}/gifs/trending?page={}&per_page={}",
+            state.klipy_api_key, page, per_page
+        )
+    } else {
+        format!(
+            "https://api.klipy.com/api/v1/{}/gifs/search?q={}&page={}&per_page={}",
+            state.klipy_api_key,
+            urlencoding::encode(q.trim()),
+            page,
+            per_page
+        )
+    };
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "HTTP client error"),
+    };
+
+    match client.get(&url).send().await {
+        Ok(resp) => match resp.json::<serde_json::Value>().await {
+            Ok(json) => (StatusCode::OK, Json(json)),
+            Err(_) => error_response(StatusCode::BAD_GATEWAY, "Invalid response from GIF API"),
+        },
+        Err(_) => error_response(StatusCode::BAD_GATEWAY, "Failed to reach GIF API"),
+    }
 }
 
 pub(crate) async fn serve_upload(

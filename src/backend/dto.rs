@@ -204,3 +204,10 @@ pub(crate) struct SetGroupRoomsRequest {
 pub(crate) struct SetGroupCollapsedRequest {
     pub(crate) collapsed: bool,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct GifSearchQuery {
+    pub(crate) q: Option<String>,
+    pub(crate) page: Option<u32>,
+    pub(crate) per_page: Option<u32>,
+}

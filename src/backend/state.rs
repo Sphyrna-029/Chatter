@@ -43,6 +43,7 @@ pub struct AppState {
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
+    pub(crate) klipy_api_key: String,
 }
 
 #[derive(Clone)]

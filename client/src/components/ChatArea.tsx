@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
+import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -31,6 +32,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
@@ -1185,6 +1187,43 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 className={`w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] max-h-40 overflow-y-auto break-words ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
                 style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: "20px" }}
               />
+
+              {/* GIF picker */}
+              <Popover open={gifOpen} onOpenChange={setGifOpen}>
+                <PopoverTrigger asChild>
+                  <button className="absolute right-9 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground hover:text-foreground hover:scale-110 transition-all cursor-pointer">
+                    GIF
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent
+                  side="top"
+                  align="end"
+                  className="w-auto p-0"
+                >
+                  <GifPicker
+                    onSelect={(gifUrl) => {
+                      setGifOpen(false);
+                      const el = inputRef.current;
+                      if (el) {
+                        const current = el.textContent || "";
+                        const newVal = current ? current + " " + gifUrl : gifUrl;
+                        el.textContent = newVal;
+                        setInput(newVal);
+                        // Place cursor at end
+                        const range = document.createRange();
+                        const sel = window.getSelection();
+                        range.selectNodeContents(el);
+                        range.collapse(false);
+                        sel?.removeAllRanges();
+                        sel?.addRange(range);
+                        el.focus();
+                      } else {
+                        setInput((prev) => (prev ? prev + " " + gifUrl : gifUrl));
+                      }
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
 
               {/* Emoji picker */}
               <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>

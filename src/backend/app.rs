@@ -15,6 +15,7 @@ pub async fn build_state() -> Arc<AppState> {
         std::env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
     let jwt_secret =
         std::env::var("JWT_SECRET").unwrap_or_else(|_| "change-me-in-production".to_string());
+    let klipy_api_key = std::env::var("KLIPY_API_KEY").unwrap_or_default();
 
     let client = Client::with_uri_str(&mongodb_uri)
         .await
@@ -48,6 +49,7 @@ pub async fn build_state() -> Arc<AppState> {
         voice_subscribers: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
         totp_attempts: RwLock::new(HashMap::new()),
+        klipy_api_key,
     })
 }
 

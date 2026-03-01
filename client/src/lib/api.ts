@@ -584,6 +584,16 @@ export interface LinkPreview {
   site_name?: string;
 }
 
+// ─── GIF Search ──────────────────────────────────────────────────────────
+
+export async function apiSearchGifs(query: string, page: number = 1, perPage: number = 24) {
+  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+  if (query.trim()) params.set("q", query.trim());
+  const res = await authenticatedFetch(`/api/gifs?${params}`);
+  if (!res.ok) throw new Error("Failed to search GIFs");
+  return res.json();
+}
+
 export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
   const res = await authenticatedFetch(`/api/link-preview?url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error("Failed to fetch link preview");
