@@ -73,6 +73,7 @@ pub(crate) struct SyncQuery {
 pub(crate) struct MessagesQuery {
     pub(crate) limit: Option<usize>,
     pub(crate) before: Option<usize>,
+    pub(crate) around_ts: Option<i64>,
 }
 
 #[derive(Deserialize)]

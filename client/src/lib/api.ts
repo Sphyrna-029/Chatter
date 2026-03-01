@@ -342,9 +342,10 @@ export async function apiGetAllRooms() {
 
 // ─── Messages ───────────────────────────────────────────────────────────────
 
-export async function apiGetMessages(roomId: string, limit = 50, before?: number) {
+export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
   if (before !== undefined) url += `&before=${before}`;
+  if (aroundTs !== undefined) url += `&around_ts=${aroundTs}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json() as Promise<{

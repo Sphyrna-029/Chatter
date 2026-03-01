@@ -437,6 +437,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const loadMessagesAround = useCallback(async (roomId: string, ts: number) => {
+    const msgData = await apiGetMessages(roomId, 50, undefined, ts);
+    const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
+    dispatch({
+      type: "SET_MESSAGES",
+      payload: {
+        messages,
+        start: msgData.start,
+        hasMore: msgData.has_more,
+      },
+    });
+    for (const msg of messages) {
+      if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+        dispatch({
+          type: "SET_REACTIONS",
+          payload: { eventId: msg.event_id, reactions: msg.reactions },
+        });
+      }
+    }
+  }, []);
+
   const sendMessage = useCallback(
     async (body: string, inReplyTo?: string) => {
       if (!stateRef.current.currentRoomId) return;
@@ -734,6 +755,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadRooms,
         selectRoom,
         loadOlderMessages,
+        loadMessagesAround,
         sendMessage,
         deleteMessage,
         editMessage,

@@ -176,9 +176,21 @@ pub(crate) async fn get_room_messages(
         .await
         .unwrap_or(0) as usize;
 
-    let end = query.before.unwrap_or(total).min(total);
-    let start = end.saturating_sub(limit as usize);
-    let has_more = start > 0;
+    let (start, end, has_more) = if let Some(around_ts) = query.around_ts {
+        // Count messages with timestamp <= around_ts to find the position
+        let pos = msg_coll
+            .count_documents(doc! { "room_id": &room_id, "origin_server_ts": { "$lte": around_ts } })
+            .await
+            .unwrap_or(0) as usize;
+        let half = (limit as usize) / 2;
+        let s = pos.saturating_sub(half);
+        let e = (s + limit as usize).min(total);
+        (s, e, s > 0)
+    } else {
+        let e = query.before.unwrap_or(total).min(total);
+        let s = e.saturating_sub(limit as usize);
+        (s, e, s > 0)
+    };
 
     // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
     let fetch_count = (end - start) as i64;

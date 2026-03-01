@@ -173,6 +173,7 @@ export interface AppContextValue {
   leaveRoom: (roomId: string) => Promise<void>;
   loadVoiceMembers: () => Promise<void>;
   loadOlderMessages: () => Promise<void>;
+  loadMessagesAround: (roomId: string, ts: number) => Promise<void>;
   sendTyping: () => void;
   getAllRooms: () => Promise<import("../api").RoomSummary[]>;
   openDM: (targetUserId: string) => Promise<void>;

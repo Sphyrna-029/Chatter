@@ -29,7 +29,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround } = useAppContext();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -178,6 +178,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [scrollToEventId, setScrollToEventId] = useState<string | null>(null);
 
   // Pending file attachments — staged until the user presses Send/Enter
   type PendingFile = { file: File; previewUrl: string | null };
@@ -732,6 +733,22 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setFileTypeFilter("all");
   };
 
+  // Scroll to a message after search closes and messages are rendered
+  useEffect(() => {
+    if (!scrollToEventId || searchOpen) return;
+    // Use requestAnimationFrame to wait for DOM to render
+    const raf = requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("bg-accent");
+        setTimeout(() => el.classList.remove("bg-accent"), 1500);
+      }
+      setScrollToEventId(null);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [scrollToEventId, searchOpen, state.messages]);
+
   const mentionMatches = mentionOpen
     ? state.roomMembers
         .filter((m) =>
@@ -944,7 +961,20 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     prev.sender === msg.sender &&
                     msg.origin_server_ts - prev.origin_server_ts < 60000;
                   return (
-                    <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+                    <div
+                      key={msg.event_id}
+                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                      onClick={async () => {
+                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
+                        if (!alreadyLoaded && state.currentRoomId) {
+                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                        }
+                        closeSearch();
+                        setScrollToEventId(msg.event_id);
+                      }}
+                    >
+                      <MessageItem message={msg} grouped={grouped} />
+                    </div>
                   );
                 })}
               </>
