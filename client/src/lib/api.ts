@@ -1305,9 +1305,11 @@ export async function apiGetTankWarState(roomId: string) {
   return res.json();
 }
 
-export async function apiNewTankWarGame(roomId: string) {
+export async function apiNewTankWarGame(roomId: string, settings?: { game_mode?: string; max_ticks?: number }) {
   const res = await authenticatedFetch(`/api/tankwar/${roomId}/new`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings || {}),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);

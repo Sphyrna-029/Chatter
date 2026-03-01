@@ -80,6 +80,7 @@ pub(crate) async fn get_tankwar_state(
                     "color": p.color,
                     "score": p.score,
                     "has_script": !p.script.is_empty(),
+                    "hill_ticks": p.hill_ticks,
                 })
             })
             .collect();
@@ -95,6 +96,7 @@ pub(crate) async fn get_tankwar_state(
             "bullets": game.bullets,
             "flag_position": game.flag_position,
             "winner": game.winner,
+            "game_mode": game.game_mode,
         })));
     }
 
@@ -105,8 +107,25 @@ pub(crate) async fn new_tankwar_game(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
     headers: HeaderMap,
+    body: Option<Json<Value>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let user_id = validate_tankwar_member(&state, &headers, &room_id).await?;
+
+    let body_val = body.map(|b| b.0);
+    let game_mode = body_val
+        .as_ref()
+        .and_then(|b| b.get("game_mode"))
+        .and_then(|v| v.as_str())
+        .filter(|m| matches!(*m, "ctf" | "battle_royale" | "koth"))
+        .unwrap_or("ctf")
+        .to_string();
+    let max_ticks = body_val
+        .as_ref()
+        .and_then(|b| b.get("max_ticks"))
+        .and_then(|v| v.as_u64())
+        .map(|v| (v as usize).clamp(100, 10000))
+        .unwrap_or(1000);
+    let starting_health: u8 = if game_mode == "battle_royale" { 1 } else { 3 };
 
     let coll = state.db.collection::<TankGameRecord>("tank_games");
 
@@ -138,10 +157,11 @@ pub(crate) async fn new_tankwar_game(
         x: 1,
         y: 1,
         direction: "east".to_string(),
-        health: 3,
+        health: starting_health,
         alive: true,
         color: colors[0].to_string(),
         score: 0,
+        hill_ticks: 0,
     };
 
     let game = TankGameRecord {
@@ -149,7 +169,7 @@ pub(crate) async fn new_tankwar_game(
         room_id: room_id.clone(),
         status: "lobby".to_string(),
         grid_size: 64,
-        max_ticks: 1000,
+        max_ticks,
         current_tick: 0,
         maze: Vec::new(),
         players: vec![player],
@@ -157,6 +177,7 @@ pub(crate) async fn new_tankwar_game(
         flag_position: [32, 32],
         winner: None,
         reset_votes: Vec::new(),
+        game_mode,
         created_at: now_millis(),
     };
 

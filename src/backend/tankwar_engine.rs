@@ -9,8 +9,8 @@ use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
 
 const GRID_SIZE: usize = 64;
-const MAX_TICKS: usize = 1000;
 const TICK_DELAY_MS: u64 = 166; // ~6 ticks/sec
+const KOTH_WIN_TICKS: u32 = 20;
 
 // ─── Maze Generation (randomized DFS) ────────────────────────────────────────
 
@@ -84,6 +84,7 @@ fn run_player_lua(
     tick: usize,
     all_players: &[TankPlayer],
     storage: &HashMap<String, String>,
+    game_mode: &str,
 ) -> (PlayerAction, HashMap<String, String>) {
     let lua = Lua::new();
 
@@ -232,6 +233,15 @@ fn run_player_lua(
         }
     }
 
+    // get_game_mode()
+    {
+        let mode = game_mode.to_string();
+        let mode_fn = lua.create_function(move |_, ()| Ok(mode.clone()));
+        if let Ok(f) = mode_fn {
+            let _ = globals.set("get_game_mode", f);
+        }
+    }
+
     // store(key, val)
     {
         let ns = new_storage.clone();
@@ -295,13 +305,18 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         (GRID_SIZE - 2, GRID_SIZE - 2, "west"),
     ];
 
+    let is_br = game.game_mode == "battle_royale";
+    let is_koth = game.game_mode == "koth";
+    let starting_health: u8 = if is_br { 1 } else { 3 };
+
     for (i, player) in game.players.iter_mut().enumerate() {
         let (x, y, dir) = spawn_positions[i % 4];
         player.x = x;
         player.y = y;
         player.direction = dir.to_string();
-        player.health = 3;
+        player.health = starting_health;
         player.alive = true;
+        player.hill_ticks = 0;
     }
 
     game.maze = maze;
@@ -322,6 +337,7 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         "grid_size": GRID_SIZE,
         "maze": &game.maze,
         "flag_position": &game.flag_position,
+        "game_mode": &game.game_mode,
         "players": game.players.iter().map(|p| json!({
             "user_id": p.user_id,
             "x": p.x,
@@ -341,8 +357,10 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         player_storage.insert(p.user_id.clone(), HashMap::new());
     }
 
+    let max_ticks = game.max_ticks;
+
     // Game loop
-    for tick in 0..MAX_TICKS {
+    for tick in 0..max_ticks {
         game.current_tick = tick;
 
         // Run each alive player's script
@@ -364,7 +382,8 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
                 let maze = game.maze.clone();
                 let flag_pos = game.flag_position;
                 let all_players = players_snapshot.clone();
-                move || run_player_lua(&player, &maze, flag_pos, tick, &all_players, &storage)
+                let mode = game.game_mode.clone();
+                move || run_player_lua(&player, &maze, flag_pos, tick, &all_players, &storage, &mode)
             })
             .await
             .unwrap_or_else(|_| {
@@ -491,17 +510,43 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         }
         game.bullets = remaining_bullets;
 
-        // Check flag capture
+        // ─── Mode-based win conditions ─────────────────────────────────────
         let mut winner: Option<String> = None;
-        for player in &game.players {
-            if player.alive && player.x == game.flag_position[0] && player.y == game.flag_position[1]
-            {
-                winner = Some(player.user_id.clone());
-                break;
+
+        if is_koth {
+            // KOTH: track hill occupancy (3x3 area around flag_position)
+            let hx = game.flag_position[0];
+            let hy = game.flag_position[1];
+            for player in game.players.iter_mut() {
+                if !player.alive {
+                    continue;
+                }
+                let dx = (player.x as i32 - hx as i32).unsigned_abs() as usize;
+                let dy = (player.y as i32 - hy as i32).unsigned_abs() as usize;
+                if dx <= 1 && dy <= 1 {
+                    player.hill_ticks += 1;
+                    if player.hill_ticks >= KOTH_WIN_TICKS {
+                        winner = Some(player.user_id.clone());
+                    }
+                } else {
+                    player.hill_ticks = 0;
+                }
+            }
+        } else if !is_br {
+            // CTF: check flag capture
+            for player in &game.players {
+                if player.alive
+                    && player.x == game.flag_position[0]
+                    && player.y == game.flag_position[1]
+                {
+                    winner = Some(player.user_id.clone());
+                    break;
+                }
             }
         }
+        // Battle Royale: no flag, no hill — only last-alive wins
 
-        // Check if only one player alive
+        // All modes: last player alive wins
         if winner.is_none() {
             let alive_players: Vec<&TankPlayer> =
                 game.players.iter().filter(|p| p.alive).collect();
@@ -524,6 +569,7 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
                 "health": p.health,
                 "alive": p.alive,
                 "score": p.score,
+                "hill_ticks": p.hill_ticks,
             })).collect::<Vec<_>>(),
             "bullets": game.bullets.iter().map(|b| json!({
                 "x": b.x,
@@ -562,13 +608,15 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         tokio::time::sleep(std::time::Duration::from_millis(TICK_DELAY_MS)).await;
     }
 
-    // Game ended by tick limit — highest score wins
+    // Game ended by tick limit
     game.status = "finished".to_string();
-    let best = game
-        .players
-        .iter()
-        .filter(|p| p.alive)
-        .max_by_key(|p| p.score);
+    let best = if is_koth {
+        // KOTH: highest hill_ticks wins
+        game.players.iter().filter(|p| p.alive).max_by_key(|p| p.hill_ticks)
+    } else {
+        // CTF / BR: highest score wins among alive
+        game.players.iter().filter(|p| p.alive).max_by_key(|p| p.score)
+    };
     game.winner = best.map(|p| p.user_id.clone());
 
     let game_over_event = json!({

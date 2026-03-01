@@ -14,9 +14,10 @@ const DEFAULT_SCRIPT = `-- ╔════════════════�
 -- ║           TANK WARS — LUA SCRIPTING API          ║
 -- ╚══════════════════════════════════════════════════╝
 --
--- Your script runs once per tick (~6 ticks/sec, up to 1000 ticks).
--- First tank to reach the flag wins. Killing all enemies also wins.
--- Each tank has 3 HP. One move and one shot allowed per tick.
+-- Your script runs once per tick (~6 ticks/sec).
+-- Game modes: CTF (capture the flag), Battle Royale (1HP, last
+-- alive wins), King of the Hill (hold hill zone 20 ticks to win).
+-- One move and one shot allowed per tick.
 --
 -- ┌─────────────────────────────────────────────────┐
 -- │ MOVEMENT & COMBAT                               │
@@ -40,7 +41,9 @@ const DEFAULT_SCRIPT = `-- ╔════════════════�
 -- │ get_position()     Returns {x, y} of your tank. │
 -- │ get_health()       Returns HP remaining (1-3).  │
 -- │ get_flag_position()Returns {x, y} of the flag.  │
--- │ get_tick()         Returns current tick (0-999). │
+-- │ get_tick()         Returns current tick number.   │
+-- │ get_game_mode()    Returns "ctf",                │
+-- │                    "battle_royale", or "koth".   │
 -- ├─────────────────────────────────────────────────┤
 -- │ MEMORY (persists across ticks)                  │
 -- ├─────────────────────────────────────────────────┤
@@ -92,6 +95,7 @@ interface TankPlayer {
   color: string;
   score: number;
   has_script?: boolean;
+  hill_ticks?: number;
 }
 
 interface BulletData {
@@ -115,6 +119,7 @@ interface GameState {
   resetVotes: number;
   resetTotal: number;
   myResetVote: boolean;
+  game_mode: string;
 }
 
 type EditorPosition = "bottom" | "top" | "left" | "right";
@@ -145,8 +150,12 @@ export function TankWarArea() {
     resetVotes: 0,
     resetTotal: 0,
     myResetVote: false,
+    game_mode: "ctf",
   });
   const [scriptSubmitted, setScriptSubmitted] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsMode, setSettingsMode] = useState("ctf");
+  const [settingsTicks, setSettingsTicks] = useState(1000);
 
   const sendWs = useCallback(
     (msg: Record<string, unknown>) => {
@@ -222,6 +231,7 @@ export function TankWarArea() {
             bullets: data.bullets || [],
             flag_position: data.flag_position || [32, 32],
             winner: data.winner || null,
+            game_mode: data.game_mode || "ctf",
           }));
         }
       })
@@ -252,6 +262,7 @@ export function TankWarArea() {
       setGameState((prev) => ({
         ...prev, status: "running", game_id: d.game_id, maze: d.maze,
         flag_position: d.flag_position, players: d.players, current_tick: 0, bullets: [],
+        game_mode: d.game_mode || prev.game_mode,
       }));
     };
     const onTick = (e: Event) => {
@@ -334,7 +345,27 @@ export function TankWarArea() {
       ctx.beginPath(); ctx.moveTo(0, i * CS); ctx.lineTo(CANVAS_SIZE, i * CS); ctx.stroke();
     }
 
-    if (flag_position?.length === 2) {
+    if (gameState.game_mode === "koth" && flag_position?.length === 2) {
+      // Draw 3x3 hill zone around flag position
+      const hx = flag_position[0], hy = flag_position[1];
+      ctx.fillStyle = "rgba(251, 191, 36, 0.15)";
+      ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+      ctx.lineWidth = 1;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const cx = (hx + dx) * CS, cy = (hy + dy) * CS;
+          ctx.fillRect(cx, cy, CS, CS);
+        }
+      }
+      ctx.strokeRect((hx - 1) * CS, (hy - 1) * CS, CS * 3, CS * 3);
+      // Crown icon at center
+      ctx.fillStyle = "#fbbf24";
+      ctx.font = `${CS}px serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("♛", hx * CS + CS / 2, hy * CS + CS / 2);
+    } else if (gameState.game_mode !== "battle_royale" && flag_position?.length === 2) {
+      // CTF: draw flag
       const fx = flag_position[0] * CS, fy = flag_position[1] * CS;
       ctx.fillStyle = "#fbbf24";
       ctx.fillRect(fx + 1, fy + 1, 2, CS - 2);
@@ -379,18 +410,25 @@ export function TankWarArea() {
 
   const handleNewGame = async () => {
     if (!roomId) return;
+    if (!showSettings) {
+      setShowSettings(true);
+      return;
+    }
     try {
-      const { game_id } = await apiNewTankWarGame(roomId);
+      const { game_id } = await apiNewTankWarGame(roomId, { game_mode: settingsMode, max_ticks: settingsTicks });
+      const hp = settingsMode === "battle_royale" ? 1 : 3;
       setGameState({
-        game_id, status: "lobby", grid_size: GRID_SIZE, max_ticks: 1000, current_tick: 0,
+        game_id, status: "lobby", grid_size: GRID_SIZE, max_ticks: settingsTicks, current_tick: 0,
         maze: [], players: [{
           user_id: state.userId || "", ready: false, x: 1, y: 1,
-          direction: "east", health: 3, alive: true, color: "#ef4444", score: 0, has_script: false,
+          direction: "east", health: hp, alive: true, color: "#ef4444", score: 0, has_script: false, hill_ticks: 0,
         }],
         bullets: [], flag_position: [32, 32], winner: null, resetVotes: 0, resetTotal: 0, myResetVote: false,
+        game_mode: settingsMode,
       });
       setScriptSubmitted(false);
       setEditorSize(220);
+      setShowSettings(false);
     } catch (err: any) {
       console.error("Failed to create game:", err.message);
     }
@@ -515,6 +553,11 @@ export function TankWarArea() {
       <div className="flex items-center justify-between border-b border-border px-4 py-2 shrink-0 z-10 bg-background">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold">Tank Wars</h2>
+          {gameState.game_mode !== "ctf" && gameState.status !== "none" && (
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-accent text-accent-foreground">
+              {gameState.game_mode === "battle_royale" ? "Battle Royale" : "King of the Hill"}
+            </span>
+          )}
           {isRunning && (
             <span className="text-xs text-muted-foreground">
               Tick: {gameState.current_tick}/{gameState.max_ticks}
@@ -526,8 +569,11 @@ export function TankWarArea() {
                 <div key={p.user_id} className="flex items-center gap-1.5 text-xs" style={{ opacity: p.alive ? 1 : 0.4 }}>
                   <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: p.color }} />
                   <span className="text-foreground font-medium">{p.user_id.replace("@", "").split(":")[0]}</span>
-                  <span className="text-muted-foreground">{"♥".repeat(p.health)}{"♡".repeat(3 - p.health)}</span>
+                  <span className="text-muted-foreground">{"♥".repeat(p.health)}{"♡".repeat(Math.max(0, (gameState.game_mode === "battle_royale" ? 1 : 3) - p.health))}</span>
                   {(isRunning || isFinished) && <span className="text-muted-foreground">{p.score}pts</span>}
+                  {gameState.game_mode === "koth" && (isRunning || isFinished) && (
+                    <span className="text-yellow-400 font-mono">♛{p.hill_ticks || 0}/20</span>
+                  )}
                 </div>
               ))}
             </div>
@@ -558,9 +604,31 @@ export function TankWarArea() {
               {gameState.myResetVote ? `Voted Reset (${gameState.resetVotes}/${gameState.resetTotal})` : gameState.resetVotes > 0 ? `Vote Reset (${gameState.resetVotes}/${gameState.resetTotal})` : "Vote Reset"}
             </button>
           )}
+          {(gameState.status === "none" || isFinished) && showSettings && (
+            <div className="flex items-center gap-2 mr-1">
+              <select
+                value={settingsMode}
+                onChange={(e) => setSettingsMode(e.target.value)}
+                className="text-xs bg-muted border border-border rounded px-1.5 py-1 text-foreground"
+              >
+                <option value="ctf">Capture the Flag</option>
+                <option value="battle_royale">Battle Royale</option>
+                <option value="koth">King of the Hill</option>
+              </select>
+              <input
+                type="number"
+                value={settingsTicks}
+                onChange={(e) => setSettingsTicks(Math.max(100, Math.min(10000, Number(e.target.value) || 1000)))}
+                className="text-xs bg-muted border border-border rounded px-1.5 py-1 w-16 text-foreground"
+                title="Max ticks"
+              />
+              <span className="text-xs text-muted-foreground">ticks</span>
+              <button onClick={() => setShowSettings(false)} className="text-xs text-muted-foreground hover:text-foreground cursor-pointer">✕</button>
+            </div>
+          )}
           {(gameState.status === "none" || isFinished) && (
             <button onClick={handleNewGame} className="px-3 py-1 text-xs font-medium rounded-md bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer">
-              {isFinished ? "Play Again" : "New Game"}
+              {showSettings ? "Start" : isFinished ? "Play Again" : "New Game"}
             </button>
           )}
         </div>

@@ -163,6 +163,10 @@ fn default_member_role() -> String {
     "member".to_string()
 }
 
+fn default_game_mode() -> String {
+    "ctf".to_string()
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct BannedUserRecord {
     pub(crate) room_id: String,
@@ -300,6 +304,8 @@ pub(crate) struct TankGameRecord {
     pub(crate) winner: Option<String>,
     #[serde(default)]
     pub(crate) reset_votes: Vec<String>,
+    #[serde(default = "default_game_mode")]
+    pub(crate) game_mode: String, // "ctf" | "battle_royale" | "koth"
     pub(crate) created_at: i64,
 }
 
@@ -315,6 +321,8 @@ pub(crate) struct TankPlayer {
     pub(crate) alive: bool,
     pub(crate) color: String,
     pub(crate) score: u32,
+    #[serde(default)]
+    pub(crate) hill_ticks: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -724,16 +724,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     if !game.players.iter().any(|p| p.user_id == user_id) {
                         if game.players.len() < 4 {
                             let color = colors[game.players.len() % 4].to_string();
+                            let hp = if game.game_mode == "battle_royale" { 1 } else { 3 };
                             game.players.push(TankPlayer {
                                 user_id: user_id.to_string(),
                                 script: script.clone(),
                                 ready: false,
                                 x: 1, y: 1,
                                 direction: "east".to_string(),
-                                health: 3,
+                                health: hp,
                                 alive: true,
                                 color,
                                 score: 0,
+                                hill_ticks: 0,
                             });
                         }
                     } else {
