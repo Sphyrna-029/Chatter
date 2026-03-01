@@ -16,6 +16,8 @@ interface GifItem {
   };
 }
 
+const PER_PAGE = 6;
+
 export function GifPicker({ onSelect }: GifPickerProps) {
   const [query, setQuery] = useState("");
   const [gifs, setGifs] = useState<GifItem[]>([]);
@@ -28,7 +30,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
   const fetchGifs = useCallback(async (q: string, p: number, append: boolean) => {
     setLoading(true);
     try {
-      const resp = await apiSearchGifs(q, p);
+      const resp = await apiSearchGifs(q, p, PER_PAGE);
       const items: GifItem[] = resp?.data?.data || [];
       const hasNext: boolean = resp?.data?.has_next ?? false;
       if (append) {
@@ -73,7 +75,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
   const handleScroll = () => {
     const el = containerRef.current;
     if (!el) return;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 100) {
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
       loadMore();
     }
   };
@@ -101,35 +103,38 @@ export function GifPicker({ onSelect }: GifPickerProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="grid grid-cols-3 gap-1 p-2 overflow-y-auto max-h-80"
+        className="overflow-y-auto"
+        style={{ maxHeight: "240px" }}
       >
-        {gifs.map((gif, i) => {
-          const thumb = getThumbUrl(gif);
-          const full = getFullUrl(gif);
-          if (!thumb || !full) return null;
-          return (
-            <button
-              key={i}
-              className="aspect-square overflow-hidden rounded-md border border-border hover:border-primary transition-colors cursor-pointer bg-muted"
-              onClick={() => onSelect(full)}
-              title={gif.title || "GIF"}
-            >
-              <img
-                src={thumb}
-                alt={gif.title || "GIF"}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            </button>
-          );
-        })}
+        <div className="grid grid-cols-3 gap-1 p-2">
+          {gifs.map((gif, i) => {
+            const thumb = getThumbUrl(gif);
+            const full = getFullUrl(gif);
+            if (!thumb || !full) return null;
+            return (
+              <button
+                key={i}
+                className="h-24 w-full overflow-hidden rounded-md border border-border hover:border-primary transition-colors cursor-pointer bg-muted"
+                onClick={() => onSelect(full)}
+                title={gif.title || "GIF"}
+              >
+                <img
+                  src={thumb}
+                  alt={gif.title || "GIF"}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </button>
+            );
+          })}
+        </div>
         {loading && (
-          <div className="col-span-3 flex justify-center py-4">
+          <div className="flex justify-center py-3">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         )}
         {!loading && gifs.length === 0 && (
-          <div className="col-span-3 text-center text-xs text-muted-foreground py-8">
+          <div className="text-center text-xs text-muted-foreground py-8">
             {query ? "No GIFs found" : "No trending GIFs available"}
           </div>
         )}
