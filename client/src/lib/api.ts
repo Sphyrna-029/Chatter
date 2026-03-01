@@ -72,7 +72,7 @@ function authHeaders(): Record<string, string> {
 
 // ─── Token refresh ──────────────────────────────────────────────────────────
 
-async function apiRefreshToken(): Promise<boolean> {
+export async function apiRefreshToken(): Promise<boolean> {
   if (!_refreshToken) return false;
   try {
     const res = await fetch("/_matrix/client/r0/refresh", {
@@ -540,8 +540,13 @@ export async function apiUploadFile(
           reject(new Error("Invalid response from server"));
         }
       } else if (xhr.status === 401 && _refreshToken) {
-        // Try refresh and retry
-        apiRefreshToken().then((refreshed) => {
+        // Deduplicate concurrent refresh attempts (same guard as authenticatedFetch)
+        if (!_refreshPromise) {
+          _refreshPromise = apiRefreshToken().finally(() => {
+            _refreshPromise = null;
+          });
+        }
+        _refreshPromise.then((refreshed) => {
           if (!refreshed) {
             reject(new Error("Upload failed - authentication expired"));
             return;
