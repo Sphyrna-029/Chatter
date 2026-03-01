@@ -110,15 +110,23 @@ pub(crate) async fn new_tankwar_game(
 
     let coll = state.db.collection::<TankGameRecord>("tank_games");
 
-    // Check no active game
-    if let Ok(Some(_)) = coll
-        .find_one(doc! { "room_id": &room_id, "status": { "$in": ["lobby", "running"] } })
-        .await
+    // Force-finish any stale non-finished games (handles race after game_over/reset)
+    let _ = coll
+        .update_many(
+            doc! { "room_id": &room_id, "status": { "$ne": "finished" } },
+            doc! { "$set": { "status": "finished" } },
+        )
+        .await;
+
+    // Abort any active game task handles for this room's games
     {
-        return Err(error_response(
-            StatusCode::CONFLICT,
-            "A game is already active in this room",
-        ));
+        let mut tg = state.tank_games.write().await;
+        let stale_keys: Vec<String> = tg.keys().cloned().collect();
+        for key in stale_keys {
+            if let Some(handle) = tg.remove(&key) {
+                handle.abort();
+            }
+        }
     }
 
     let colors = ["#ef4444", "#3b82f6", "#22c55e", "#eab308"];

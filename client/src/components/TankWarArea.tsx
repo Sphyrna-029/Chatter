@@ -10,11 +10,52 @@ const CANVAS_SIZE = CELL_SIZE * GRID_SIZE;
 
 const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
 
-const DEFAULT_SCRIPT = `-- Your tank AI runs every tick!
--- API: move(dir), shoot(dir), scan(dir, range)
---       get_position(), get_health(), get_flag_position()
---       get_tick(), store(key, val), recall(key)
--- Directions: "north", "south", "east", "west"
+const DEFAULT_SCRIPT = `-- ╔══════════════════════════════════════════════════╗
+-- ║           TANK WARS — LUA SCRIPTING API          ║
+-- ╚══════════════════════════════════════════════════╝
+--
+-- Your script runs once per tick (~6 ticks/sec, up to 1000 ticks).
+-- First tank to reach the flag wins. Killing all enemies also wins.
+-- Each tank has 3 HP. One move and one shot allowed per tick.
+--
+-- ┌─────────────────────────────────────────────────┐
+-- │ MOVEMENT & COMBAT                               │
+-- ├─────────────────────────────────────────────────┤
+-- │ move(dir)          Move 1 cell in direction.    │
+-- │                    Blocked by walls and tanks.   │
+-- │ shoot(dir)         Fire a bullet in direction.  │
+-- │                    Bullets move 1 cell/tick.     │
+-- │                    Each hit does 1 damage.       │
+-- ├─────────────────────────────────────────────────┤
+-- │ SENSING                                         │
+-- ├─────────────────────────────────────────────────┤
+-- │ scan(dir, range)   Look up to \`range\` cells in │
+-- │                    a direction. Returns the     │
+-- │                    first thing found:            │
+-- │                    "wall", "enemy", "flag",     │
+-- │                    or "empty" if nothing.        │
+-- ├─────────────────────────────────────────────────┤
+-- │ STATE                                           │
+-- ├─────────────────────────────────────────────────┤
+-- │ get_position()     Returns {x, y} of your tank. │
+-- │ get_health()       Returns HP remaining (1-3).  │
+-- │ get_flag_position()Returns {x, y} of the flag.  │
+-- │ get_tick()         Returns current tick (0-999). │
+-- ├─────────────────────────────────────────────────┤
+-- │ MEMORY (persists across ticks)                  │
+-- ├─────────────────────────────────────────────────┤
+-- │ store(key, val)    Save a string value.         │
+-- │                    Up to 100 keys allowed.      │
+-- │ recall(key)        Get stored value or nil.     │
+-- ├─────────────────────────────────────────────────┤
+-- │ DIRECTIONS                                      │
+-- ├─────────────────────────────────────────────────┤
+-- │ "north" = up (y-1)    "south" = down (y+1)     │
+-- │ "west"  = left (x-1)  "east"  = right (x+1)    │
+-- └─────────────────────────────────────────────────┘
+--
+-- Grid is 64x64 with walls on the borders.
+-- Tanks spawn in corners. Flag is at the center.
 
 local pos = get_position()
 local flag = get_flag_position()
@@ -349,6 +390,7 @@ export function TankWarArea() {
         bullets: [], flag_position: [32, 32], winner: null, resetVotes: 0, resetTotal: 0, myResetVote: false,
       });
       setScriptSubmitted(false);
+      setEditorSize(220);
     } catch (err: any) {
       console.error("Failed to create game:", err.message);
     }
