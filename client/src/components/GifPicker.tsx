@@ -28,14 +28,15 @@ export function GifPicker({ onSelect }: GifPickerProps) {
   const fetchGifs = useCallback(async (q: string, p: number, append: boolean) => {
     setLoading(true);
     try {
-      const data = await apiSearchGifs(q, p);
-      const items: GifItem[] = data?.items || data?.results || [];
+      const resp = await apiSearchGifs(q, p);
+      const items: GifItem[] = resp?.data?.data || [];
+      const hasNext: boolean = resp?.data?.has_next ?? false;
       if (append) {
         setGifs((prev) => [...prev, ...items]);
       } else {
         setGifs(items);
       }
-      setHasMore(items.length >= 24);
+      setHasMore(hasNext);
     } catch {
       if (!append) setGifs([]);
       setHasMore(false);
