@@ -104,7 +104,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
         ref={containerRef}
         onScroll={handleScroll}
         className="overflow-y-auto"
-        style={{ maxHeight: "240px" }}
+        style={{ maxHeight: "420px" }}
       >
         <div className="grid grid-cols-3 gap-1 p-2">
           {gifs.map((gif, i) => {
