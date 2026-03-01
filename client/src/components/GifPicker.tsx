@@ -22,7 +22,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const fetchGifs = useCallback(async (q: string, p: number, append: boolean) => {
