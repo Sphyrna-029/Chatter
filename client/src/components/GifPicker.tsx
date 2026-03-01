@@ -16,7 +16,7 @@ interface GifItem {
   };
 }
 
-const PER_PAGE = 6;
+const PER_PAGE = 12;
 
 export function GifPicker({ onSelect }: GifPickerProps) {
   const [query, setQuery] = useState("");
