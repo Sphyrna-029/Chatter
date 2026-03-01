@@ -1293,3 +1293,25 @@ export async function apiUnblockUser(userId: string) {
   }
   return res.json();
 }
+
+// ─── Tank Wars ────────────────────────────────────────────────────────────────
+
+export async function apiGetTankWarState(roomId: string) {
+  const res = await authenticatedFetch(`/api/tankwar/${roomId}/state`);
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to get tank war state");
+  }
+  return res.json();
+}
+
+export async function apiNewTankWarGame(roomId: string) {
+  const res = await authenticatedFetch(`/api/tankwar/${roomId}/new`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to create new game");
+  }
+  return res.json() as Promise<{ game_id: string }>;
+}

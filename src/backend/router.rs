@@ -17,6 +17,7 @@ use super::{
             leave_room, list_all_rooms, list_banned_users, set_member_role, set_name_colors,
             unban_member, update_room_settings, update_room_topic,
         },
+        tankwar::{get_tankwar_state, new_tankwar_game},
         static_content::{serve_client, versions},
         sync::sync,
         whiteboard::get_strokes,
@@ -129,6 +130,9 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Webhooks
            .route("/api/rooms/{room_id}/webhooks", post(create_webhook).get(list_webhooks))
            .route("/api/webhooks/{webhook_id}", delete(delete_webhook).post(execute_webhook))
+           // Tank Wars
+           .route("/api/tankwar/{room_id}/state", get(get_tankwar_state))
+           .route("/api/tankwar/{room_id}/new", post(new_tankwar_game))
            // Whiteboard
            .route("/api/whiteboard/{room_id}/strokes", get(get_strokes))
            // Forum

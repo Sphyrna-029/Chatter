@@ -43,6 +43,7 @@ pub struct AppState {
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
+    pub(crate) tank_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) klipy_api_key: String,
 }
 
@@ -279,6 +280,49 @@ pub(crate) struct UserRoomGroupsRecord {
     #[serde(rename = "_id")]
     pub(crate) user_id: String,
     pub(crate) groups: Vec<RoomGroupEntry>,
+}
+
+// ─── Tank Wars types ─────────────────────────────────────────────────────────
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TankGameRecord {
+    #[serde(rename = "_id")]
+    pub(crate) game_id: String,
+    pub(crate) room_id: String,
+    pub(crate) status: String, // "lobby" | "running" | "finished"
+    pub(crate) grid_size: usize,
+    pub(crate) max_ticks: usize,
+    pub(crate) current_tick: usize,
+    pub(crate) maze: Vec<Vec<u8>>, // 0=empty, 1=wall
+    pub(crate) players: Vec<TankPlayer>,
+    pub(crate) bullets: Vec<Bullet>,
+    pub(crate) flag_position: [usize; 2],
+    pub(crate) winner: Option<String>,
+    #[serde(default)]
+    pub(crate) reset_votes: Vec<String>,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TankPlayer {
+    pub(crate) user_id: String,
+    pub(crate) script: String,
+    pub(crate) ready: bool,
+    pub(crate) x: usize,
+    pub(crate) y: usize,
+    pub(crate) direction: String,
+    pub(crate) health: u8,
+    pub(crate) alive: bool,
+    pub(crate) color: String,
+    pub(crate) score: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Bullet {
+    pub(crate) x: usize,
+    pub(crate) y: usize,
+    pub(crate) direction: String,
+    pub(crate) owner: String,
 }
 
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────

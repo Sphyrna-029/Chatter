@@ -13,7 +13,8 @@ use super::{
 };
 use crate::backend::{
     helpers::{broadcast_to_room, generate_id, get_user_from_token, is_moderator_or_owner, now_millis, now_secs, send_to_user},
-    state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
+    state::{AppState, PresenceRecord, TankGameRecord, TankPlayer, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
+    tankwar_engine,
 };
 use axum::{
     extract::ws::{Message, WebSocket},
@@ -707,6 +708,184 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "stroke_id": stroke_id,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "tankwar_submit_script" => {
+            if !room_id.is_empty() {
+                let script = msg.get("script").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let coll = state.db.collection::<TankGameRecord>("tank_games");
+                if let Ok(Some(mut game)) = coll
+                    .find_one(doc! { "room_id": room_id, "status": "lobby" })
+                    .await
+                {
+                    // Add player if not already in game
+                    let colors = ["#ef4444", "#3b82f6", "#22c55e", "#eab308"];
+                    if !game.players.iter().any(|p| p.user_id == user_id) {
+                        if game.players.len() < 4 {
+                            let color = colors[game.players.len() % 4].to_string();
+                            game.players.push(TankPlayer {
+                                user_id: user_id.to_string(),
+                                script: script.clone(),
+                                ready: false,
+                                x: 1, y: 1,
+                                direction: "east".to_string(),
+                                health: 3,
+                                alive: true,
+                                color,
+                                score: 0,
+                            });
+                        }
+                    } else {
+                        // Update existing script
+                        for p in &mut game.players {
+                            if p.user_id == user_id {
+                                p.script = script.clone();
+                            }
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tankwar_script_submitted",
+                        "room_id": room_id,
+                        "user_id": user_id,
+                        "game_id": &game.game_id,
+                    });
+                    send_to_user(&state, user_id, &event).await;
+                    // Broadcast player list update
+                    let players_event = json!({
+                        "type": "tankwar_player_joined",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "ready": p.ready,
+                            "color": p.color,
+                            "has_script": !p.script.is_empty(),
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &players_event).await;
+                }
+            }
+        }
+        "tankwar_ready" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TankGameRecord>("tank_games");
+                if let Ok(Some(mut game)) = coll
+                    .find_one(doc! { "room_id": room_id, "status": "lobby" })
+                    .await
+                {
+                    for p in &mut game.players {
+                        if p.user_id == user_id {
+                            p.ready = true;
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tankwar_player_ready",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "user_id": user_id,
+                        "ready": true,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "ready": p.ready,
+                            "color": p.color,
+                            "has_script": !p.script.is_empty(),
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+
+                    // Check if all players ready (need at least 1)
+                    let all_ready = !game.players.is_empty()
+                        && game.players.iter().all(|p| p.ready && !p.script.is_empty());
+                    if all_ready {
+                        let game_id = game.game_id.clone();
+                        let room_id_owned = room_id.to_string();
+                        let state_clone = state.clone();
+                        let handle = tokio::spawn(async move {
+                            tankwar_engine::run_tank_game(state_clone, room_id_owned, game_id.clone()).await;
+                        });
+                        state.tank_games.write().await.insert(game.game_id.clone(), handle);
+                    }
+                }
+            }
+        }
+        "tankwar_unready" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TankGameRecord>("tank_games");
+                if let Ok(Some(mut game)) = coll
+                    .find_one(doc! { "room_id": room_id, "status": "lobby" })
+                    .await
+                {
+                    for p in &mut game.players {
+                        if p.user_id == user_id {
+                            p.ready = false;
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tankwar_player_ready",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "user_id": user_id,
+                        "ready": false,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "ready": p.ready,
+                            "color": p.color,
+                            "has_script": !p.script.is_empty(),
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "tankwar_vote_reset" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TankGameRecord>("tank_games");
+                if let Ok(Some(mut game)) = coll
+                    .find_one(doc! { "room_id": room_id, "status": { "$in": ["lobby", "running"] } })
+                    .await
+                {
+                    // Add vote if not already voted
+                    if !game.reset_votes.contains(&user_id.to_string()) {
+                        game.reset_votes.push(user_id.to_string());
+                    }
+
+                    let total_players = game.players.len();
+                    let vote_count = game.reset_votes.len();
+                    let all_voted = vote_count >= total_players && total_players > 0;
+
+                    if all_voted {
+                        // Cancel running game task if active
+                        let game_id = game.game_id.clone();
+                        if let Some(handle) = state.tank_games.write().await.remove(&game_id) {
+                            handle.abort();
+                        }
+                        // Mark game as finished (reset)
+                        game.status = "finished".to_string();
+                        game.winner = None;
+                        let _ = coll.replace_one(doc! { "_id": &game_id }, &game).await;
+
+                        let event = json!({
+                            "type": "tankwar_game_reset",
+                            "room_id": room_id,
+                            "game_id": &game_id,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    } else {
+                        let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                        let event = json!({
+                            "type": "tankwar_reset_vote",
+                            "room_id": room_id,
+                            "game_id": &game.game_id,
+                            "user_id": user_id,
+                            "vote_count": vote_count,
+                            "votes_needed": total_players,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
                 }
             }
         }

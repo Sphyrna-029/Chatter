@@ -16,7 +16,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, Crosshair, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 
 interface CreateRoomDialogProps {
@@ -35,7 +35,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [unlisted, setUnlisted] = useState(false);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard">("text");
+  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard" | "tankwar">("text");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -136,7 +136,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
             <ToggleGroup
               type="single"
               value={roomType}
-              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard"); }}
+              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar"); }}
               className="w-full rounded-md border border-border p-0.5 bg-muted"
             >
               <ToggleGroupItem
@@ -159,6 +159,13 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               >
                 <PenTool className="w-3.5 h-3.5" />
                 Whiteboard
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="tankwar"
+                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+                Tank Wars
               </ToggleGroupItem>
             </ToggleGroup>
           </div>

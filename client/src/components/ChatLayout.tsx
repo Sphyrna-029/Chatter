@@ -5,6 +5,7 @@ import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
+import { TankWarArea } from "./TankWarArea";
 import { WhiteboardArea } from "./WhiteboardArea";
 import { ActivityPage } from "./ActivityPage";
 import { MembersPanel } from "./MembersPanel";
@@ -80,6 +81,9 @@ export function ChatLayout() {
     : false;
   const isWhiteboardRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "whiteboard"
+    : false;
+  const isTankWarRoom = state.currentRoomId
+    ? state.roomInfoMap[state.currentRoomId]?.room_type === "tankwar"
     : false;
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
@@ -321,8 +325,10 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
-              {isWhiteboardRoom ? (
+              {!isForumRoom && !isWhiteboardRoom && !isTankWarRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
+              {isTankWarRoom ? (
+                <TankWarArea />
+              ) : isWhiteboardRoom ? (
                 <WhiteboardArea />
               ) : isForumRoom ? (
                 <ForumArea />
