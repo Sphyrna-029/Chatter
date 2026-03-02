@@ -14,6 +14,8 @@ import {
   restoreTokens,
   clearTokens,
   getAccessToken,
+  getRefreshToken,
+  apiRefreshToken,
   setIsAdmin,
   getIsAdmin,
   setTotpVerified,
@@ -87,25 +89,49 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     restoreTokens();
     const token = getAccessToken();
+
+    const loginWithToken = (accessToken: string) => {
+      try {
+        const payload = JSON.parse(atob(accessToken.split(".")[1]));
+        dispatch({
+          type: "LOGIN",
+          payload: { accessToken, userId: payload.sub },
+        });
+        dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
+        dispatch({ type: "SET_TOTP_VERIFIED", payload: getTotpVerified() });
+        // Fetch actual admin status from server (handles pre-existing users)
+        fetch("/api/admin/stats", {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }).then((res) => {
+          const isAdmin = res.ok;
+          setIsAdmin(isAdmin);
+          dispatch({ type: "SET_IS_ADMIN", payload: isAdmin });
+        }).catch(() => {});
+      } catch {
+        clearTokens();
+      }
+    };
+
     if (token) {
       try {
         const payload = JSON.parse(atob(token.split(".")[1]));
         if (payload.sub && payload.exp * 1000 > Date.now()) {
-          dispatch({
-            type: "LOGIN",
-            payload: { accessToken: token, userId: payload.sub },
+          // Access token still valid — use it directly
+          loginWithToken(token);
+        } else if (getRefreshToken()) {
+          // Access token expired but we have a refresh token — try to refresh
+          apiRefreshToken().then((refreshed) => {
+            if (refreshed) {
+              const newToken = getAccessToken();
+              if (newToken) {
+                loginWithToken(newToken);
+              } else {
+                clearTokens();
+              }
+            } else {
+              clearTokens();
+            }
           });
-          // Use localStorage value immediately, then verify from server
-          dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
-          dispatch({ type: "SET_TOTP_VERIFIED", payload: getTotpVerified() });
-          // Fetch actual admin status from server (handles pre-existing users)
-          fetch("/api/admin/stats", {
-            headers: { Authorization: `Bearer ${token}` },
-          }).then((res) => {
-            const isAdmin = res.ok; // 200 = admin, 403 = not admin
-            setIsAdmin(isAdmin);
-            dispatch({ type: "SET_IS_ADMIN", payload: isAdmin });
-          }).catch(() => {});
         } else {
           clearTokens();
         }
