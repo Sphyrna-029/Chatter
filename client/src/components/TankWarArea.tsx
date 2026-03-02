@@ -1,14 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { GripHorizontal, GripVertical, ZoomIn, ZoomOut, PanelBottom, PanelLeft, PanelRight, PanelTop } from "lucide-react";
+import { GripHorizontal, GripVertical, ZoomIn, ZoomOut, PanelBottom, PanelLeft, PanelRight, PanelTop, RotateCcw, RotateCw, MessageCircle, X, Mic } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { apiGetTankWarState, apiNewTankWarGame } from "@/lib/api";
 import Editor from "@monaco-editor/react";
+import { MessageItem } from "./MessageItem";
+import { displayUserId } from "@/lib/utils";
 
-const CELL_SIZE = 10;
 const GRID_SIZE = 64;
-const CANVAS_SIZE = CELL_SIZE * GRID_SIZE;
+const TILE_W = 14;
+const TILE_H = 7;
+const WALL_H = 6;
+const CANVAS_W = GRID_SIZE * TILE_W; // 896
+const CANVAS_H = GRID_SIZE * TILE_H + WALL_H + TILE_H; // ~461
+const ORIGIN_X = CANVAS_W / 2;
+const ORIGIN_Y = TILE_H;
 
-const ZOOM_LEVELS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3];
+function toIso(x: number, y: number): [number, number] {
+  return [
+    ORIGIN_X + (x - y) * (TILE_W / 2),
+    ORIGIN_Y + (x + y) * (TILE_H / 2),
+  ];
+}
+
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 0.25;
 
 const DEFAULT_SCRIPT = `-- ╔══════════════════════════════════════════════════╗
 -- ║           TANK WARS — LUA SCRIPTING API          ║
@@ -124,8 +140,12 @@ interface GameState {
 
 type EditorPosition = "bottom" | "top" | "left" | "right";
 
-export function TankWarArea() {
-  const { state, wsRef } = useAppContext();
+interface TankWarAreaProps {
+  onJoinVoice?: () => void;
+}
+
+export function TankWarArea({ onJoinVoice }: TankWarAreaProps) {
+  const { state, wsRef, sendMessage } = useAppContext();
   const roomId = state.currentRoomId;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -133,6 +153,7 @@ export function TankWarArea() {
   const [editorSize, setEditorSize] = useState(220);
   const [editorPos, setEditorPos] = useState<EditorPosition>("bottom");
   const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef(0);
   const dragStartSizeRef = useRef(0);
@@ -154,6 +175,12 @@ export function TankWarArea() {
   });
   const [scriptSubmitted, setScriptSubmitted] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [chatPos, setChatPos] = useState<{ x: number; y: number } | null>(null);
+  const chatOverlayRef = useRef<HTMLDivElement>(null);
+  const chatDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
   const [settingsMode, setSettingsMode] = useState("ctf");
   const [settingsTicks, setSettingsTicks] = useState(1000);
 
@@ -201,17 +228,16 @@ export function TankWarArea() {
 
   // Zoom
   const zoomIn = useCallback(() => {
-    setZoom((z) => {
-      const idx = ZOOM_LEVELS.indexOf(z);
-      return idx < ZOOM_LEVELS.length - 1 ? ZOOM_LEVELS[idx + 1] : z;
-    });
+    setZoom((z) => Math.round(Math.min(ZOOM_MAX, z + ZOOM_STEP) * 100) / 100);
   }, []);
   const zoomOut = useCallback(() => {
-    setZoom((z) => {
-      const idx = ZOOM_LEVELS.indexOf(z);
-      return idx > 0 ? ZOOM_LEVELS[idx - 1] : z;
-    });
+    setZoom((z) => Math.round(Math.max(ZOOM_MIN, z - ZOOM_STEP) * 100) / 100);
   }, []);
+  const onCanvasWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    if (e.deltaY < 0) zoomIn();
+    else zoomOut();
+  }, [zoomIn, zoomOut]);
 
   // Load initial state
   useEffect(() => {
@@ -306,7 +332,7 @@ export function TankWarArea() {
     return () => { for (const [name, fn] of events) window.removeEventListener(name, fn); };
   }, [roomId, state.userId]);
 
-  // Canvas rendering
+  // Canvas rendering (isometric)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -314,99 +340,227 @@ export function TankWarArea() {
     if (!ctx) return;
 
     const { maze, players, bullets, flag_position, status } = gameState;
-    const CS = CELL_SIZE;
+    const hw = TILE_W / 2;
+    const hh = TILE_H / 2;
+
+    // Remap grid coords based on rotation (0–3 = 0°, 90°, 180°, 270°)
+    const rotGrid = (x: number, y: number): [number, number] => {
+      switch (rotation) {
+        case 1: return [63 - y, x];
+        case 2: return [63 - x, 63 - y];
+        case 3: return [y, 63 - x];
+        default: return [x, y];
+      }
+    };
+
+    // Helper: draw an isometric diamond at grid (gx, gy)
+    const drawDiamond = (gx: number, gy: number, yOff: number = 0) => {
+      const [cx, cy] = toIso(...rotGrid(gx, gy));
+      ctx.moveTo(cx, cy - hh + yOff);
+      ctx.lineTo(cx + hw, cy + yOff);
+      ctx.lineTo(cx, cy + hh + yOff);
+      ctx.lineTo(cx - hw, cy + yOff);
+      ctx.closePath();
+    };
 
     ctx.fillStyle = "#1a1a2e";
-    ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+    ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
     if (status === "none" || status === "lobby") {
+      // Draw a small grid preview in isometric
       ctx.strokeStyle = "#2a2a4a";
-      ctx.lineWidth = 0.5;
-      for (let i = 0; i <= GRID_SIZE; i++) {
-        ctx.beginPath(); ctx.moveTo(i * CS, 0); ctx.lineTo(i * CS, CANVAS_SIZE); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(0, i * CS); ctx.lineTo(CANVAS_SIZE, i * CS); ctx.stroke();
+      ctx.lineWidth = 0.3;
+      for (let y = 0; y < GRID_SIZE; y += 4) {
+        for (let x = 0; x < GRID_SIZE; x += 4) {
+          ctx.beginPath();
+          drawDiamond(x, y);
+          ctx.stroke();
+        }
       }
       ctx.fillStyle = "#6a6a8a";
       ctx.font = "16px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(status === "none" ? "Start a new game to begin!" : "Waiting for players...", CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        status === "none" ? "Start a new game to begin!" : "Waiting for players...",
+        CANVAS_W / 2, CANVAS_H / 2,
+      );
       return;
     }
 
-    for (let y = 0; y < maze.length; y++)
-      for (let x = 0; x < (maze[y]?.length || 0); x++) {
-        ctx.fillStyle = maze[y][x] === 1 ? "#2d2d5e" : "#0f0f23";
-        ctx.fillRect(x * CS, y * CS, CS, CS);
-      }
-
-    ctx.strokeStyle = "#1a1a3a"; ctx.lineWidth = 0.3;
-    for (let i = 0; i <= GRID_SIZE; i++) {
-      ctx.beginPath(); ctx.moveTo(i * CS, 0); ctx.lineTo(i * CS, CANVAS_SIZE); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, i * CS); ctx.lineTo(CANVAS_SIZE, i * CS); ctx.stroke();
+    // Build lookup maps for entities at each cell
+    const playerAt = new Map<string, TankPlayer[]>();
+    for (const p of players) {
+      if (!p.alive) continue;
+      const key = `${p.x},${p.y}`;
+      const arr = playerAt.get(key);
+      if (arr) arr.push(p);
+      else playerAt.set(key, [p]);
+    }
+    const bulletAt = new Map<string, BulletData[]>();
+    for (const b of bullets) {
+      const key = `${b.x},${b.y}`;
+      const arr = bulletAt.get(key);
+      if (arr) arr.push(b);
+      else bulletAt.set(key, [b]);
     }
 
-    if (gameState.game_mode === "koth" && flag_position?.length === 2) {
-      // Draw 3x3 hill zone around flag position
-      const hx = flag_position[0], hy = flag_position[1];
-      ctx.fillStyle = "rgba(251, 191, 36, 0.15)";
-      ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
-      ctx.lineWidth = 1;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const cx = (hx + dx) * CS, cy = (hy + dy) * CS;
-          ctx.fillRect(cx, cy, CS, CS);
+    // Flag / hill info
+    const flagX = flag_position?.[0] ?? -1;
+    const flagY = flag_position?.[1] ?? -1;
+    const isKoth = gameState.game_mode === "koth";
+    const isCTF = gameState.game_mode !== "battle_royale" && !isKoth;
+
+    // Back-to-front tile loop (painter's algorithm)
+    for (let y = 0; y < maze.length; y++) {
+      const row = maze[y];
+      if (!row) continue;
+      for (let x = 0; x < row.length; x++) {
+        const [cx, cy] = toIso(...rotGrid(x, y));
+        const isWall = row[x] === 1;
+
+        if (isWall) {
+          // 3D wall block
+          // Top face (shifted up by WALL_H)
+          ctx.fillStyle = "#3d3d6e";
+          ctx.beginPath();
+          drawDiamond(x, y, -WALL_H);
+          ctx.fill();
+
+          // Left face (parallelogram)
+          ctx.fillStyle = "#2d2d5e";
+          ctx.beginPath();
+          ctx.moveTo(cx - hw, cy - WALL_H);
+          ctx.lineTo(cx, cy + hh - WALL_H);
+          ctx.lineTo(cx, cy + hh);
+          ctx.lineTo(cx - hw, cy);
+          ctx.closePath();
+          ctx.fill();
+
+          // Right face (parallelogram)
+          ctx.fillStyle = "#232350";
+          ctx.beginPath();
+          ctx.moveTo(cx + hw, cy - WALL_H);
+          ctx.lineTo(cx, cy + hh - WALL_H);
+          ctx.lineTo(cx, cy + hh);
+          ctx.lineTo(cx + hw, cy);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          // Floor tile
+          ctx.fillStyle = "#0f0f23";
+          ctx.beginPath();
+          drawDiamond(x, y);
+          ctx.fill();
+
+          // Grid line
+          ctx.strokeStyle = "#1a1a3a";
+          ctx.lineWidth = 0.3;
+          ctx.beginPath();
+          drawDiamond(x, y);
+          ctx.stroke();
+
+          // KOTH hill zone highlight
+          if (isKoth && flagX >= 0 && Math.abs(x - flagX) <= 1 && Math.abs(y - flagY) <= 1) {
+            ctx.fillStyle = "rgba(251, 191, 36, 0.15)";
+            ctx.beginPath();
+            drawDiamond(x, y);
+            ctx.fill();
+            ctx.strokeStyle = "rgba(251, 191, 36, 0.5)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            drawDiamond(x, y);
+            ctx.stroke();
+            // Crown at center
+            if (x === flagX && y === flagY) {
+              ctx.fillStyle = "#fbbf24";
+              ctx.font = "8px serif";
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText("♛", cx, cy);
+            }
+          }
+
+          // CTF flag
+          if (isCTF && x === flagX && y === flagY) {
+            ctx.fillStyle = "#fbbf24";
+            // Pole
+            ctx.fillRect(cx - 1, cy - 6, 2, 8);
+            // Flag triangle
+            ctx.beginPath();
+            ctx.moveTo(cx + 1, cy - 6);
+            ctx.lineTo(cx + 5, cy - 4);
+            ctx.lineTo(cx + 1, cy - 2);
+            ctx.closePath();
+            ctx.fill();
+          }
+
+          // Draw tanks at this cell
+          const tanksHere = playerAt.get(`${x},${y}`);
+          if (tanksHere) {
+            for (const player of tanksHere) {
+              // Tank body: colored diamond (slightly smaller)
+              ctx.fillStyle = player.color || "#3b82f6";
+              ctx.beginPath();
+              const s = 0.7; // scale factor
+              ctx.moveTo(cx, cy - hh * s);
+              ctx.lineTo(cx + hw * s, cy);
+              ctx.lineTo(cx, cy + hh * s);
+              ctx.lineTo(cx - hw * s, cy);
+              ctx.closePath();
+              ctx.fill();
+
+              // Turret line
+              ctx.strokeStyle = "#ffffff";
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.moveTo(cx, cy);
+              const turretLen = 5;
+              let tx = cx, ty = cy;
+              switch (player.direction) {
+                case "north": { const [ex, ey] = toIso(...rotGrid(x, y - 0.5)); tx = cx + (ex - cx) * (turretLen / 4); ty = cy + (ey - cy) * (turretLen / 4); break; }
+                case "south": { const [ex, ey] = toIso(...rotGrid(x, y + 0.5)); tx = cx + (ex - cx) * (turretLen / 4); ty = cy + (ey - cy) * (turretLen / 4); break; }
+                case "east":  { const [ex, ey] = toIso(...rotGrid(x + 0.5, y)); tx = cx + (ex - cx) * (turretLen / 4); ty = cy + (ey - cy) * (turretLen / 4); break; }
+                case "west":  { const [ex, ey] = toIso(...rotGrid(x - 0.5, y)); tx = cx + (ex - cx) * (turretLen / 4); ty = cy + (ey - cy) * (turretLen / 4); break; }
+              }
+              ctx.lineTo(tx, ty);
+              ctx.stroke();
+
+              // Health pips above
+              const pipY = cy - hh - 4;
+              const totalW = player.health * 3 - 1;
+              for (let h = 0; h < player.health; h++) {
+                ctx.fillStyle = "#22c55e";
+                ctx.fillRect(cx - totalW / 2 + h * 3, pipY, 2, 2);
+              }
+            }
+          }
+
+          // Draw bullets at this cell
+          const bulletsHere = bulletAt.get(`${x},${y}`);
+          if (bulletsHere) {
+            for (const bullet of bulletsHere) {
+              const [bx, by] = toIso(...rotGrid(bullet.x, bullet.y));
+              ctx.fillStyle = "#f97316";
+              ctx.beginPath();
+              ctx.arc(bx, by, 2, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
         }
       }
-      ctx.strokeRect((hx - 1) * CS, (hy - 1) * CS, CS * 3, CS * 3);
-      // Crown icon at center
-      ctx.fillStyle = "#fbbf24";
-      ctx.font = `${CS}px serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("♛", hx * CS + CS / 2, hy * CS + CS / 2);
-    } else if (gameState.game_mode !== "battle_royale" && flag_position?.length === 2) {
-      // CTF: draw flag
-      const fx = flag_position[0] * CS, fy = flag_position[1] * CS;
-      ctx.fillStyle = "#fbbf24";
-      ctx.fillRect(fx + 1, fy + 1, 2, CS - 2);
-      ctx.beginPath(); ctx.moveTo(fx + 3, fy + 1); ctx.lineTo(fx + CS - 1, fy + CS / 3); ctx.lineTo(fx + 3, fy + CS / 2); ctx.closePath(); ctx.fill();
-    }
-
-    for (const player of players) {
-      if (!player.alive) continue;
-      const tx = player.x * CS, ty = player.y * CS;
-      ctx.fillStyle = player.color || "#3b82f6";
-      ctx.fillRect(tx + 1, ty + 1, CS - 2, CS - 2);
-      ctx.fillStyle = "#ffffff";
-      const cx = tx + CS / 2, cy = ty + CS / 2;
-      switch (player.direction) {
-        case "north": ctx.fillRect(cx - 1, ty, 2, CS / 2); break;
-        case "south": ctx.fillRect(cx - 1, cy, 2, CS / 2); break;
-        case "east":  ctx.fillRect(cx, cy - 1, CS / 2, 2); break;
-        case "west":  ctx.fillRect(tx, cy - 1, CS / 2, 2); break;
-      }
-      for (let h = 0; h < player.health; h++) {
-        ctx.fillStyle = "#22c55e";
-        ctx.fillRect(tx + 1 + h * 3, ty - 3, 2, 2);
-      }
-    }
-
-    ctx.fillStyle = "#f97316";
-    for (const bullet of bullets) {
-      ctx.beginPath();
-      ctx.arc(bullet.x * CS + CS / 2, bullet.y * CS + CS / 2, 2, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     if (status === "finished") {
       ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
       ctx.fillStyle = "#fbbf24";
       ctx.font = "bold 20px monospace";
       ctx.textAlign = "center";
-      ctx.fillText(gameState.winner ? `Winner: ${gameState.winner}` : "Game Over!", CANVAS_SIZE / 2, CANVAS_SIZE / 2);
+      ctx.textBaseline = "middle";
+      ctx.fillText(gameState.winner ? `Winner: ${gameState.winner}` : "Tie!", CANVAS_W / 2, CANVAS_H / 2);
     }
-  }, [gameState]);
+  }, [gameState, rotation]);
 
   const handleNewGame = async () => {
     if (!roomId) return;
@@ -451,6 +605,53 @@ export function TankWarArea() {
     sendWs({ type: "tankwar_vote_reset", room_id: roomId });
   };
 
+  // Auto-scroll chat when new messages arrive
+  const messages = state.messages;
+  useEffect(() => {
+    if (chatOpen && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [messages, chatOpen]);
+
+  const onChatDragStart = useCallback((e: React.MouseEvent) => {
+    // Only drag from the header bar itself, not child buttons
+    if ((e.target as HTMLElement).closest("button")) return;
+    e.preventDefault();
+    const el = chatOverlayRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const parentRect = (el.offsetParent as HTMLElement)?.getBoundingClientRect();
+    if (!parentRect) return;
+    chatDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: rect.left - parentRect.left,
+      originY: rect.top - parentRect.top,
+    };
+    const onMouseMove = (ev: MouseEvent) => {
+      const d = chatDragRef.current;
+      if (!d) return;
+      setChatPos({
+        x: d.originX + (ev.clientX - d.startX),
+        y: d.originY + (ev.clientY - d.startY),
+      });
+    };
+    const onMouseUp = () => {
+      chatDragRef.current = null;
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
+
+  const handleChatSend = useCallback(() => {
+    const text = chatInput.trim();
+    if (!text) return;
+    sendMessage(text);
+    setChatInput("");
+  }, [chatInput, sendMessage]);
+
   const myPlayer = gameState.players.find((p) => p.user_id === state.userId);
   const isRunning = gameState.status === "running";
   const isFinished = gameState.status === "finished";
@@ -462,16 +663,54 @@ export function TankWarArea() {
   // ─── Shared sub-components ──────────────────────────────────────────────────
 
   const canvasPanel = (
-    <div className="flex-1 min-h-0 min-w-0 overflow-auto">
+    <div className="flex-1 min-h-0 min-w-0 overflow-auto relative" onWheel={onCanvasWheel}>
       <div className="flex items-center justify-center h-full w-full p-2">
         <canvas
           ref={canvasRef}
-          width={CANVAS_SIZE}
-          height={CANVAS_SIZE}
+          width={CANVAS_W}
+          height={CANVAS_H}
           className="rounded-md border border-border"
-          style={{ imageRendering: "pixelated", width: CANVAS_SIZE * zoom, height: CANVAS_SIZE * zoom }}
+          style={{ imageRendering: "pixelated", width: CANVAS_W * zoom, height: CANVAS_H * zoom }}
         />
       </div>
+      {/* Chat overlay */}
+      {chatOpen && (
+        <div
+          ref={chatOverlayRef}
+          className="absolute z-20 w-80 h-[400px] flex flex-col bg-background/85 backdrop-blur-sm border border-border rounded-lg shadow-lg"
+          style={chatPos ? { left: chatPos.x, top: chatPos.y } : { bottom: 12, right: 12 }}
+        >
+          <div
+            onMouseDown={onChatDragStart}
+            className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0 cursor-grab active:cursor-grabbing select-none"
+          >
+            <span className="text-xs font-semibold">Chat</span>
+            <button onClick={() => setChatOpen(false)} className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto px-1 py-1">
+            {messages.map((msg, i) => {
+              const prev = i > 0 ? messages[i - 1] : null;
+              const grouped = prev !== null
+                && prev.sender === msg.sender
+                && msg.origin_server_ts - prev.origin_server_ts < 5 * 60 * 1000;
+              return <MessageItem key={msg.event_id} message={msg} grouped={grouped} />;
+            })}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="border-t border-border px-2 py-1.5 shrink-0">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+              placeholder="Type a message..."
+              className="w-full text-xs px-2 py-1.5 rounded bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -527,10 +766,10 @@ export function TankWarArea() {
               </span>
             </div>
           )}
-          {isFinished && gameState.winner && (
+          {isFinished && (
             <div className="border-t border-border px-4 py-3 text-center">
               <p className="text-sm font-semibold text-yellow-400">
-                Winner: {gameState.winner.replace("@", "").split(":")[0]}
+                {gameState.winner ? `Winner: ${gameState.winner.replace("@", "").split(":")[0]}` : "Tie!"}
               </p>
             </div>
           )}
@@ -581,13 +820,40 @@ export function TankWarArea() {
         </div>
         <div className="flex items-center gap-1.5">
           {/* Zoom controls */}
-          <button onClick={zoomOut} disabled={zoom <= ZOOM_LEVELS[0]} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer" title="Zoom out">
+          <button onClick={zoomOut} disabled={zoom <= ZOOM_MIN} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer" title="Zoom out">
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
           <span className="text-xs text-muted-foreground w-10 text-center">{Math.round(zoom * 100)}%</span>
-          <button onClick={zoomIn} disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer" title="Zoom in">
+          <button onClick={zoomIn} disabled={zoom >= ZOOM_MAX} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-30 cursor-pointer" title="Zoom in">
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
+          <div className="w-px h-4 bg-border mx-1" />
+          {/* Rotation controls */}
+          <button onClick={() => setRotation((r) => (r + 3) % 4)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer" title="Rotate left">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => setRotation((r) => (r + 1) % 4)} className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer" title="Rotate right">
+            <RotateCw className="w-3.5 h-3.5" />
+          </button>
+          <div className="w-px h-4 bg-border mx-1" />
+          {/* Chat toggle */}
+          <button
+            onClick={() => setChatOpen((o) => !o)}
+            className={`p-1 rounded hover:bg-accent cursor-pointer ${chatOpen ? "text-foreground bg-accent" : "text-muted-foreground hover:text-foreground"}`}
+            title="Toggle chat"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+          </button>
+          {/* Voice join */}
+          {onJoinVoice && !state.inVoiceChannel && (
+            <button
+              onClick={onJoinVoice}
+              className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground cursor-pointer"
+              title="Join voice"
+            >
+              <Mic className="w-3.5 h-3.5" />
+            </button>
+          )}
           <div className="w-px h-4 bg-border mx-1" />
           {/* Editor position toggle */}
           <button

@@ -325,9 +325,9 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {!isForumRoom && !isWhiteboardRoom && !isTankWarRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
+              {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
               {isTankWarRoom ? (
-                <TankWarArea />
+                <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isWhiteboardRoom ? (
                 <WhiteboardArea />
               ) : isForumRoom ? (

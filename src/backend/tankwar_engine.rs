@@ -546,12 +546,34 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
         }
         // Battle Royale: no flag, no hill — only last-alive wins
 
-        // All modes: last player alive wins
-        if winner.is_none() {
+        // All modes: last player alive wins, all dead = tie
+        if winner.is_none() && game.players.len() > 1 {
             let alive_players: Vec<&TankPlayer> =
                 game.players.iter().filter(|p| p.alive).collect();
-            if alive_players.len() == 1 && game.players.len() > 1 {
+            if alive_players.len() == 1 {
                 winner = Some(alive_players[0].user_id.clone());
+            } else if alive_players.is_empty() {
+                // All dead — end as tie (winner stays None)
+                game.status = "finished".to_string();
+                game.winner = None;
+
+                let game_over_event = json!({
+                    "type": "tankwar_game_over",
+                    "room_id": &room_id,
+                    "game_id": &game_id,
+                    "winner": null,
+                    "players": game.players.iter().map(|p| json!({
+                        "user_id": p.user_id,
+                        "score": p.score,
+                        "alive": p.alive,
+                        "health": p.health,
+                    })).collect::<Vec<_>>(),
+                });
+                broadcast_to_room(&state, &room_id, &game_over_event).await;
+
+                let _ = coll.replace_one(doc! { "_id": &game_id }, &game).await;
+                state.tank_games.write().await.remove(&game_id);
+                return;
             }
         }
 
@@ -610,14 +632,18 @@ pub(crate) async fn run_tank_game(state: Arc<AppState>, room_id: String, game_id
 
     // Game ended by tick limit
     game.status = "finished".to_string();
-    let best = if is_koth {
-        // KOTH: highest hill_ticks wins
-        game.players.iter().filter(|p| p.alive).max_by_key(|p| p.hill_ticks)
+    let alive: Vec<&TankPlayer> = game.players.iter().filter(|p| p.alive).collect();
+    game.winner = if alive.is_empty() {
+        None
+    } else if is_koth {
+        let max_ht = alive.iter().map(|p| p.hill_ticks).max().unwrap_or(0);
+        let top: Vec<&&TankPlayer> = alive.iter().filter(|p| p.hill_ticks == max_ht).collect();
+        if top.len() == 1 { Some(top[0].user_id.clone()) } else { None }
     } else {
-        // CTF / BR: highest score wins among alive
-        game.players.iter().filter(|p| p.alive).max_by_key(|p| p.score)
+        let max_score = alive.iter().map(|p| p.score).max().unwrap_or(0);
+        let top: Vec<&&TankPlayer> = alive.iter().filter(|p| p.score == max_score).collect();
+        if top.len() == 1 { Some(top[0].user_id.clone()) } else { None }
     };
-    game.winner = best.map(|p| p.user_id.clone());
 
     let game_over_event = json!({
         "type": "tankwar_game_over",
