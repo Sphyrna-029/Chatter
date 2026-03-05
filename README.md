@@ -9,19 +9,24 @@ A lightweight, performant, self-hosted chat application built with Rust. Chatter
 ## Features
 
 - **Rooms**
-- **Real-time messaging**
-- **Voice chat** 
+- **Real-Time Messaging**
+- **Voice Chat** 
 - **Multi Screen sharing (Requires HTTPS for WebRTC)**
 - **File sharing**
 - **Forums**
-- **Whiteboard**
-- **Code snippets with syntax highlighting**
-- **Direct messages** 
-- **Custom emojis**
-- **Room invite links**
+- **Collaborative Whiteboard**
+- **Code Snippets And Syntax Highlighting**
+- **Direct Messages** 
+- **Custom Emojis**
+- **Room Invite Links**
 - **2FA (TOTP)**
 - **Themes**
-- **Server admin dashboard**
+- **Friend Requests**
+- **Chat Search**
+- **Webhooks**
+- **GIF Search (Requires Klip API)**
+- **Tank Scripting Mini Game**
+- **Server Admin Dashboard**
 
 ## Prerequisites
 
@@ -159,6 +164,7 @@ The first user to register (or log in on an existing database with no admin) is 
 
 - Data is stored in MongoDB. A running MongoDB instance is required.
 - HTTPS context is required for WebRTC (screen share, voice)
+- If behind CloudFlare free plan, max file upload size is 100MB (chatter does not currently chunk uploads)
 
 ## License
 

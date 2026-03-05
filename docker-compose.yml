@@ -15,17 +15,20 @@ services:
     environment:
       MONGODB_URI: mongodb://mongodb:27017
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      KLIPY_API_KEY: your-klipy-key
+
     volumes:
       - uploads:/app/external
     depends_on:
       - mongodb
     restart: unless-stopped
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.chatter.entrypoints: "websecure"
-      traefik.http.routers.chatter.rule: "Host(`chatter.zgaf.io`)"
-      traefik.http.routers.chatter.tls.certResolver: "zgaf"
-      traefik.http.routers.chatter.tls: "true"
+    #labels:
+    #Traefik reverse proxy example config
+    #traefik.enable: "true"
+    #traefik.http.routers.chatter.entrypoints: "your-https-entrypoint"
+    #traefik.http.routers.chatter.rule: "Host(`yourdomain.com`)"
+    #traefik.http.routers.chatter.tls.certResolver: "your-tls-resolver"
+    #traefik.http.routers.chatter.tls: "true"
 
 volumes:
   mongo_data:
