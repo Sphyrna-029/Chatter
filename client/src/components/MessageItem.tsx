@@ -21,9 +21,19 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
 
+// ─── Custom name font registration ──────────────────────────────────────────
+const registeredFonts = new Set<string>();
+function ensureFontFace(userId: string, url: string) {
+  if (registeredFonts.has(url)) return;
+  registeredFonts.add(url);
+  const style = document.createElement("style");
+  style.textContent = `@font-face { font-family: 'user-font-${CSS.escape(userId)}'; src: url('${url}'); }`;
+  document.head.appendChild(style);
+}
+
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
-const videoExtensions = /\.(mp4|webm|ogg|mov)(\?.*)?$/i;
+const videoExtensions = /\.(mp4|webm|ogg|mov|mkv)(\?.*)?$/i;
 const audioExtensions = /\.(mp3|wav|flac|aac|m4a)(\?.*)?$/i;
 
 function escapeHtml(text: string) {
@@ -379,6 +389,11 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
         ? roomInfo.mod_name_color
         : undefined;
 
+  const nameFontUrl = !isWebhook ? state.userPresence[message.sender]?.nameFontUrl : undefined;
+  if (nameFontUrl) {
+    ensureFontFace(message.sender, nameFontUrl);
+  }
+
   if (isSystem) {
     const isLeave = message.content.body.includes("has left");
     return (
@@ -454,7 +469,10 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
             <div className="flex items-baseline gap-2">
               <span
                 className={cn("text-sm font-semibold", !isWebhook && "cursor-pointer hover:underline")}
-                style={senderNameColor ? { color: senderNameColor } : undefined}
+                style={{
+                  ...(senderNameColor ? { color: senderNameColor } : {}),
+                  ...(nameFontUrl ? { fontFamily: `'user-font-${CSS.escape(message.sender)}'` } : {}),
+                }}
                 onClick={() => !isWebhook && setProfileOpen(true)}
               >
                 {sender}

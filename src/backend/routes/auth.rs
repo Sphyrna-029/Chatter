@@ -186,6 +186,7 @@ pub(crate) async fn register(
         manual_status: None,
         is_admin,
         disabled: false,
+        name_font_url: String::new(),
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(

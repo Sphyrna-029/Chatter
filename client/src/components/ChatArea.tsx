@@ -24,6 +24,10 @@ import { displayUserId } from "@/lib/utils";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
+const mediaUrlRegex = /(https?:\/\/[^\s]+)/g;
+const mediaImageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
+const mediaVideoExtensions = /\.(mp4|webm|ogg|mov|mkv)(\?.*)?$/i;
+
 interface ChatAreaProps {
   onJoinVoice?: () => void;
 }
@@ -64,6 +68,30 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       : {};
     return { ...STANDARD_SHORTCODES, ...roomAliases };
   }, [state.currentRoomId, state.roomInfoMap]);
+
+  // Detect image/video URLs in the input for thumbnail previews
+  const mediaUrls = useMemo(() => {
+    const results: { url: string; type: "image" | "video" }[] = [];
+    const stripped = input.replace(/:emoji\{[^}]+\}:/g, "");
+    const matches = stripped.match(mediaUrlRegex);
+    if (matches) {
+      for (const url of matches) {
+        if (mediaImageExtensions.test(url)) results.push({ url, type: "image" });
+        else if (mediaVideoExtensions.test(url)) results.push({ url, type: "video" });
+      }
+    }
+    return results;
+  }, [input]);
+
+  // Remove a media URL from the input
+  const removeMediaUrl = useCallback((urlToRemove: string) => {
+    const el = inputRef.current;
+    if (!el) return;
+    const current = getDivContent();
+    const newVal = current.replace(urlToRemove, "").replace(/  +/g, " ").trim();
+    el.textContent = newVal;
+    setInput(newVal);
+  }, []);
 
   // --- Contenteditable helpers ---
 
@@ -1102,6 +1130,32 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               ))}
             </div>
           )}
+          {mediaUrls.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {mediaUrls.map((m, i) => (
+                <div key={i} className="relative group">
+                  {m.type === "image" ? (
+                    <img
+                      src={m.url}
+                      alt="preview"
+                      className="h-16 rounded-md border border-border object-cover"
+                    />
+                  ) : (
+                    <div className="relative h-16 w-20 rounded-md border border-border bg-muted flex items-center justify-center">
+                      <Film className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                  )}
+                  <button
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    onClick={() => removeMediaUrl(m.url)}
+                    title="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {displayLength > MAX_MESSAGE_LENGTH * 0.75 && (
             <div className="flex justify-end mb-1">
               <span
@@ -1304,7 +1358,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           <DialogHeader>
             <DialogTitle className="text-sm">Uploading file</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="space-y-2 min-w-0 overflow-hidden">
             <p className="text-xs text-muted-foreground truncate">{uploadFileName}</p>
             <div className="bg-muted rounded-full h-2">
               <div

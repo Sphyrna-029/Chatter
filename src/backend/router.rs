@@ -1,5 +1,5 @@
 use super::{
-    constants::MAX_UPLOAD_SIZE,
+    constants::{CHUNK_SIZE, MAX_UPLOAD_SIZE},
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
         auth::{change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, server_info, totp_setup, totp_verify},
@@ -8,7 +8,7 @@ use super::{
         room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
-        media::{delete_upload, gif_search, link_preview, list_uploads, serve_upload, upload_file},
+        media::{delete_upload, gif_search, link_preview, list_uploads, serve_upload, upload_chunk, upload_complete, upload_file, upload_init},
         messages::{edit_message, get_room_messages, redact_message, search_messages, send_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
@@ -68,6 +68,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
                "/api/upload",
                post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)),
            )
+           .route("/api/upload/init", post(upload_init))
+           .route(
+               "/api/upload/chunk",
+               post(upload_chunk).layer(DefaultBodyLimit::max(CHUNK_SIZE + 2 * 1024 * 1024)),
+           )
+           .route("/api/upload/complete", post(upload_complete))
            // Messages
            .route(
                "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

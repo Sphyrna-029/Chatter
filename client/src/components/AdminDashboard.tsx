@@ -41,6 +41,8 @@ export function AdminDashboard() {
   const [inviteOnly, setInviteOnly] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [storageLimitMb, setStorageLimitMb] = useState(0);
+  const [roomCreationLimit, setRoomCreationLimit] = useState(0);
   const [loading, setLoading] = useState(true);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordUser, setTempPasswordUser] = useState<string | null>(null);
@@ -59,6 +61,8 @@ export function AdminDashboard() {
         const s = await apiAdminGetSettings();
         setInviteOnly(s.invite_only);
         setInviteCode(s.invite_code);
+        setStorageLimitMb(Math.round(s.storage_limit_bytes / (1024 * 1024)));
+        setRoomCreationLimit(s.room_creation_limit);
       }
     } catch (e: any) {
       console.error("Admin load error:", e.message);
@@ -185,9 +189,11 @@ export function AdminDashboard() {
               inviteOnly={inviteOnly}
               inviteCode={inviteCode}
               inviteCopied={inviteCopied}
+              storageLimitMb={storageLimitMb}
+              roomCreationLimit={roomCreationLimit}
               onToggleInviteOnly={async (val) => {
                 try {
-                  await apiAdminUpdateSettings(val);
+                  await apiAdminUpdateSettings({ invite_only: val });
                   setInviteOnly(val);
                 } catch (e: any) {
                   alert(e.message);
@@ -205,6 +211,22 @@ export function AdminDashboard() {
                 navigator.clipboard.writeText(inviteCode);
                 setInviteCopied(true);
                 setTimeout(() => setInviteCopied(false), 2000);
+              }}
+              onSaveStorageLimit={async (mb) => {
+                try {
+                  await apiAdminUpdateSettings({ storage_limit_bytes: mb * 1024 * 1024 });
+                  setStorageLimitMb(mb);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onSaveRoomCreationLimit={async (val) => {
+                try {
+                  await apiAdminUpdateSettings({ room_creation_limit: val });
+                  setRoomCreationLimit(val);
+                } catch (e: any) {
+                  alert(e.message);
+                }
               }}
             />
           ) : null}
@@ -387,17 +409,38 @@ function SettingsTab({
   inviteOnly,
   inviteCode,
   inviteCopied,
+  storageLimitMb,
+  roomCreationLimit,
   onToggleInviteOnly,
   onRefreshInvite,
   onCopyInvite,
+  onSaveStorageLimit,
+  onSaveRoomCreationLimit,
 }: {
   inviteOnly: boolean;
   inviteCode: string;
   inviteCopied: boolean;
+  storageLimitMb: number;
+  roomCreationLimit: number;
   onToggleInviteOnly: (val: boolean) => void;
   onRefreshInvite: () => void;
   onCopyInvite: () => void;
+  onSaveStorageLimit: (mb: number) => void;
+  onSaveRoomCreationLimit: (val: number) => void;
 }) {
+  const [localLimit, setLocalLimit] = useState(storageLimitMb);
+  const limitChanged = localLimit !== storageLimitMb;
+  const [localRoomLimit, setLocalRoomLimit] = useState(roomCreationLimit);
+  const roomLimitChanged = localRoomLimit !== roomCreationLimit;
+
+  useEffect(() => {
+    setLocalLimit(storageLimitMb);
+  }, [storageLimitMb]);
+
+  useEffect(() => {
+    setLocalRoomLimit(roomCreationLimit);
+  }, [roomCreationLimit]);
+
   return (
     <div className="space-y-4">
       <div className="border rounded-lg p-4 space-y-3">
@@ -446,6 +489,66 @@ function SettingsTab({
             </p>
           </div>
         )}
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Per-User Storage Limit</h3>
+          <p className="text-xs text-muted-foreground">
+            Maximum upload storage per user. Set to 0 for unlimited.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            value={localLimit}
+            onChange={(e) => setLocalLimit(Math.max(0, parseInt(e.target.value) || 0))}
+            className="w-28 rounded-md border bg-background px-3 py-1.5 text-sm"
+          />
+          <span className="text-sm text-muted-foreground">MB</span>
+          <Button
+            size="sm"
+            className="text-xs h-7 ml-2"
+            disabled={!limitChanged}
+            onClick={() => onSaveStorageLimit(localLimit)}
+          >
+            Save
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB.`}
+        </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Per-User Room Limit</h3>
+          <p className="text-xs text-muted-foreground">
+            Maximum number of rooms each user can create. DMs are not counted. Set to 0 for unlimited.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            value={localRoomLimit}
+            onChange={(e) => setLocalRoomLimit(Math.max(0, parseInt(e.target.value) || 0))}
+            className="w-28 rounded-md border bg-background px-3 py-1.5 text-sm"
+          />
+          <span className="text-sm text-muted-foreground">rooms</span>
+          <Button
+            size="sm"
+            className="text-xs h-7 ml-2"
+            disabled={!roomLimitChanged}
+            onClick={() => onSaveRoomCreationLimit(localRoomLimit)}
+          >
+            Save
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {localRoomLimit === 0 ? "Currently unlimited." : `Each user can create up to ${localRoomLimit} room${localRoomLimit !== 1 ? "s" : ""}.`}
+        </p>
       </div>
     </div>
   );

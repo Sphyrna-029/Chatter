@@ -88,6 +88,9 @@ export function UserProfileDialog({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
+  const fontInputRef = useRef<HTMLInputElement>(null);
+  const [pendingFontFile, setPendingFontFile] = useState<File | null>(null);
+  const nameFontUrl = presence?.nameFontUrl || "";
   const [activeTab, setActiveTab] = useState("profile");
 
   // My Files state
@@ -130,6 +133,7 @@ export function UserProfileDialog({
       setPendingAvatarFile(null);
       setBannerPreview(bannerUrl);
       setPendingBannerFile(null);
+      setPendingFontFile(null);
       setActiveTab("profile");
       setNewPassword("");
       setConfirmNewPassword("");
@@ -229,12 +233,18 @@ export function UserProfileDialog({
         const uploaded = await apiUploadFile(pendingBannerFile);
         newBannerUrl = uploaded.url;
       }
+      let newFontUrl: string | undefined;
+      if (pendingFontFile) {
+        const uploaded = await apiUploadFile(pendingFontFile);
+        newFontUrl = uploaded.url;
+      }
       updateProfile({
         avatarUrl: newAvatarUrl !== undefined ? newAvatarUrl : undefined,
         bannerUrl: newBannerUrl !== undefined ? newBannerUrl : undefined,
         about: aboutInput.trim(),
         customStatus: statusInput.trim(),
         displayName: nicknameInput.trim(),
+        ...(newFontUrl !== undefined ? { nameFontUrl: newFontUrl } : {}),
       });
       onOpenChange(false);
     } finally {
@@ -247,7 +257,8 @@ export function UserProfileDialog({
     statusInput.trim() !== customStatus ||
     aboutInput.trim() !== about ||
     pendingAvatarFile !== null ||
-    pendingBannerFile !== null;
+    pendingBannerFile !== null ||
+    pendingFontFile !== null;
 
   const profileContent = (
     <div className="flex flex-col">
@@ -399,6 +410,86 @@ export function UserProfileDialog({
               rows={3}
             />
             <p className="text-[10px] text-muted-foreground text-right">{aboutInput.length}/200</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Name Font</label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-foreground truncate flex-1">
+                {pendingFontFile
+                  ? pendingFontFile.name
+                  : nameFontUrl
+                    ? decodeURIComponent(nameFontUrl.split("/").pop() || "Custom Font")
+                    : "Default"}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => fontInputRef.current?.click()}
+              >
+                Upload
+              </Button>
+              {(nameFontUrl || pendingFontFile) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 text-destructive"
+                  onClick={() => {
+                    setPendingFontFile(null);
+                    if (nameFontUrl) {
+                      updateProfile({ nameFontUrl: "" });
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            <input
+              ref={fontInputRef}
+              type="file"
+              accept=".ttf,.otf"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (file.size > 2 * 1024 * 1024) {
+                  alert("Font file must be under 2 MB");
+                  return;
+                }
+                setPendingFontFile(file);
+                e.target.value = "";
+              }}
+            />
+            {(pendingFontFile || nameFontUrl) && (
+              <p
+                className="text-sm font-semibold mt-1"
+                style={
+                  pendingFontFile
+                    ? { fontFamily: "pending-font-preview" }
+                    : nameFontUrl
+                      ? { fontFamily: `'user-font-${CSS.escape(userId)}'` }
+                      : undefined
+                }
+                ref={(el) => {
+                  if (el && pendingFontFile) {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                      const url = reader.result as string;
+                      const existing = document.getElementById("font-preview-style");
+                      if (existing) existing.remove();
+                      const style = document.createElement("style");
+                      style.id = "font-preview-style";
+                      style.textContent = `@font-face { font-family: 'pending-font-preview'; src: url('${url}'); }`;
+                      document.head.appendChild(style);
+                    };
+                    reader.readAsDataURL(pendingFontFile);
+                  }
+                }}
+              >
+                {presence?.displayName || username}
+              </p>
+            )}
           </div>
           <Button
             className="w-full"

@@ -151,6 +151,25 @@ pub(crate) async fn create_room(
         }
     }
 
+    // Enforce per-user room creation limit (non-DM only)
+    if !is_dm {
+        let limit = state.server_settings.read().await.room_creation_limit;
+        if limit > 0 {
+            let count = state
+                .db
+                .collection::<RoomRecord>("rooms")
+                .count_documents(doc! { "creator": &user_id, "is_dm": false })
+                .await
+                .unwrap_or(0);
+            if count >= limit {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    &format!("Room creation limit reached (max {})", limit),
+                ));
+            }
+        }
+    }
+
     // Regular room creation
     let room_id = generate_id("!");
 

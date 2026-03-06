@@ -253,7 +253,9 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
     if let Ok(Some(doc)) = coll.find_one(doc! { "_id": "global" }).await {
         let invite_only = doc.get_bool("invite_only").unwrap_or(false);
         let invite_code = doc.get_str("invite_code").unwrap_or("").to_string();
-        return ServerSettings { invite_only, invite_code };
+        let storage_limit_bytes = doc.get_i64("storage_limit_bytes").unwrap_or(0) as u64;
+        let room_creation_limit = doc.get_i64("room_creation_limit").unwrap_or(0) as u64;
+        return ServerSettings { invite_only, invite_code, storage_limit_bytes, room_creation_limit };
     }
 
     // Create default settings
@@ -262,9 +264,11 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         "_id": "global",
         "invite_only": false,
         "invite_code": &code,
+        "storage_limit_bytes": 0_i64,
+        "room_creation_limit": 0_i64,
     };
     let _ = coll.insert_one(default_doc).await;
-    ServerSettings { invite_only: false, invite_code: code }
+    ServerSettings { invite_only: false, invite_code: code, storage_limit_bytes: 0, room_creation_limit: 0 }
 }
 
 pub(crate) fn generate_invite_code() -> String {

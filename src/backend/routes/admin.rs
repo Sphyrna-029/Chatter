@@ -397,7 +397,9 @@ pub(crate) async fn admin_get_settings(
     let settings = state.server_settings.read().await;
     Ok(Json(json!({
         "invite_only": settings.invite_only,
-        "invite_code": settings.invite_code
+        "invite_code": settings.invite_code,
+        "storage_limit_bytes": settings.storage_limit_bytes,
+        "room_creation_limit": settings.room_creation_limit
     })))
 }
 
@@ -409,15 +411,28 @@ pub(crate) async fn admin_update_settings(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     require_admin(&state, &headers).await?;
 
-    let invite_only = body.get("invite_only")
-        .and_then(|v| v.as_bool())
-        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "invite_only (bool) is required"))?;
+    // Build $set doc from whichever fields are present
+    let mut set_doc = mongodb::bson::Document::new();
+
+    if let Some(invite_only) = body.get("invite_only").and_then(|v| v.as_bool()) {
+        set_doc.insert("invite_only", invite_only);
+    }
+    if let Some(storage_limit) = body.get("storage_limit_bytes").and_then(|v| v.as_u64()) {
+        set_doc.insert("storage_limit_bytes", storage_limit as i64);
+    }
+    if let Some(room_limit) = body.get("room_creation_limit").and_then(|v| v.as_u64()) {
+        set_doc.insert("room_creation_limit", room_limit as i64);
+    }
+
+    if set_doc.is_empty() {
+        return Err(error_response(StatusCode::BAD_REQUEST, "No valid fields to update"));
+    }
 
     // Update DB
     let coll = state.db.collection::<mongodb::bson::Document>("server_settings");
     coll.update_one(
         doc! { "_id": "global" },
-        doc! { "$set": { "invite_only": invite_only } },
+        doc! { "$set": set_doc.clone() },
     )
     .await
     .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
@@ -425,10 +440,18 @@ pub(crate) async fn admin_update_settings(
     // Update cache
     {
         let mut settings = state.server_settings.write().await;
-        settings.invite_only = invite_only;
+        if let Ok(val) = set_doc.get_bool("invite_only") {
+            settings.invite_only = val;
+        }
+        if let Ok(val) = set_doc.get_i64("storage_limit_bytes") {
+            settings.storage_limit_bytes = val as u64;
+        }
+        if let Ok(val) = set_doc.get_i64("room_creation_limit") {
+            settings.room_creation_limit = val as u64;
+        }
     }
 
-    Ok(Json(json!({ "invite_only": invite_only })))
+    Ok(Json(json!({ "ok": true })))
 }
 
 /// POST /api/admin/settings/refresh-invite

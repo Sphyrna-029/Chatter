@@ -1,5 +1,5 @@
 use super::super::{
-    constants::MAX_UPLOAD_SIZE,
+    constants::{CHUNK_SIZE, MAX_UPLOAD_SIZE},
     dto::{GifSearchQuery, LinkPreviewQuery},
     helpers::{error_response, extract_token, get_user_from_token},
     state::{AppState, CachedPreview, UploadRecord},
@@ -12,9 +12,55 @@ use axum::{
 };
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
+
+async fn check_storage_quota(
+    state: &AppState,
+    user_id: &str,
+    incoming_size: u64,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let limit = state.server_settings.read().await.storage_limit_bytes;
+    if limit == 0 {
+        return Ok(());
+    }
+
+    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
+    let mut cursor = uploads_coll
+        .find(doc! { "user_id": user_id })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+    let mut current_total: u64 = 0;
+    while let Ok(Some(record)) = cursor.try_next().await {
+        current_total += record.size;
+    }
+
+    if current_total + incoming_size > limit {
+        let used = format_bytes_short(current_total);
+        let max = format_bytes_short(limit);
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Storage quota exceeded (used {} of {})", used, max),
+        ));
+    }
+    Ok(())
+}
+
+fn format_bytes_short(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
 
 pub(crate) async fn upload_file(
     State(state): State<Arc<AppState>>,
@@ -60,8 +106,20 @@ pub(crate) async fn upload_file(
         return error_response(StatusCode::BAD_REQUEST, "No filename provided");
     }
 
+    // Enforce 2 MB limit for font files
+    let ext_lower = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if ext_lower == "ttf" || ext_lower == "otf" {
+        if data.len() > 2 * 1024 * 1024 {
+            return error_response(StatusCode::BAD_REQUEST, "Font file too large (max 2MB)");
+        }
+    }
+
     if data.len() > MAX_UPLOAD_SIZE {
         return error_response(StatusCode::BAD_REQUEST, "File too large (max 500MB)");
+    }
+
+    if let Err(e) = check_storage_quota(&state, &user_id, data.len() as u64).await {
+        return e;
     }
 
     // Generate random folder name
@@ -113,6 +171,292 @@ pub(crate) async fn upload_file(
         url: url.clone(),
         disk_path: path,
         size: data.len() as u64,
+        uploaded_at: chrono::Utc::now().timestamp(),
+    };
+    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
+    let _ = uploads_coll.insert_one(record).await;
+
+    (StatusCode::OK, Json(json!({ "url": url })))
+}
+
+// ---------------------------------------------------------------------------
+// Chunked upload
+// ---------------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+pub(crate) struct ChunkedUploadInitBody {
+    filename: String,
+    #[serde(rename = "fileSize")]
+    file_size: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ChunkMeta {
+    filename: String,
+    file_size: u64,
+    user_id: String,
+    chunk_count: u64,
+}
+
+pub(crate) async fn upload_init(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ChunkedUploadInitBody>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token) {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    if body.file_size == 0 || body.file_size > MAX_UPLOAD_SIZE as u64 {
+        return error_response(StatusCode::BAD_REQUEST, "Invalid file size");
+    }
+
+    if let Err(e) = check_storage_quota(&state, &user_id, body.file_size).await {
+        return e;
+    }
+
+    let filename = body.filename.replace(['/', '\\', '\0'], "_");
+    if filename.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "No filename provided");
+    }
+
+    let chunk_count = (body.file_size + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64;
+
+    // Generate upload ID
+    use rand::Rng;
+    let bytes: [u8; 16] = rand::thread_rng().gen();
+    let upload_id: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+    let chunk_dir = format!("external/.chunks/{}", upload_id);
+    if tokio::fs::create_dir_all(&chunk_dir).await.is_err() {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create chunk dir");
+    }
+
+    // Write metadata sidecar
+    let meta = ChunkMeta {
+        filename,
+        file_size: body.file_size,
+        user_id,
+        chunk_count,
+    };
+    let meta_path = format!("{}/meta.json", chunk_dir);
+    if let Err(_) = tokio::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).await {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write metadata");
+    }
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "uploadId": upload_id,
+            "chunkSize": CHUNK_SIZE,
+        })),
+    )
+}
+
+pub(crate) async fn upload_chunk(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    mut multipart: Multipart,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token) {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let mut upload_id = String::new();
+    let mut chunk_index: Option<u64> = None;
+    let mut chunk_data = None;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or("").to_string();
+        match name.as_str() {
+            "uploadId" => {
+                if let Ok(text) = field.text().await {
+                    upload_id = text;
+                }
+            }
+            "chunkIndex" => {
+                if let Ok(text) = field.text().await {
+                    chunk_index = text.parse().ok();
+                }
+            }
+            "file" => {
+                match field.bytes().await {
+                    Ok(b) => chunk_data = Some(b),
+                    Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read chunk"),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if upload_id.is_empty() || upload_id.len() != 32 || !upload_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
+    }
+    let chunk_index = match chunk_index {
+        Some(i) => i,
+        None => return error_response(StatusCode::BAD_REQUEST, "Missing chunkIndex"),
+    };
+    let chunk_data = match chunk_data {
+        Some(d) => d,
+        None => return error_response(StatusCode::BAD_REQUEST, "Missing file data"),
+    };
+
+    let chunk_dir = format!("external/.chunks/{}", upload_id);
+    let meta_path = format!("{}/meta.json", chunk_dir);
+    let meta_str = match tokio::fs::read_to_string(&meta_path).await {
+        Ok(s) => s,
+        Err(_) => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
+    };
+    let meta: ChunkMeta = match serde_json::from_str(&meta_str) {
+        Ok(m) => m,
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Corrupt metadata"),
+    };
+
+    if meta.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Not your upload");
+    }
+    if chunk_index >= meta.chunk_count {
+        return error_response(StatusCode::BAD_REQUEST, "chunkIndex out of range");
+    }
+
+    let chunk_path = format!("{}/{}", chunk_dir, chunk_index);
+    if tokio::fs::write(&chunk_path, &chunk_data).await.is_err() {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write chunk");
+    }
+
+    (StatusCode::OK, Json(json!({ "received": chunk_index })))
+}
+
+#[derive(serde::Deserialize)]
+pub(crate) struct ChunkedUploadCompleteBody {
+    #[serde(rename = "uploadId")]
+    upload_id: String,
+}
+
+pub(crate) async fn upload_complete(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<ChunkedUploadCompleteBody>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token) {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let upload_id = &body.upload_id;
+    if upload_id.is_empty() || upload_id.len() != 32 || !upload_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
+    }
+
+    let chunk_dir = format!("external/.chunks/{}", upload_id);
+    let meta_path = format!("{}/meta.json", chunk_dir);
+    let meta_str = match tokio::fs::read_to_string(&meta_path).await {
+        Ok(s) => s,
+        Err(_) => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
+    };
+    let meta: ChunkMeta = match serde_json::from_str(&meta_str) {
+        Ok(m) => m,
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Corrupt metadata"),
+    };
+
+    if meta.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Not your upload");
+    }
+
+    // Verify all chunks are present
+    for i in 0..meta.chunk_count {
+        let chunk_path = format!("{}/{}", chunk_dir, i);
+        if !tokio::fs::try_exists(&chunk_path).await.unwrap_or(false) {
+            return error_response(StatusCode::BAD_REQUEST, &format!("Missing chunk {}", i));
+        }
+    }
+
+    // Generate random folder and assemble final file
+    use rand::Rng;
+    let bytes: [u8; 16] = rand::thread_rng().gen();
+    let folder: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+    let dir = format!("external/{}", folder);
+    if tokio::fs::create_dir_all(&dir).await.is_err() {
+        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create directory");
+    }
+
+    let filename = &meta.filename;
+    let path = format!("{}/{}", dir, filename);
+
+    // Concatenate chunks into final file
+    let mut file = match tokio::fs::File::create(&path).await {
+        Ok(f) => f,
+        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create file"),
+    };
+
+    use tokio::io::AsyncWriteExt;
+    let mut total_size: u64 = 0;
+    for i in 0..meta.chunk_count {
+        let chunk_path = format!("{}/{}", chunk_dir, i);
+        let chunk_data = match tokio::fs::read(&chunk_path).await {
+            Ok(d) => d,
+            Err(_) => {
+                let _ = tokio::fs::remove_file(&path).await;
+                return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to read chunk");
+            }
+        };
+        total_size += chunk_data.len() as u64;
+        if file.write_all(&chunk_data).await.is_err() {
+            let _ = tokio::fs::remove_file(&path).await;
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
+        }
+    }
+
+    // Clean up chunk dir
+    let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+
+    // Build URL
+    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    const ENCODE_SET: &AsciiSet = &CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'#')
+        .add(b'?')
+        .add(b'{')
+        .add(b'}');
+    let encoded_filename = utf8_percent_encode(filename, ENCODE_SET).to_string();
+
+    let host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:8000");
+    let scheme = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
+        "http"
+    } else {
+        "https"
+    };
+    let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
+
+    // Track in MongoDB
+    let record = UploadRecord {
+        user_id: user_id.clone(),
+        filename: filename.clone(),
+        url: url.clone(),
+        disk_path: path,
+        size: total_size,
         uploaded_at: chrono::Utc::now().timestamp(),
     };
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");

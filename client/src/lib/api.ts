@@ -511,7 +511,9 @@ export async function apiUpdateTopic(roomId: string, topic: string) {
   return res.json();
 }
 
-export async function apiUploadFile(
+const CLIENT_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
+
+function uploadSingleFile(
   file: File,
   onProgress?: (pct: number) => void
 ): Promise<{ url: string }> {
@@ -540,7 +542,6 @@ export async function apiUploadFile(
           reject(new Error("Invalid response from server"));
         }
       } else if (xhr.status === 401 && _refreshToken) {
-        // Deduplicate concurrent refresh attempts (same guard as authenticatedFetch)
         if (!_refreshPromise) {
           _refreshPromise = apiRefreshToken().finally(() => {
             _refreshPromise = null;
@@ -551,7 +552,6 @@ export async function apiUploadFile(
             reject(new Error("Upload failed - authentication expired"));
             return;
           }
-          // Retry upload with new token
           const retryXhr = new XMLHttpRequest();
           retryXhr.open("POST", "/api/upload");
           if (_accessToken) {
@@ -579,6 +579,98 @@ export async function apiUploadFile(
     xhr.onerror = () => reject(new Error("Upload failed"));
     xhr.send(formData);
   });
+}
+
+function uploadChunkXhr(
+  uploadId: string,
+  chunkIndex: number,
+  blob: Blob,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append("uploadId", uploadId);
+    fd.append("chunkIndex", String(chunkIndex));
+    fd.append("file", blob);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload/chunk");
+    if (_accessToken) {
+      xhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
+    }
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else if (xhr.status === 401 && _refreshToken) {
+        if (!_refreshPromise) {
+          _refreshPromise = apiRefreshToken().finally(() => { _refreshPromise = null; });
+        }
+        _refreshPromise.then((refreshed) => {
+          if (!refreshed) { reject(new Error("Auth expired")); return; }
+          const retry = new XMLHttpRequest();
+          retry.open("POST", "/api/upload/chunk");
+          if (_accessToken) retry.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
+          retry.onload = () => retry.status >= 200 && retry.status < 300 ? resolve() : reject(new Error("Chunk upload failed"));
+          retry.onerror = () => reject(new Error("Chunk upload failed"));
+          retry.send(fd);
+        });
+      } else {
+        reject(new Error("Chunk upload failed"));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Chunk upload failed"));
+    xhr.send(fd);
+  });
+}
+
+async function uploadChunkedFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ url: string }> {
+  // 1. Init
+  const initRes = await authenticatedFetch("/api/upload/init", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, fileSize: file.size }),
+  });
+  if (!initRes.ok) {
+    const err = await initRes.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to init chunked upload");
+  }
+  const { uploadId } = await initRes.json();
+
+  // 2. Upload chunks
+  const totalChunks = Math.ceil(file.size / CLIENT_CHUNK_SIZE);
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CLIENT_CHUNK_SIZE;
+    const end = Math.min(start + CLIENT_CHUNK_SIZE, file.size);
+    const blob = file.slice(start, end);
+    await uploadChunkXhr(uploadId, i, blob);
+    if (onProgress) {
+      onProgress(Math.round(((i + 1) / totalChunks) * 100));
+    }
+  }
+
+  // 3. Complete
+  const completeRes = await authenticatedFetch("/api/upload/complete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uploadId }),
+  });
+  if (!completeRes.ok) {
+    const err = await completeRes.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to complete chunked upload");
+  }
+  return completeRes.json();
+}
+
+export async function apiUploadFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ url: string }> {
+  if (file.size > CLIENT_CHUNK_SIZE) {
+    return uploadChunkedFile(file, onProgress);
+  }
+  return uploadSingleFile(file, onProgress);
 }
 
 // ─── Link previews ──────────────────────────────────────────────────────────
@@ -977,7 +1069,7 @@ export async function apiGetServerInfo(): Promise<{ invite_only: boolean }> {
   return res.json();
 }
 
-export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string }> {
+export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string; storage_limit_bytes: number; room_creation_limit: number }> {
   const res = await authenticatedFetch("/api/admin/settings");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -986,10 +1078,10 @@ export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; inv
   return res.json();
 }
 
-export async function apiAdminUpdateSettings(inviteOnly: boolean): Promise<void> {
+export async function apiAdminUpdateSettings(settings: { invite_only?: boolean; storage_limit_bytes?: number; room_creation_limit?: number }): Promise<void> {
   const res = await authenticatedFetch("/api/admin/settings", {
     method: "PUT",
-    body: JSON.stringify({ invite_only: inviteOnly }),
+    body: JSON.stringify(settings),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);

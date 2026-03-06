@@ -15,6 +15,8 @@ pub(crate) type WsSender = mpsc::UnboundedSender<Message>;
 pub(crate) struct ServerSettings {
     pub(crate) invite_only: bool,
     pub(crate) invite_code: String,
+    pub(crate) storage_limit_bytes: u64, // 0 = unlimited
+    pub(crate) room_creation_limit: u64, // 0 = unlimited
 }
 
 pub struct AppState {
@@ -80,6 +82,8 @@ pub(crate) struct UserRecord {
     pub(crate) is_admin: bool,
     #[serde(default)]
     pub(crate) disabled: bool,
+    #[serde(default)]
+    pub(crate) name_font_url: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

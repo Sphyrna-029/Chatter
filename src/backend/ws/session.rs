@@ -124,11 +124,11 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             up.get(&user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
         };
         // Get avatar/about/banner/display_name from MongoDB
-        let (avatar_url, about, banner_url, display_name) = {
+        let (avatar_url, about, banner_url, display_name, name_font_url) = {
             let users_coll = state.db.collection::<UserRecord>("users");
             match users_coll.find_one(doc! { "_id": &user_id }).await {
-                Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name),
-                _ => (String::new(), String::new(), String::new(), String::new()),
+                Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
+                _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
             }
         };
         let event = json!({
@@ -139,7 +139,8 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             "avatar_url": avatar_url,
             "about": about,
             "banner_url": banner_url,
-            "display_name": display_name
+            "display_name": display_name,
+            "name_font_url": name_font_url
         });
         for rid in user_rooms {
             broadcast_to_room(&state, &rid, &event).await;
@@ -470,7 +471,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     }
                 } else { "active".to_string() }
             };
-            let (avatar_url, about, banner_url, display_name) = get_user_profile(&state, user_id).await;
+            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -486,7 +487,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "avatar_url": avatar_url,
                 "about": about,
                 "banner_url": banner_url,
-                "display_name": display_name
+                "display_name": display_name,
+                "name_font_url": name_font_url
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -521,7 +523,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     (eff, p.custom_status.clone())
                 } else { ("active".to_string(), String::new()) }
             };
-            let (avatar_url, about, banner_url, display_name) = get_user_profile(&state, user_id).await;
+            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -537,7 +539,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "avatar_url": avatar_url,
                 "about": about,
                 "banner_url": banner_url,
-                "display_name": display_name
+                "display_name": display_name,
+                "name_font_url": name_font_url
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -557,6 +560,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
             if let Some(dn) = msg.get("display_name").and_then(|v| v.as_str()) {
                 update_doc.insert("display_name", dn);
+            }
+            if let Some(nfu) = msg.get("name_font_url").and_then(|v| v.as_str()) {
+                update_doc.insert("name_font_url", nfu);
             }
             if !update_doc.is_empty() {
                 let users_coll = state.db.collection::<UserRecord>("users");
@@ -582,7 +588,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
 
             // Read current values for broadcast
-            let (avatar_url, about, banner_url, display_name) = get_user_profile(&state, user_id).await;
+            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
             let custom_status = {
                 let up = state.user_presence.read().await;
                 up.get(user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
@@ -611,7 +617,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "avatar_url": avatar_url,
                 "about": about,
                 "banner_url": banner_url,
-                "display_name": display_name
+                "display_name": display_name,
+                "name_font_url": name_font_url
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -897,11 +904,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 }
 
 /// Helper to get user avatar_url, about, banner_url, and display_name from MongoDB.
-async fn get_user_profile(state: &AppState, user_id: &str) -> (String, String, String, String) {
+async fn get_user_profile(state: &AppState, user_id: &str) -> (String, String, String, String, String) {
     let users_coll = state.db.collection::<UserRecord>("users");
     match users_coll.find_one(doc! { "_id": user_id }).await {
-        Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name),
-        _ => (String::new(), String::new(), String::new(), String::new()),
+        Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
+        _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
     }
 }
 
