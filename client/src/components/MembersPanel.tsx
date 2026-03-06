@@ -4,6 +4,7 @@ import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { ensureFontFace } from "@/lib/fontFace";
 import { UserProfileDialog } from "./UserProfileDialog";
 
 interface MembersPanelProps {
@@ -65,6 +66,11 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           ? roomInfo.mod_name_color
           : undefined;
 
+    const nameFontUrl = presence?.nameFontUrl;
+    if (nameFontUrl) {
+      ensureFontFace(member.userId, nameFontUrl);
+    }
+
     return (
       <div
         key={member.userId}
@@ -101,7 +107,10 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
                 "truncate text-sm block",
                 status === "offline" && "text-muted-foreground"
               )}
-              style={nameColor ? { color: nameColor } : undefined}
+              style={{
+                ...(nameColor ? { color: nameColor } : {}),
+                ...(nameFontUrl ? { fontFamily: `'user-font-${CSS.escape(member.userId)}'` } : {}),
+              }}
             >
               {effectiveName}
             </span>

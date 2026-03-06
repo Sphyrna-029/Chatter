@@ -22,14 +22,7 @@ import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
 
 // ─── Custom name font registration ──────────────────────────────────────────
-const registeredFonts = new Set<string>();
-function ensureFontFace(userId: string, url: string) {
-  if (registeredFonts.has(url)) return;
-  registeredFonts.add(url);
-  const style = document.createElement("style");
-  style.textContent = `@font-face { font-family: 'user-font-${CSS.escape(userId)}'; src: url('${url}'); }`;
-  document.head.appendChild(style);
-}
+import { ensureFontFace } from "@/lib/fontFace";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
