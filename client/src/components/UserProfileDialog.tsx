@@ -325,7 +325,10 @@ export function UserProfileDialog({
       {/* Rest of profile content */}
       <div className="flex flex-col gap-4 px-5 pb-5">
         <div className="text-center space-y-1 w-full">
-          <h2 className="text-lg font-semibold">{presence?.displayName || username}</h2>
+          <h2
+            className="text-lg font-semibold"
+            style={nameFontUrl ? { fontFamily: `'user-font-${CSS.escape(userId)}'` } : undefined}
+          >{presence?.displayName || username}</h2>
           {presence?.displayName && (
             <p className="text-xs text-muted-foreground/70">{username}</p>
           )}
