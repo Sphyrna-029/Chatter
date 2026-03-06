@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, displayUserId } from "@/lib/utils";
+import { ensureFontFace } from "@/lib/fontFace";
 import {
   Dialog,
   DialogContent,
@@ -91,6 +92,9 @@ export function UserProfileDialog({
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [pendingFontFile, setPendingFontFile] = useState<File | null>(null);
   const nameFontUrl = presence?.nameFontUrl || "";
+  if (presence?.nameFontUrl) {
+    ensureFontFace(userId, presence.nameFontUrl);
+  }
   const [activeTab, setActiveTab] = useState("profile");
 
   // My Files state
@@ -508,6 +512,30 @@ export function UserProfileDialog({
             <div className="w-full space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">About Me</label>
               <p className="text-sm text-foreground">{about}</p>
+            </div>
+          )}
+          {presence?.nameFontUrl && (
+            <div className="w-full space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Name Font</label>
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-sm font-semibold flex-1"
+                  style={{ fontFamily: `'user-font-${CSS.escape(userId)}'` }}
+                >
+                  {presence?.displayName || username}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    updateProfile({ nameFontUrl: presence!.nameFontUrl });
+                    onOpenChange(false);
+                  }}
+                >
+                  Steal Font
+                </Button>
+              </div>
             </div>
           )}
         </>
