@@ -319,7 +319,7 @@ export function UserProfileDialog({
       </div>
 
       {/* Rest of profile content */}
-      <div className="flex flex-col items-center gap-4 px-5 pb-5">
+      <div className="flex flex-col gap-4 px-5 pb-5">
         <div className="text-center space-y-1 w-full">
           <h2 className="text-lg font-semibold">{presence?.displayName || username}</h2>
           {presence?.displayName && (
@@ -381,7 +381,7 @@ export function UserProfileDialog({
         </div>
         </>
       ) : (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-2">
           <span className={cn("h-2.5 w-2.5 rounded-full", statusColor(status))} />
           <span className="text-sm">{statusLabel(status)}</span>
         </div>
@@ -514,7 +514,7 @@ export function UserProfileDialog({
       )}
 
       {joinDate && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground text-center">
           Joined{" "}
           {joinDate.toLocaleDateString(undefined, {
             month: "short",
@@ -1146,7 +1146,7 @@ export function UserProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
         "transition-all duration-200 p-0 overflow-hidden",
-        isSelf && activeTab === "files" ? "sm:max-w-[440px]" : "sm:max-w-[340px]"
+        isSelf && activeTab === "files" ? "sm:max-w-[480px]" : "sm:max-w-[400px]"
       )}>
         <DialogHeader className="sr-only">
           <DialogTitle>User Profile</DialogTitle>
