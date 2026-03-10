@@ -79,6 +79,22 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     isYoutubeRef.current = isYoutube;
   }, [isYoutube]);
 
+  // Listen for YouTube player messages (duration, state)
+  useEffect(() => {
+    const handleYtMsg = (e: MessageEvent) => {
+      if (!isYoutubeRef.current) return;
+      try {
+        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+        const dur = data?.info?.duration;
+        if (dur && isFinite(dur) && dur > 0) {
+          setVideoDuration(dur);
+        }
+      } catch {}
+    };
+    window.addEventListener("message", handleYtMsg);
+    return () => window.removeEventListener("message", handleYtMsg);
+  }, []);
+
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
 
@@ -180,15 +196,14 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         ? msg.position_secs + (Date.now() / 1000 - msg.position_updated_at)
         : msg.position_secs;
 
-      // Decide whether to actually seek the player.
-      // Always sync on: new video, play/pause state change, or drift > 3s.
-      // Skip seek on heartbeats where state hasn't changed and we're close enough.
+      // Only seek the player when something meaningful changed.
+      // Heartbeat syncs (same play state, no video change) just update the
+      // progress bar via state — they must not seek or they cause stuttering.
       const iAmHost = state.userId === msg.host_user_id;
       if (!iAmHost || msg.type === "watchparty_video_changed") {
         const isVideoChanged = msg.type === "watchparty_video_changed";
         const playStateChanged = msg.playing !== watchStateRef.current.playing;
-        const drift = Math.abs(compensated - displayPositionRef.current);
-        if (isVideoChanged || playStateChanged || drift > 3) {
+        if (isVideoChanged || playStateChanged) {
           applySync(compensated, msg.playing);
         }
       }
@@ -349,6 +364,12 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   allow="autoplay; encrypted-media"
                   allowFullScreen
                   onLoad={() => {
+                    const win = iframeRef.current?.contentWindow;
+                    // Enable YouTube event delivery so we receive duration info
+                    win?.postMessage(
+                      JSON.stringify({ event: "listening", id: 1, channel: "widget" }),
+                      "*"
+                    );
                     const ws = watchStateRef.current;
                     const compensated = ws.playing
                       ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
