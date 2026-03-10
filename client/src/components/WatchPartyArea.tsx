@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Play, Pause, Film, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { Play, Pause, Film, RefreshCw, Volume2, VolumeX, Crown } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 
 function extractYouTubeId(url: string): string | null {
@@ -48,6 +48,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     hostUserId: "",
   });
   const [urlInput, setUrlInput] = useState("");
+  const [showTransfer, setShowTransfer] = useState(false);
   const [displayPosition, setDisplayPosition] = useState(0);
   const [videoDuration, setVideoDuration] = useState(14400);
   const [volume, setVolume] = useState(() => {
@@ -244,6 +245,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   }, [isHost, watchState.playing, send]);
 
   // Host controls
+  const handleTransferHost = (newHostId: string) => {
+    send({ type: "watchparty_transfer_host", new_host_user_id: newHostId });
+    setShowTransfer(false);
+  };
+
   const handleLoadVideo = () => {
     const url = urlInput.trim();
     if (!url) return;
@@ -511,6 +517,37 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   >
                     Load
                   </Button>
+                  <button
+                    onClick={() => setShowTransfer((v) => !v)}
+                    className="p-1.5 rounded hover:bg-white/10 text-yellow-400 transition-colors cursor-pointer shrink-0"
+                    title="Transfer host"
+                  >
+                    <Crown className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Transfer host panel */}
+              {isHost && showTransfer && (
+                <div className="flex flex-col gap-1 pt-1 border-t border-zinc-700">
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    Promote to host
+                  </span>
+                  {state.voiceMembers
+                    .filter((uid) => uid !== state.userId)
+                    .map((uid) => (
+                      <button
+                        key={uid}
+                        onClick={() => handleTransferHost(uid)}
+                        className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/10 text-left text-xs text-zinc-300 transition-colors cursor-pointer"
+                      >
+                        <Crown className="w-3 h-3 text-yellow-400 shrink-0" />
+                        {state.userPresence[uid]?.displayName || displayUserId(uid)}
+                      </button>
+                    ))}
+                  {state.voiceMembers.filter((uid) => uid !== state.userId).length === 0 && (
+                    <span className="text-[11px] text-zinc-600 px-2">No other users in voice</span>
+                  )}
                 </div>
               )}
             </div>

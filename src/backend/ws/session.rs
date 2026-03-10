@@ -962,6 +962,38 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
         }
+        "watchparty_transfer_host" => {
+            if !room_id.is_empty() {
+                let new_host = msg.get("new_host_user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if !new_host.is_empty() {
+                    let is_host = {
+                        let wp = state.watch_party_rooms.read().await;
+                        wp.get(room_id).map(|s| s.host_user_id == user_id).unwrap_or(false)
+                    };
+                    if is_host {
+                        let (playing, position_secs, position_updated_at, video_url) = {
+                            let mut wp = state.watch_party_rooms.write().await;
+                            if let Some(s) = wp.get_mut(room_id) {
+                                s.host_user_id = new_host.clone();
+                                (s.playing, s.position_secs, s.position_updated_at, s.video_url.clone())
+                            } else {
+                                return;
+                            }
+                        };
+                        let event = json!({
+                            "type": "watchparty_sync",
+                            "room_id": room_id,
+                            "video_url": video_url,
+                            "playing": playing,
+                            "position_secs": position_secs,
+                            "position_updated_at": position_updated_at,
+                            "host_user_id": new_host,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
+                }
+            }
+        }
         "watchparty_request_sync" => {
             if !room_id.is_empty() {
                 let wp = state.watch_party_rooms.read().await;
