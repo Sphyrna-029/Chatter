@@ -138,7 +138,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               type="single"
               value={roomType}
               onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar" | "watchparty"); }}
-              className="w-full rounded-md border border-border p-0.5 bg-muted"
+              className="w-full rounded-md border border-border p-0.5 bg-muted flex-wrap"
             >
               <ToggleGroupItem
                 value="text"
