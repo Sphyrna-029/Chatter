@@ -38,6 +38,7 @@ export interface AppState {
   screenViewers: Record<string, string[]>;
   // UI
   roomMentions: Record<string, number>;
+  roomUnreadCounts: Record<string, number>;
   currentView: "chat" | "voice";
   replyingTo: MatrixMessage | null;
   // Typing

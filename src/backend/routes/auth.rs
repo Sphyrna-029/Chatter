@@ -516,14 +516,15 @@ pub(crate) async fn refresh(
         ));
     }
 
-    // Look up user to include is_admin
+    // Look up user to include is_admin and totp_verified
     let users = state.db.collection::<UserRecord>("users");
     let user = users
         .find_one(doc! { "_id": &user_id })
         .await
         .ok()
         .flatten();
-    let is_admin = user.map(|u| u.is_admin).unwrap_or(false);
+    let is_admin = user.as_ref().map(|u| u.is_admin).unwrap_or(false);
+    let totp_verified = user.as_ref().map(|u| u.totp_verified).unwrap_or(false);
 
     // Issue new token pair
     let new_access = create_access_token(&user_id, &state.jwt_secret);
@@ -533,7 +534,8 @@ pub(crate) async fn refresh(
     Ok(Json(json!({
         "access_token": new_access,
         "refresh_token": new_refresh,
-        "is_admin": is_admin
+        "is_admin": is_admin,
+        "totp_verified": totp_verified
     })))
 }
 
@@ -620,6 +622,28 @@ pub(crate) async fn totp_setup(
         "totp_secret": totp_secret,
         "totp_uri": totp_uri,
         "totp_qr_base64": qr_base64
+    })))
+}
+
+pub(crate) async fn account_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
+
+    Ok(Json(json!({
+        "totp_verified": user.totp_verified
     })))
 }
 

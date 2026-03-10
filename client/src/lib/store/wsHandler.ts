@@ -3,6 +3,23 @@ import type { Action, AppState } from "./types";
 import { apiSync, apiGetPresence } from "../api";
 import { displayUserId } from "@/lib/utils";
 
+async function playReversed(url: string) {
+  try {
+    const ctx = new AudioContext();
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+      audioBuffer.getChannelData(c).reverse();
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(ctx.destination);
+    source.start();
+    source.onended = () => ctx.close();
+  } catch {}
+}
+
 export function createWsMessageHandler(
   dispatch: Dispatch<Action>,
   stateRef: MutableRefObject<AppState>,
@@ -121,6 +138,9 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
+        if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
+          playReversed("/external/vc-join.wav");
+        }
       }
     } else if (msg.type === "voice_user_muted") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;

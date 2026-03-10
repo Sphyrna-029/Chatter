@@ -85,6 +85,7 @@ export async function apiRefreshToken(): Promise<boolean> {
     setAccessToken(data.access_token);
     setRefreshToken(data.refresh_token);
     if (data.is_admin !== undefined) setIsAdmin(data.is_admin);
+    if (data.totp_verified !== undefined) setTotpVerified(data.totp_verified);
     return true;
   } catch {
     return false;
@@ -269,6 +270,15 @@ export async function apiGetRecoveryCodes(totpCode: string) {
     throw new Error(body?.error || "Failed to get recovery codes");
   }
   return res.json() as Promise<{ recovery_codes: string[] }>;
+}
+
+export async function apiGetAccountStatus() {
+  const res = await authenticatedFetch("/api/account/status");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get account status");
+  }
+  return res.json() as Promise<{ totp_verified: boolean }>;
 }
 
 export async function apiLogout() {

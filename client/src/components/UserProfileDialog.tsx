@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
@@ -177,6 +177,15 @@ export function UserProfileDialog({
       fetchUploads();
     }
   }, [activeTab, isSelf, fetchUploads]);
+
+  useEffect(() => {
+    if (activeTab === "account" && isSelf) {
+      apiGetAccountStatus().then((data) => {
+        setTotpVerified(data.totp_verified);
+        dispatch({ type: "SET_TOTP_VERIFIED", payload: data.totp_verified });
+      }).catch(() => {});
+    }
+  }, [activeTab, isSelf]);
 
   const handleDeleteUpload = async (url: string) => {
     setDeletingUrl(url);
