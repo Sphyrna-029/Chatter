@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { AuthImage } from "@/components/AuthImage";
 
 interface RoomGroupDialogProps {
   open: boolean;
@@ -120,7 +121,7 @@ export function RoomGroupDialog({ open, onOpenChange, mode, groupId, groupName }
                         className="h-4 w-4 rounded border-border accent-primary shrink-0"
                       />
                       {info?.icon_url && (
-                        <img src={info.icon_url} alt="" className="h-5 w-5 rounded object-cover" />
+                        <AuthImage src={info.icon_url} alt="" className="h-5 w-5 rounded object-cover" />
                       )}
                       <span className="truncate">{roomName}</span>
                     </label>

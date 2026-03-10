@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { AuthImage } from "@/components/AuthImage";
 import remarkGfm from "remark-gfm";
 import hljs from "highlight.js";
 
@@ -91,8 +92,8 @@ export function ForumMarkdown({ content, className }: ForumMarkdownProps) {
           },
           img({ src, alt }) {
             return (
-              <img
-                src={src}
+              <AuthImage
+                src={src ?? ""}
                 alt={alt || ""}
                 className="max-w-full max-h-96 rounded-md object-contain my-2"
               />

@@ -2,7 +2,8 @@ import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -272,7 +273,7 @@ export function UserProfileDialog({
         onClick={handleBannerClick}
       >
         {bannerPreview ? (
-          <img src={bannerPreview} alt="Profile banner" className="w-full h-full object-cover" />
+          <AuthImage src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-muted to-secondary" />
         )}
@@ -299,7 +300,7 @@ export function UserProfileDialog({
           onClick={handleAvatarClick}
         >
           <Avatar className="h-16 w-16 border-4 border-background">
-            {avatarPreview && <AvatarImage src={avatarPreview} />}
+            <AuthAvatarImage src={avatarPreview} />
             <AvatarFallback className="text-xl bg-secondary">
               {initial}
             </AvatarFallback>
@@ -733,7 +734,7 @@ export function UserProfileDialog({
             >
               {isImageFile(file.filename) ? (
                 <a href={file.url} target="_blank" rel="noopener noreferrer">
-                  <img
+                  <AuthImage
                     src={file.url}
                     alt={file.filename}
                     className="w-full h-24 object-cover"

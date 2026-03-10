@@ -885,6 +885,8 @@ pub(crate) async fn gif_search(
 }
 
 pub(crate) async fn serve_upload(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((folder, filename)): Path<(String, String)>,
 ) -> Response<Body> {
     if folder.contains("..") || filename.contains("..") {
@@ -892,6 +894,23 @@ pub(crate) async fn serve_upload(
             .status(StatusCode::BAD_REQUEST)
             .body(Body::from("Invalid path"))
             .unwrap();
+    }
+
+    // Check if authentication is required for uploads
+    let require_auth = state.server_settings.read().await.require_auth_for_uploads;
+    if require_auth {
+        let token = extract_token(&headers);
+        let authed = match token {
+            Some(t) => get_user_from_token(&state, &t).is_some(),
+            None => false,
+        };
+        if !authed {
+            return Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from("Unauthorized"))
+                .unwrap();
+        }
     }
 
     let path = format!("external/{}/{}", folder, filename);

@@ -2,7 +2,8 @@ import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { AuthImage, AuthAvatarImage } from "./AuthImage";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -235,14 +236,12 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
         </div>
       ))}
       {images.map((url) => (
-        <img
+        <AuthImage
           key={url}
           src={url}
           alt="Image"
-          loading="lazy"
           className="max-w-full max-h-80 rounded-md cursor-pointer"
           onClick={() => setLightbox({ url, type: "image" })}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
       ))}
       {videos.map((url) => (
@@ -274,7 +273,7 @@ const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
         <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none flex items-center justify-center [&>button]:text-white [&>button]:bg-black/50 [&>button]:rounded-full [&>button]:p-1">
           <VisuallyHidden.Root><DialogTitle>Media preview</DialogTitle></VisuallyHidden.Root>
           {lightbox?.type === "image" && (
-            <img src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
+            <AuthImage src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
           )}
           {lightbox?.type === "video" && (
             <video src={lightbox.url} autoPlay controls className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
@@ -437,7 +436,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           <span className="w-8 flex-shrink-0" />
         ) : (
           <Avatar className={cn("h-8 w-8 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
-            {avatarUrl && <AvatarImage src={avatarUrl} alt={sender} />}
+            <AuthAvatarImage src={avatarUrl} />
             <AvatarFallback className="text-xs font-semibold bg-secondary">
               {initial}
             </AvatarFallback>

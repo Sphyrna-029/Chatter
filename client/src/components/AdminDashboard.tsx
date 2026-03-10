@@ -18,7 +18,8 @@ import {
   type AdminRoom,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthAvatarImage } from "@/components/AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, displayUserId } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ export function AdminDashboard() {
   const [inviteCopied, setInviteCopied] = useState(false);
   const [storageLimitMb, setStorageLimitMb] = useState(0);
   const [roomCreationLimit, setRoomCreationLimit] = useState(0);
+  const [requireAuthForUploads, setRequireAuthForUploads] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordUser, setTempPasswordUser] = useState<string | null>(null);
@@ -63,6 +65,7 @@ export function AdminDashboard() {
         setInviteCode(s.invite_code);
         setStorageLimitMb(Math.round(s.storage_limit_bytes / (1024 * 1024)));
         setRoomCreationLimit(s.room_creation_limit);
+        setRequireAuthForUploads(s.require_auth_for_uploads);
       }
     } catch (e: any) {
       console.error("Admin load error:", e.message);
@@ -191,6 +194,7 @@ export function AdminDashboard() {
               inviteCopied={inviteCopied}
               storageLimitMb={storageLimitMb}
               roomCreationLimit={roomCreationLimit}
+              requireAuthForUploads={requireAuthForUploads}
               onToggleInviteOnly={async (val) => {
                 try {
                   await apiAdminUpdateSettings({ invite_only: val });
@@ -224,6 +228,14 @@ export function AdminDashboard() {
                 try {
                   await apiAdminUpdateSettings({ room_creation_limit: val });
                   setRoomCreationLimit(val);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onToggleRequireAuthForUploads={async (val) => {
+                try {
+                  await apiAdminUpdateSettings({ require_auth_for_uploads: val });
+                  setRequireAuthForUploads(val);
                 } catch (e: any) {
                   alert(e.message);
                 }
@@ -307,7 +319,7 @@ function UsersTab({
           )}
         >
           <Avatar className="h-9 w-9 shrink-0">
-            {user.avatar_url && <AvatarImage src={user.avatar_url} />}
+            <AuthAvatarImage src={user.avatar_url} />
             <AvatarFallback className="text-xs">
               {displayUserId(user.user_id).substring(0, 2).toUpperCase()}
             </AvatarFallback>
@@ -411,22 +423,26 @@ function SettingsTab({
   inviteCopied,
   storageLimitMb,
   roomCreationLimit,
+  requireAuthForUploads,
   onToggleInviteOnly,
   onRefreshInvite,
   onCopyInvite,
   onSaveStorageLimit,
   onSaveRoomCreationLimit,
+  onToggleRequireAuthForUploads,
 }: {
   inviteOnly: boolean;
   inviteCode: string;
   inviteCopied: boolean;
   storageLimitMb: number;
   roomCreationLimit: number;
+  requireAuthForUploads: boolean;
   onToggleInviteOnly: (val: boolean) => void;
   onRefreshInvite: () => void;
   onCopyInvite: () => void;
   onSaveStorageLimit: (mb: number) => void;
   onSaveRoomCreationLimit: (val: number) => void;
+  onToggleRequireAuthForUploads: (val: boolean) => void;
 }) {
   const [localLimit, setLocalLimit] = useState(storageLimitMb);
   const limitChanged = localLimit !== storageLimitMb;
@@ -548,6 +564,39 @@ function SettingsTab({
         </div>
         <p className="text-[11px] text-muted-foreground">
           {localRoomLimit === 0 ? "Currently unlimited." : `Each user can create up to ${localRoomLimit} room${localRoomLimit !== 1 ? "s" : ""}.`}
+        </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Require Auth for Uploads</h3>
+            <p className="text-xs text-muted-foreground">
+              When enabled, uploaded files can only be accessed by authenticated users.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={requireAuthForUploads}
+            onClick={() => onToggleRequireAuthForUploads(!requireAuthForUploads)}
+            className={cn(
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0",
+              requireAuthForUploads ? "bg-primary" : "bg-muted"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 transform rounded-full bg-background transition-transform",
+                requireAuthForUploads ? "translate-x-6" : "translate-x-1"
+              )}
+            />
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {requireAuthForUploads
+            ? "Only logged-in users can view uploaded images and files."
+            : "Uploaded files are publicly accessible to anyone with the link."}
         </p>
       </div>
     </div>

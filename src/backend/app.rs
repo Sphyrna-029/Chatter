@@ -255,7 +255,8 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         let invite_code = doc.get_str("invite_code").unwrap_or("").to_string();
         let storage_limit_bytes = doc.get_i64("storage_limit_bytes").unwrap_or(0) as u64;
         let room_creation_limit = doc.get_i64("room_creation_limit").unwrap_or(0) as u64;
-        return ServerSettings { invite_only, invite_code, storage_limit_bytes, room_creation_limit };
+        let require_auth_for_uploads = doc.get_bool("require_auth_for_uploads").unwrap_or(false);
+        return ServerSettings { invite_only, invite_code, storage_limit_bytes, room_creation_limit, require_auth_for_uploads };
     }
 
     // Create default settings
@@ -266,9 +267,10 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         "invite_code": &code,
         "storage_limit_bytes": 0_i64,
         "room_creation_limit": 0_i64,
+        "require_auth_for_uploads": false,
     };
     let _ = coll.insert_one(default_doc).await;
-    ServerSettings { invite_only: false, invite_code: code, storage_limit_bytes: 0, room_creation_limit: 0 }
+    ServerSettings { invite_only: false, invite_code: code, storage_limit_bytes: 0, room_creation_limit: 0, require_auth_for_uploads: false }
 }
 
 pub(crate) fn generate_invite_code() -> String {

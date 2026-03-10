@@ -399,7 +399,8 @@ pub(crate) async fn admin_get_settings(
         "invite_only": settings.invite_only,
         "invite_code": settings.invite_code,
         "storage_limit_bytes": settings.storage_limit_bytes,
-        "room_creation_limit": settings.room_creation_limit
+        "room_creation_limit": settings.room_creation_limit,
+        "require_auth_for_uploads": settings.require_auth_for_uploads
     })))
 }
 
@@ -422,6 +423,9 @@ pub(crate) async fn admin_update_settings(
     }
     if let Some(room_limit) = body.get("room_creation_limit").and_then(|v| v.as_u64()) {
         set_doc.insert("room_creation_limit", room_limit as i64);
+    }
+    if let Some(require_auth) = body.get("require_auth_for_uploads").and_then(|v| v.as_bool()) {
+        set_doc.insert("require_auth_for_uploads", require_auth);
     }
 
     if set_doc.is_empty() {
@@ -448,6 +452,9 @@ pub(crate) async fn admin_update_settings(
         }
         if let Ok(val) = set_doc.get_i64("room_creation_limit") {
             settings.room_creation_limit = val as u64;
+        }
+        if let Ok(val) = set_doc.get_bool("require_auth_for_uploads") {
+            settings.require_auth_for_uploads = val;
         }
     }
 

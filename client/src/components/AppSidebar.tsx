@@ -16,11 +16,13 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthAvatarImage } from "@/components/AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn, displayUserId } from "@/lib/utils";
+import { AuthImage } from "@/components/AuthImage";
 
 interface AppSidebarProps {
   onCreateRoom: () => void;
@@ -144,7 +146,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
         {/* Room icon / initial */}
         {info?.icon_url ? (
-          <img
+          <AuthImage
             src={info.icon_url}
             alt=""
             className="h-10 w-10 rounded-md object-cover"
@@ -270,9 +272,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           >
             <div className="relative shrink-0">
               <Avatar className="h-9 w-9">
-                {state.userId && state.userPresence[state.userId]?.avatarUrl && (
-                  <AvatarImage src={state.userPresence[state.userId].avatarUrl} />
-                )}
+                <AuthAvatarImage src={state.userId ? state.userPresence[state.userId]?.avatarUrl : undefined} />
                 <AvatarFallback className="bg-primary text-primary-foreground text-sm font-bold">
                   {initial}
                 </AvatarFallback>

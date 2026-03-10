@@ -47,6 +47,8 @@ export interface AppState {
   // Admin
   isAdmin: boolean;
   adminDashboardOpen: boolean;
+  // Server settings
+  requireAuthForUploads: boolean;
   // 2FA
   totpVerified: boolean;
   // Room Groups
@@ -91,7 +93,7 @@ export type Action =
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
-  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean; read_only?: boolean } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean }
@@ -99,6 +101,7 @@ export type Action =
   | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } }
   | { type: "SET_IS_ADMIN"; payload: boolean }
   | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean }
+  | { type: "SET_SERVER_SETTINGS"; payload: { requireAuthForUploads: boolean } }
   | { type: "SET_TOTP_VERIFIED"; payload: boolean }
   | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
   | { type: "SET_ROOM_GROUPS"; payload: RoomGroup[] }
@@ -145,6 +148,7 @@ export const initialState: AppState = {
   wsConnected: false,
   isAdmin: false,
   adminDashboardOpen: false,
+  requireAuthForUploads: false,
   totpVerified: false,
   roomGroups: [],
   friends: [],

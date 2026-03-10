@@ -17,6 +17,7 @@ pub(crate) struct ServerSettings {
     pub(crate) invite_code: String,
     pub(crate) storage_limit_bytes: u64, // 0 = unlimited
     pub(crate) room_creation_limit: u64, // 0 = unlimited
+    pub(crate) require_auth_for_uploads: bool,
 }
 
 pub struct AppState {
@@ -109,6 +110,8 @@ pub(crate) struct RoomRecord {
     pub(crate) password_hash: String,
     #[serde(default)]
     pub(crate) room_type: String,
+    #[serde(default)]
+    pub(crate) read_only: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

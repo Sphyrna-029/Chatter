@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { HalftoneBackground } from "@/components/HalftoneBackground";
+import { AuthImage } from "@/components/AuthImage";
 import {
   hasInvalidUsernameChars,
   sanitizeUsernameInput,
@@ -595,7 +596,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
               }}
             >
               {inviteInfo.icon_url ? (
-                <img src={inviteInfo.icon_url} alt="" className="w-full h-full object-cover" />
+                <AuthImage src={inviteInfo.icon_url} alt="" className="w-full h-full object-cover" />
               ) : (
                 inviteInfo.room_name.charAt(0).toUpperCase()
               )}

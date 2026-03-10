@@ -2,6 +2,7 @@ import { useAppContext } from "@/lib/store";
 import type { ForumPost } from "@/lib/api";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
+import { AuthImage } from "@/components/AuthImage";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { displayUserId } from "@/lib/utils";
 
@@ -40,7 +41,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
       {/* Thumbnail */}
       {post.image_url && (
         <div className="shrink-0">
-          <img
+          <AuthImage
             src={post.image_url}
             alt=""
             className="w-24 h-24 object-cover rounded-md"

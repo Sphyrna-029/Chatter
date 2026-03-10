@@ -110,7 +110,7 @@ pub(crate) async fn server_info(
     State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
     let settings = state.server_settings.read().await;
-    Json(json!({ "invite_only": settings.invite_only }))
+    Json(json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads }))
 }
 
 pub(crate) async fn register(

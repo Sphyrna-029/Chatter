@@ -18,6 +18,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, Crosshair, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
+import { AuthImage } from "@/components/AuthImage";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -365,7 +366,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
                 <div className="flex items-center gap-2">
                   <div className="shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden text-xs font-medium">
                     {room.icon_url ? (
-                      <img src={room.icon_url} alt="" className="w-full h-full object-cover" />
+                      <AuthImage src={room.icon_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       room.name.charAt(0).toUpperCase()
                     )}
@@ -452,6 +453,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [deleteConfirmName, setDeleteConfirmName] = useState("");
   const [deleting, setDeleting] = useState(false);
   const [settingsUnlisted, setSettingsUnlisted] = useState(false);
+  const [settingsReadOnly, setSettingsReadOnly] = useState(false);
   const [settingsPassword, setSettingsPassword] = useState("");
   const [showSettingsPassword, setShowSettingsPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
@@ -496,6 +498,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setCopiedCode(null);
       setDeleteConfirmName("");
       setSettingsUnlisted(info.unlisted || false);
+      setSettingsReadOnly(info.read_only || false);
       setSettingsPassword("");
       setShowSettingsPassword(false);
       setWebhooks([]);
@@ -516,7 +519,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   }, [open, roomId]);
 
   const handleSave = async () => {
-    if (!name) return;
+    if (isOwner && !name) return;
     setLoading(true);
     try {
       let iconUrl: string | undefined;
@@ -524,7 +527,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
@@ -534,6 +537,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       const infoAliases = info?.emoji_aliases || {};
       if (JSON.stringify(emojiAliases) !== JSON.stringify(infoAliases)) settings.emoji_aliases = emojiAliases;
       if (settingsUnlisted !== (info?.unlisted || false)) settings.unlisted = settingsUnlisted;
+      if (settingsReadOnly !== (info?.read_only || false)) settings.read_only = settingsReadOnly;
       if (settingsPassword) settings.password = settingsPassword;
       if (Object.keys(settings).length > 0) {
         await updateRoomSettings(roomId, settings);
@@ -709,6 +713,15 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
                 </div>
                 <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
+              </div>
+            )}
+            {(isOwner || isModerator) && (
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label>Read Only</Label>
+                  <p className="text-xs text-muted-foreground">Only owners and moderators can send messages</p>
+                </div>
+                <Switch checked={settingsReadOnly} onCheckedChange={setSettingsReadOnly} />
               </div>
             )}
             {isOwner && (
@@ -1010,7 +1023,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   />
                   <div className="flex items-center gap-2">
                     {webhookAvatarUrl ? (
-                      <img src={webhookAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                      <AuthImage src={webhookAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
                     ) : (
                       <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
                         <WebhookIcon className="w-4 h-4 text-muted-foreground" />
@@ -1095,7 +1108,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
                         >
                           {wh.avatar_url ? (
-                            <img src={wh.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                            <AuthImage src={wh.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
                           ) : (
                             <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center shrink-0">
                               <WebhookIcon className="w-3 h-3 text-muted-foreground" />
@@ -1248,7 +1261,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={!name || loading}>
+          <Button onClick={handleSave} disabled={(isOwner && !name) || loading}>
             {loading ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>

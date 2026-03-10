@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-react";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
+import { AuthImage } from "@/components/AuthImage";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -288,7 +289,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
         <div className="max-w-3xl mx-auto p-4 space-y-4">
           {/* Post image */}
           {post.image_url && (
-            <img
+            <AuthImage
               src={post.image_url}
               alt=""
               className="w-full max-h-96 object-contain rounded-lg bg-muted"
@@ -482,7 +483,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                         <ForumMarkdown content={comment.body} className="text-sm mt-1" />
                       )}
                       {comment.image_url && (
-                        <img
+                        <AuthImage
                           src={comment.image_url}
                           alt=""
                           className="mt-2 max-w-xs max-h-48 object-contain rounded-md"
@@ -503,7 +504,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
         <div className="max-w-3xl mx-auto">
           {commentImage && (
             <div className="relative inline-block mb-2">
-              <img src={commentImage} alt="" className="h-16 rounded-md" />
+              <AuthImage src={commentImage} alt="" className="h-16 rounded-md" />
               <button
                 onClick={() => { setCommentImage(null); setCommentImageFile(null); }}
                 className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 cursor-pointer"

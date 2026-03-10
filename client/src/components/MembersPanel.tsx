@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, Crown, Shield } from "lucide-react";
 import { useAppContext } from "@/lib/store";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthAvatarImage } from "./AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
 import { ensureFontFace } from "@/lib/fontFace";
@@ -85,7 +86,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
       >
         <div className="relative flex-shrink-0">
           <Avatar className="h-7 w-7">
-            {presence?.avatarUrl && <AvatarImage src={presence.avatarUrl} />}
+            <AuthAvatarImage src={presence?.avatarUrl} />
             <AvatarFallback className="text-xs bg-secondary">
               {initial}
             </AvatarFallback>

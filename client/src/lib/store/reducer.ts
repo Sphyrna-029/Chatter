@@ -233,6 +233,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ...(action.payload.emoji_aliases !== undefined && { emoji_aliases: action.payload.emoji_aliases }),
             ...(action.payload.unlisted !== undefined && { unlisted: action.payload.unlisted }),
             ...(action.payload.has_password !== undefined && { has_password: action.payload.has_password }),
+            ...(action.payload.read_only !== undefined && { read_only: action.payload.read_only }),
           },
         },
       };
@@ -281,6 +282,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, isAdmin: action.payload };
     case "SET_ADMIN_DASHBOARD_OPEN":
       return { ...state, adminDashboardOpen: action.payload };
+    case "SET_SERVER_SETTINGS":
+      return { ...state, requireAuthForUploads: action.payload.requireAuthForUploads };
     case "SET_TOTP_VERIFIED":
       return { ...state, totpVerified: action.payload };
     case "SET_ROOM_GROUPS":

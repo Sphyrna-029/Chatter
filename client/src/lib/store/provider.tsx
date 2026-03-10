@@ -58,6 +58,7 @@ import {
   apiRemoveFriend,
   apiBlockUser,
   apiUnblockUser,
+  apiGetServerInfo,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -84,6 +85,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  // Fetch public server settings on mount
+  useEffect(() => {
+    apiGetServerInfo().then((info) => {
+      dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads } });
+    }).catch(() => {});
+  }, []);
 
   // Restore tokens from localStorage on mount
   useEffect(() => {
@@ -320,6 +328,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const roomTypeEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.type"
         );
+        const readOnlyEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.read_only"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -335,6 +346,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           unlisted: unlistedEvent?.content?.unlisted || false,
           has_password: hasPasswordEvent?.content?.has_password || false,
           room_type: roomTypeEvent?.content?.room_type || "text",
+          read_only: readOnlyEvent?.content?.read_only || false,
         };
       } else {
         roomInfoMap[roomId] = {
@@ -630,7 +642,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateRoomSettings = useCallback(
-    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }) => {
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean }) => {
       await apiUpdateRoomSettings(roomId, settings);
     },
     []

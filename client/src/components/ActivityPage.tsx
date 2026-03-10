@@ -3,9 +3,10 @@ import { useAppContext } from "@/lib/store";
 import { apiSync, apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
+import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
 import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown } from "lucide-react";
 
 interface RoomActivity {
@@ -196,7 +197,7 @@ export function ActivityPage() {
                         {/* Room icon */}
                         <span className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-sm font-bold shrink-0 mt-0.5">
                           {info?.icon_url ? (
-                            <img src={info.icon_url} alt="" className="h-9 w-9 rounded-md object-cover" />
+                            <AuthImage src={info.icon_url} alt="" className="h-9 w-9 rounded-md object-cover" />
                           ) : (
                             name.charAt(0).toUpperCase()
                           )}
@@ -324,7 +325,7 @@ export function ActivityPage() {
                       >
                         <div className="relative shrink-0">
                           <Avatar className="h-7 w-7">
-                            {avatarUrl && <AvatarImage src={avatarUrl} />}
+                            <AuthAvatarImage src={avatarUrl} />
                             <AvatarFallback className="text-xs bg-secondary">{initial}</AvatarFallback>
                           </Avatar>
                           <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background ${statusColor(status)}`} />
