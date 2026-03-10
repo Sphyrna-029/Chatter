@@ -88,9 +88,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
 
   // isHost as a ref so the YouTube listener can check it without a stale closure
-  const isHostRef = useRef(false);
-  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
-
   const send = useCallback(
     (msg: object) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -100,7 +97,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     [wsRef, roomId]
   );
 
-  // Listen for YouTube player postMessages to extract video duration
+  // Listen for YouTube player postMessages to extract video duration locally.
+  // Each client (host and viewer) has their own iframe and receives these events
+  // independently — no need to broadcast, which would cause sync spam.
   useEffect(() => {
     const handleYtMsg = (e: MessageEvent) => {
       if (!isYoutubeRef.current) return;
@@ -108,27 +107,14 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
         const dur: unknown = data?.info?.duration;
         if (typeof dur === "number" && isFinite(dur) && dur > 0 && dur !== videoDurationRef.current) {
+          videoDurationRef.current = dur; // update synchronously to prevent duplicate fires
           setVideoDuration(dur);
-          // Host immediately broadcasts the real duration so viewers update too
-          if (isHostRef.current) {
-            const ws = watchStateRef.current;
-            const pos = displayPositionRef.current;
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send(JSON.stringify({
-                type: "watchparty_control",
-                room_id: roomId,
-                playing: ws.playing,
-                position_secs: pos,
-                duration_secs: dur,
-              }));
-            }
-          }
         }
       } catch {}
     };
     window.addEventListener("message", handleYtMsg);
     return () => window.removeEventListener("message", handleYtMsg);
-  }, [roomId, wsRef]);
+  }, []);
 
   const applyVolume = useCallback((vol: number, muted: boolean) => {
     if (isYoutubeRef.current && iframeRef.current) {
@@ -427,19 +413,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   onSeeked={handleVideoSeeked}
                   onLoadedMetadata={() => {
                     const dur = videoRef.current?.duration;
+                    // Both host and viewer receive this independently from their own <video> element
                     if (dur && isFinite(dur)) {
                       setVideoDuration(dur);
-                      // Host immediately broadcasts real duration so viewers update right away
-                      if (isHostRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-                        const ws = watchStateRef.current;
-                        wsRef.current.send(JSON.stringify({
-                          type: "watchparty_control",
-                          room_id: roomId,
-                          playing: ws.playing,
-                          position_secs: displayPositionRef.current,
-                          duration_secs: dur,
-                        }));
-                      }
                     }
                     const ws = watchStateRef.current;
                     const compensated = ws.playing
