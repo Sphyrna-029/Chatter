@@ -143,6 +143,7 @@ export const initialState: AppState = {
   selectedScreenSharer: null,
   screenViewers: {},
   roomMentions: {},
+  roomUnreadCounts: {},
   currentView: "chat",
   replyingTo: null,
   typingUsers: [],
