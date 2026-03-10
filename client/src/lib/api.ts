@@ -278,9 +278,10 @@ export async function apiGetWatchPartyState(roomId: string): Promise<{
   position_secs: number;
   position_updated_at: number;
   host_user_id: string;
+  duration_secs: number;
 }> {
   const res = await authenticatedFetch(`/api/watchparty/${roomId}/state`);
-  if (!res.ok) return { video_url: "", playing: false, position_secs: 0, position_updated_at: 0, host_user_id: "" };
+  if (!res.ok) return { video_url: "", playing: false, position_secs: 0, position_updated_at: 0, host_user_id: "", duration_secs: 0 };
   return res.json();
 }
 
