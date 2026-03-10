@@ -50,7 +50,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const [urlInput, setUrlInput] = useState("");
   const [showTransfer, setShowTransfer] = useState(false);
   const [displayPosition, setDisplayPosition] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(14400);
+  const [videoDuration, setVideoDuration] = useState(0);
   const [volume, setVolume] = useState(() => {
     const saved = localStorage.getItem("watchparty_volume");
     return saved ? parseFloat(saved) : 1.0;
@@ -63,6 +63,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const watchStateRef = useRef(watchState);
   const isYoutubeRef = useRef(false);
   const displayPositionRef = useRef(0);
+  const videoDurationRef = useRef(0);
   const volumeRef = useRef(volume);
   const isMutedRef = useRef(isMuted);
 
@@ -80,24 +81,15 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     isYoutubeRef.current = isYoutube;
   }, [isYoutube]);
 
-  // Listen for YouTube player messages (duration, state)
-  useEffect(() => {
-    const handleYtMsg = (e: MessageEvent) => {
-      if (!isYoutubeRef.current) return;
-      try {
-        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        const dur = data?.info?.duration;
-        if (dur && isFinite(dur) && dur > 0) {
-          setVideoDuration(dur);
-        }
-      } catch {}
-    };
-    window.addEventListener("message", handleYtMsg);
-    return () => window.removeEventListener("message", handleYtMsg);
-  }, []);
+  // Keep videoDurationRef in sync so callbacks can read the latest value
+  useEffect(() => { videoDurationRef.current = videoDuration; }, [videoDuration]);
 
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+
+  // isHost as a ref so the YouTube listener can check it without a stale closure
+  const isHostRef = useRef(false);
+  useEffect(() => { isHostRef.current = isHost; }, [isHost]);
 
   const send = useCallback(
     (msg: object) => {
@@ -107,6 +99,36 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     },
     [wsRef, roomId]
   );
+
+  // Listen for YouTube player postMessages to extract video duration
+  useEffect(() => {
+    const handleYtMsg = (e: MessageEvent) => {
+      if (!isYoutubeRef.current) return;
+      try {
+        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+        const dur: unknown = data?.info?.duration;
+        if (typeof dur === "number" && isFinite(dur) && dur > 0 && dur !== videoDurationRef.current) {
+          setVideoDuration(dur);
+          // Host immediately broadcasts the real duration so viewers update too
+          if (isHostRef.current) {
+            const ws = watchStateRef.current;
+            const pos = displayPositionRef.current;
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+              wsRef.current.send(JSON.stringify({
+                type: "watchparty_control",
+                room_id: roomId,
+                playing: ws.playing,
+                position_secs: pos,
+                duration_secs: dur,
+              }));
+            }
+          }
+        }
+      } catch {}
+    };
+    window.addEventListener("message", handleYtMsg);
+    return () => window.removeEventListener("message", handleYtMsg);
+  }, [roomId, wsRef]);
 
   const applyVolume = useCallback((vol: number, muted: boolean) => {
     if (isYoutubeRef.current && iframeRef.current) {
@@ -246,7 +268,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         type: "watchparty_control",
         playing: true,
         position_secs: displayPositionRef.current,
-        duration_secs: videoDuration > 0 && videoDuration !== 14400 ? videoDuration : undefined,
+        duration_secs: videoDuration > 0 ? videoDuration : undefined,
       });
     }, 5000);
     return () => clearInterval(interval);
@@ -268,7 +290,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const handlePlayPause = () => {
     const pos = displayPositionRef.current;
     const newPlaying = !watchState.playing;
-    send({ type: "watchparty_control", playing: newPlaying, position_secs: pos, duration_secs: videoDuration > 0 && videoDuration !== 14400 ? videoDuration : undefined });
+    send({ type: "watchparty_control", playing: newPlaying, position_secs: pos, duration_secs: videoDuration > 0 ? videoDuration : undefined });
     setWatchState((prev) => ({
       ...prev,
       playing: newPlaying,
@@ -374,7 +396,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   ref={iframeRef}
                   key={ytId}
                   className="w-full h-full"
-                  src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&controls=0&disablekb=1&rel=0&autoplay=0`}
+                  src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&controls=0&disablekb=1&rel=0&autoplay=0&origin=${encodeURIComponent(window.location.origin)}`}
                   allow="autoplay; encrypted-media"
                   allowFullScreen
                   onLoad={() => {
@@ -405,7 +427,20 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   onSeeked={handleVideoSeeked}
                   onLoadedMetadata={() => {
                     const dur = videoRef.current?.duration;
-                    if (dur && isFinite(dur)) setVideoDuration(dur);
+                    if (dur && isFinite(dur)) {
+                      setVideoDuration(dur);
+                      // Host immediately broadcasts real duration so viewers update right away
+                      if (isHostRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+                        const ws = watchStateRef.current;
+                        wsRef.current.send(JSON.stringify({
+                          type: "watchparty_control",
+                          room_id: roomId,
+                          playing: ws.playing,
+                          position_secs: displayPositionRef.current,
+                          duration_secs: dur,
+                        }));
+                      }
+                    }
                     const ws = watchStateRef.current;
                     const compensated = ws.playing
                       ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
@@ -453,7 +488,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     <input
                       type="range"
                       min={0}
-                      max={isYoutube ? 14400 : videoDuration}
+                      max={videoDuration || 14400}
                       step={1}
                       value={Math.max(0, displayPosition)}
                       onChange={handleSeekDrag}
@@ -465,7 +500,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                       <div
                         className="h-full bg-purple-500"
                         style={{
-                          width: `${Math.min(100, (Math.max(0, displayPosition) / (isYoutube ? 14400 : videoDuration)) * 100)}%`,
+                          width: videoDuration > 0 ? `${Math.min(100, (Math.max(0, displayPosition) / videoDuration) * 100)}%` : "0%",
                         }}
                       />
                     </div>
