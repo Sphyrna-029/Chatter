@@ -272,6 +272,18 @@ export async function apiGetRecoveryCodes(totpCode: string) {
   return res.json() as Promise<{ recovery_codes: string[] }>;
 }
 
+export async function apiGetWatchPartyState(roomId: string): Promise<{
+  video_url: string;
+  playing: boolean;
+  position_secs: number;
+  position_updated_at: number;
+  host_user_id: string;
+}> {
+  const res = await authenticatedFetch(`/api/watchparty/${roomId}/state`);
+  if (!res.ok) return { video_url: "", playing: false, position_secs: 0, position_updated_at: 0, host_user_id: "" };
+  return res.json();
+}
+
 export async function apiGetAccountStatus() {
   const res = await authenticatedFetch("/api/account/status");
   if (!res.ok) {

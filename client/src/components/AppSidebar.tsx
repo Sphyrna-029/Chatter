@@ -87,6 +87,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const hasMention = !!state.roomMentions[roomId] && !isActive;
     const isForumRoom = info?.room_type === "forum";
     const isWhiteboardRoom = info?.room_type === "whiteboard";
+    const isWatchPartyRoom = info?.room_type === "watchparty";
     const memberCount = summary?.member_count ?? 0;
     const voiceCount = summary?.voice_count ?? 0;
     const screenShareActive = summary?.screen_share_active ?? false;
@@ -184,6 +185,12 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground">
               <path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/>
               <circle cx="11" cy="11" r="2"/>
+            </svg>
+          )}
+          {isWatchPartyRoom && (
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 text-muted-foreground">
+              <path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/>
+              <path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V4zm15 0a1 1 0 0 0-1-1H2a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z"/>
             </svg>
           )}
           <span className="truncate">{roomName}</span>

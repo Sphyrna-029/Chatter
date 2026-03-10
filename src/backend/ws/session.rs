@@ -898,6 +898,88 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
         }
+        "watchparty_set_video" => {
+            if !room_id.is_empty() {
+                let video_url = msg.get("video_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let is_host = {
+                    let wp = state.watch_party_rooms.read().await;
+                    wp.get(room_id)
+                        .map(|s| s.host_user_id == user_id || s.host_user_id.is_empty() || s.video_url.is_empty())
+                        .unwrap_or(true)
+                };
+                if is_host {
+                    let now = now_secs();
+                    {
+                        let mut wp = state.watch_party_rooms.write().await;
+                        wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
+                            video_url: video_url.clone(),
+                            playing: false,
+                            position_secs: 0.0,
+                            position_updated_at: now,
+                            host_user_id: user_id.to_string(),
+                        });
+                    }
+                    let event = json!({
+                        "type": "watchparty_video_changed",
+                        "room_id": room_id,
+                        "video_url": video_url,
+                        "playing": false,
+                        "position_secs": 0.0,
+                        "position_updated_at": now,
+                        "host_user_id": user_id,
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "watchparty_control" => {
+            if !room_id.is_empty() {
+                let is_host = {
+                    let wp = state.watch_party_rooms.read().await;
+                    wp.get(room_id).map(|s| s.host_user_id == user_id).unwrap_or(false)
+                };
+                if is_host {
+                    let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let position_secs = msg.get("position_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let now = now_secs();
+                    {
+                        let mut wp = state.watch_party_rooms.write().await;
+                        if let Some(s) = wp.get_mut(room_id) {
+                            s.playing = playing;
+                            s.position_secs = position_secs;
+                            s.position_updated_at = now;
+                        }
+                    }
+                    let event = json!({
+                        "type": "watchparty_sync",
+                        "room_id": room_id,
+                        "playing": playing,
+                        "position_secs": position_secs,
+                        "position_updated_at": now,
+                        "host_user_id": user_id,
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "watchparty_request_sync" => {
+            if !room_id.is_empty() {
+                let wp = state.watch_party_rooms.read().await;
+                if let Some(s) = wp.get(room_id) {
+                    let event = json!({
+                        "type": "watchparty_sync",
+                        "room_id": room_id,
+                        "video_url": s.video_url,
+                        "playing": s.playing,
+                        "position_secs": s.position_secs,
+                        "position_updated_at": s.position_updated_at,
+                        "host_user_id": s.host_user_id,
+                    });
+                    drop(wp);
+                    send_to_user(&state, user_id, &event).await;
+                }
+            }
+        }
         "heartbeat" => {}
         _ => {}
     }
@@ -993,6 +1075,44 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
                 "room_id": room_id,
                 "user_id": user_id
             });
+            broadcast_to_room(state, &room_id, &event).await;
+        }
+    }
+
+    // Watch party host transfer
+    let wp_rooms: Vec<String> = {
+        let wp = state.watch_party_rooms.read().await;
+        wp.iter()
+            .filter(|(_, s)| s.host_user_id == user_id)
+            .map(|(rid, _)| rid.clone())
+            .collect()
+    };
+    for room_id in wp_rooms {
+        let new_host = {
+            let rm = state.room_members.read().await;
+            rm.get(&room_id)
+                .and_then(|members| members.iter().find(|uid| uid.as_str() != user_id).cloned())
+        };
+        let event_opt = {
+            let mut wp = state.watch_party_rooms.write().await;
+            if let Some(s) = wp.get_mut(&room_id) {
+                if let Some(ref h) = new_host {
+                    s.host_user_id = h.clone();
+                }
+                Some(json!({
+                    "type": "watchparty_sync",
+                    "room_id": room_id,
+                    "video_url": s.video_url,
+                    "playing": s.playing,
+                    "position_secs": s.position_secs,
+                    "position_updated_at": s.position_updated_at,
+                    "host_user_id": s.host_user_id,
+                }))
+            } else {
+                None
+            }
+        };
+        if let Some(event) = event_opt {
             broadcast_to_room(state, &room_id, &event).await;
         }
     }

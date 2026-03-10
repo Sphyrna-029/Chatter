@@ -47,6 +47,7 @@ pub struct AppState {
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
     pub(crate) tank_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
+    pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
     pub(crate) klipy_api_key: String,
 }
 
@@ -341,6 +342,15 @@ pub(crate) struct Bullet {
 }
 
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
+
+#[derive(Clone)]
+pub(crate) struct WatchPartyState {
+    pub(crate) video_url: String,
+    pub(crate) playing: bool,
+    pub(crate) position_secs: f64,
+    pub(crate) position_updated_at: f64,
+    pub(crate) host_user_id: String,
+}
 
 #[derive(Clone)]
 pub(crate) struct VoiceMemberState {

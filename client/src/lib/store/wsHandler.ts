@@ -279,6 +279,10 @@ export function createWsMessageHandler(
         new CustomEvent(msg.type, { detail: msg })
       );
     }
+    // Watch Party real-time events
+    else if (msg.type === "watchparty_sync" || msg.type === "watchparty_video_changed") {
+      window.dispatchEvent(new CustomEvent(msg.type, { detail: msg }));
+    }
     // Friend events
     else if (msg.type === "friend_request") {
       dispatch({

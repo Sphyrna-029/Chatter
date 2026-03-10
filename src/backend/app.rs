@@ -50,6 +50,7 @@ pub async fn build_state() -> Arc<AppState> {
         link_previews: RwLock::new(HashMap::new()),
         totp_attempts: RwLock::new(HashMap::new()),
         tank_games: RwLock::new(HashMap::new()),
+        watch_party_rooms: RwLock::new(HashMap::new()),
         klipy_api_key,
     })
 }

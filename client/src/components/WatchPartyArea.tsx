@@ -1,0 +1,433 @@
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useAppContext } from "@/lib/store";
+import { apiGetWatchPartyState } from "@/lib/api";
+import { ChatArea } from "./ChatArea";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Play, Pause, Film, RefreshCw } from "lucide-react";
+import { displayUserId } from "@/lib/utils";
+
+function extractYouTubeId(url: string): string | null {
+  const m = url.match(
+    /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&?/\s]+)/
+  );
+  return m ? m[1] : null;
+}
+
+function formatTime(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.floor(secs % 60);
+  if (h > 0)
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+interface WatchState {
+  videoUrl: string;
+  playing: boolean;
+  positionSecs: number;
+  positionUpdatedAt: number;
+  hostUserId: string;
+}
+
+export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
+  const { state, wsRef } = useAppContext();
+  const roomId = state.currentRoomId!;
+
+  const [watchState, setWatchState] = useState<WatchState>({
+    videoUrl: "",
+    playing: false,
+    positionSecs: 0,
+    positionUpdatedAt: 0,
+    hostUserId: "",
+  });
+  const [urlInput, setUrlInput] = useState("");
+  const [displayPosition, setDisplayPosition] = useState(0);
+  const [videoDuration, setVideoDuration] = useState(14400);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const isApplyingSync = useRef(false);
+  const watchStateRef = useRef(watchState);
+  const isYoutubeRef = useRef(false);
+  const displayPositionRef = useRef(0);
+
+  useEffect(() => {
+    watchStateRef.current = watchState;
+  }, [watchState]);
+
+  const isHost =
+    state.userId !== null &&
+    (watchState.hostUserId === "" || watchState.hostUserId === state.userId);
+  const ytId = extractYouTubeId(watchState.videoUrl);
+  const isYoutube = ytId !== null;
+
+  useEffect(() => {
+    isYoutubeRef.current = isYoutube;
+  }, [isYoutube]);
+
+  const send = useCallback(
+    (msg: object) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ ...msg, room_id: roomId }));
+      }
+    },
+    [wsRef, roomId]
+  );
+
+  const applySync = useCallback((positionSecs: number, playing: boolean) => {
+    isApplyingSync.current = true;
+    if (isYoutubeRef.current && iframeRef.current) {
+      const win = iframeRef.current.contentWindow;
+      win?.postMessage(
+        JSON.stringify({ event: "command", func: "seekTo", args: [positionSecs, true] }),
+        "*"
+      );
+      win?.postMessage(
+        JSON.stringify({ event: "command", func: playing ? "playVideo" : "pauseVideo", args: "" }),
+        "*"
+      );
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = positionSecs;
+      if (playing) {
+        videoRef.current.play().catch(() => {});
+      } else {
+        videoRef.current.pause();
+      }
+    }
+    setDisplayPosition(positionSecs);
+    displayPositionRef.current = positionSecs;
+    setTimeout(() => {
+      isApplyingSync.current = false;
+    }, 400);
+  }, []);
+
+  // Fetch state on mount and request sync
+  useEffect(() => {
+    setWatchState({ videoUrl: "", playing: false, positionSecs: 0, positionUpdatedAt: 0, hostUserId: "" });
+    setDisplayPosition(0);
+    displayPositionRef.current = 0;
+
+    apiGetWatchPartyState(roomId).then((data) => {
+      if (data.video_url) {
+        const now = Date.now() / 1000;
+        const compensated = data.playing
+          ? data.position_secs + (now - data.position_updated_at)
+          : data.position_secs;
+        setWatchState({
+          videoUrl: data.video_url,
+          playing: data.playing,
+          positionSecs: data.position_secs,
+          positionUpdatedAt: data.position_updated_at,
+          hostUserId: data.host_user_id,
+        });
+        setDisplayPosition(compensated);
+        displayPositionRef.current = compensated;
+      }
+    }).catch(() => {});
+
+    send({ type: "watchparty_request_sync" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
+  // Listen for WS sync events
+  useEffect(() => {
+    const handle = (e: Event) => {
+      const msg = (e as CustomEvent).detail;
+      if (msg.room_id !== roomId) return;
+
+      const newState: WatchState = {
+        videoUrl: msg.video_url !== undefined ? msg.video_url : watchStateRef.current.videoUrl,
+        playing: msg.playing,
+        positionSecs: msg.position_secs,
+        positionUpdatedAt: msg.position_updated_at,
+        hostUserId: msg.host_user_id,
+      };
+      setWatchState(newState);
+
+      const compensated = msg.playing
+        ? msg.position_secs + (Date.now() / 1000 - msg.position_updated_at)
+        : msg.position_secs;
+
+      // Viewers always sync; host only syncs on video_changed (new URL loaded)
+      const iAmHost = state.userId === msg.host_user_id;
+      if (!iAmHost || msg.type === "watchparty_video_changed") {
+        applySync(compensated, msg.playing);
+      }
+    };
+
+    window.addEventListener("watchparty_sync", handle);
+    window.addEventListener("watchparty_video_changed", handle);
+    return () => {
+      window.removeEventListener("watchparty_sync", handle);
+      window.removeEventListener("watchparty_video_changed", handle);
+    };
+  }, [roomId, state.userId, applySync]);
+
+  // Animate progress bar while playing
+  useEffect(() => {
+    if (!watchState.playing) return;
+    const startPos = watchState.positionSecs;
+    const startTime = watchState.positionUpdatedAt;
+    const interval = setInterval(() => {
+      const pos = startPos + (Date.now() / 1000 - startTime);
+      setDisplayPosition(pos);
+      displayPositionRef.current = pos;
+    }, 500);
+    return () => clearInterval(interval);
+  }, [watchState.playing, watchState.positionSecs, watchState.positionUpdatedAt]);
+
+  // Host heartbeat — broadcast position every 5s while playing
+  useEffect(() => {
+    if (!isHost || !watchState.playing) return;
+    const interval = setInterval(() => {
+      send({
+        type: "watchparty_control",
+        playing: true,
+        position_secs: displayPositionRef.current,
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [isHost, watchState.playing, send]);
+
+  // Host controls
+  const handleLoadVideo = () => {
+    const url = urlInput.trim();
+    if (!url) return;
+    send({ type: "watchparty_set_video", video_url: url });
+    setUrlInput("");
+  };
+
+  const handlePlayPause = () => {
+    const pos = displayPositionRef.current;
+    const newPlaying = !watchState.playing;
+    send({ type: "watchparty_control", playing: newPlaying, position_secs: pos });
+    setWatchState((prev) => ({
+      ...prev,
+      playing: newPlaying,
+      positionSecs: pos,
+      positionUpdatedAt: Date.now() / 1000,
+    }));
+    applySync(pos, newPlaying);
+  };
+
+  const handleSeekDrag = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const pos = parseFloat(e.target.value);
+    setDisplayPosition(pos);
+    displayPositionRef.current = pos;
+  };
+
+  const handleSeekCommit = (e: React.PointerEvent<HTMLInputElement>) => {
+    const pos = parseFloat(e.currentTarget.value);
+    displayPositionRef.current = pos;
+    const playing = watchStateRef.current.playing;
+    send({ type: "watchparty_control", playing, position_secs: pos });
+    setWatchState((prev) => ({
+      ...prev,
+      positionSecs: pos,
+      positionUpdatedAt: Date.now() / 1000,
+    }));
+    applySync(pos, playing);
+  };
+
+  // Direct video event handlers (host only)
+  const handleVideoPlay = useCallback(() => {
+    if (!isHost || isApplyingSync.current) return;
+    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
+    send({ type: "watchparty_control", playing: true, position_secs: pos });
+    setWatchState((prev) => ({
+      ...prev,
+      playing: true,
+      positionSecs: pos,
+      positionUpdatedAt: Date.now() / 1000,
+    }));
+  }, [isHost, send]);
+
+  const handleVideoPause = useCallback(() => {
+    if (!isHost || isApplyingSync.current) return;
+    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
+    send({ type: "watchparty_control", playing: false, position_secs: pos });
+    setWatchState((prev) => ({ ...prev, playing: false, positionSecs: pos }));
+  }, [isHost, send]);
+
+  const handleVideoSeeked = useCallback(() => {
+    if (!isHost || isApplyingSync.current) return;
+    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
+    displayPositionRef.current = pos;
+    setDisplayPosition(pos);
+    send({
+      type: "watchparty_control",
+      playing: watchStateRef.current.playing,
+      position_secs: pos,
+    });
+  }, [isHost, send]);
+
+  const hostName = watchState.hostUserId
+    ? state.userPresence[watchState.hostUserId]?.displayName ||
+      displayUserId(watchState.hostUserId)
+    : null;
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <ResizablePanelGroup orientation="vertical" className="flex-1">
+        <ResizablePanel defaultSize={65} minSize={20}>
+          <div className="h-full flex flex-col bg-black">
+            {/* Video */}
+            <div className="flex-1 relative flex items-center justify-center min-h-0 overflow-hidden">
+              {!watchState.videoUrl ? (
+                <div className="flex flex-col items-center gap-3 text-muted-foreground select-none">
+                  <Film className="w-12 h-12 opacity-20" />
+                  <p className="text-sm opacity-60">No video loaded</p>
+                  {isHost && (
+                    <p className="text-xs opacity-40">
+                      Paste a YouTube or direct video URL below
+                    </p>
+                  )}
+                </div>
+              ) : isYoutube ? (
+                <iframe
+                  ref={iframeRef}
+                  key={ytId}
+                  className="w-full h-full"
+                  src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&controls=0&disablekb=1&rel=0&autoplay=0`}
+                  allow="autoplay; encrypted-media"
+                  allowFullScreen
+                  onLoad={() => {
+                    const ws = watchStateRef.current;
+                    const compensated = ws.playing
+                      ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
+                      : ws.positionSecs;
+                    setTimeout(() => applySync(compensated, ws.playing), 600);
+                  }}
+                />
+              ) : (
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-contain"
+                  src={watchState.videoUrl}
+                  controls={false}
+                  onPlay={handleVideoPlay}
+                  onPause={handleVideoPause}
+                  onSeeked={handleVideoSeeked}
+                  onLoadedMetadata={() => {
+                    const dur = videoRef.current?.duration;
+                    if (dur && isFinite(dur)) setVideoDuration(dur);
+                    const ws = watchStateRef.current;
+                    const compensated = ws.playing
+                      ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
+                      : ws.positionSecs;
+                    applySync(compensated, ws.playing);
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Controls bar */}
+            <div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-900 border-t border-border shrink-0">
+              {/* Host info row */}
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>
+                  {hostName ? (
+                    <>
+                      <span className="opacity-60">Host: </span>
+                      <span className="font-medium text-zinc-300">{hostName}</span>
+                    </>
+                  ) : (
+                    <span className="opacity-40">No host yet</span>
+                  )}
+                </span>
+                {!isHost && (
+                  <button
+                    className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                    onClick={() => send({ type: "watchparty_request_sync" })}
+                    title="Request sync from host"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Sync
+                  </button>
+                )}
+              </div>
+
+              {/* Progress bar */}
+              {watchState.videoUrl && (
+                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <span className="shrink-0 tabular-nums w-10 text-right">
+                    {formatTime(Math.max(0, displayPosition))}
+                  </span>
+                  {isHost ? (
+                    <input
+                      type="range"
+                      min={0}
+                      max={isYoutube ? 14400 : videoDuration}
+                      step={1}
+                      value={Math.max(0, displayPosition)}
+                      onChange={handleSeekDrag}
+                      onPointerUp={handleSeekCommit}
+                      className="flex-1 accent-purple-500 cursor-pointer h-1"
+                    />
+                  ) : (
+                    <div className="flex-1 h-1 bg-zinc-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500"
+                        style={{
+                          width: `${Math.min(100, (Math.max(0, displayPosition) / (isYoutube ? 14400 : videoDuration)) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Host action row */}
+              {isHost && (
+                <div className="flex items-center gap-2">
+                  {watchState.videoUrl && (
+                    <button
+                      onClick={handlePlayPause}
+                      className="p-1.5 rounded hover:bg-white/10 text-white transition-colors cursor-pointer shrink-0"
+                    >
+                      {watchState.playing ? (
+                        <Pause className="w-4 h-4" />
+                      ) : (
+                        <Play className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                  <Input
+                    className="flex-1 h-7 text-xs bg-zinc-800 border-zinc-700 placeholder:text-zinc-500"
+                    placeholder="YouTube URL or direct video URL…"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleLoadVideo()}
+                  />
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs shrink-0"
+                    onClick={handleLoadVideo}
+                    disabled={!urlInput.trim()}
+                  >
+                    Load
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
+
+        <ResizablePanel defaultSize={35} minSize={15}>
+          <div className="h-full flex flex-col min-h-0">
+            <ChatArea onJoinVoice={onJoinVoice} />
+          </div>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
+  );
+}
