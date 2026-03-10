@@ -34,6 +34,7 @@ export function VoiceSettingsDialog({
     accent: "#e94560",
     primary: "#eaeaea",
   });
+  const [copiedThemeId, setCopiedThemeId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importJson, setImportJson] = useState("");
   const [importError, setImportError] = useState("");
@@ -445,12 +446,17 @@ export function VoiceSettingsDialog({
                         </button>
                         <button
                           className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white hover:bg-black/80"
-                          onClick={() => {
+                          onClick={async () => {
                             const json = exportTheme(theme.id);
-                            if (json) navigator.clipboard.writeText(json);
+                            if (!json) return;
+                            try {
+                              await navigator.clipboard.writeText(json);
+                              setCopiedThemeId(theme.id);
+                              setTimeout(() => setCopiedThemeId(null), 2000);
+                            } catch {}
                           }}
                         >
-                          Copy
+                          {copiedThemeId === theme.id ? "Copied!" : "Copy"}
                         </button>
                         <button
                           className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-black/80"
@@ -586,12 +592,17 @@ export function VoiceSettingsDialog({
                     variant="outline"
                     size="sm"
                     className="flex-1"
-                    onClick={() => {
+                    onClick={async () => {
                       const json = exportTheme(themeId);
-                      if (json) navigator.clipboard.writeText(json);
+                      if (!json) return;
+                      try {
+                        await navigator.clipboard.writeText(json);
+                        setCopiedThemeId(themeId);
+                        setTimeout(() => setCopiedThemeId(null), 2000);
+                      } catch {}
                     }}
                   >
-                    Export Current
+                    {copiedThemeId === themeId ? "Copied!" : "Export Current"}
                   </Button>
                 )}
               </div>
