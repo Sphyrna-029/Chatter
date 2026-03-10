@@ -533,20 +533,20 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
                     Promote to host
                   </span>
-                  {state.voiceMembers
-                    .filter((uid) => uid !== state.userId)
-                    .map((uid) => (
+                  {state.roomMembers
+                    .filter((m) => m.userId !== state.userId)
+                    .map((m) => (
                       <button
-                        key={uid}
-                        onClick={() => handleTransferHost(uid)}
+                        key={m.userId}
+                        onClick={() => handleTransferHost(m.userId)}
                         className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/10 text-left text-xs text-zinc-300 transition-colors cursor-pointer"
                       >
                         <Crown className="w-3 h-3 text-yellow-400 shrink-0" />
-                        {state.userPresence[uid]?.displayName || displayUserId(uid)}
+                        {m.displayName || displayUserId(m.userId)}
                       </button>
                     ))}
-                  {state.voiceMembers.filter((uid) => uid !== state.userId).length === 0 && (
-                    <span className="text-[11px] text-zinc-600 px-2">No other users in voice</span>
+                  {state.roomMembers.filter((m) => m.userId !== state.userId).length === 0 && (
+                    <span className="text-[11px] text-zinc-600 px-2">No other members in room</span>
                   )}
                 </div>
               )}
