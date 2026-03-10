@@ -157,16 +157,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // WebSocket connection — uses stateRef so the closure never goes stale
-  const connectWebSocket = useCallback(() => {
-    if (!stateRef.current.accessToken) return;
+  // WebSocket connection — refreshes expired token before connecting
+  const connectWebSocket = useCallback(async () => {
+    let token = getAccessToken();
+    if (!token) return;
+
+    // Refresh the token if it has expired (access tokens live only 15 min)
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.exp * 1000 <= Date.now()) {
+        const ok = await apiRefreshToken();
+        if (!ok) {
+          dispatch({ type: "LOGOUT" });
+          return;
+        }
+        token = getAccessToken();
+        if (!token) return;
+      }
+    } catch {
+      // Malformed token — attempt connection anyway and let the server reject it
+    }
+
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ access_token: stateRef.current.accessToken }));
+      // Use getAccessToken() in case another refresh happened between now and above
+      ws.send(JSON.stringify({ access_token: getAccessToken() ?? token }));
       dispatch({ type: "SET_WS_CONNECTED", payload: true });
     };
 
@@ -182,7 +201,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_WS_CONNECTED", payload: false });
       setTimeout(connectWebSocket, 3000);
     };
-  }, []); // stateRef is always current — no state dependency needed
+  }, []); // getAccessToken / apiRefreshToken are module-level, no deps needed
 
   // Update document title with total unread notification count
   useEffect(() => {
@@ -192,7 +211,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Connect WS when logged in
   useEffect(() => {
-    if (state.accessToken && !wsRef.current) {
+    if (state.accessToken && !wsRef.current && getAccessToken()) {
       connectWebSocket();
     }
     return () => {
