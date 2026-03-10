@@ -120,9 +120,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       );
     } else if (videoRef.current) {
       videoRef.current.currentTime = positionSecs;
-      if (playing) {
+      if (playing && videoRef.current.paused) {
         videoRef.current.play().catch(() => {});
-      } else {
+      } else if (!playing && !videoRef.current.paused) {
         videoRef.current.pause();
       }
     }
@@ -180,10 +180,17 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         ? msg.position_secs + (Date.now() / 1000 - msg.position_updated_at)
         : msg.position_secs;
 
-      // Viewers always sync; host only syncs on video_changed (new URL loaded)
+      // Decide whether to actually seek the player.
+      // Always sync on: new video, play/pause state change, or drift > 3s.
+      // Skip seek on heartbeats where state hasn't changed and we're close enough.
       const iAmHost = state.userId === msg.host_user_id;
       if (!iAmHost || msg.type === "watchparty_video_changed") {
-        applySync(compensated, msg.playing);
+        const isVideoChanged = msg.type === "watchparty_video_changed";
+        const playStateChanged = msg.playing !== watchStateRef.current.playing;
+        const drift = Math.abs(compensated - displayPositionRef.current);
+        if (isVideoChanged || playStateChanged || drift > 3) {
+          applySync(compensated, msg.playing);
+        }
       }
     };
 
