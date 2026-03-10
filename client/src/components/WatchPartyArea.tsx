@@ -97,25 +97,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     [wsRef, roomId]
   );
 
-  // Listen for YouTube player postMessages to extract video duration locally.
-  // Each client (host and viewer) has their own iframe and receives these events
-  // independently — no need to broadcast, which would cause sync spam.
-  useEffect(() => {
-    const handleYtMsg = (e: MessageEvent) => {
-      if (!isYoutubeRef.current) return;
-      try {
-        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        const dur: unknown = data?.info?.duration;
-        if (typeof dur === "number" && isFinite(dur) && dur > 0 && dur !== videoDurationRef.current) {
-          videoDurationRef.current = dur; // update synchronously to prevent duplicate fires
-          setVideoDuration(dur);
-        }
-      } catch {}
-    };
-    window.addEventListener("message", handleYtMsg);
-    return () => window.removeEventListener("message", handleYtMsg);
-  }, []);
-
   const applyVolume = useCallback((vol: number, muted: boolean) => {
     if (isYoutubeRef.current && iframeRef.current) {
       const win = iframeRef.current.contentWindow;
@@ -130,6 +111,29 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       videoRef.current.muted = muted;
     }
   }, []);
+
+  // Listen for YouTube player postMessages: duration detection and onReady volume restore.
+  // Each client has their own iframe so these fire independently — no broadcasting needed.
+  useEffect(() => {
+    const handleYtMsg = (e: MessageEvent) => {
+      if (!isYoutubeRef.current) return;
+      try {
+        const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
+        // Restore volume as soon as the player signals it's ready to accept commands
+        if (data?.event === "onReady") {
+          applyVolume(volumeRef.current, isMutedRef.current);
+        }
+        // Duration detection
+        const dur: unknown = data?.info?.duration;
+        if (typeof dur === "number" && isFinite(dur) && dur > 0 && dur !== videoDurationRef.current) {
+          videoDurationRef.current = dur;
+          setVideoDuration(dur);
+        }
+      } catch {}
+    };
+    window.addEventListener("message", handleYtMsg);
+    return () => window.removeEventListener("message", handleYtMsg);
+  }, [applyVolume]);
 
   const applySync = useCallback((positionSecs: number, playing: boolean) => {
     isApplyingSync.current = true;
