@@ -90,6 +90,7 @@ pub(crate) async fn create_room(
                     unlisted: false,
                     password_hash: String::new(),
                     room_type: String::new(),
+                    read_only: false,
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -241,6 +242,7 @@ pub(crate) async fn create_room(
         unlisted: req.unlisted.unwrap_or(false),
         password_hash,
         room_type: req.room_type.unwrap_or_default(),
+        read_only: false,
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -647,11 +649,33 @@ pub(crate) async fn update_room_settings(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    if room.creator != user_id {
+    let caller_role = get_user_role(&state, &room_id, &user_id).await;
+    let is_owner = room.creator == user_id;
+    let is_mod = caller_role == "moderator";
+
+    if !is_owner && !is_mod {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only the room creator can edit settings",
+            "Only the room owner or moderators can edit settings",
         ));
+    }
+
+    // Moderators may only toggle read_only; any other field requires owner
+    if is_mod && !is_owner {
+        let has_non_read_only = req.name.is_some()
+            || req.icon_url.is_some()
+            || req.tags.is_some()
+            || req.custom_emojis.is_some()
+            || req.emoji_aliases.is_some()
+            || req.unlisted.is_some()
+            || req.password.is_some()
+            || req.remove_password.is_some();
+        if has_non_read_only {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Moderators can only change the read-only setting",
+            ));
+        }
     }
 
     {
@@ -717,6 +741,10 @@ pub(crate) async fn update_room_settings(
             set_doc.insert("password_hash", hash_password(password));
             content.insert("has_password".to_string(), json!(true));
         }
+    }
+    if let Some(read_only) = req.read_only {
+        set_doc.insert("read_only", read_only);
+        content.insert("read_only".to_string(), json!(read_only));
     }
 
     if !set_doc.is_empty() {

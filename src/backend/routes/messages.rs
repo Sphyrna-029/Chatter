@@ -29,15 +29,12 @@ pub(crate) async fn send_message(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    if rooms_coll
+    let room = rooms_coll
         .find_one(doc! { "_id": &room_id })
         .await
         .ok()
         .flatten()
-        .is_none()
-    {
-        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
-    }
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
     {
         let rm = state.room_members.read().await;
@@ -49,6 +46,16 @@ pub(crate) async fn send_message(
             return Err(error_response(
                 StatusCode::FORBIDDEN,
                 "Not a member of this room",
+            ));
+        }
+    }
+
+    if room.read_only {
+        let role = get_user_role(&state, &room_id, &user_id).await;
+        if role != "owner" && role != "moderator" {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "This room is read-only",
             ));
         }
     }

@@ -223,6 +223,12 @@ pub(crate) async fn sync(
                 "content": {"room_type": if room_data.room_type.is_empty() { "text" } else { &room_data.room_type }},
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.read_only",
+                "state_key": "",
+                "content": {"read_only": room_data.read_only},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

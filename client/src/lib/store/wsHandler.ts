@@ -187,6 +187,7 @@ export function createWsMessageHandler(
           emoji_aliases: msg.content?.emoji_aliases,
           unlisted: msg.content?.unlisted,
           has_password: msg.content?.has_password,
+          read_only: msg.content?.read_only,
         },
       });
     }

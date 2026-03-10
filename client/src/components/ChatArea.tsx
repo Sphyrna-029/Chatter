@@ -1100,7 +1100,19 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       {/* Input */}
       {cliMode ? (
         <CommandBar onClose={() => setCliMode(false)} />
-      ) : (
+      ) : (() => {
+        const currentRoomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
+        const myMember = state.roomMembers.find((m) => m.userId === state.userId);
+        const myRole = myMember?.role || "member";
+        const isReadOnlyForMe = currentRoomInfo?.read_only && myRole === "member";
+        if (isReadOnlyForMe) {
+          return (
+            <div className="border-t p-3 flex items-center justify-center text-sm text-muted-foreground">
+              This room is read-only. Only owners and moderators can send messages.
+            </div>
+          );
+        }
+        return (
         <div className="border-t p-3">
           {/* Staged file previews */}
           {pendingFiles.length > 0 && (
@@ -1347,7 +1359,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </Button>
           </div>
         </div>
-      )}
+        );
+      })()}
       <Dialog open={uploading}>
         <DialogContent
           className="sm:max-w-[300px]"
