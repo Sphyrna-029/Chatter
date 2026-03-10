@@ -917,6 +917,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             position_secs: 0.0,
                             position_updated_at: now,
                             host_user_id: user_id.to_string(),
+                            duration_secs: 0.0,
                         });
                     }
                     let event = json!({
@@ -927,6 +928,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "position_secs": 0.0,
                         "position_updated_at": now,
                         "host_user_id": user_id,
+                        "duration_secs": 0.0,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
                 }
@@ -941,6 +943,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 if is_host {
                     let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
                     let position_secs = msg.get("position_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let duration_secs = msg.get("duration_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     let now = now_secs();
                     {
                         let mut wp = state.watch_party_rooms.write().await;
@@ -948,8 +951,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             s.playing = playing;
                             s.position_secs = position_secs;
                             s.position_updated_at = now;
+                            if duration_secs > 0.0 {
+                                s.duration_secs = duration_secs;
+                            }
                         }
                     }
+                    let stored_duration = {
+                        let wp = state.watch_party_rooms.read().await;
+                        wp.get(room_id).map(|s| s.duration_secs).unwrap_or(0.0)
+                    };
                     let event = json!({
                         "type": "watchparty_sync",
                         "room_id": room_id,
@@ -957,6 +967,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "position_secs": position_secs,
                         "position_updated_at": now,
                         "host_user_id": user_id,
+                        "duration_secs": stored_duration,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
                 }
@@ -971,11 +982,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         wp.get(room_id).map(|s| s.host_user_id == user_id).unwrap_or(false)
                     };
                     if is_host {
-                        let (playing, position_secs, position_updated_at, video_url) = {
+                        let (playing, position_secs, position_updated_at, video_url, duration_secs) = {
                             let mut wp = state.watch_party_rooms.write().await;
                             if let Some(s) = wp.get_mut(room_id) {
                                 s.host_user_id = new_host.clone();
-                                (s.playing, s.position_secs, s.position_updated_at, s.video_url.clone())
+                                (s.playing, s.position_secs, s.position_updated_at, s.video_url.clone(), s.duration_secs)
                             } else {
                                 return;
                             }
@@ -988,6 +999,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             "position_secs": position_secs,
                             "position_updated_at": position_updated_at,
                             "host_user_id": new_host,
+                            "duration_secs": duration_secs,
                         });
                         broadcast_to_room(&state, room_id, &event).await;
                     }
@@ -1006,6 +1018,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "position_secs": s.position_secs,
                         "position_updated_at": s.position_updated_at,
                         "host_user_id": s.host_user_id,
+                        "duration_secs": s.duration_secs,
                     });
                     drop(wp);
                     send_to_user(&state, user_id, &event).await;
@@ -1139,6 +1152,7 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
                     "position_secs": s.position_secs,
                     "position_updated_at": s.position_updated_at,
                     "host_user_id": s.host_user_id,
+                    "duration_secs": s.duration_secs,
                 }))
             } else {
                 None

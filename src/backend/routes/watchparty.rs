@@ -28,6 +28,7 @@ pub(crate) async fn get_watchparty_state(
             "position_secs": s.position_secs,
             "position_updated_at": s.position_updated_at,
             "host_user_id": s.host_user_id,
+            "duration_secs": s.duration_secs,
         })))
     } else {
         Ok(Json(json!({
@@ -36,6 +37,7 @@ pub(crate) async fn get_watchparty_state(
             "position_secs": 0.0,
             "position_updated_at": 0.0,
             "host_user_id": "",
+            "duration_secs": 0.0,
         })))
     }
 }

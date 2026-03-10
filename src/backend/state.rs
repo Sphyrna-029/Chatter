@@ -350,6 +350,7 @@ pub(crate) struct WatchPartyState {
     pub(crate) position_secs: f64,
     pub(crate) position_updated_at: f64,
     pub(crate) host_user_id: String,
+    pub(crate) duration_secs: f64,
 }
 
 #[derive(Clone)]

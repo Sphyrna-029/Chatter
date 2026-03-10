@@ -169,6 +169,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
           positionUpdatedAt: data.position_updated_at,
           hostUserId: data.host_user_id,
         });
+        if (data.duration_secs > 0) {
+          setVideoDuration(data.duration_secs);
+        }
         setDisplayPosition(compensated);
         displayPositionRef.current = compensated;
       }
@@ -192,6 +195,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         hostUserId: msg.host_user_id,
       };
       setWatchState(newState);
+
+      if (msg.duration_secs > 0) {
+        setVideoDuration(msg.duration_secs);
+      }
 
       const compensated = msg.playing
         ? msg.position_secs + (Date.now() / 1000 - msg.position_updated_at)
@@ -239,10 +246,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         type: "watchparty_control",
         playing: true,
         position_secs: displayPositionRef.current,
+        duration_secs: videoDuration > 0 && videoDuration !== 14400 ? videoDuration : undefined,
       });
     }, 5000);
     return () => clearInterval(interval);
-  }, [isHost, watchState.playing, send]);
+  }, [isHost, watchState.playing, send, videoDuration]);
 
   // Host controls
   const handleTransferHost = (newHostId: string) => {
@@ -260,7 +268,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const handlePlayPause = () => {
     const pos = displayPositionRef.current;
     const newPlaying = !watchState.playing;
-    send({ type: "watchparty_control", playing: newPlaying, position_secs: pos });
+    send({ type: "watchparty_control", playing: newPlaying, position_secs: pos, duration_secs: videoDuration > 0 && videoDuration !== 14400 ? videoDuration : undefined });
     setWatchState((prev) => ({
       ...prev,
       playing: newPlaying,
