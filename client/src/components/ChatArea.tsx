@@ -1026,8 +1026,35 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     msg.content.msgtype !== "m.system" &&
                     prev.sender === msg.sender &&
                     msg.origin_server_ts - prev.origin_server_ts < 60000;
+                  const msgDate = new Date(msg.origin_server_ts);
+                  const prevDate = prev ? new Date(prev.origin_server_ts) : null;
+                  const showDateDivider =
+                    !prevDate ||
+                    msgDate.getFullYear() !== prevDate.getFullYear() ||
+                    msgDate.getMonth() !== prevDate.getMonth() ||
+                    msgDate.getDate() !== prevDate.getDate();
+                  const dateLabel = msgDate.toLocaleDateString(undefined, {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year:
+                      msgDate.getFullYear() !== new Date().getFullYear()
+                        ? "numeric"
+                        : undefined,
+                  });
                   return (
-                    <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+                    <div key={msg.event_id}>
+                      {showDateDivider && (
+                        <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+                          <div className="h-px flex-1 bg-border" />
+                          <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-muted-foreground/70 bg-muted/40">
+                            {dateLabel}
+                          </span>
+                          <div className="h-px flex-1 bg-border" />
+                        </div>
+                      )}
+                      <MessageItem message={msg} grouped={grouped} />
+                    </div>
                   );
                 })}
                 <div ref={messagesEndRef} />
