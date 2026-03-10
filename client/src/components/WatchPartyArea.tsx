@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Play, Pause, Film, RefreshCw } from "lucide-react";
+import { Play, Pause, Film, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 
 function extractYouTubeId(url: string): string | null {
@@ -50,6 +50,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const [urlInput, setUrlInput] = useState("");
   const [displayPosition, setDisplayPosition] = useState(0);
   const [videoDuration, setVideoDuration] = useState(14400);
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem("watchparty_volume");
+    return saved ? parseFloat(saved) : 1.0;
+  });
+  const [isMuted, setIsMuted] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -57,6 +62,8 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const watchStateRef = useRef(watchState);
   const isYoutubeRef = useRef(false);
   const displayPositionRef = useRef(0);
+  const volumeRef = useRef(volume);
+  const isMutedRef = useRef(isMuted);
 
   useEffect(() => {
     watchStateRef.current = watchState;
@@ -72,6 +79,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     isYoutubeRef.current = isYoutube;
   }, [isYoutube]);
 
+  useEffect(() => { volumeRef.current = volume; }, [volume]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
+
   const send = useCallback(
     (msg: object) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -80,6 +90,21 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     },
     [wsRef, roomId]
   );
+
+  const applyVolume = useCallback((vol: number, muted: boolean) => {
+    if (isYoutubeRef.current && iframeRef.current) {
+      const win = iframeRef.current.contentWindow;
+      if (muted) {
+        win?.postMessage(JSON.stringify({ event: "command", func: "mute", args: "" }), "*");
+      } else {
+        win?.postMessage(JSON.stringify({ event: "command", func: "unMute", args: "" }), "*");
+        win?.postMessage(JSON.stringify({ event: "command", func: "setVolume", args: [Math.round(vol * 100)] }), "*");
+      }
+    } else if (videoRef.current) {
+      videoRef.current.volume = vol;
+      videoRef.current.muted = muted;
+    }
+  }, []);
 
   const applySync = useCallback((positionSecs: number, playing: boolean) => {
     isApplyingSync.current = true;
@@ -268,6 +293,24 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     });
   }, [isHost, send]);
 
+  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const vol = parseFloat(e.target.value);
+    setVolume(vol);
+    volumeRef.current = vol;
+    localStorage.setItem("watchparty_volume", String(vol));
+    const newMuted = vol === 0;
+    setIsMuted(newMuted);
+    isMutedRef.current = newMuted;
+    applyVolume(vol, newMuted);
+  };
+
+  const handleToggleMute = () => {
+    const newMuted = !isMuted;
+    setIsMuted(newMuted);
+    isMutedRef.current = newMuted;
+    applyVolume(volumeRef.current, newMuted);
+  };
+
   const hostName = watchState.hostUserId
     ? state.userPresence[watchState.hostUserId]?.displayName ||
       displayUserId(watchState.hostUserId)
@@ -303,7 +346,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     const compensated = ws.playing
                       ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
                       : ws.positionSecs;
-                    setTimeout(() => applySync(compensated, ws.playing), 600);
+                    setTimeout(() => {
+                      applySync(compensated, ws.playing);
+                      applyVolume(volumeRef.current, isMutedRef.current);
+                    }, 600);
                   }}
                 />
               ) : (
@@ -323,6 +369,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                       ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
                       : ws.positionSecs;
                     applySync(compensated, ws.playing);
+                    applyVolume(volumeRef.current, isMutedRef.current);
                   }}
                 />
               )}
@@ -354,7 +401,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                 )}
               </div>
 
-              {/* Progress bar */}
+              {/* Progress bar + volume */}
               {watchState.videoUrl && (
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className="shrink-0 tabular-nums w-10 text-right">
@@ -381,6 +428,28 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                       />
                     </div>
                   )}
+                  {/* Volume */}
+                  <button
+                    onClick={handleToggleMute}
+                    className="shrink-0 hover:text-zinc-200 transition-colors cursor-pointer"
+                    title={isMuted ? "Unmute" : "Mute"}
+                  >
+                    {isMuted || volume === 0 ? (
+                      <VolumeX className="w-3.5 h-3.5" />
+                    ) : (
+                      <Volume2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.02}
+                    value={isMuted ? 0 : volume}
+                    onChange={handleVolumeChange}
+                    className="w-16 shrink-0 accent-zinc-400 cursor-pointer h-1"
+                    title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
+                  />
                 </div>
               )}
 
