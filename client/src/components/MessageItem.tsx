@@ -76,19 +76,19 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 
-  // Restore custom emoji placeholders as inline images with alias tooltip
+  // Restore custom emoji placeholders as inline images with data attribute for tooltip
   escaped = escaped.replace(/\x00EMOJI(\d+)\x00/g, (_match, idx) => {
     const url = emojiUrls[parseInt(idx)];
     const alias = urlToAlias?.[url];
-    const title = alias ? ` title=":${alias}:"` : "";
-    return `<img src="${url}" alt=":emoji{${url}}:"${title} class="inline-block h-5 w-5 object-contain align-middle mx-0.5 cursor-default" />`;
+    const nameAttr = alias ? ` data-emoji-name=":${alias}:"` : "";
+    return `<img src="${url}" alt=":emoji{${url}}:"${nameAttr} class="inline-block h-5 w-5 object-contain align-middle mx-0.5 cursor-default" />`;
   });
 
-  // Wrap standard Unicode emoji characters with shortcode tooltips
+  // Wrap standard Unicode emoji characters with data attribute for tooltip
   escaped = escaped.replace(/\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu, (emoji) => {
     const name = standardEmojiToName[emoji];
     if (!name) return emoji;
-    return `<span title=":${name}:" style="cursor:default">${emoji}</span>`;
+    return `<span data-emoji-name=":${name}:">${emoji}</span>`;
   });
 
   return escaped;
@@ -310,6 +310,8 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
+
+  const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
 
   // Reverse map of custom emoji URL → alias for hover tooltips
   const urlToAlias = useMemo(() => {
@@ -568,6 +570,16 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                 cn("text-sm break-words [overflow-wrap:anywhere] [word-break:break-word] whitespace-pre-wrap", !grouped && "mt-0.5"),
                 isDeleted && "italic text-muted-foreground opacity-60"
               )}
+              onMouseOver={(e) => {
+                const el = (e.target as HTMLElement).closest("[data-emoji-name]");
+                if (el) {
+                  const rect = el.getBoundingClientRect();
+                  setEmojiTip({ name: el.getAttribute("data-emoji-name")!, x: rect.left + rect.width / 2, y: rect.top });
+                } else {
+                  setEmojiTip(null);
+                }
+              }}
+              onMouseLeave={() => setEmojiTip(null)}
             >
               {segments.map((segment, i) =>
                 segment.type === "code" ? (
@@ -583,6 +595,14 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
               )}
               {message.edited && (
                 <span className="text-xs text-muted-foreground/60 italic ml-1">(edited)</span>
+              )}
+              {emojiTip && (
+                <div
+                  className="fixed z-50 px-2 py-1 text-xs rounded bg-popover border border-border text-popover-foreground shadow pointer-events-none -translate-x-1/2"
+                  style={{ left: emojiTip.x, top: emojiTip.y - 4, transform: "translate(-50%, -100%)" }}
+                >
+                  {emojiTip.name}
+                </div>
               )}
             </div>
           )}
