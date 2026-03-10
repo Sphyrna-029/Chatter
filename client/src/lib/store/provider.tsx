@@ -157,16 +157,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // WebSocket connection
+  // WebSocket connection — uses stateRef so the closure never goes stale
   const connectWebSocket = useCallback(() => {
-    if (!state.accessToken) return;
+    if (!stateRef.current.accessToken) return;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ access_token: state.accessToken }));
+      ws.send(JSON.stringify({ access_token: stateRef.current.accessToken }));
       dispatch({ type: "SET_WS_CONNECTED", payload: true });
     };
 
@@ -182,7 +182,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_WS_CONNECTED", payload: false });
       setTimeout(connectWebSocket, 3000);
     };
-  }, [state.accessToken]);
+  }, []); // stateRef is always current — no state dependency needed
 
   // Update document title with total unread notification count
   useEffect(() => {
@@ -202,7 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         wsRef.current = null;
       }
     };
-  }, [state.accessToken, connectWebSocket]);
+  }, [state.accessToken]); // connectWebSocket is stable ([] deps), no need to include
 
   // Send periodic heartbeats to keep presence active
   useEffect(() => {
