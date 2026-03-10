@@ -12,6 +12,7 @@ interface VoiceToolbarProps {
   onLeaveVoice: () => void;
   onToggleMute: () => void;
   onToggleInputMode: () => void;
+  hideScreenShare?: boolean;
   onStartScreenShare: () => void;
   onStopScreenShare: () => void;
   onSetScreenFps: (fps: 30 | 60) => void;
@@ -29,6 +30,7 @@ export function VoiceToolbar({
   onLeaveVoice,
   onToggleMute,
   onToggleInputMode,
+  hideScreenShare,
   onStartScreenShare,
   onStopScreenShare,
   onSetScreenFps,
@@ -67,33 +69,35 @@ export function VoiceToolbar({
         {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
       </Button>
 
-      <div className="flex items-center">
-        <Button
-          size="sm"
-          variant={isScreenSharing ? "destructive" : "outline"}
-          onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
-          className="text-xs flex-1 rounded-r-none"
-        >
-          {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant={isScreenSharing ? "destructive" : "outline"}
-              className="text-xs rounded-l-none border-l-0 px-1.5"
-            >
-              ▾
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
-              <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+      {!hideScreenShare && (
+        <div className="flex items-center">
+          <Button
+            size="sm"
+            variant={isScreenSharing ? "destructive" : "outline"}
+            onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+            className="text-xs flex-1 rounded-r-none"
+          >
+            {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant={isScreenSharing ? "destructive" : "outline"}
+                className="text-xs rounded-l-none border-l-0 px-1.5"
+              >
+                ▾
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
+                <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )}
 
       {voiceInputMode === "ptt" && !isMuted && (
         <span className="text-xs text-green-500 font-semibold animate-pulse text-center">

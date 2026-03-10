@@ -120,6 +120,13 @@ export function VoiceControls({ joinVoiceRef }: VoiceControlsProps) {
         isScreenSharing={state.isScreenSharing}
         screenFps={screen.screenFps}
         debugOpen={debugOpen}
+        hideScreenShare={
+          (state.voiceRoomId
+            ? state.roomInfoMap[state.voiceRoomId]?.room_type
+            : state.currentRoomId
+              ? state.roomInfoMap[state.currentRoomId]?.room_type
+              : undefined) === "watchparty"
+        }
         onJoinVoice={voice.joinVoice}
         onLeaveVoice={voice.leaveVoice}
         onToggleMute={voice.toggleMute}
