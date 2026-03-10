@@ -19,6 +19,7 @@ import {
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { UserProfileDialog } from "./UserProfileDialog";
 import hljs from "highlight.js";
 
@@ -30,6 +31,12 @@ const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
 const videoExtensions = /\.(mp4|webm|ogg|mov|mkv)(\?.*)?$/i;
 const audioExtensions = /\.(mp3|wav|flac|aac|m4a)(\?.*)?$/i;
 
+// Reverse map: Unicode emoji → first matching shortcode name
+const standardEmojiToName: Record<string, string> = {};
+for (const [name, emoji] of Object.entries(STANDARD_SHORTCODES)) {
+  if (!standardEmojiToName[emoji]) standardEmojiToName[emoji] = name;
+}
+
 function escapeHtml(text: string) {
   const div = document.createElement("div");
   div.textContent = text;
@@ -37,7 +44,7 @@ function escapeHtml(text: string) {
 }
 
 /** Returns HTML with URLs as links and @mentions styled, but NO embedded media tags */
-function processMessageBody(body: string, currentUserId: string | null) {
+function processMessageBody(body: string, currentUserId: string | null, urlToAlias?: Record<string, string>) {
   // Extract custom emoji markers before escaping HTML — replace with placeholders
   const emojiUrls: string[] = [];
   let processed = body.replace(/:emoji\{([^}]+)\}:/g, (_match, url) => {
@@ -69,10 +76,19 @@ function processMessageBody(body: string, currentUserId: string | null) {
     return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 
-  // Restore custom emoji placeholders as inline images
+  // Restore custom emoji placeholders as inline images with alias tooltip
   escaped = escaped.replace(/\x00EMOJI(\d+)\x00/g, (_match, idx) => {
     const url = emojiUrls[parseInt(idx)];
-    return `<img src="${url}" alt=":emoji{${url}}:" class="inline-block h-5 w-5 object-contain align-middle mx-0.5" />`;
+    const alias = urlToAlias?.[url];
+    const title = alias ? ` title=":${alias}:"` : "";
+    return `<img src="${url}" alt=":emoji{${url}}:"${title} class="inline-block h-5 w-5 object-contain align-middle mx-0.5 cursor-default" />`;
+  });
+
+  // Wrap standard Unicode emoji characters with shortcode tooltips
+  escaped = escaped.replace(/\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu, (emoji) => {
+    const name = standardEmojiToName[emoji];
+    if (!name) return emoji;
+    return `<span title=":${name}:" style="cursor:default">${emoji}</span>`;
   });
 
   return escaped;
@@ -294,6 +310,14 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
+
+  // Reverse map of custom emoji URL → alias for hover tooltips
+  const urlToAlias = useMemo(() => {
+    const aliases = state.currentRoomId
+      ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
+      : {};
+    return Object.fromEntries(Object.entries(aliases).map(([alias, url]) => [url, alias]));
+  }, [state.currentRoomId, state.roomInfoMap]);
 
   // Convert raw body text (with :emoji{url}: markers) to HTML for the contenteditable div
   const bodyToEditHtml = useCallback((body: string): string => {
@@ -552,7 +576,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                   <span
                     key={i}
                     dangerouslySetInnerHTML={{
-                      __html: processMessageBody(segment.content, state.userId),
+                      __html: processMessageBody(segment.content, state.userId, urlToAlias),
                     }}
                   />
                 )
