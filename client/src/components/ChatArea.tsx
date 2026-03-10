@@ -15,6 +15,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -23,6 +25,38 @@ import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
 
 const MAX_MESSAGE_LENGTH = 4000;
+
+async function stripExifData(file: File): Promise<File> {
+  return new Promise((resolve) => {
+    const img = document.createElement("img");
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(objectUrl);
+        return resolve(file);
+      }
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(objectUrl);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return resolve(file);
+          resolve(new File([blob], file.name, { type: blob.type }));
+        },
+        file.type,
+        1.0
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file);
+    };
+    img.src = objectUrl;
+  });
+}
 
 const mediaUrlRegex = /(https?:\/\/[^\s]+)/g;
 const mediaImageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
@@ -59,6 +93,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
   const [cliMode, setCliMode] = useState(false);
+  const [exifDialogOpen, setExifDialogOpen] = useState(false);
+  const exifPendingFilesRef = useRef<File[]>([]);
   const [displayLength, setDisplayLength] = useState(0);
 
   // Merge standard shortcodes + room emoji aliases (room overrides standard)
@@ -602,6 +638,25 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     });
   };
 
+  const processFiles = (files: File[]) => {
+    const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+    const otherFiles = files.filter((f) => !f.type.startsWith("image/"));
+    otherFiles.forEach(addPendingFile);
+    if (imageFiles.length === 0) return;
+    exifPendingFilesRef.current = imageFiles;
+    setExifDialogOpen(true);
+  };
+
+  const handleExifChoice = async (scrub: boolean) => {
+    setExifDialogOpen(false);
+    const files = exifPendingFilesRef.current;
+    exifPendingFilesRef.current = [];
+    for (const file of files) {
+      const processed = scrub ? await stripExifData(file) : file;
+      addPendingFile(processed);
+    }
+  };
+
   const removePendingFile = (index: number) => {
     setPendingFiles((prev) => {
       const next = [...prev];
@@ -616,7 +671,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     // FileList when e.target.value is reset, so we must snapshot it first.
     const filesList = Array.from(e.target.files ?? []);
     e.target.value = "";
-    filesList.forEach(addPendingFile);
+    processFiles(filesList);
   };
 
   // Drag-and-drop file upload
@@ -650,7 +705,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     const files = e.clipboardData?.files;
     if (files && files.length > 0) {
       e.preventDefault();
-      Array.from(files).forEach(addPendingFile);
+      processFiles(Array.from(files));
       return;
     }
     // Prevent HTML paste — insert as plain text only, but reconstitute custom emoji markers
@@ -691,7 +746,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     dragCounter.current = 0;
     const files = e.dataTransfer.files;
     if (files) {
-      Array.from(files).forEach(addPendingFile);
+      processFiles(Array.from(files));
     }
   };
 
@@ -1388,6 +1443,24 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         </div>
         );
       })()}
+      <Dialog open={exifDialogOpen} onOpenChange={setExifDialogOpen}>
+        <DialogContent className="sm:max-w-[360px]">
+          <DialogHeader>
+            <DialogTitle>Scrub image metadata?</DialogTitle>
+            <DialogDescription>
+              Your image may contain EXIF data such as GPS location, camera model, and capture time. Would you like to remove it before uploading?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button variant="outline" onClick={() => handleExifChoice(false)}>
+              Keep metadata
+            </Button>
+            <Button onClick={() => handleExifChoice(true)}>
+              Scrub EXIF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={uploading}>
         <DialogContent
           className="sm:max-w-[300px]"
