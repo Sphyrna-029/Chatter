@@ -138,39 +138,39 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               type="single"
               value={roomType}
               onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar" | "watchparty"); }}
-              className="w-full rounded-md border border-border p-0.5 bg-muted flex-wrap"
+              className="w-full rounded-md border border-border p-0.5 bg-muted !grid grid-cols-3"
             >
               <ToggleGroupItem
                 value="text"
-                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
               >
                 <MessageSquare className="w-3.5 h-3.5" />
                 Text Chat
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="forum"
-                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
               >
                 <LayoutList className="w-3.5 h-3.5" />
                 Forum
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="whiteboard"
-                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
               >
                 <PenTool className="w-3.5 h-3.5" />
                 Whiteboard
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="tankwar"
-                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
               >
                 <Crosshair className="w-3.5 h-3.5" />
                 Tank Wars
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="watchparty"
-                className="flex-1 text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
               >
                 <Film className="w-3.5 h-3.5" />
                 Watch Party
