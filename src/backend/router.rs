@@ -2,7 +2,7 @@ use super::{
     constants::{CHUNK_SIZE, MAX_UPLOAD_SIZE},
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
-        auth::{account_status, change_password, check_username, delete_account, get_recovery_codes, login, logout, refresh, register, server_info, totp_setup, totp_verify},
+        auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, login, logout, recovery_login, refresh, register, server_info, totp_setup, totp_verify},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
@@ -60,6 +60,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/account/password", post(change_password))
            .route("/api/account/delete", post(delete_account))
            .route("/api/recovery-codes", post(get_recovery_codes))
+           .route("/api/recovery-login", post(recovery_login))
+           .route("/api/account/force-reset-password", post(force_reset_password))
            // Rooms
            .route("/_matrix/client/r0/createRoom", post(create_room))
            .route("/_matrix/client/r0/rooms/{room_id}/join", post(join_room))

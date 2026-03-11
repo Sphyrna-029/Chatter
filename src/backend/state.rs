@@ -87,6 +87,8 @@ pub(crate) struct UserRecord {
     pub(crate) disabled: bool,
     #[serde(default)]
     pub(crate) name_font_url: String,
+    #[serde(default)]
+    pub(crate) must_reset_password: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

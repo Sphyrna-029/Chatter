@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiCheckUsername, apiVerifyTotp, apiGetServerInfo, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin } from "@/lib/api";
+import { apiCheckUsername, apiVerifyTotp, apiRecoveryLogin, apiForceResetPassword, apiGetServerInfo, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,7 +32,7 @@ import {
   validateUsername,
 } from "@/lib/username";
 
-type Step = "login" | "register" | "totp-setup" | "recovery-codes";
+type Step = "login" | "register" | "totp-setup" | "recovery-codes" | "recovery-login" | "force-reset-password";
 
 const CONNECTION_STEPS = [
   { ms: 0, text: "initializing handshake..." },
@@ -78,6 +78,15 @@ export function LoginScreen() {
   const [registeredUserId, setRegisteredUserId] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
+
+  // Recovery login fields
+  const [recoveryUsername, setRecoveryUsername] = useState("");
+  const [recoveryCode, setRecoveryCode] = useState("");
+
+  // Force reset password fields
+  const [resetNewPassword, setResetNewPassword] = useState("");
+  const [resetConfirmPassword, setResetConfirmPassword] = useState("");
+  const [recoveryUserId, setRecoveryUserId] = useState("");
 
   // Common
   const [error, setError] = useState<string | null>(null);
@@ -270,6 +279,84 @@ export function LoginScreen() {
       }
     },
     [totpVerifyCode, registeredUserId, dispatch, runConnectionAnimation],
+  );
+
+  // ── Recovery login handler ──
+  const handleRecoveryLogin = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      const name = recoveryUsername.trim();
+      setError(null);
+
+      const usernameValidationError = validateUsername(name);
+      if (usernameValidationError) {
+        setNicknameError(usernameValidationError);
+        return;
+      }
+      setNicknameError(null);
+
+      if (!recoveryCode) {
+        setError("Recovery code is required");
+        return;
+      }
+
+      setLoading(true);
+      await runConnectionAnimation();
+
+      try {
+        const result = await apiRecoveryLogin(name, recoveryCode);
+        setAccessToken(result.access_token);
+        setRefreshToken(result.refresh_token);
+        if (result.is_admin !== undefined) setIsAdmin(result.is_admin);
+        // Force password reset before completing login
+        setRecoveryUserId(result.user_id);
+        setStep("force-reset-password");
+        setLoading(false);
+        setVisibleSteps(0);
+      } catch (err: any) {
+        setError(err.message || "Recovery login failed");
+        setLoading(false);
+        setVisibleSteps(0);
+      }
+    },
+    [recoveryUsername, recoveryCode, runConnectionAnimation],
+  );
+
+  // ── Force reset password handler ──
+  const handleForceResetPassword = useCallback(
+    async (e: FormEvent) => {
+      e.preventDefault();
+      setError(null);
+
+      if (resetNewPassword.length < 6) {
+        setError("Password must be at least 6 characters");
+        return;
+      }
+
+      if (resetNewPassword !== resetConfirmPassword) {
+        setError("Passwords do not match");
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        await apiForceResetPassword(resetNewPassword);
+        // Password reset complete — now log the user in
+        const token = getAccessToken();
+        if (token && recoveryUserId) {
+          dispatch({
+            type: "LOGIN",
+            payload: { accessToken: token, userId: recoveryUserId },
+          });
+          dispatch({ type: "SET_TOTP_VERIFIED", payload: true });
+        }
+      } catch (err: any) {
+        setError(err.message || "Failed to reset password");
+        setLoading(false);
+      }
+    },
+    [resetNewPassword, resetConfirmPassword, recoveryUserId, dispatch],
   );
 
   useEffect(() => () => clearStepTimeouts(), [clearStepTimeouts]);
@@ -531,7 +618,7 @@ export function LoginScreen() {
             {renderError()}
             {renderButton("connect")}
 
-            <div className="flex justify-center pt-1">
+            <div className="flex justify-center gap-4 pt-1">
               {renderLink("create account", () => {
                 setStep("register");
                 setError(null);
@@ -539,6 +626,14 @@ export function LoginScreen() {
                 setNicknameWarning(null);
                 setNeedsTotp(false);
                 setTotpCode("");
+              })}
+              {renderLink("forgot password?", () => {
+                setStep("recovery-login");
+                setError(null);
+                setNicknameError(null);
+                setNicknameWarning(null);
+                setRecoveryUsername(username);
+                setRecoveryCode("");
               })}
             </div>
           </form>
@@ -722,6 +817,64 @@ export function LoginScreen() {
           </form>
         );
 
+      case "recovery-login":
+        return (
+          <form onSubmit={handleRecoveryLogin} className="space-y-5">
+            <p className="text-[11px] tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
+              Enter your username and a recovery code to sign in without your password.
+            </p>
+
+            {renderUsernameInput(recoveryUsername, setRecoveryUsername, true)}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="recovery-code" className={labelClass} style={labelStyle}>
+                recovery code
+              </Label>
+              <Input
+                id="recovery-code"
+                placeholder="A3K9M2X7"
+                value={recoveryCode}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 8);
+                  setRecoveryCode(v);
+                  if (error) setError(null);
+                }}
+                maxLength={8}
+                disabled={loading}
+                className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                style={inputStyle}
+              />
+            </div>
+
+            {renderError()}
+            {renderButton("recover account")}
+
+            <div className="flex justify-center pt-1">
+              {renderLink("back to login", () => {
+                setStep("login");
+                setError(null);
+                setNicknameError(null);
+                setNicknameWarning(null);
+              })}
+            </div>
+          </form>
+        );
+
+      case "force-reset-password":
+        return (
+          <form onSubmit={handleForceResetPassword} className="space-y-5">
+            <p className="text-[11px] tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
+              You must set a new password before continuing.
+            </p>
+
+            {renderPasswordInput("reset-password", "new password", resetNewPassword, setResetNewPassword)}
+            {renderPasswordInput("reset-confirm", "confirm password", resetConfirmPassword, setResetConfirmPassword)}
+
+            {renderError()}
+            {renderButton("set new password")}
+          </form>
+        );
+
       case "recovery-codes":
         return (
           <div className="space-y-5">
@@ -799,6 +952,8 @@ export function LoginScreen() {
       case "register": return "create your account";
       case "totp-setup": return "set up two-factor auth";
       case "recovery-codes": return "save your recovery codes";
+      case "recovery-login": return "recover your account";
+      case "force-reset-password": return "reset your password";
     }
   };
 

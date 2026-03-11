@@ -221,6 +221,40 @@ export async function apiVerifyTotp(userId: string, code: string) {
   }>;
 }
 
+export async function apiRecoveryLogin(username: string, recoveryCode: string) {
+  const res = await fetch("/api/recovery-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, recovery_code: recoveryCode }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Recovery login failed");
+  }
+  return res.json() as Promise<{
+    user_id: string;
+    access_token: string;
+    refresh_token: string;
+    device_id: string;
+    is_admin?: boolean;
+    totp_verified?: boolean;
+    must_reset_password?: boolean;
+    recovery_codes_remaining: number;
+  }>;
+}
+
+export async function apiForceResetPassword(newPassword: string) {
+  const res = await authenticatedFetch("/api/account/force-reset-password", {
+    method: "POST",
+    body: JSON.stringify({ new_password: newPassword }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to reset password");
+  }
+  return res.json() as Promise<{ success: boolean }>;
+}
+
 export async function apiSetupTotp() {
   const res = await authenticatedFetch("/api/totp/setup", {
     method: "POST",

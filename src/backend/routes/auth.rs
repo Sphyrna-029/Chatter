@@ -1,7 +1,8 @@
 use super::super::{
     dto::{
-        ChangePasswordRequest, CheckUsernameRequest, DeleteAccountRequest, LoginRequest,
-        RecoveryCodesRequest, RefreshTokenRequest, RegisterRequest, TotpVerifyRequest,
+        ChangePasswordRequest, CheckUsernameRequest, DeleteAccountRequest,
+        ForceResetPasswordRequest, LoginRequest, RecoveryCodesRequest, RecoveryLoginRequest,
+        RefreshTokenRequest, RegisterRequest, TotpVerifyRequest,
     },
     helpers::{
         create_access_token, create_refresh_token, decode_token, error_response, extract_token,
@@ -187,6 +188,7 @@ pub(crate) async fn register(
         is_admin,
         disabled: false,
         name_font_url: String::new(),
+        must_reset_password: false,
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(
@@ -370,6 +372,139 @@ pub(crate) async fn login(
         "is_admin": is_admin,
         "totp_verified": user.totp_verified
     })))
+}
+
+pub(crate) async fn recovery_login(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<RecoveryLoginRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let username = req.username.trim();
+    if let Err(detail) = validate_username(username) {
+        return Err(error_response(StatusCode::BAD_REQUEST, detail));
+    }
+
+    let user_id = format_user_id(username);
+
+    // Rate limit: max 3 attempts per 15-minute window per user_id
+    {
+        use super::super::helpers::now_secs;
+        use super::super::state::TotpAttemptRecord;
+        let now = now_secs();
+        let window = 900.0; // 15 minutes
+        let max_attempts = 3u32;
+        let key = format!("recovery_login:{}", user_id);
+
+        let mut attempts = state.totp_attempts.write().await;
+        let entry = attempts.entry(key).or_insert(TotpAttemptRecord {
+            count: 0,
+            window_start: now,
+        });
+
+        if now - entry.window_start > window {
+            entry.count = 0;
+            entry.window_start = now;
+        }
+
+        if entry.count >= max_attempts {
+            return Err(error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many recovery login attempts. Try again in 15 minutes.",
+            ));
+        }
+
+        entry.count += 1;
+    }
+
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::FORBIDDEN, "Invalid credentials"))?;
+
+    if user.disabled {
+        return Err(error_response(StatusCode::FORBIDDEN, "Account is disabled"));
+    }
+
+    // Verify recovery code
+    let code_hash = hash_recovery_code(&req.recovery_code.to_uppercase());
+    let pos = user.recovery_codes.iter().position(|h| h == &code_hash)
+        .ok_or_else(|| error_response(StatusCode::FORBIDDEN, "Invalid recovery code"))?;
+
+    // Remove used recovery code from DB
+    let mut remaining = user.recovery_codes.clone();
+    remaining.remove(pos);
+    let bson_codes: Vec<mongodb::bson::Bson> = remaining.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+    // Remove used code and flag for forced password reset
+    let _ = users
+        .update_one(
+            doc! { "_id": &user_id },
+            doc! { "$set": { "recovery_codes": bson_codes, "must_reset_password": true } },
+        )
+        .await;
+
+    // Clear rate limit on success
+    {
+        let key = format!("recovery_login:{}", user_id);
+        let mut attempts = state.totp_attempts.write().await;
+        attempts.remove(&key);
+    }
+
+    let device_id = generate_id("DEVICE");
+    let access_token = create_access_token(&user_id, &state.jwt_secret);
+    let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
+    store_refresh_token(&state, &refresh_token, &user_id).await;
+
+    Ok(Json(json!({
+        "user_id": user_id,
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "device_id": device_id,
+        "is_admin": user.is_admin,
+        "totp_verified": user.totp_verified,
+        "must_reset_password": true,
+        "recovery_codes_remaining": remaining.len()
+    })))
+}
+
+/// Reset password after recovery login. Only works when must_reset_password is true.
+/// Authenticated via token (no TOTP required).
+pub(crate) async fn force_reset_password(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(req): Json<ForceResetPasswordRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    if req.new_password.len() < 6 {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+    }
+
+    let users = state.db.collection::<UserRecord>("users");
+    let user = users
+        .find_one(doc! { "_id": &user_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
+
+    if !user.must_reset_password {
+        return Err(error_response(StatusCode::FORBIDDEN, "Password reset not required"));
+    }
+
+    let new_hash = hash_password(&req.new_password);
+    let _ = users
+        .update_one(
+            doc! { "_id": &user_id },
+            doc! { "$set": { "password_hash": new_hash, "must_reset_password": false } },
+        )
+        .await;
+
+    Ok(Json(json!({ "success": true })))
 }
 
 pub(crate) async fn change_password(

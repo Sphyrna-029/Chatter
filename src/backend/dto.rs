@@ -44,6 +44,17 @@ pub(crate) struct RecoveryCodesRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct ForceResetPasswordRequest {
+    pub(crate) new_password: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RecoveryLoginRequest {
+    pub(crate) username: String,
+    pub(crate) recovery_code: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct CreateRoomRequest {
     pub(crate) name: Option<String>,
     pub(crate) topic: Option<String>,
