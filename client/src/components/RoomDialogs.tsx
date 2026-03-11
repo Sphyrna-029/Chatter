@@ -36,7 +36,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [unlisted, setUnlisted] = useState(false);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard" | "tankwar" | "watchparty">("text");
+  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard" | "tankwar" | "watchparty" | "tugofwar">("text");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -137,7 +137,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
             <ToggleGroup
               type="single"
               value={roomType}
-              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar" | "watchparty"); }}
+              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar" | "watchparty" | "tugofwar"); }}
               className="w-full rounded-md border border-border p-0.5 bg-muted !grid grid-cols-3"
             >
               <ToggleGroupItem
@@ -174,6 +174,13 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               >
                 <Film className="w-3.5 h-3.5" />
                 Watch Party
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="tugofwar"
+                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+              >
+                🪢
+                Tug of War
               </ToggleGroupItem>
             </ToggleGroup>
           </div>

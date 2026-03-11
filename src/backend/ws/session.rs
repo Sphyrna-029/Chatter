@@ -13,8 +13,9 @@ use super::{
 };
 use crate::backend::{
     helpers::{broadcast_to_room, generate_id, get_user_from_token, is_moderator_or_owner, now_millis, now_secs, send_to_user},
-    state::{AppState, PresenceRecord, TankGameRecord, TankPlayer, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
+    state::{AppState, PresenceRecord, TankGameRecord, TankPlayer, TugOfWarGame, TugOfWarPlayer, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
     tankwar_engine,
+    tugofwar_engine,
 };
 use axum::{
     extract::ws::{Message, WebSocket},
@@ -1022,6 +1023,212 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     });
                     drop(wp);
                     send_to_user(&state, user_id, &event).await;
+                }
+            }
+        }
+        // ─── Tug of War ──────────────────────────────────────────────────────────
+        "tugofwar_join_team" => {
+            if !room_id.is_empty() {
+                let team = msg.get("team").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if team != "left" && team != "right" { return; }
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll.find_one(doc! { "room_id": room_id, "status": "lobby" }).await {
+                    if !game.players.iter().any(|p| p.user_id == user_id) {
+                        game.players.push(TugOfWarPlayer {
+                            user_id: user_id.to_string(),
+                            team: team.clone(),
+                            ready: false,
+                            chars_correct: 0,
+                            errors: 0,
+                            wps: 0.0,
+                        });
+                    } else {
+                        for p in &mut game.players {
+                            if p.user_id == user_id {
+                                p.team = team.clone();
+                                p.ready = false;
+                            }
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tugofwar_player_update",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "team": p.team,
+                            "ready": p.ready,
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "tugofwar_leave_team" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll.find_one(doc! { "room_id": room_id, "status": "lobby" }).await {
+                    for p in &mut game.players {
+                        if p.user_id == user_id {
+                            p.team = String::new();
+                            p.ready = false;
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tugofwar_player_update",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "team": p.team,
+                            "ready": p.ready,
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "tugofwar_ready" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll.find_one(doc! { "room_id": room_id, "status": "lobby" }).await {
+                    for p in &mut game.players {
+                        if p.user_id == user_id && !p.team.is_empty() {
+                            p.ready = true;
+                        }
+                    }
+                    let has_left = game.players.iter().any(|p| p.team == "left");
+                    let has_right = game.players.iter().any(|p| p.team == "right");
+                    let all_ready = has_left && has_right
+                        && game.players.iter().filter(|p| !p.team.is_empty()).all(|p| p.ready);
+
+                    if all_ready {
+                        game.status = "running".to_string();
+                        game.started_at = Some(now_millis());
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+
+                    if all_ready {
+                        let started_at = game.started_at;
+                        let game_id = game.game_id.clone();
+                        let room_id_owned = room_id.to_string();
+                        let state_clone = state.clone();
+                        let handle = tokio::spawn(async move {
+                            tugofwar_engine::run_tug_of_war_game(state_clone, room_id_owned, game_id).await;
+                        });
+                        state.tug_of_war_games.write().await.insert(game.game_id.clone(), handle);
+
+                        let event = json!({
+                            "type": "tugofwar_game_started",
+                            "room_id": room_id,
+                            "game_id": &game.game_id,
+                            "prompt": &game.prompt,
+                            "started_at": started_at,
+                            "players": game.players.iter().map(|p| json!({
+                                "user_id": p.user_id,
+                                "team": p.team,
+                                "ready": p.ready,
+                            })).collect::<Vec<_>>(),
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    } else {
+                        let event = json!({
+                            "type": "tugofwar_player_update",
+                            "room_id": room_id,
+                            "game_id": &game.game_id,
+                            "players": game.players.iter().map(|p| json!({
+                                "user_id": p.user_id,
+                                "team": p.team,
+                                "ready": p.ready,
+                            })).collect::<Vec<_>>(),
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
+                }
+            }
+        }
+        "tugofwar_unready" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll.find_one(doc! { "room_id": room_id, "status": "lobby" }).await {
+                    for p in &mut game.players {
+                        if p.user_id == user_id {
+                            p.ready = false;
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                    let event = json!({
+                        "type": "tugofwar_player_update",
+                        "room_id": room_id,
+                        "game_id": &game.game_id,
+                        "players": game.players.iter().map(|p| json!({
+                            "user_id": p.user_id,
+                            "team": p.team,
+                            "ready": p.ready,
+                        })).collect::<Vec<_>>(),
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
+        "tugofwar_progress" => {
+            if !room_id.is_empty() {
+                let chars_correct = msg.get("chars_correct").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let errors = msg.get("errors").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll.find_one(doc! { "room_id": room_id, "status": "running" }).await {
+                    for p in &mut game.players {
+                        if p.user_id == user_id {
+                            p.chars_correct = chars_correct;
+                            p.errors = errors;
+                        }
+                    }
+                    let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                }
+            }
+        }
+        "tugofwar_vote_reset" => {
+            if !room_id.is_empty() {
+                let coll = state.db.collection::<TugOfWarGame>("tug_of_war_games");
+                if let Ok(Some(mut game)) = coll
+                    .find_one(doc! { "room_id": room_id, "status": { "$in": ["lobby", "running", "finished"] } })
+                    .await
+                {
+                    if !game.reset_votes.contains(&user_id.to_string()) {
+                        game.reset_votes.push(user_id.to_string());
+                    }
+                    let total = game.players.len().max(1);
+                    let votes = game.reset_votes.len();
+                    let all_voted = votes >= total;
+
+                    if all_voted {
+                        // Abort tick task
+                        if let Some(handle) = state.tug_of_war_games.write().await.remove(&game.game_id) {
+                            handle.abort();
+                        }
+                        game.status = "finished".to_string();
+                        game.winner = None;
+                        let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                        let event = json!({
+                            "type": "tugofwar_game_reset",
+                            "room_id": room_id,
+                            "game_id": &game.game_id,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    } else {
+                        let _ = coll.replace_one(doc! { "_id": &game.game_id }, &game).await;
+                        let event = json!({
+                            "type": "tugofwar_reset_vote",
+                            "room_id": room_id,
+                            "game_id": &game.game_id,
+                            "user_id": user_id,
+                            "vote_count": votes,
+                            "votes_needed": total,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
                 }
             }
         }

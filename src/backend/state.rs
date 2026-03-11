@@ -48,6 +48,7 @@ pub struct AppState {
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
     pub(crate) tank_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
+    pub(crate) tug_of_war_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) klipy_api_key: String,
 }
 
@@ -339,6 +340,34 @@ pub(crate) struct Bullet {
     pub(crate) y: usize,
     pub(crate) direction: String,
     pub(crate) owner: String,
+}
+
+// ─── Tug of War types ────────────────────────────────────────────────────────
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TugOfWarGame {
+    #[serde(rename = "_id")]
+    pub(crate) game_id: String,
+    pub(crate) room_id: String,
+    pub(crate) status: String, // "lobby" | "running" | "finished"
+    pub(crate) players: Vec<TugOfWarPlayer>,
+    pub(crate) rope_position: f64, // -100.0 to 100.0; positive = right winning
+    pub(crate) prompt: String,
+    pub(crate) started_at: Option<i64>,
+    pub(crate) winner: Option<String>, // "left" | "right" | "draw"
+    #[serde(default)]
+    pub(crate) reset_votes: Vec<String>,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TugOfWarPlayer {
+    pub(crate) user_id: String,
+    pub(crate) team: String, // "left" | "right" | "" (unassigned)
+    pub(crate) ready: bool,
+    pub(crate) chars_correct: u32,
+    pub(crate) errors: u32,
+    pub(crate) wps: f64,
 }
 
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────

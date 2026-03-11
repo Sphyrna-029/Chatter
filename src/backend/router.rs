@@ -18,6 +18,7 @@ use super::{
             unban_member, update_room_settings, update_room_topic,
         },
         tankwar::{get_tankwar_state, new_tankwar_game},
+        tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
         static_content::{serve_client, versions},
         sync::sync,
@@ -141,6 +142,9 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Tank Wars
            .route("/api/tankwar/{room_id}/state", get(get_tankwar_state))
            .route("/api/tankwar/{room_id}/new", post(new_tankwar_game))
+           // Tug of War
+           .route("/api/tugofwar/{room_id}/state", get(get_tugofwar_state))
+           .route("/api/tugofwar/{room_id}/new", post(new_tugofwar_game))
            // Watch Party
            .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
            // Whiteboard

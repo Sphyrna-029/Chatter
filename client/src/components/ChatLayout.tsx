@@ -6,6 +6,7 @@ import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
 import { TankWarArea } from "./TankWarArea";
+import { TugOfWarArea } from "./TugOfWarArea";
 import { WatchPartyArea } from "./WatchPartyArea";
 import { WhiteboardArea } from "./WhiteboardArea";
 import { ActivityPage } from "./ActivityPage";
@@ -88,6 +89,9 @@ export function ChatLayout() {
     : false;
   const isWatchPartyRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "watchparty"
+    : false;
+  const isTugOfWarRoom = state.currentRoomId
+    ? state.roomInfoMap[state.currentRoomId]?.room_type === "tugofwar"
     : false;
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
@@ -332,6 +336,8 @@ export function ChatLayout() {
               {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
               {isTankWarRoom ? (
                 <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
+              ) : isTugOfWarRoom ? (
+                <TugOfWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isWatchPartyRoom ? (
                 <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isWhiteboardRoom ? (
