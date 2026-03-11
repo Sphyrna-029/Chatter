@@ -104,6 +104,9 @@ pub(crate) async fn send_message(
                     let preview: String = body.chars().take(100).collect();
                     content["reply_to_body"] = json!(preview);
                 }
+                if parent_content.get_bool("spoiler").unwrap_or(false) {
+                    content["reply_to_spoiler"] = json!(true);
+                }
             }
         }
     }

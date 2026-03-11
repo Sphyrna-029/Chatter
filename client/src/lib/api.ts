@@ -491,6 +491,7 @@ export interface MatrixMessage {
     in_reply_to?: string;
     reply_to_sender?: string;
     reply_to_body?: string;
+    reply_to_spoiler?: boolean;
     webhook?: boolean;
     webhook_name?: string;
     webhook_avatar_url?: string;

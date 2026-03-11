@@ -299,6 +299,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     messagesEndRef.current?.scrollIntoView();
   }, [state.currentRoomId]);
 
+  // Focus the input when the user starts a reply
+  useEffect(() => {
+    if (state.replyingTo) {
+      inputRef.current?.focus();
+    }
+  }, [state.replyingTo]);
+
   // Plain async function — never memoized so it always reads the latest state/pending
   // files from the current render closure, avoiding stale-closure bugs.
   const handleSend = async () => {
@@ -1157,7 +1164,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               Replying to {state.userPresence[state.replyingTo.sender]?.displayName || displayUserId(state.replyingTo.sender)}
             </p>
             <p className="text-xs text-muted-foreground truncate inline-flex items-center gap-0.5">
-              {renderInlineEmojis(state.replyingTo.content.body)}
+              {state.replyingTo.content.spoiler
+                ? <span className="italic">Spoiler message</span>
+                : renderInlineEmojis(state.replyingTo.content.body)}
             </p>
           </div>
           <button

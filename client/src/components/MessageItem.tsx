@@ -508,7 +508,9 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
             >
               <span className="font-semibold">{replySender}</span>
               <span className="truncate max-w-xs inline-flex items-center gap-0.5">
-                {renderInlineEmojis(message.content.reply_to_body || "...")}
+                {message.content.reply_to_spoiler
+                  ? <span className="italic">Spoiler message</span>
+                  : renderInlineEmojis(message.content.reply_to_body || "...")}
               </span>
             </button>
           )}
