@@ -337,6 +337,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const editRef = useRef<HTMLDivElement>(null);
 
   const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
+  const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
 
   // Reverse map of custom emoji URL → alias for hover tooltips
   const urlToAlias = useMemo(() => {
@@ -692,14 +693,58 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
         </button>
       </TooltipTrigger>
       <TooltipContent>
-        {userIds
-          .map((id) => state.userPresence[id]?.displayName || displayUserId(id))
-          .join(", ")}
+        {(() => {
+          const names = userIds.map((id) => state.userPresence[id]?.displayName || displayUserId(id));
+          const shown = names.slice(0, 5);
+          const remaining = names.length - shown.length;
+          return shown.join(", ") + (remaining > 0 ? ` +${remaining} more` : "");
+        })()}
       </TooltipContent>
     </Tooltip>
   )
               )}
+              <button
+                className="inline-flex items-center justify-center rounded-full border border-border px-1.5 py-0.5 text-xs text-muted-foreground transition-colors cursor-pointer hover:bg-accent"
+                onClick={() => setReactionsDetailOpen(true)}
+                title="View all reactions"
+              >
+                ···
+              </button>
             </div>
+          )}
+
+          {/* Reactions detail dialog */}
+          {reactionsDetailOpen && (
+            <Dialog open={reactionsDetailOpen} onOpenChange={setReactionsDetailOpen}>
+              <DialogContent className="max-w-sm">
+                <DialogTitle className="text-sm font-semibold">Reactions</DialogTitle>
+                <div className="space-y-3 max-h-64 overflow-y-auto">
+                  {Object.entries(reactions).map(([emoji, userIds]) =>
+                    userIds.length > 0 ? (
+                      <div key={emoji} className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">
+                            {isCustomEmojiUrl(emoji) ? (
+                              <img src={emoji} alt="emoji" className="inline-block h-5 w-5 object-contain" />
+                            ) : (
+                              emoji
+                            )}
+                          </span>
+                          <span className="text-xs text-muted-foreground font-medium">{userIds.length}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1 pl-7">
+                          {userIds.map((id) => (
+                            <span key={id} className="text-xs text-muted-foreground">
+                              {state.userPresence[id]?.displayName || displayUserId(id)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
           )}
         </div>
 
