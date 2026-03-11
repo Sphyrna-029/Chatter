@@ -53,6 +53,12 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    let is_mobile = auth_msg
+        .as_ref()
+        .and_then(|m| m.get("is_mobile"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     // JWT decode — no DB call
     let user_id = match token {
         Some(ref t) => get_user_from_token(&state, t),
@@ -89,6 +95,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             p.last_active = now_secs();
             p.last_typing = 0.0;
             p.connected = true;
+            p.is_mobile = is_mobile;
         } else {
             // Load persisted custom_status and manual_status from user record
             let (saved_custom_status, saved_manual_status) = {
@@ -106,6 +113,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                     connected: true,
                     custom_status: saved_custom_status,
                     manual_status: saved_manual_status,
+                    is_mobile,
                 },
             );
         }
@@ -120,9 +128,13 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             .map(|(rid, _)| rid.clone())
             .collect();
         drop(rm);
-        let custom_status = {
+        let (custom_status, presence_is_mobile) = {
             let up = state.user_presence.read().await;
-            up.get(&user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
+            let p = up.get(&user_id);
+            (
+                p.map(|p| p.custom_status.clone()).unwrap_or_default(),
+                p.map(|p| p.is_mobile).unwrap_or(false),
+            )
         };
         // Get avatar/about/banner/display_name from MongoDB
         let (avatar_url, about, banner_url, display_name, name_font_url) = {
@@ -141,7 +153,8 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             "about": about,
             "banner_url": banner_url,
             "display_name": display_name,
-            "name_font_url": name_font_url
+            "name_font_url": name_font_url,
+            "is_mobile": presence_is_mobile
         });
         for rid in user_rooms {
             broadcast_to_room(&state, &rid, &event).await;
@@ -462,15 +475,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 doc! { "_id": user_id },
                 doc! { "$set": { "custom_status": &custom_status } },
             ).await;
-            let effective_status = {
+            let (effective_status, p_is_mobile) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = custom_status.clone();
-                    match &p.manual_status {
+                    let eff = match &p.manual_status {
                         Some(ms) => ms.clone(),
                         None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
-                    }
-                } else { "active".to_string() }
+                    };
+                    (eff, p.is_mobile)
+                } else { ("active".to_string(), false) }
             };
             let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
@@ -489,7 +503,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "about": about,
                 "banner_url": banner_url,
                 "display_name": display_name,
-                "name_font_url": name_font_url
+                "name_font_url": name_font_url,
+                "is_mobile": p_is_mobile
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -513,7 +528,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     ).await;
                 }
             }
-            let (effective_status, custom_status) = {
+            let (effective_status, custom_status, p_is_mobile) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.manual_status = manual_status;
@@ -521,8 +536,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         Some(ms) => ms.clone(),
                         None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
                     };
-                    (eff, p.custom_status.clone())
-                } else { ("active".to_string(), String::new()) }
+                    (eff, p.custom_status.clone(), p.is_mobile)
+                } else { ("active".to_string(), String::new(), false) }
             };
             let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
@@ -541,7 +556,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "about": about,
                 "banner_url": banner_url,
                 "display_name": display_name,
-                "name_font_url": name_font_url
+                "name_font_url": name_font_url,
+                "is_mobile": p_is_mobile
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -590,9 +606,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 
             // Read current values for broadcast
             let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
-            let custom_status = {
+            let (custom_status, effective_status, p_is_mobile) = {
                 let up = state.user_presence.read().await;
-                up.get(user_id).map(|p| p.custom_status.clone()).unwrap_or_default()
+                if let Some(p) = up.get(user_id) {
+                    let eff = match &p.manual_status {
+                        Some(ms) => ms.clone(),
+                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                    };
+                    (p.custom_status.clone(), eff, p.is_mobile)
+                } else { (String::new(), "active".to_string(), false) }
             };
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
@@ -601,15 +623,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .map(|(rid, _)| rid.clone())
                 .collect();
             drop(rm);
-            let effective_status = {
-                let up = state.user_presence.read().await;
-                if let Some(p) = up.get(user_id) {
-                    match &p.manual_status {
-                        Some(ms) => ms.clone(),
-                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
-                    }
-                } else { "active".to_string() }
-            };
             let event = json!({
                 "type": "presence_update",
                 "user_id": user_id,
@@ -619,7 +632,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "about": about,
                 "banner_url": banner_url,
                 "display_name": display_name,
-                "name_font_url": name_font_url
+                "name_font_url": name_font_url,
+                "is_mobile": p_is_mobile
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -1394,7 +1408,8 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
         let event = json!({
             "type": "presence_update",
             "user_id": user_id,
-            "status": "offline"
+            "status": "offline",
+            "is_mobile": false
         });
         for rid in user_rooms {
             broadcast_to_room(state, &rid, &event).await;

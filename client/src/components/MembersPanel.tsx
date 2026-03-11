@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, Crown, Shield } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
@@ -120,6 +120,9 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             )}
             {member.role === "moderator" && (
               <Shield className="h-3 w-3 text-blue-400 shrink-0" />
+            )}
+            {presence?.isMobile && status !== "offline" && (
+              <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
             )}
           </span>
           {customStatus && (

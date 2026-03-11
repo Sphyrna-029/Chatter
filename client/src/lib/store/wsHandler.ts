@@ -190,6 +190,7 @@ export function createWsMessageHandler(
               bannerUrl: msg.banner_url !== undefined ? (msg.banner_url || undefined) : existing?.bannerUrl,
               displayName: msg.display_name !== undefined ? (msg.display_name || undefined) : existing?.displayName,
               nameFontUrl: msg.name_font_url !== undefined ? (msg.name_font_url || undefined) : existing?.nameFontUrl,
+              isMobile: msg.is_mobile !== undefined ? msg.is_mobile : existing?.isMobile,
             },
           },
         });

@@ -185,7 +185,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       // Use getAccessToken() in case another refresh happened between now and above
-      ws.send(JSON.stringify({ access_token: getAccessToken() ?? token }));
+      const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      ws.send(JSON.stringify({ access_token: getAccessToken() ?? token, is_mobile: isMobileDevice }));
       dispatch({ type: "SET_WS_CONNECTED", payload: true });
     };
 
@@ -241,10 +242,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const interval = setInterval(async () => {
       try {
         const data = await apiGetPresence(stateRef.current.currentRoomId!);
-        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string }> = {};
+        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean }> = {};
         for (const [uid, p] of Object.entries(data.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, isMobile: pAny.is_mobile || false };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}

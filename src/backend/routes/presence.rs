@@ -140,7 +140,8 @@ pub(crate) async fn get_room_presence(
                         "about": about,
                         "banner_url": banner_url,
                         "display_name": display_name,
-                        "name_font_url": name_font_url
+                        "name_font_url": name_font_url,
+                        "is_mobile": presence.is_mobile
                     }),
                 );
             } else {
@@ -154,7 +155,8 @@ pub(crate) async fn get_room_presence(
                         "about": about,
                         "banner_url": banner_url,
                         "display_name": display_name,
-                        "name_font_url": name_font_url
+                        "name_font_url": name_font_url,
+                        "is_mobile": false
                     }),
                 );
             }

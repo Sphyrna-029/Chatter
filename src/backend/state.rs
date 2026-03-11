@@ -395,6 +395,7 @@ pub(crate) struct PresenceRecord {
     pub(crate) connected: bool,
     pub(crate) custom_status: String,
     pub(crate) manual_status: Option<String>,
+    pub(crate) is_mobile: bool,
 }
 
 #[derive(Clone, Serialize)]
