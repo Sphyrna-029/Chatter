@@ -3,7 +3,7 @@ import { useAppContext } from "@/lib/store";
 import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -247,6 +247,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // Pending file attachments — staged until the user presses Send/Enter
   type PendingFile = { file: File; previewUrl: string | null };
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const [isSpoiler, setIsSpoiler] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
   const getViewport = useCallback(() => {
@@ -307,33 +308,50 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     if (!state.currentRoomId) return;
     if (displayLength > MAX_MESSAGE_LENGTH) return;
     const replyEventId = state.replyingTo?.event_id;
+    const spoiler = isSpoiler;
     if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
     setDisplayLength(0);
+    setIsSpoiler(false);
     dispatch({ type: "SET_REPLYING_TO", payload: null });
 
     // Grab and clear staged files before any async work
     const toUpload = [...pendingFiles];
     setPendingFiles([]);
 
-    // Upload each staged file and send as a message
-    for (const { file, previewUrl } of toUpload) {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-      const url = await uploadFile(file);
-      if (url) await sendMessage(url);
-    }
-
-    // Send the text message (with reply context if set)
-    if (body) {
-      // Auto-resolve :shortcode: patterns to emoji
-      const resolved = body.replace(/:([a-zA-Z0-9_]+):/g, (match: string, name: string) => {
+    // Auto-resolve :shortcode: patterns to emoji in body text
+    const resolveShortcodes = (raw: string) =>
+      raw.replace(/:([a-zA-Z0-9_]+):/g, (match: string, name: string) => {
         const value = mergedShortcodes[name];
         if (!value) return match;
-        // If value is a URL (custom emoji), convert to :emoji{url}: format
         if (value.startsWith("/") || value.startsWith("http")) return `:emoji{${value}}:`;
         return value;
       });
-      await sendMessage(resolved, replyEventId);
+
+    if (toUpload.length > 0 && body) {
+      // Files + text: upload all files first, then send as one combined message
+      // so text and images aren't split into separate spoiler/reply messages.
+      const uploadedUrls: string[] = [];
+      for (const { file, previewUrl } of toUpload) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        const url = await uploadFile(file);
+        if (url) uploadedUrls.push(url);
+      }
+      const parts = [resolveShortcodes(body), ...uploadedUrls].filter(Boolean);
+      if (parts.length > 0) {
+        await sendMessage(parts.join("\n"), replyEventId, spoiler);
+      }
+    } else {
+      // Files only: send each as its own message
+      for (const { file, previewUrl } of toUpload) {
+        if (previewUrl) URL.revokeObjectURL(previewUrl);
+        const url = await uploadFile(file);
+        if (url) await sendMessage(url, undefined, spoiler);
+      }
+      // Text only: send as one message
+      if (body) {
+        await sendMessage(resolveShortcodes(body), replyEventId, spoiler);
+      }
     }
   };
 
@@ -1196,6 +1214,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         }
         return (
         <div className="border-t p-3">
+          {/* Spoiler mode banner */}
+          {isSpoiler && (
+            <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-xs font-medium">
+              <EyeOff className="h-3 w-3 shrink-0" />
+              <span>Spoiler — message will be hidden until clicked</span>
+              <button className="ml-auto hover:text-amber-400 cursor-pointer" onClick={() => setIsSpoiler(false)} title="Disable spoiler">✕</button>
+            </div>
+          )}
           {/* Staged file previews */}
           {pendingFiles.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
@@ -1343,6 +1369,16 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               >
                 {uploading ? "…" : "+"}
               </label>
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`shrink-0 ${isSpoiler ? "text-amber-500 bg-amber-500/10 hover:bg-amber-500/20 hover:text-amber-400" : ""}`}
+              onClick={() => setIsSpoiler(v => !v)}
+              title={isSpoiler ? "Spoiler mode on — click to disable" : "Mark as spoiler"}
+            >
+              <EyeOff className="h-4 w-4" />
             </Button>
 
             <div className="relative flex-1">

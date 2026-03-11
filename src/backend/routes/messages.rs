@@ -80,6 +80,10 @@ pub(crate) async fn send_message(
         "body": req.body
     });
 
+    if req.spoiler == Some(true) {
+        content["spoiler"] = json!(true);
+    }
+
     // If replying to a message, look up parent and embed reply metadata
     let mut reply_to_user: Option<String> = None;
     if let Some(ref parent_event_id) = req.in_reply_to {

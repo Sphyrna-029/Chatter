@@ -516,9 +516,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const sendMessage = useCallback(
-    async (body: string, inReplyTo?: string) => {
+    async (body: string, inReplyTo?: string, spoiler?: boolean) => {
       if (!stateRef.current.currentRoomId) return;
-      await apiSendMessage(stateRef.current.currentRoomId, body, inReplyTo);
+      await apiSendMessage(stateRef.current.currentRoomId, body, inReplyTo, spoiler);
     },
     []
   );

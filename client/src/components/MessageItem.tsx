@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
+import { EyeOff } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -233,11 +234,26 @@ function LinkPreviewCard({ url }: { url: string }) {
 }
 
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
-const MediaPreview = memo(function MediaPreview({ body }: { body: string }) {
+const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onReveal }: { body: string; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
   const { images, videos, audios, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
 
-  if (images.length === 0 && videos.length === 0 && audios.length === 0 && links.length === 0 && youtubeIds.length === 0) return null;
+  const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || links.length > 0 || youtubeIds.length > 0;
+  if (!hasMedia) return null;
+
+  if (hiddenBySpoiler) {
+    return (
+      <div
+        className="mt-2 flex items-center gap-2 px-3 py-2 rounded-md bg-muted/60 cursor-pointer hover:bg-muted/80 transition-colors w-fit"
+        onClick={onReveal}
+        title="Click to reveal spoiler media"
+      >
+        <EyeOff className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="text-sm text-muted-foreground">Spoiler media — click to reveal</span>
+      </div>
+    );
+  }
+
   return (
     <div className="mt-2 space-y-2">
       {youtubeIds.map((id) => (
@@ -309,6 +325,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction } = useAppContext();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
 
   const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -374,6 +391,19 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
     : state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
+  const isSpoilerMsg = message.content.spoiler === true && !isDeleted;
+  const showSpoilerMask = isSpoilerMsg && !spoilerRevealed;
+  // Only show the text spoiler pill if the body has visible text beyond embedded media URLs.
+  // If the body is purely an image/video/audio URL, MediaPreview already shows the spoiler overlay.
+  const spoilerHasVisibleText = showSpoilerMask && (() => {
+    const withoutEmoji = message.content.body.replace(/:emoji\{[^}]+\}:/g, "");
+    const withoutMedia = withoutEmoji.replace(/(https?:\/\/[^\s]+)/g, (url) =>
+      imageExtensions.test(url) || videoExtensions.test(url) || audioExtensions.test(url) || getYouTubeVideoId(url) !== null
+        ? ""
+        : url
+    );
+    return withoutMedia.trim().length > 0;
+  })();
 
   // Populate edit div with HTML and focus with cursor at end
   useEffect(() => {
@@ -564,6 +594,15 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
                 <span>Esc to cancel</span>
               </div>
             </div>
+          ) : spoilerHasVisibleText ? (
+            <div
+              className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md cursor-pointer bg-muted hover:bg-muted/70 transition-colors select-none", !grouped && "mt-0.5")}
+              onClick={() => setSpoilerRevealed(true)}
+              title="Click to reveal spoiler"
+            >
+              <EyeOff className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs font-medium text-muted-foreground">Spoiler — click to reveal</span>
+            </div>
           ) : (
             <div
               className={cn(
@@ -608,7 +647,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           )}
 
           {/* Media rendered as stable React elements — not inside innerHTML */}
-          {!isDeleted && <MediaPreview body={message.content.body} />}
+          {!isDeleted && <MediaPreview body={message.content.body} hiddenBySpoiler={showSpoilerMask} onReveal={() => setSpoilerRevealed(true)} />}
 
           {/* Reactions */}
           {Object.keys(reactions).length > 0 && (

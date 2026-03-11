@@ -379,11 +379,14 @@ export async function apiGetMessages(roomId: string, limit = 50, before?: number
   }>;
 }
 
-export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string) {
+export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string, spoiler?: boolean) {
   const txnId = Date.now();
-  const payload: Record<string, string> = { msgtype: "m.text", body };
+  const payload: Record<string, string | boolean> = { msgtype: "m.text", body };
   if (inReplyTo) {
     payload.in_reply_to = inReplyTo;
+  }
+  if (spoiler) {
+    payload.spoiler = true;
   }
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.room.message/${txnId}`,
@@ -484,6 +487,7 @@ export interface MatrixMessage {
   content: {
     body: string;
     msgtype: string;
+    spoiler?: boolean;
     in_reply_to?: string;
     reply_to_sender?: string;
     reply_to_body?: string;

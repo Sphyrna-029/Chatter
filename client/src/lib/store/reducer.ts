@@ -59,6 +59,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_LOADING_OLDER":
       return { ...state, loadingOlderMessages: action.payload };
     case "ADD_MESSAGE":
+      if (state.messages.some((m) => m.event_id === action.payload.event_id)) return state;
       return { ...state, messages: [...state.messages, action.payload] };
     case "REDACT_MESSAGE":
       return {

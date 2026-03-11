@@ -170,7 +170,7 @@ export interface AppContextValue {
   logout: () => Promise<void>;
   loadRooms: () => Promise<void>;
   selectRoom: (roomId: string) => Promise<void>;
-  sendMessage: (body: string, inReplyTo?: string) => Promise<void>;
+  sendMessage: (body: string, inReplyTo?: string, spoiler?: boolean) => Promise<void>;
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;

@@ -61,6 +61,7 @@ pub(crate) struct SendMessageRequest {
     pub(crate) msgtype: Option<String>,
     pub(crate) body: String,
     pub(crate) in_reply_to: Option<String>,
+    pub(crate) spoiler: Option<bool>,
 }
 
 #[derive(Deserialize)]
