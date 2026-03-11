@@ -375,3 +375,34 @@
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0.5 0 0);
 }
+
+/* Mobile-specific: prevent iOS input zoom, use safe area insets, fix 100vh */
+@supports (-webkit-touch-callout: none) {
+  body {
+    /* Use dvh on iOS to account for toolbar */
+    height: 100dvh;
+  }
+  /* Prevent iOS zoom on input focus (16px minimum) */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px;
+  }
+}
+
+/* Safe area insets for notched devices */
+@media (max-width: 767px) {
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  #root {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  /* Ensure bottom input clears the safe area */
+  .border-t.p-3 {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+}

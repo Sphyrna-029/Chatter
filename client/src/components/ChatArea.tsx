@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
@@ -68,6 +69,7 @@ interface ChatAreaProps {
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround } = useAppContext();
+  const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -897,8 +899,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           <p className="text-sm font-medium text-primary">Drop file to attach</p>
         </div>
       )}
-      {/* Header */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
+      {/* Header — compact on mobile since MobileHeader shows room name */}
+      <div className={`flex items-center justify-between border-b px-4 ${isMobile ? "py-1.5" : "py-3"}`}>
         {/* Join voice button — only visible when not already in voice */}
         {onJoinVoice && !state.inVoiceChannel ? (
           <Button
@@ -910,9 +912,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             Join Voice
           </Button>
         ) : (
-          <div className="w-8" />
+          <div className={isMobile ? "w-0" : "w-8"} />
         )}
-        <div className="flex-1 min-w-0 text-center">
+        <div className={`flex-1 min-w-0 text-center ${isMobile ? "hidden" : ""}`}>
           <h2 className="text-sm font-semibold">
             {roomInfo?.name || "Unnamed Room"}
           </h2>
@@ -1394,7 +1396,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               {/* Placeholder — shown when the div is empty */}
               {!input && (
                 <span className="absolute top-2 left-3 text-sm text-muted-foreground pointer-events-none select-none z-10">
-                  Type your message... (/ for commands, Ctrl+O for CLI)
+                  {isMobile ? "Type a message..." : "Type your message... (/ for commands, Ctrl+O for CLI)"}
                 </span>
               )}
               <div

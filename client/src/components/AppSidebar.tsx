@@ -14,6 +14,7 @@ import {
   SidebarGroupContent,
   SidebarHeader,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -31,6 +32,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms } = useAppContext();
+  const { isMobile, setOpenMobile } = useSidebar();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
@@ -104,7 +106,10 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     return (
       <button
         key={roomId}
-        onClick={() => selectRoom(roomId)}
+        onClick={() => {
+          selectRoom(roomId);
+          if (isMobile) setOpenMobile(false);
+        }}
         draggable={!isDm}
         onDragStart={(e) => {
           if (isDm) return;
@@ -360,7 +365,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             </ToggleGroup>
           </div>
           <SidebarGroupContent className="flex-1 min-h-0">
-            <ScrollArea className="h-[calc(100vh-280px)]">
+            <ScrollArea className="h-[calc(100dvh-280px)]">
               {activeTab === "rooms" ? (
                 <>
                   {/* + Group button */}
@@ -594,7 +599,10 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             variant="ghost"
             size="sm"
             className="w-full text-xs text-muted-foreground justify-start gap-2"
-            onClick={() => dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: true })}
+            onClick={() => {
+              dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: true });
+              if (isMobile) setOpenMobile(false);
+            }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -609,6 +617,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           onClick={() => {
             dispatch({ type: "SELECT_ROOM", payload: null });
             dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: false });
+            if (isMobile) setOpenMobile(false);
           }}
         >
           <span className="relative">

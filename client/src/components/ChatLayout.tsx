@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { WifiOff, ChevronRight } from "lucide-react";
+import { WifiOff, ChevronRight, Menu, Users } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
@@ -15,6 +16,13 @@ import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from "@/components/ui/sheet";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -57,11 +65,47 @@ function LeftPanelRestoreButton() {
   );
 }
 
+/** Mobile top bar with sidebar toggle + room name + members */
+function MobileHeader({
+  roomName,
+  onMembersToggle,
+  showMembers,
+}: {
+  roomName: string;
+  onMembersToggle: () => void;
+  showMembers: boolean;
+}) {
+  const { toggleSidebar } = useSidebar();
+  return (
+    <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
+      <button
+        onClick={toggleSidebar}
+        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        title="Open sidebar"
+      >
+        <Menu className="h-5 w-5" />
+      </button>
+      <h1 className="flex-1 truncate text-sm font-semibold">{roomName}</h1>
+      {showMembers && (
+        <button
+          onClick={onMembersToggle}
+          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          title="Show members"
+        >
+          <Users className="h-5 w-5" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function ChatLayout() {
   const { state, loadRooms, loadFriends, loadRoomGroups, selectRoom } = useAppContext();
+  const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
+  const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const joinVoiceRef = useRef<(() => void) | null>(null);
@@ -243,15 +287,30 @@ export function ChatLayout() {
       />
 
       <SidebarProvider>
-        <div className="flex h-screen w-full">
+        <div className="flex h-dvh w-full">
           <AppSidebar
             onCreateRoom={() => setCreateOpen(true)}
             onJoinRoom={() => setJoinOpen(true)}
           />
 
           <SidebarInset className="flex flex-1 flex-col min-w-0">
-            {/* Floating restore button — only visible when left sidebar is collapsed */}
-            <LeftPanelRestoreButton />
+            {/* Floating restore button — only visible when left sidebar is collapsed (desktop only) */}
+            {!isMobile && <LeftPanelRestoreButton />}
+
+            {/* Mobile top bar */}
+            {isMobile && (
+              <MobileHeader
+                roomName={
+                  state.currentRoomId
+                    ? state.roomInfoMap[state.currentRoomId]?.name || "Unnamed"
+                    : state.adminDashboardOpen
+                    ? "Admin Dashboard"
+                    : "Activity"
+                }
+                onMembersToggle={() => setMobileMembersOpen(true)}
+                showMembers={!!state.currentRoomId && !state.adminDashboardOpen}
+              />
+            )}
 
             {/* Connection lost banner */}
             {!state.wsConnected && (
@@ -373,15 +432,30 @@ export function ChatLayout() {
               ) : (
                 <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
               )}
-              <MembersPanel
-                collapsed={membersCollapsed}
-                onToggle={() => setMembersCollapsed((v) => !v)}
-              />
+              {!isMobile && (
+                <MembersPanel
+                  collapsed={membersCollapsed}
+                  onToggle={() => setMembersCollapsed((v) => !v)}
+                />
+              )}
             </div>
             )}
           </SidebarInset>
         </div>
       </SidebarProvider>
+
+      {/* Mobile members drawer */}
+      {isMobile && (
+        <Sheet open={mobileMembersOpen} onOpenChange={setMobileMembersOpen}>
+          <SheetContent side="right" className="w-72 p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Members</SheetTitle>
+              <SheetDescription>Room members list</SheetDescription>
+            </SheetHeader>
+            <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
+          </SheetContent>
+        </Sheet>
+      )}
 
       <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} />
       <JoinRoomDialog open={joinOpen} onOpenChange={setJoinOpen} />

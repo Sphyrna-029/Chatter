@@ -149,7 +149,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
   };
 
   return (
-    <div className="w-56 border-l flex flex-col shrink-0">
+    <div className="w-full md:w-56 md:border-l flex flex-col shrink-0 h-full">
       <div className="flex items-center gap-2 border-b px-3 py-3">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Members
