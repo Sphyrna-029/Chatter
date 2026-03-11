@@ -376,22 +376,22 @@
   background: oklch(0.5 0 0);
 }
 
-/* Mobile-specific: prevent iOS input zoom, use safe area insets, fix 100vh */
+/* ── Mobile-specific styles ────────────────────────────────────────────────── */
+
+/* Prevent iOS zoom on input focus (16px minimum) */
 @supports (-webkit-touch-callout: none) {
   body {
-    /* Use dvh on iOS to account for toolbar */
     height: 100dvh;
   }
-  /* Prevent iOS zoom on input focus (16px minimum) */
   input,
   textarea,
   select,
   [contenteditable="true"] {
-    font-size: 16px;
+    font-size: 16px !important;
   }
 }
 
-/* Safe area insets for notched devices */
+/* Mobile layout & readability */
 @media (max-width: 767px) {
   body {
     height: 100dvh;
@@ -401,8 +401,84 @@
     height: 100dvh;
     overflow: hidden;
   }
-  /* Ensure bottom input clears the safe area */
+
+  /* Bump base font to 15px for readability on small screens */
+  body {
+    font-size: 15px;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Ensure bottom input clears the safe area on notched devices */
   .border-t.p-3 {
     padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+
+  /* Larger message text */
+  [data-slot="sidebar-wrapper"] .text-sm {
+    font-size: 0.9375rem; /* 15px */
+    line-height: 1.5;
+  }
+
+  /* Bigger avatars in messages */
+  [data-event-id] .h-8.w-8 {
+    width: 2.5rem;
+    height: 2.5rem;
+  }
+  [data-event-id] .w-8 {
+    width: 2.5rem;
+  }
+
+  /* Bigger touch targets for buttons */
+  button,
+  [role="button"] {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  /* Exclude tiny inline elements like emoji reactions, close buttons */
+  .h-4.w-4,
+  .h-3.w-3,
+  .h-2.w-2 {
+    min-height: unset;
+    min-width: unset;
+  }
+
+  /* Larger room cards in sidebar */
+  [data-sidebar="sidebar"] button[style*="min-height"] {
+    min-height: 6.5rem !important;
+  }
+  [data-sidebar="sidebar"] .text-\[11px\] {
+    font-size: 0.8125rem; /* 13px */
+  }
+  [data-sidebar="sidebar"] .text-\[10px\] {
+    font-size: 0.75rem; /* 12px */
+  }
+  [data-sidebar="sidebar"] .text-\[9px\] {
+    font-size: 0.6875rem; /* 11px */
+  }
+  [data-sidebar="sidebar"] .h-10.w-10 {
+    width: 3rem;
+    height: 3rem;
+  }
+
+  /* Larger sidebar buttons */
+  [data-sidebar="sidebar"] .text-xs {
+    font-size: 0.8125rem;
+  }
+
+  /* Bigger members panel text */
+  [data-slot="scroll-area-viewport"] .text-xs {
+    font-size: 0.8125rem;
+  }
+
+  /* Message reactions — keep them tappable but not oversized */
+  [data-event-id] button.rounded-md {
+    min-height: 32px;
+    padding-left: 0.625rem;
+    padding-right: 0.625rem;
+  }
+
+  /* Input area padding */
+  .border-t.p-3 {
+    padding: 0.625rem;
   }
 }

@@ -1409,8 +1409,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
                 suppressContentEditableWarning
-                className={`w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] max-h-40 overflow-y-auto break-words ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
-                style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: "20px" }}
+                className={`w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+                style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: isMobile ? "24px" : "20px" }}
               />
 
               {/* GIF picker */}
@@ -1481,8 +1481,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
             <Button
               onClick={handleSend}
-              size="default"
+              size={isMobile ? "lg" : "default"}
               disabled={displayLength > MAX_MESSAGE_LENGTH}
+              className={isMobile ? "px-5 text-base" : ""}
             >
               Send
             </Button>

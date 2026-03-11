@@ -119,7 +119,7 @@ export function ActivityPage() {
 
   return (
     <ScrollArea className="flex-1">
-      <div className="mx-auto max-w-5xl px-6 py-8 space-y-8">
+      <div className="mx-auto max-w-5xl px-4 md:px-6 py-6 md:py-8 space-y-6 md:space-y-8">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Activity</h1>
@@ -163,7 +163,7 @@ export function ActivityPage() {
         )}
 
         {/* Two-column layout: Rooms left, Friends right */}
-        <div className="flex gap-8 items-start">
+        <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
           {/* Left column — Your Rooms */}
           <div className="flex-1 min-w-0 overflow-hidden space-y-3">
             <section className="space-y-3">
@@ -252,7 +252,7 @@ export function ActivityPage() {
           </div>
 
           {/* Right column — Friends */}
-          <div className="w-64 shrink-0 space-y-6">
+          <div className="w-full md:w-64 md:shrink-0 space-y-6">
             {/* Friend Requests */}
             {state.incomingFriendRequests.length > 0 && (
               <section className="space-y-3">

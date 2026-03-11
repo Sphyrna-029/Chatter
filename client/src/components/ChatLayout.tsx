@@ -77,22 +77,22 @@ function MobileHeader({
 }) {
   const { toggleSidebar } = useSidebar();
   return (
-    <div className="flex items-center gap-2 border-b px-3 py-2 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
+    <div className="flex items-center gap-3 border-b px-3 py-2.5 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
       <button
         onClick={toggleSidebar}
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+        className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
         title="Open sidebar"
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-6 w-6" />
       </button>
-      <h1 className="flex-1 truncate text-sm font-semibold">{roomName}</h1>
+      <h1 className="flex-1 truncate text-base font-semibold">{roomName}</h1>
       {showMembers && (
         <button
           onClick={onMembersToggle}
-          className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
           title="Show members"
         >
-          <Users className="h-5 w-5" />
+          <Users className="h-6 w-6" />
         </button>
       )}
     </div>

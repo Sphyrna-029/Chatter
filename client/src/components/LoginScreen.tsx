@@ -803,7 +803,7 @@ export function LoginScreen() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center p-4">
+    <div className="relative flex min-h-dvh items-center justify-center p-4">
       <HalftoneBackground />
 
       {/* Help icon */}
