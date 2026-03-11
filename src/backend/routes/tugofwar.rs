@@ -1,5 +1,5 @@
 use super::super::{
-    helpers::{error_response, extract_token, generate_id, get_user_from_token, now_millis},
+    helpers::{broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token, now_millis},
     state::{AppState, RoomRecord, TugOfWarGame, TugOfWarPlayer},
     tugofwar_engine::PROMPTS,
 };
@@ -134,6 +134,16 @@ pub(crate) async fn new_tugofwar_game(
     coll.insert_one(&game)
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create game"))?;
+
+    broadcast_to_room(&state, &room_id, &json!({
+        "type": "tugofwar_game_created",
+        "room_id": &room_id,
+        "game_id": &game_id,
+        "status": "lobby",
+        "players": [{ "user_id": &user_id, "team": "", "ready": false }],
+        "prompt": &game.prompt,
+        "rope_position": 0.0,
+    })).await;
 
     Ok(Json(json!({ "game_id": game_id })))
 }

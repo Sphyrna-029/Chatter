@@ -261,6 +261,25 @@ export function TugOfWarArea({ onJoinVoice: _onJoinVoice }: TugOfWarAreaProps) {
 
   // WS event handlers
   useEffect(() => {
+    const onGameCreated = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d.room_id !== roomId) return;
+      setGameState((prev) => ({
+        ...prev,
+        game_id: d.game_id,
+        status: "lobby",
+        players: d.players || [],
+        rope_position: 0,
+        prompt: d.prompt || "",
+        started_at: null,
+        winner: null,
+        left_wps: 0,
+        right_wps: 0,
+        reset_votes: 0,
+        reset_total: 0,
+        my_reset_vote: false,
+      }));
+    };
     const onPlayerUpdate = (e: Event) => {
       const d = (e as CustomEvent).detail;
       if (d.room_id !== roomId) return;
@@ -331,6 +350,7 @@ export function TugOfWarArea({ onJoinVoice: _onJoinVoice }: TugOfWarAreaProps) {
     };
 
     const events = [
+      ["tugofwar_game_created", onGameCreated],
       ["tugofwar_player_update", onPlayerUpdate],
       ["tugofwar_game_started", onGameStarted],
       ["tugofwar_rope_update", onRopeUpdate],

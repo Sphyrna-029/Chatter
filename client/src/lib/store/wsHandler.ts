@@ -273,9 +273,10 @@ export function createWsMessageHandler(
       );
     }
     // Tug of War real-time events
-    else if (msg.type === "tugofwar_player_update" || msg.type === "tugofwar_game_started" ||
-             msg.type === "tugofwar_rope_update" || msg.type === "tugofwar_game_over" ||
-             msg.type === "tugofwar_reset_vote" || msg.type === "tugofwar_game_reset") {
+    else if (msg.type === "tugofwar_game_created" || msg.type === "tugofwar_player_update" ||
+             msg.type === "tugofwar_game_started" || msg.type === "tugofwar_rope_update" ||
+             msg.type === "tugofwar_game_over" || msg.type === "tugofwar_reset_vote" ||
+             msg.type === "tugofwar_game_reset") {
       window.dispatchEvent(new CustomEvent(msg.type, { detail: msg }));
     }
     // Whiteboard real-time events — dispatch as custom events for WhiteboardArea to handle
