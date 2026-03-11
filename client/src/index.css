@@ -352,6 +352,14 @@
   font-weight: bold;
 }
 
+/* Restore bold/italic inside innerHTML (Tailwind preflight resets these) */
+strong, b {
+  font-weight: bold;
+}
+em, i {
+  font-style: italic;
+}
+
 @keyframes marquee {
   0% {
     transform: translateX(100%);
