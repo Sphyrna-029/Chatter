@@ -92,6 +92,14 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     return `<span data-emoji-name=":${name}:">${emoji}</span>`;
   });
 
+  // Text formatting: %%%strobe%%%, **bold**, _italic_
+  // RGB strobe (must be before bold to avoid conflict with asterisks)
+  escaped = escaped.replace(/%%%(.+?)%%%/g, '<span class="strobe-rgb">$1</span>');
+  // Bold
+  escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic (use word boundary-ish check to avoid matching underscores in URLs/names)
+  escaped = escaped.replace(/(?<![a-zA-Z0-9])_(.+?)_(?![a-zA-Z0-9])/g, '<em>$1</em>');
+
   return escaped;
 }
 

@@ -337,6 +337,21 @@
   --sidebar-ring: oklch(0.8 0.25 145);
 }
 
+@keyframes strobe-rgb {
+  0%   { color: #ff0000; }
+  16%  { color: #ff8000; }
+  33%  { color: #ffff00; }
+  50%  { color: #00ff00; }
+  66%  { color: #0080ff; }
+  83%  { color: #8000ff; }
+  100% { color: #ff0000; }
+}
+
+.strobe-rgb {
+  animation: strobe-rgb 1.5s linear infinite;
+  font-weight: bold;
+}
+
 @keyframes marquee {
   0% {
     transform: translateX(100%);
