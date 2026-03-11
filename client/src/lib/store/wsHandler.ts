@@ -3,17 +3,42 @@ import type { Action, AppState } from "./types";
 import { apiSync, apiGetPresence } from "../api";
 import { displayUserId } from "@/lib/utils";
 
-async function playReversed(url: string) {
-  try {
-    const ctx = new AudioContext();
-    const response = await fetch(url);
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-    for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-      audioBuffer.getChannelData(c).reverse();
+// Pre-decode and cache the reversed leave sound so playback is instant
+let cachedLeaveBuffer: AudioBuffer | null = null;
+let cacheLoading = false;
+
+function ensureLeaveBufferCached() {
+  if (cachedLeaveBuffer || cacheLoading) return;
+  cacheLoading = true;
+  (async () => {
+    try {
+      const ctx = new AudioContext();
+      const response = await fetch("/external/vc-join.wav");
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
+        audioBuffer.getChannelData(c).reverse();
+      }
+      cachedLeaveBuffer = audioBuffer;
+      await ctx.close();
+    } catch {
+      cacheLoading = false;
     }
+  })();
+}
+
+// Start caching immediately on module load
+ensureLeaveBufferCached();
+
+function playLeaveSound() {
+  try {
+    if (!cachedLeaveBuffer) {
+      ensureLeaveBufferCached();
+      return;
+    }
+    const ctx = new AudioContext();
     const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
+    source.buffer = cachedLeaveBuffer;
     source.connect(ctx.destination);
     source.start();
     source.onended = () => ctx.close();
@@ -139,7 +164,7 @@ export function createWsMessageHandler(
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
         if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
-          playReversed("/external/vc-join.wav");
+          playLeaveSound();
         }
       }
     } else if (msg.type === "voice_user_muted") {
