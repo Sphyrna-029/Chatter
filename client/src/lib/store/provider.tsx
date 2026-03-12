@@ -245,7 +245,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean }> = {};
         for (const [uid, p] of Object.entries(data.presence)) {
           const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, isMobile: pAny.is_mobile || false };
+          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined };
         }
         dispatch({ type: "SET_PRESENCE", payload: mapped });
       } catch {}

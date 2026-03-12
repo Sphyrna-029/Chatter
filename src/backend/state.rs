@@ -50,6 +50,7 @@ pub struct AppState {
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
     pub(crate) tug_of_war_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) klipy_api_key: String,
+    pub(crate) steam_api_key: String,
 }
 
 #[derive(Clone)]
@@ -89,6 +90,8 @@ pub(crate) struct UserRecord {
     pub(crate) name_font_url: String,
     #[serde(default)]
     pub(crate) must_reset_password: bool,
+    #[serde(default)]
+    pub(crate) steam_id: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -398,6 +401,7 @@ pub(crate) struct PresenceRecord {
     pub(crate) custom_status: String,
     pub(crate) manual_status: Option<String>,
     pub(crate) is_mobile: bool,
+    pub(crate) steam_game: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

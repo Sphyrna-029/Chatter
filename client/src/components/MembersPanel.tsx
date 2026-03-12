@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone, Gamepad2 } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
@@ -128,6 +128,12 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           {customStatus && (
             <span className="truncate text-[0.625rem] leading-tight text-muted-foreground block">
               {customStatus}
+            </span>
+          )}
+          {presence?.steamGame && status !== "offline" && (
+            <span className="flex items-center gap-1 truncate text-[0.625rem] leading-tight text-blue-400 block">
+              <Gamepad2 className="h-3 w-3 shrink-0" />
+              {presence.steamGame}
             </span>
           )}
         </div>

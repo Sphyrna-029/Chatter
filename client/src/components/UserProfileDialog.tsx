@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiUnlinkSteam, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
@@ -129,6 +129,11 @@ export function UserProfileDialog({
   const [totpSetupError, setTotpSetupError] = useState<string | null>(null);
   const [totpSetupRecoveryCodes, setTotpSetupRecoveryCodes] = useState<string[] | null>(null);
 
+  // Steam state
+  const [steamId, setSteamId] = useState<string | null>(null);
+  const [steamLoading, setSteamLoading] = useState(false);
+  const [steamError, setSteamError] = useState<string | null>(null);
+
   useEffect(() => {
     if (open) {
       setNicknameInput(nicknameFromPresence);
@@ -183,6 +188,9 @@ export function UserProfileDialog({
       apiGetAccountStatus().then((data) => {
         setTotpVerified(data.totp_verified);
         dispatch({ type: "SET_TOTP_VERIFIED", payload: data.totp_verified });
+      }).catch(() => {});
+      apiGetSteamStatus().then((data) => {
+        setSteamId(data.steam_id);
       }).catch(() => {});
     }
   }, [activeTab, isSelf]);
@@ -1127,6 +1135,62 @@ export function UserProfileDialog({
           >
             View Recovery Codes
           </Button>
+        )}
+      </div>
+
+      {/* Steam Integration */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-sm font-semibold">Steam Account</h3>
+        {steamError && <p className="text-xs text-destructive">{steamError}</p>}
+        {steamId ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Linked Steam ID: <span className="font-mono text-foreground">{steamId}</span>
+            </p>
+            <Button
+              onClick={async () => {
+                setSteamLoading(true);
+                setSteamError(null);
+                try {
+                  await apiUnlinkSteam();
+                  setSteamId(null);
+                } catch (err: any) {
+                  setSteamError(err.message || "Failed to unlink Steam");
+                } finally {
+                  setSteamLoading(false);
+                }
+              }}
+              disabled={steamLoading}
+              variant="outline"
+              className="w-full"
+            >
+              {steamLoading ? "Unlinking..." : "Unlink Steam Account"}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Link your Steam account to show your currently playing game to other members.
+            </p>
+            <Button
+              onClick={async () => {
+                setSteamLoading(true);
+                setSteamError(null);
+                try {
+                  const { url } = await apiGetSteamLinkUrl();
+                  window.location.href = url;
+                } catch (err: any) {
+                  setSteamError(err.message || "Failed to get Steam link URL");
+                  setSteamLoading(false);
+                }
+              }}
+              disabled={steamLoading}
+              variant="outline"
+              className="w-full"
+            >
+              {steamLoading ? "Redirecting..." : "Link Steam Account"}
+            </Button>
+          </div>
         )}
       </div>
 

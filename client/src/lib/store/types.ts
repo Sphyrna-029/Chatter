@@ -19,7 +19,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
-  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string }>;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;
@@ -78,7 +78,7 @@ export type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }

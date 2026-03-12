@@ -92,10 +92,10 @@ export function createWsMessageHandler(
               });
             }
             const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string }> = {};
+            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; steamGame?: string }> = {};
             for (const [uid, p] of Object.entries(presData.presence)) {
               const pAny = p as any;
-              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined };
+              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, steamGame: pAny.steam_game || undefined };
             }
             dispatch({ type: "SET_PRESENCE", payload: mapped });
           } catch {}
@@ -147,7 +147,7 @@ export function createWsMessageHandler(
           type: "SET_PRESENCE",
           payload: {
             ...stateRef.current.userPresence,
-            [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about, displayName: existing?.displayName, nameFontUrl: existing?.nameFontUrl },
+            [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about, displayName: existing?.displayName, nameFontUrl: existing?.nameFontUrl, steamGame: existing?.steamGame },
           },
         });
       }
@@ -216,6 +216,7 @@ export function createWsMessageHandler(
               displayName: msg.display_name !== undefined ? (msg.display_name || undefined) : existing?.displayName,
               nameFontUrl: msg.name_font_url !== undefined ? (msg.name_font_url || undefined) : existing?.nameFontUrl,
               isMobile: msg.is_mobile !== undefined ? msg.is_mobile : existing?.isMobile,
+              steamGame: msg.steam_game !== undefined ? (msg.steam_game || undefined) : existing?.steamGame,
             },
           },
         });

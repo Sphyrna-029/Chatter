@@ -1,4 +1,9 @@
-use super::{router, state::{AppState, ServerSettings}, webrtc::build_webrtc_api};
+use super::{
+    helpers::{broadcast_to_room, now_secs},
+    router,
+    state::{AppState, ServerSettings, UserRecord},
+    webrtc::build_webrtc_api,
+};
 use axum::Router;
 use mongodb::{Client, IndexModel, options::IndexOptions};
 use std::{collections::HashMap, sync::Arc};
@@ -16,6 +21,7 @@ pub async fn build_state() -> Arc<AppState> {
     let jwt_secret =
         std::env::var("JWT_SECRET").unwrap_or_else(|_| "change-me-in-production".to_string());
     let klipy_api_key = std::env::var("KLIPY_API_KEY").unwrap_or_default();
+    let steam_api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
 
     let client = Client::with_uri_str(&mongodb_uri)
         .await
@@ -53,6 +59,7 @@ pub async fn build_state() -> Arc<AppState> {
         watch_party_rooms: RwLock::new(HashMap::new()),
         tug_of_war_games: RwLock::new(HashMap::new()),
         klipy_api_key,
+        steam_api_key,
     })
 }
 
@@ -284,9 +291,142 @@ pub(crate) fn generate_invite_code() -> String {
 
 pub async fn run() {
     let state = build_state().await;
+
+    // Spawn Steam presence poller if API key is configured
+    if !state.steam_api_key.is_empty() {
+        let state_for_poller = Arc::clone(&state);
+        tokio::spawn(steam_presence_poller(state_for_poller));
+    }
+
     let app = build_app(state);
 
     println!("Chatter server running on http://0.0.0.0:8000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn steam_presence_poller(state: Arc<AppState>) {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+    use serde_json::json;
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    interval.tick().await; // skip the immediate first tick
+
+    loop {
+        interval.tick().await;
+
+        let api_key = state.steam_api_key.clone();
+        if api_key.is_empty() {
+            break;
+        }
+
+        // Collect online user IDs
+        let online_user_ids: Vec<String> = {
+            let up = state.user_presence.read().await;
+            up.iter()
+                .filter(|(_, p)| p.connected)
+                .map(|(uid, _)| uid.clone())
+                .collect()
+        };
+        if online_user_ids.is_empty() {
+            continue;
+        }
+
+        // Find which online users have a steam_id
+        let users_coll = state.db.collection::<UserRecord>("users");
+        let filter = doc! { "_id": { "$in": &online_user_ids }, "steam_id": { "$ne": null } };
+        let Ok(mut cursor) = users_coll.find(filter).await else { continue };
+
+        let mut steam_to_user: HashMap<String, String> = HashMap::new();
+        while let Ok(Some(user)) = cursor.try_next().await {
+            if let Some(sid) = user.steam_id {
+                if !sid.is_empty() {
+                    steam_to_user.insert(sid, user.user_id);
+                }
+            }
+        }
+        if steam_to_user.is_empty() {
+            continue;
+        }
+
+        // Batch call Steam GetPlayerSummaries (max 100 IDs per call)
+        let steam_ids_str = steam_to_user.keys().cloned().collect::<Vec<_>>().join(",");
+        let url = format!(
+            "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={}&steamids={}",
+            api_key, steam_ids_str
+        );
+        let Ok(resp) = reqwest::get(&url).await else { continue };
+        let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+
+        let Some(players) = body["response"]["players"].as_array() else { continue };
+
+        // Build set of steam IDs that are currently in-game
+        let mut in_game: HashMap<String, String> = HashMap::new(); // steam_id -> game name
+        for player in players {
+            if let Some(steam_id) = player["steamid"].as_str() {
+                if let Some(game) = player["gameextrainfo"].as_str() {
+                    in_game.insert(steam_id.to_string(), game.to_string());
+                }
+            }
+        }
+
+        // Update presence and broadcast changes
+        for (steam_id, user_id) in &steam_to_user {
+            let new_game = in_game.get(steam_id).cloned();
+
+            let changed = {
+                let up = state.user_presence.read().await;
+                up.get(user_id).map(|p| p.steam_game != new_game).unwrap_or(false)
+            };
+            if !changed {
+                continue;
+            }
+
+            {
+                let mut up = state.user_presence.write().await;
+                if let Some(p) = up.get_mut(user_id) {
+                    p.steam_game = new_game.clone();
+                }
+            }
+
+            // Collect rooms and current presence values for broadcast
+            let user_rooms: Vec<String> = {
+                let rm = state.room_members.read().await;
+                rm.iter()
+                    .filter(|(_, members)| members.contains(user_id))
+                    .map(|(rid, _)| rid.clone())
+                    .collect()
+            };
+            let (status, custom_status, is_mobile) = {
+                let up = state.user_presence.read().await;
+                up.get(user_id)
+                    .map(|p| {
+                        let st = if !p.connected {
+                            "offline".to_string()
+                        } else if let Some(ref ms) = p.manual_status {
+                            ms.clone()
+                        } else if now_secs() - p.last_active < 300.0 {
+                            "active".to_string()
+                        } else {
+                            "idle".to_string()
+                        };
+                        (st, p.custom_status.clone(), p.is_mobile)
+                    })
+                    .unwrap_or_else(|| ("offline".to_string(), String::new(), false))
+            };
+
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": status,
+                "custom_status": custom_status,
+                "is_mobile": is_mobile,
+                "steam_game": new_game,
+            });
+            for room_id in user_rooms {
+                broadcast_to_room(&state, &room_id, &event).await;
+            }
+        }
+    }
 }

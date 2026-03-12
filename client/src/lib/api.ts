@@ -1506,3 +1506,32 @@ export async function apiNewTugOfWarGame(roomId: string) {
   }
   return res.json() as Promise<{ game_id: string }>;
 }
+
+
+// ─── Steam ────────────────────────────────────────────────────────────────────
+
+export async function apiGetSteamLinkUrl(): Promise<{ url: string }> {
+  const res = await authenticatedFetch("/api/steam/link-url");
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to get Steam link URL");
+  }
+  return res.json();
+}
+
+export async function apiGetSteamStatus(): Promise<{ steam_id: string | null }> {
+  const res = await authenticatedFetch("/api/steam/status");
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to get Steam status");
+  }
+  return res.json();
+}
+
+export async function apiUnlinkSteam(): Promise<void> {
+  const res = await authenticatedFetch("/api/steam/unlink", { method: "DELETE" });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to unlink Steam");
+  }
+}

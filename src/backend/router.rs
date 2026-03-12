@@ -20,6 +20,7 @@ use super::{
         tankwar::{get_tankwar_state, new_tankwar_game},
         tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
+        steam::{steam_callback, steam_link_url, steam_login, steam_status, steam_unlink},
         static_content::{serve_client, versions},
         sync::sync,
         whiteboard::get_strokes,
@@ -171,6 +172,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/friends/remove", post(remove_friend))
            .route("/api/friends/block", post(block_user))
            .route("/api/friends/unblock", post(unblock_user))
+           // Steam
+           .route("/api/auth/steam/login", get(steam_login))
+           .route("/api/auth/steam/callback", get(steam_callback))
+           .route("/api/steam/link-url", get(steam_link_url))
+           .route("/api/steam/status", get(steam_status))
+           .route("/api/steam/unlink", delete(steam_unlink))
            // Server info (public)
            .route("/api/server/info", get(server_info))
            // Admin
