@@ -92,6 +92,8 @@ pub(crate) struct UserRecord {
     pub(crate) must_reset_password: bool,
     #[serde(default)]
     pub(crate) steam_id: Option<String>,
+    #[serde(default)]
+    pub(crate) hide_steam_game: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

@@ -335,7 +335,7 @@ async fn steam_presence_poller(state: Arc<AppState>) {
 
         // Find which online users have a steam_id
         let users_coll = state.db.collection::<UserRecord>("users");
-        let filter = doc! { "_id": { "$in": &online_user_ids }, "steam_id": { "$ne": null } };
+        let filter = doc! { "_id": { "$in": &online_user_ids }, "steam_id": { "$ne": null }, "hide_steam_game": { "$ne": true } };
         let Ok(mut cursor) = users_coll.find(filter).await else { continue };
 
         let mut steam_to_user: HashMap<String, String> = HashMap::new();

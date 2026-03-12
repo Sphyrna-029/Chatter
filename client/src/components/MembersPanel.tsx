@@ -131,9 +131,16 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             </span>
           )}
           {presence?.steamGame && status !== "offline" && (
-            <span className="flex items-center gap-1 truncate text-[0.625rem] leading-tight text-blue-400 block">
+            <span className="flex items-center gap-1 text-[0.625rem] leading-tight text-blue-400 overflow-hidden">
               <Gamepad2 className="h-3 w-3 shrink-0" />
-              {presence.steamGame}
+              <span className="overflow-hidden">
+                <span
+                  className="block whitespace-nowrap"
+                  style={{ animation: `marquee-loop ${Math.max(4, presence.steamGame.length * 0.18)}s linear infinite` }}
+                >
+                  {presence.steamGame}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{presence.steamGame}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                </span>
+              </span>
             </span>
           )}
         </div>

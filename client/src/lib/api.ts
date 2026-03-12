@@ -1519,13 +1519,25 @@ export async function apiGetSteamLinkUrl(): Promise<{ url: string }> {
   return res.json();
 }
 
-export async function apiGetSteamStatus(): Promise<{ steam_id: string | null }> {
+export async function apiGetSteamStatus(): Promise<{ steam_id: string | null; hide_game: boolean }> {
   const res = await authenticatedFetch("/api/steam/status");
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new Error(data?.error || "Failed to get Steam status");
   }
   return res.json();
+}
+
+export async function apiSetSteamHideGame(hide: boolean): Promise<void> {
+  const res = await authenticatedFetch("/api/steam/hide-game", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ hide }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Failed to update Steam game visibility");
+  }
 }
 
 export async function apiUnlinkSteam(): Promise<void> {

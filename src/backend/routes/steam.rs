@@ -17,7 +17,11 @@ fn get_base_url(headers: &HeaderMap) -> String {
             .get("host")
             .and_then(|h| h.to_str().ok())
             .unwrap_or("localhost:8000");
-        format!("http://{}", host)
+        let proto = headers
+            .get("x-forwarded-proto")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("http");
+        format!("{}://{}", proto, host)
     })
 }
 
@@ -225,7 +229,7 @@ pub(crate) async fn steam_callback(
 }
 
 /// GET /api/steam/status (auth required)
-/// Returns the current user's linked Steam ID (null if not linked).
+/// Returns the current user's linked Steam ID (null if not linked) and hide_game flag.
 pub(crate) async fn steam_status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -243,7 +247,40 @@ pub(crate) async fn steam_status(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
-    Ok(Json(json!({ "steam_id": user.steam_id })))
+    Ok(Json(json!({ "steam_id": user.steam_id, "hide_game": user.hide_steam_game })))
+}
+
+/// PUT /api/steam/hide-game (auth required)
+/// Toggles whether the user's currently playing game is shown to others.
+pub(crate) async fn steam_set_hide_game(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let hide = body.get("hide").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let users = state.db.collection::<UserRecord>("users");
+    let _ = users
+        .update_one(
+            doc! { "_id": &user_id },
+            doc! { "$set": { "hide_steam_game": hide } },
+        )
+        .await;
+
+    // If hiding, clear the game from ephemeral presence immediately
+    if hide {
+        let mut up = state.user_presence.write().await;
+        if let Some(p) = up.get_mut(&user_id) {
+            p.steam_game = None;
+        }
+    }
+
+    Ok(Json(json!({ "success": true, "hide_game": hide })))
 }
 
 /// DELETE /api/steam/unlink (auth required)

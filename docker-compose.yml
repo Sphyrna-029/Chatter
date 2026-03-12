@@ -16,6 +16,8 @@ services:
       MONGODB_URI: mongodb://mongodb:27017
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       KLIPY_API_KEY: your-klipy-key
+      STEAM_API_KEY:
+      SERVER_URL: yourdomain.com
 
     volumes:
       - uploads:/app/external

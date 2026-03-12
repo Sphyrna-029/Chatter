@@ -190,6 +190,7 @@ pub(crate) async fn register(
         name_font_url: String::new(),
         must_reset_password: false,
         steam_id: None,
+        hide_steam_game: false,
     };
     users.insert_one(user_record).await.map_err(|_| {
         error_response(
