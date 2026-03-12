@@ -92,7 +92,7 @@ export function createWsMessageHandler(
               });
             }
             const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; steamGame?: string }> = {};
+            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; steamGame?: string; steamAppId?: string; gameSessionStart?: number }> = {};
             for (const [uid, p] of Object.entries(presData.presence)) {
               const pAny = p as any;
               mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined };
