@@ -21,7 +21,7 @@ use super::{
         tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
         steam::{steam_callback, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
-        static_content::{serve_client, versions},
+        static_content::{serve_client, serve_invite_page, versions},
         sync::sync,
         whiteboard::get_strokes,
     },
@@ -192,8 +192,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/admin/users/{user_id}/reset-password", post(admin_reset_password))
            .route("/api/admin/rooms", get(admin_list_rooms))
            .route("/api/admin/rooms/{room_id}", delete(admin_delete_room))
-           // SPA fallback for invite pages
-           .route("/invite/{code}", get(serve_client))
+           // Invite page with OG meta tags for link previews
+           .route("/invite/{code}", get(serve_invite_page))
            // WebSocket
            .route("/ws", get(ws_upgrade))
    }
