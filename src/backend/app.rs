@@ -362,18 +362,20 @@ async fn steam_presence_poller(state: Arc<AppState>) {
         let Some(players) = body["response"]["players"].as_array() else { continue };
 
         // Build set of steam IDs that are currently in-game
-        let mut in_game: HashMap<String, String> = HashMap::new(); // steam_id -> game name
+        let mut in_game: HashMap<String, (String, String)> = HashMap::new(); // steam_id -> (game name, appid)
         for player in players {
             if let Some(steam_id) = player["steamid"].as_str() {
                 if let Some(game) = player["gameextrainfo"].as_str() {
-                    in_game.insert(steam_id.to_string(), game.to_string());
+                    let appid = player["gameid"].as_str().unwrap_or("").to_string();
+                    in_game.insert(steam_id.to_string(), (game.to_string(), appid));
                 }
             }
         }
 
         // Update presence and broadcast changes
         for (steam_id, user_id) in &steam_to_user {
-            let new_game = in_game.get(steam_id).cloned();
+            let new_game = in_game.get(steam_id).map(|(g, _)| g.clone());
+            let new_appid = in_game.get(steam_id).map(|(_, a)| a.clone());
 
             let changed = {
                 let up = state.user_presence.read().await;
@@ -383,10 +385,17 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                 continue;
             }
 
+            let current_time = now_secs();
             {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
+                    if p.steam_game.is_none() && new_game.is_some() {
+                        p.game_session_start = Some(current_time);
+                    } else if new_game.is_none() {
+                        p.game_session_start = None;
+                    }
                     p.steam_game = new_game.clone();
+                    p.steam_appid = new_appid.clone();
                 }
             }
 
@@ -398,7 +407,7 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                     .map(|(rid, _)| rid.clone())
                     .collect()
             };
-            let (status, custom_status, is_mobile) = {
+            let (status, custom_status, is_mobile, game_session_start) = {
                 let up = state.user_presence.read().await;
                 up.get(user_id)
                     .map(|p| {
@@ -411,9 +420,9 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                         } else {
                             "idle".to_string()
                         };
-                        (st, p.custom_status.clone(), p.is_mobile)
+                        (st, p.custom_status.clone(), p.is_mobile, p.game_session_start)
                     })
-                    .unwrap_or_else(|| ("offline".to_string(), String::new(), false))
+                    .unwrap_or_else(|| ("offline".to_string(), String::new(), false, None))
             };
 
             let event = json!({
@@ -423,6 +432,8 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                 "custom_status": custom_status,
                 "is_mobile": is_mobile,
                 "steam_game": new_game,
+                "steam_appid": new_appid,
+                "game_session_start": game_session_start,
             });
             for room_id in user_rooms {
                 broadcast_to_room(&state, &room_id, &event).await;

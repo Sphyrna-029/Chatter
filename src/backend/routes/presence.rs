@@ -142,7 +142,9 @@ pub(crate) async fn get_room_presence(
                         "display_name": display_name,
                         "name_font_url": name_font_url,
                         "is_mobile": presence.is_mobile,
-                        "steam_game": presence.steam_game
+                        "steam_game": presence.steam_game,
+                        "steam_appid": presence.steam_appid,
+                        "game_session_start": presence.game_session_start
                     }),
                 );
             } else {
@@ -158,7 +160,9 @@ pub(crate) async fn get_room_presence(
                         "display_name": display_name,
                         "name_font_url": name_font_url,
                         "is_mobile": false,
-                        "steam_game": null
+                        "steam_game": null,
+                        "steam_appid": null,
+                        "game_session_start": null
                     }),
                 );
             }

@@ -404,6 +404,8 @@ pub(crate) struct PresenceRecord {
     pub(crate) manual_status: Option<String>,
     pub(crate) is_mobile: bool,
     pub(crate) steam_game: Option<String>,
+    pub(crate) steam_appid: Option<String>,
+    pub(crate) game_session_start: Option<f64>,
 }
 
 #[derive(Clone, Serialize)]
