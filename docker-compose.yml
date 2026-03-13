@@ -15,9 +15,18 @@ services:
     environment:
       MONGODB_URI: mongodb://mongodb:27017
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
-      KLIPY_API_KEY: your-klipy-key
-      STEAM_API_KEY:
-      SERVER_URL: yourdomain.com
+
+      #################  KLIPY  #################
+      #KLIPY_API_KEY: your-klipy-key (for gif pallette)
+
+      #################  STEAM  #################
+      #STEAM_API_KEY: steam integration
+      #SERVER_URL: https://yourdomain.com (for steam integration)
+
+      ################  SPOTIFY  ################
+      #SPOTIFY_CLIENT_ID: spotify integration
+      #SPOTIFY_CLIENT_SECRET: spotify integration
+      #Set spotify redirect URI to https://yourdomain.com/api/auth/spotify/callback
 
     volumes:
       - uploads:/app/external
