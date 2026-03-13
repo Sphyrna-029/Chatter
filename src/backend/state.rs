@@ -51,6 +51,10 @@ pub struct AppState {
     pub(crate) tug_of_war_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) klipy_api_key: String,
     pub(crate) steam_api_key: String,
+    pub(crate) spotify_client_id: String,
+    pub(crate) spotify_client_secret: String,
+    // Cache: user_id -> (access_token, expires_at_unix_secs)
+    pub(crate) spotify_tokens: RwLock<HashMap<String, (String, f64)>>,
 }
 
 #[derive(Clone)]
@@ -94,6 +98,10 @@ pub(crate) struct UserRecord {
     pub(crate) steam_id: Option<String>,
     #[serde(default)]
     pub(crate) hide_steam_game: bool,
+    #[serde(default)]
+    pub(crate) spotify_refresh_token: Option<String>,
+    #[serde(default)]
+    pub(crate) hide_spotify: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -406,6 +414,9 @@ pub(crate) struct PresenceRecord {
     pub(crate) steam_game: Option<String>,
     pub(crate) steam_appid: Option<String>,
     pub(crate) game_session_start: Option<f64>,
+    pub(crate) spotify_track: Option<String>,
+    pub(crate) spotify_artist: Option<String>,
+    pub(crate) spotify_album_art: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

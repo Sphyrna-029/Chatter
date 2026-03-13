@@ -21,6 +21,7 @@ use super::{
         tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
         steam::{steam_callback, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
+        spotify::{spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink},
         static_content::{serve_client, serve_invite_page, versions},
         sync::sync,
         whiteboard::get_strokes,
@@ -179,6 +180,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/steam/status", get(steam_status))
            .route("/api/steam/hide-game", put(steam_set_hide_game))
            .route("/api/steam/unlink", delete(steam_unlink))
+           // Spotify
+           .route("/api/auth/spotify/callback", get(spotify_callback))
+           .route("/api/spotify/link-url", get(spotify_link_url))
+           .route("/api/spotify/status", get(spotify_status))
+           .route("/api/spotify/hide", put(spotify_set_hide))
+           .route("/api/spotify/unlink", delete(spotify_unlink))
            // Server info (public)
            .route("/api/server/info", get(server_info))
            // Admin

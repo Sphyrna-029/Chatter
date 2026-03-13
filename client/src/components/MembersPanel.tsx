@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone, Gamepad2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone, Gamepad2, Music2 } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
@@ -139,6 +139,19 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
                   style={{ animation: `marquee-loop ${Math.max(4, presence.steamGame.length * 0.18)}s linear infinite` }}
                 >
                   {presence.steamGame}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{presence.steamGame}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+                </span>
+              </span>
+            </span>
+          )}
+          {presence?.spotifyTrack && status !== "offline" && (
+            <span className="flex items-center gap-1 text-[0.625rem] leading-tight text-green-400 overflow-hidden">
+              <Music2 className="h-3 w-3 shrink-0" />
+              <span className="overflow-hidden">
+                <span
+                  className="block whitespace-nowrap"
+                  style={{ animation: `marquee-loop ${Math.max(4, (presence.spotifyTrack + (presence.spotifyArtist ? ` – ${presence.spotifyArtist}` : "")).length * 0.18)}s linear infinite` }}
+                >
+                  {presence.spotifyTrack}{presence.spotifyArtist ? ` – ${presence.spotifyArtist}` : ""}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{presence.spotifyTrack}{presence.spotifyArtist ? ` – ${presence.spotifyArtist}` : ""}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
                 </span>
               </span>
             </span>

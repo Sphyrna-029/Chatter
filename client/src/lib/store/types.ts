@@ -19,7 +19,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
-  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }>;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;

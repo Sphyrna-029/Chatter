@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetSpotifyLinkUrl, apiGetSpotifyStatus, apiSetSpotifyHide, apiUnlinkSpotify, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
@@ -62,6 +62,34 @@ function formatDuration(startSecs: number): string {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m`;
   return "just started";
+}
+
+function SpotifyCard({ track, artist, albumArt }: { track: string; artist?: string; albumArt?: string }) {
+  return (
+    <div className="w-full rounded-md overflow-hidden border border-border/40 bg-muted/20">
+      <div className="flex items-center gap-3 p-2.5">
+        {albumArt ? (
+          <img
+            src={albumArt}
+            alt={track}
+            className="h-12 w-12 rounded shrink-0 object-cover"
+            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+          />
+        ) : (
+          <div className="h-12 w-12 rounded shrink-0 bg-muted flex items-center justify-center">
+            <svg viewBox="0 0 24 24" className="h-5 w-5 fill-current text-green-400" xmlns="http://www.w3.org/2000/svg">
+              <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+            </svg>
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-medium text-green-400 truncate">{track}</p>
+          {artist && <p className="text-[10px] text-muted-foreground truncate">{artist}</p>}
+          <p className="text-[10px] text-muted-foreground/60">Listening on Spotify</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SteamGameCard({ game, appId, sessionStart }: { game: string; appId?: string; sessionStart?: number }) {
@@ -182,6 +210,12 @@ export function UserProfileDialog({
   const [steamLoading, setSteamLoading] = useState(false);
   const [steamError, setSteamError] = useState<string | null>(null);
 
+  // Spotify state
+  const [spotifyLinked, setSpotifyLinked] = useState(false);
+  const [spotifyHide, setSpotifyHide] = useState(false);
+  const [spotifyLoading, setSpotifyLoading] = useState(false);
+  const [spotifyError, setSpotifyError] = useState<string | null>(null);
+
   useEffect(() => {
     if (open) {
       setNicknameInput(nicknameFromPresence);
@@ -240,6 +274,10 @@ export function UserProfileDialog({
       apiGetSteamStatus().then((data) => {
         setSteamId(data.steam_id);
         setSteamHideGame(data.hide_game);
+      }).catch(() => {});
+      apiGetSpotifyStatus().then((data) => {
+        setSpotifyLinked(data.linked);
+        setSpotifyHide(data.hide);
       }).catch(() => {});
     }
   }, [activeTab, isSelf]);
@@ -583,6 +621,13 @@ export function UserProfileDialog({
               game={presence.steamGame}
               appId={presence.steamAppId}
               sessionStart={presence.gameSessionStart}
+            />
+          )}
+          {presence?.spotifyTrack && status !== "offline" && (
+            <SpotifyCard
+              track={presence.spotifyTrack}
+              artist={presence.spotifyArtist}
+              albumArt={presence.spotifyAlbumArt}
             />
           )}
           {about && (
@@ -1263,6 +1308,80 @@ export function UserProfileDialog({
               className="w-full"
             >
               {steamLoading ? "Redirecting..." : "Link Steam Account"}
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Spotify Integration */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-sm font-semibold">Spotify Account</h3>
+        {spotifyError && <p className="text-xs text-destructive">{spotifyError}</p>}
+        {spotifyLinked ? (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Your Spotify account is linked. Currently playing tracks will appear on your profile.
+            </p>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={spotifyHide}
+                onChange={async (e) => {
+                  const hide = e.target.checked;
+                  setSpotifyHide(hide);
+                  try {
+                    await apiSetSpotifyHide(hide);
+                  } catch (err: any) {
+                    setSpotifyError(err.message || "Failed to update");
+                    setSpotifyHide(!hide);
+                  }
+                }}
+                className="h-3.5 w-3.5 accent-green-500"
+              />
+              <span className="text-xs text-muted-foreground">Hide currently playing track from others</span>
+            </label>
+            <Button
+              onClick={async () => {
+                setSpotifyLoading(true);
+                setSpotifyError(null);
+                try {
+                  await apiUnlinkSpotify();
+                  setSpotifyLinked(false);
+                } catch (err: any) {
+                  setSpotifyError(err.message || "Failed to unlink Spotify");
+                } finally {
+                  setSpotifyLoading(false);
+                }
+              }}
+              disabled={spotifyLoading}
+              variant="outline"
+              className="w-full"
+            >
+              {spotifyLoading ? "Unlinking..." : "Unlink Spotify Account"}
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Link your Spotify account to show your currently playing track to other members.
+            </p>
+            <Button
+              onClick={async () => {
+                setSpotifyLoading(true);
+                setSpotifyError(null);
+                try {
+                  const { url } = await apiGetSpotifyLinkUrl();
+                  window.location.href = url;
+                } catch (err: any) {
+                  setSpotifyError(err.message || "Failed to get Spotify link URL");
+                  setSpotifyLoading(false);
+                }
+              }}
+              disabled={spotifyLoading}
+              variant="outline"
+              className="w-full"
+            >
+              {spotifyLoading ? "Redirecting..." : "Link Spotify Account"}
             </Button>
           </div>
         )}

@@ -15,5 +15,6 @@ pub(crate) mod room_groups;
 pub(crate) mod tankwar;
 pub(crate) mod tugofwar;
 pub(crate) mod steam;
+pub(crate) mod spotify;
 pub(crate) mod watchparty;
 pub(crate) mod whiteboard;
