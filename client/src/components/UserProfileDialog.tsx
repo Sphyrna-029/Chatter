@@ -1443,18 +1443,18 @@ export function UserProfileDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
-        "transition-all duration-200 p-0 overflow-hidden",
+        "transition-all duration-200 p-0 overflow-hidden flex flex-col max-h-[90vh]",
         isSelf && activeTab === "files" ? "sm:max-w-[480px]" : "sm:max-w-[400px]"
       )}>
         <DialogHeader className="sr-only">
           <DialogTitle>User Profile</DialogTitle>
         </DialogHeader>
         {isSelf ? (
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsContent value="profile" className="mt-0">{profileContent}</TabsContent>
-            <TabsContent value="files" className="mt-0 px-5 pb-5">{filesContent}</TabsContent>
-            <TabsContent value="account" className="mt-0">{accountContent}</TabsContent>
-            <div className="px-5 pb-4 border-t pt-3">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col min-h-0 flex-1">
+            <TabsContent value="profile" className="mt-0 overflow-y-auto">{profileContent}</TabsContent>
+            <TabsContent value="files" className="mt-0 px-5 pb-5 overflow-y-auto">{filesContent}</TabsContent>
+            <TabsContent value="account" className="mt-0 overflow-y-auto">{accountContent}</TabsContent>
+            <div className="px-5 pb-4 border-t pt-3 shrink-0">
               <TabsList className="w-full">
                 <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
                 <TabsTrigger value="files" className="flex-1">My Files</TabsTrigger>
