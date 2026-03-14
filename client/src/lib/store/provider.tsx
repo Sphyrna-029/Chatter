@@ -89,7 +89,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Fetch public server settings on mount
   useEffect(() => {
     apiGetServerInfo().then((info) => {
-      dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads } });
+      dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.storage_limit_bytes ?? 0 } });
     }).catch(() => {});
   }, []);
 

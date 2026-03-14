@@ -1126,7 +1126,7 @@ export interface AdminRoom {
   message_count: number;
 }
 
-export async function apiGetServerInfo(): Promise<{ invite_only: boolean; require_auth_for_uploads: boolean }> {
+export async function apiGetServerInfo(): Promise<{ invite_only: boolean; require_auth_for_uploads: boolean; storage_limit_bytes: number }> {
   const res = await fetch("/api/server/info");
   if (!res.ok) throw new Error("Failed to get server info");
   return res.json();

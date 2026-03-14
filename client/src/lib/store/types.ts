@@ -50,6 +50,7 @@ export interface AppState {
   adminDashboardOpen: boolean;
   // Server settings
   requireAuthForUploads: boolean;
+  uploadLimitBytes: number; // 0 = unlimited
   // 2FA
   totpVerified: boolean;
   // Room Groups
@@ -102,7 +103,7 @@ export type Action =
   | { type: "UPDATE_NAME_COLORS"; payload: { roomId: string; owner_name_color: string; mod_name_color: string } }
   | { type: "SET_IS_ADMIN"; payload: boolean }
   | { type: "SET_ADMIN_DASHBOARD_OPEN"; payload: boolean }
-  | { type: "SET_SERVER_SETTINGS"; payload: { requireAuthForUploads: boolean } }
+  | { type: "SET_SERVER_SETTINGS"; payload: { requireAuthForUploads: boolean; uploadLimitBytes: number } }
   | { type: "SET_TOTP_VERIFIED"; payload: boolean }
   | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
   | { type: "SET_ROOM_GROUPS"; payload: RoomGroup[] }
@@ -151,6 +152,7 @@ export const initialState: AppState = {
   isAdmin: false,
   adminDashboardOpen: false,
   requireAuthForUploads: false,
+  uploadLimitBytes: 0,
   totpVerified: false,
   roomGroups: [],
   friends: [],

@@ -1,5 +1,5 @@
 use super::super::{
-    constants::{CHUNK_SIZE, MAX_UPLOAD_SIZE},
+    constants::CHUNK_SIZE,
     dto::{GifSearchQuery, LinkPreviewQuery},
     helpers::{error_response, extract_token, get_user_from_token},
     state::{AppState, CachedPreview, UploadRecord},
@@ -114,8 +114,9 @@ pub(crate) async fn upload_file(
         }
     }
 
-    if data.len() > MAX_UPLOAD_SIZE {
-        return error_response(StatusCode::BAD_REQUEST, "File too large (max 500MB)");
+    let upload_limit = state.server_settings.read().await.storage_limit_bytes;
+    if upload_limit > 0 && data.len() as u64 > upload_limit {
+        return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
     }
 
     if let Err(e) = check_storage_quota(&state, &user_id, data.len() as u64).await {
@@ -212,8 +213,12 @@ pub(crate) async fn upload_init(
         None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
     };
 
-    if body.file_size == 0 || body.file_size > MAX_UPLOAD_SIZE as u64 {
+    if body.file_size == 0 {
         return error_response(StatusCode::BAD_REQUEST, "Invalid file size");
+    }
+    let upload_limit = state.server_settings.read().await.storage_limit_bytes;
+    if upload_limit > 0 && body.file_size > upload_limit {
+        return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
     }
 
     if let Err(e) = check_storage_quota(&state, &user_id, body.file_size).await {

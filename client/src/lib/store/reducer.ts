@@ -284,7 +284,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_ADMIN_DASHBOARD_OPEN":
       return { ...state, adminDashboardOpen: action.payload };
     case "SET_SERVER_SETTINGS":
-      return { ...state, requireAuthForUploads: action.payload.requireAuthForUploads };
+      return { ...state, requireAuthForUploads: action.payload.requireAuthForUploads, uploadLimitBytes: action.payload.uploadLimitBytes };
     case "SET_TOTP_VERIFIED":
       return { ...state, totpVerified: action.payload };
     case "SET_ROOM_GROUPS":

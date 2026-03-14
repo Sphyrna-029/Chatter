@@ -1,5 +1,5 @@
 use super::{
-    constants::{CHUNK_SIZE, MAX_UPLOAD_SIZE},
+    constants::CHUNK_SIZE,
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
         auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, login, logout, recovery_login, refresh, register, server_info, totp_setup, totp_verify},
@@ -73,7 +73,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/rooms/{room_id}", delete(delete_room))
            .route(
                "/api/upload",
-               post(upload_file).layer(DefaultBodyLimit::max(MAX_UPLOAD_SIZE + 2 * 1024 * 1024)),
+               post(upload_file).layer(DefaultBodyLimit::disable()),
            )
            .route("/api/upload/init", post(upload_init))
            .route(

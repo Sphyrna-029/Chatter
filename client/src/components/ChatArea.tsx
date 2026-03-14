@@ -635,8 +635,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // Uploads a file and returns its URL; does NOT send a message.
   const uploadFile = async (file: File): Promise<string | null> => {
     if (!state.currentRoomId) return null;
-    if (file.size > 500 * 1024 * 1024) {
-      alert("File too large (max 500MB)");
+    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
+      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
       return null;
     }
     setUploading(true);
@@ -654,8 +654,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   };
 
   const addPendingFile = (file: File) => {
-    if (file.size > 500 * 1024 * 1024) {
-      alert("File too large (max 500MB)");
+    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
+      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
       return;
     }
     setPendingFiles((prev) => {
