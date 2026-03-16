@@ -217,7 +217,7 @@ pub(crate) async fn create_room(
             .unwrap_or(0);
         let raw_name = req.name
             .unwrap_or_else(|| format!("Room {}", room_count + 1));
-        let sanitized: String = raw_name.trim().chars().take(18).collect();
+        let sanitized: String = raw_name.trim().chars().take(64).collect();
         if sanitized.is_empty() {
             return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
         }
@@ -707,7 +707,7 @@ pub(crate) async fn update_room_settings(
     let mut content = serde_json::Map::new();
 
     if let Some(ref name) = req.name {
-        let sanitized: String = name.trim().chars().take(18).collect();
+        let sanitized: String = name.trim().chars().take(64).collect();
         if sanitized.is_empty() {
             return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
         }
