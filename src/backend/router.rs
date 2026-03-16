@@ -3,6 +3,7 @@ use super::{
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
         auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, login, logout, recovery_login, refresh, register, server_info, totp_setup, totp_verify},
+        channels::{list_channels, create_channel, update_channel, delete_channel, create_category, update_category, delete_category},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
@@ -126,6 +127,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/rooms/{room_id}/ban/{user_id}", delete(unban_member))
            .route("/api/rooms/{room_id}/members/{user_id}/role", put(set_member_role))
            .route("/api/rooms/{room_id}/name-colors", put(set_name_colors))
+           // Channels
+           .route("/api/rooms/{room_id}/channels", get(list_channels).post(create_channel))
+           .route("/api/rooms/{room_id}/channels/{channel_id}", put(update_channel).delete(delete_channel))
+           .route("/api/rooms/{room_id}/categories", post(create_category))
+           .route("/api/rooms/{room_id}/categories/{category_id}", put(update_category).delete(delete_category))
            // Threads
            .route("/api/rooms/{room_id}/threads", get(get_room_threads))
            .route("/api/rooms/{room_id}/threads/{event_id}", get(get_thread_messages))

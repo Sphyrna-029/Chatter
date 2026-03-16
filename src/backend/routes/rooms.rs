@@ -4,8 +4,9 @@ use super::super::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
         get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
     },
-    state::{AppState, BannedUserRecord, DmRoomRecord, RoomMemberRecord, RoomRecord},
+    state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord},
 };
+use super::channels::ensure_default_channels;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -293,6 +294,11 @@ pub(crate) async fn create_room(
         }
     }
 
+    // Create default channels for non-DM rooms
+    if !is_dm {
+        ensure_default_channels(&state, &room_id, &user_id).await;
+    }
+
     Ok(Json(json!({"room_id": room_id})))
 }
 
@@ -377,11 +383,11 @@ pub(crate) async fn leave_room(
             }
         }
 
-        // Remove from voice channel
+        // Remove from voice channels (keyed by channel_id)
         {
             let mut vc = state.voice_channels.write().await;
-            if let Some(room_vc) = vc.get_mut(&room_id) {
-                room_vc.remove(&user_id);
+            for members in vc.values_mut() {
+                members.remove(&user_id);
             }
         }
 
@@ -506,6 +512,10 @@ pub(crate) async fn delete_room(
         .db
         .collection::<super::super::state::WhiteboardStrokeRecord>("whiteboard_strokes");
     let _ = whiteboard_coll.delete_many(doc! { "room_id": &room_id }).await;
+
+    // Remove channels
+    let channels_coll = state.db.collection::<ChannelRecord>("channels");
+    let _ = channels_coll.delete_many(doc! { "room_id": &room_id }).await;
 
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
@@ -808,8 +818,8 @@ pub(crate) async fn kick_member(
     }
     {
         let mut vc = state.voice_channels.write().await;
-        if let Some(room_vc) = vc.get_mut(&room_id) {
-            room_vc.remove(&target_user_id);
+        for members in vc.values_mut() {
+            members.remove(&target_user_id);
         }
     }
 
@@ -915,8 +925,8 @@ pub(crate) async fn ban_member(
     }
     {
         let mut vc = state.voice_channels.write().await;
-        if let Some(room_vc) = vc.get_mut(&room_id) {
-            room_vc.remove(&target_user_id);
+        for members in vc.values_mut() {
+            members.remove(&target_user_id);
         }
     }
 

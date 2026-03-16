@@ -23,6 +23,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         currentRoomId: action.payload,
+        currentChannelId: null,
+        channels: [],
+        channelCategories: [],
         messages: [],
         hasMoreMessages: false,
         oldestMessageIndex: null,
@@ -30,6 +33,7 @@ export function reducer(state: AppState, action: Action): AppState {
         roomMembers: [],
         voiceMembers: preserveVoice ? state.voiceMembers : [],
         voiceMemberStates: preserveVoice ? state.voiceMemberStates : {},
+        voiceChannelMembers: preserveVoice ? state.voiceChannelMembers : {},
         activeScreenSharers: preserveVoice ? state.activeScreenSharers : [],
         screenViewerOpen: preserveVoice ? state.screenViewerOpen : false,
         selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
@@ -408,6 +412,86 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         blockedUsers: state.blockedUsers.filter((id) => id !== action.payload),
+      };
+    case "SET_CHANNELS":
+      return { ...state, channels: action.payload };
+    case "SET_CHANNEL_CATEGORIES":
+      return { ...state, channelCategories: action.payload };
+    case "ADD_CHANNEL_CATEGORY":
+      if (state.channelCategories.some((c) => c.category_id === action.payload.category_id)) return state;
+      return { ...state, channelCategories: [...state.channelCategories, action.payload] };
+    case "UPDATE_CHANNEL_CATEGORY":
+      return {
+        ...state,
+        channelCategories: state.channelCategories.map((c) =>
+          c.category_id === action.payload.category_id ? { ...c, ...action.payload } : c
+        ),
+      };
+    case "REMOVE_CHANNEL_CATEGORY":
+      return {
+        ...state,
+        channelCategories: state.channelCategories.filter((c) => c.category_id !== action.payload),
+        channels: state.channels.map((ch) =>
+          ch.category_id === action.payload ? { ...ch, category_id: "" } : ch
+        ),
+      };
+    case "SELECT_CHANNEL":
+      return {
+        ...state,
+        currentChannelId: action.payload,
+        messages: [],
+        hasMoreMessages: false,
+        oldestMessageIndex: null,
+        loadingOlderMessages: false,
+        ...(action.payload ? {
+          channelUnreadCounts: { ...state.channelUnreadCounts, [action.payload]: 0 },
+          channelMentions: { ...state.channelMentions, [action.payload]: 0 },
+        } : {}),
+      };
+    case "ADD_CHANNEL":
+      if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;
+      return { ...state, channels: [...state.channels, action.payload] };
+    case "UPDATE_CHANNEL":
+      return {
+        ...state,
+        channels: state.channels.map((c) =>
+          c.channel_id === action.payload.channel_id
+            ? { ...c, ...action.payload }
+            : c
+        ),
+      };
+    case "REMOVE_CHANNEL":
+      return {
+        ...state,
+        channels: state.channels.filter((c) => c.channel_id !== action.payload),
+        currentChannelId:
+          state.currentChannelId === action.payload ? null : state.currentChannelId,
+      };
+    case "SET_VOICE_CHANNEL_MEMBERS":
+      return { ...state, voiceChannelMembers: action.payload };
+    case "SET_CHANNEL_MENTION":
+      return {
+        ...state,
+        channelMentions: {
+          ...state.channelMentions,
+          [action.payload.channelId]: action.payload.hasMention
+            ? (state.channelMentions[action.payload.channelId] || 0) + 1
+            : 0,
+        },
+      };
+    case "INCREMENT_CHANNEL_UNREAD":
+      return {
+        ...state,
+        channelUnreadCounts: {
+          ...state.channelUnreadCounts,
+          [action.payload]: (state.channelUnreadCounts[action.payload] || 0) + 1,
+        },
+      };
+    case "CLEAR_CHANNEL_UNREAD":
+      return {
+        ...state,
+        channelUnreadCounts: { ...state.channelUnreadCounts, [action.payload]: 0 },
+        channelMentions: { ...state.channelMentions, [action.payload]: 0 },
       };
     default:
       return state;

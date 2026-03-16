@@ -13,7 +13,8 @@ import { WhiteboardArea } from "./WhiteboardArea";
 import { ActivityPage } from "./ActivityPage";
 import { MembersPanel } from "./MembersPanel";
 import { ThreadPanel } from "./ThreadPanel";
-import { VoiceControls } from "./VoiceControls";
+import { ChannelList } from "./ChannelList";
+import { VoiceControls, type ConnQualityData } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
@@ -101,7 +102,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, loadRooms, loadFriends, loadRoomGroups, selectRoom, closeThread } = useAppContext();
+  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, selectRoom, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -109,7 +110,12 @@ export function ChatLayout() {
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
-  const joinVoiceRef = useRef<(() => void) | null>(null);
+  const joinVoiceRef = useRef<((channelId?: string) => void) | null>(null);
+  const leaveVoiceRef = useRef<(() => void) | null>(null);
+  const toggleMuteRef = useRef<(() => void) | null>(null);
+  const startScreenShareRef = useRef<(() => void) | null>(null);
+  const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null });
+  const stopScreenShareRef = useRef<(() => void) | null>(null);
   const [isPiP, setIsPiP] = useState(false);
   // True when we want PiP but auto-enter failed (Firefox requires user gesture)
   const [pipWanted, setPipWanted] = useState(false);
@@ -123,6 +129,10 @@ export function ChatLayout() {
     loadRoomGroups();
   }, [loadRooms, loadFriends, loadRoomGroups]);
 
+  const isDmRoom = state.currentRoomId
+    ? state.roomInfoMap[state.currentRoomId]?.is_direct === true
+    : false;
+  const hasChannels = !isDmRoom && state.channels.length > 0;
   const isForumRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"
     : false;
@@ -393,7 +403,37 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {!isForumRoom && !isWhiteboardRoom && <VoiceControls joinVoiceRef={joinVoiceRef} />}
+              {hasChannels && !isForumRoom && !isWhiteboardRoom && (
+                <ChannelList
+                  onJoinVoiceChannel={(channelId) => {
+                    joinVoiceRef.current?.(channelId);
+                  }}
+                  onLeaveVoice={() => leaveVoiceRef.current?.()}
+                  onToggleMute={() => toggleMuteRef.current?.()}
+                  onToggleScreenShare={() => {
+                    if (state.isScreenSharing) {
+                      stopScreenShareRef.current?.();
+                    } else {
+                      startScreenShareRef.current?.();
+                    }
+                  }}
+                  isScreenSharing={state.isScreenSharing}
+                  connQualityRef={connQualityRef}
+                />
+              )}
+              {/* VoiceControls: shown standalone for DMs/rooms without channels, hidden but mounted for WebRTC when channels exist */}
+              {!isForumRoom && !isWhiteboardRoom && (
+                <div className={hasChannels ? "sr-only" : "contents"}>
+                  <VoiceControls
+                    joinVoiceRef={joinVoiceRef}
+                    leaveVoiceRef={leaveVoiceRef}
+                    toggleMuteRef={toggleMuteRef}
+                    startScreenShareRef={startScreenShareRef}
+                    stopScreenShareRef={stopScreenShareRef}
+                    connQualityRef={connQualityRef}
+                  />
+                </div>
+              )}
               {isTankWarRoom ? (
                 <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isTugOfWarRoom ? (

@@ -122,6 +122,7 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
     state: Arc<AppState>,
     user_id: &str,
     room_id: &str,
+    channel_id: &str,
     sdp: &str,
 ) {
     if room_id.is_empty() || sdp.is_empty() {
@@ -169,6 +170,7 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
             user_id.to_string(),
             VoicePublisherState {
                 room_id: room_id.to_string(),
+                channel_id: channel_id.to_string(),
                 peer_connection: peer_connection.clone(),
                 audio_codec: None,
                 rtp_sender: None,

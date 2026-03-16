@@ -13,6 +13,8 @@ A lightweight, performant, self-hosted chat application built with Rust. Chatter
 - **Voice Chat** 
 - **Multi Screen sharing (Requires HTTPS for WebRTC)**
 - **File sharing**
+- **Steam Integration**
+- **Spotify Integration**
 - **Forums**
 - **Collaborative Whiteboard**
 - **Code Snippets And Syntax Highlighting**

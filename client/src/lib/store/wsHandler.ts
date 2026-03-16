@@ -55,6 +55,18 @@ export function createWsMessageHandler(
     if (msg.type === "m.room.message") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "ADD_MESSAGE", payload: msg });
+        // Track per-channel unreads/mentions for messages in a different channel
+        const msgChannelId = msg.channel_id || msg.content?.channel_id;
+        if (msgChannelId && msgChannelId !== stateRef.current.currentChannelId && msg.sender !== stateRef.current.userId && msg.content?.msgtype !== "m.system") {
+          dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
+          const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
+          if (myUsername && msg.content?.body?.includes(`@${myUsername}`)) {
+            dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
+            dispatch({ type: "SET_MENTION", payload: { roomId: msg.room_id, hasMention: true } });
+            const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
+            if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
+          }
+        }
       } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
         const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
         const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
@@ -185,6 +197,15 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
+        // Update per-channel voice members
+        if (msg.channel_id) {
+          const cur = { ...stateRef.current.voiceChannelMembers };
+          const members = cur[msg.channel_id] || [];
+          if (!members.some((m: any) => m.userId === msg.user_id)) {
+            cur[msg.channel_id] = [...members, { userId: msg.user_id, muted: false, screen_sharing: false }];
+            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+          }
+        }
         if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
           new Audio("/external/vc-join.wav").play().catch(() => {});
         }
@@ -193,6 +214,12 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
+        // Update per-channel voice members
+        if (msg.channel_id) {
+          const cur = { ...stateRef.current.voiceChannelMembers };
+          cur[msg.channel_id] = (cur[msg.channel_id] || []).filter((m: any) => m.userId !== msg.user_id);
+          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+        }
         if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
           playLeaveSound();
         }
@@ -204,16 +231,40 @@ export function createWsMessageHandler(
           type: "VOICE_USER_MUTED",
           payload: { userId: msg.user_id, muted: msg.muted },
         });
+        // Update per-channel voice members mute state
+        if (msg.channel_id) {
+          const cur = { ...stateRef.current.voiceChannelMembers };
+          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
+            m.userId === msg.user_id ? { ...m, muted: msg.muted } : m
+          );
+          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+        }
       }
     } else if (msg.type === "screen_share_started") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
+        // Update per-channel voice members screen_sharing state
+        if (msg.channel_id) {
+          const cur = { ...stateRef.current.voiceChannelMembers };
+          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
+            m.userId === msg.user_id ? { ...m, screen_sharing: true } : m
+          );
+          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+        }
       }
     } else if (msg.type === "screen_share_stopped") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
+        // Update per-channel voice members screen_sharing state
+        if (msg.channel_id) {
+          const cur = { ...stateRef.current.voiceChannelMembers };
+          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
+            m.userId === msg.user_id ? { ...m, screen_sharing: false } : m
+          );
+          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+        }
       }
     } else if (msg.type === "screen_viewers_update") {
       dispatch({
@@ -309,6 +360,37 @@ export function createWsMessageHandler(
     else if (msg.type === "m.room.created") {
       // A new DM room was created — refresh rooms list so it appears instantly
       loadRoomsRef.current();
+    }
+    // Channel CRUD events
+    else if (msg.type === "m.channel.created") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.channel) {
+        dispatch({ type: "ADD_CHANNEL", payload: msg.channel });
+      }
+    }
+    else if (msg.type === "m.channel.updated") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.content) {
+        dispatch({ type: "UPDATE_CHANNEL", payload: msg.content });
+      }
+    }
+    else if (msg.type === "m.channel.deleted") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.channel_id) {
+        dispatch({ type: "REMOVE_CHANNEL", payload: msg.channel_id });
+      }
+    }
+    else if (msg.type === "m.channel.category_created") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.category) {
+        dispatch({ type: "ADD_CHANNEL_CATEGORY", payload: msg.category });
+      }
+    }
+    else if (msg.type === "m.channel.category_updated") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.content) {
+        dispatch({ type: "UPDATE_CHANNEL_CATEGORY", payload: msg.content });
+      }
+    }
+    else if (msg.type === "m.channel.category_deleted") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.category_id) {
+        dispatch({ type: "REMOVE_CHANNEL_CATEGORY", payload: msg.category_id });
+      }
     }
     // Forum real-time events — dispatch as custom events for ForumArea to handle
     else if (msg.type === "forum.post.created" || msg.type === "forum.post.deleted" ||

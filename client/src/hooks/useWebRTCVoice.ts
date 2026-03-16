@@ -22,8 +22,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
   const currentRoomRef = useRef(state.currentRoomId);
+  const voiceChannelIdRef = useRef(state.voiceChannelId);
   useEffect(() => { inVoiceRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
+  useEffect(() => { voiceChannelIdRef.current = state.voiceChannelId; }, [state.voiceChannelId]);
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
   const createVoicePublisher = useCallback(async () => {
@@ -47,6 +49,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     wsRef.current!.send(JSON.stringify({
       type: "voice_webrtc_publish_offer",
       room_id: currentRoomRef.current,
+      channel_id: voiceChannelIdRef.current || undefined,
       sdp: offer.sdp,
     }));
   }, []);
@@ -205,7 +208,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   }, [state.inVoiceChannel, state.userId, state.currentRoomId]);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
-  const joinVoice = useCallback(async () => {
+  const joinVoice = useCallback(async (channelId?: string) => {
     if (!state.currentRoomId) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -220,17 +223,21 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       });
       localStreamRef.current = stream;
 
-      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, voiceRoomId: state.currentRoomId } });
+      const resolvedChannelId = channelId || state.voiceChannelId || undefined;
+      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
+      voiceChannelIdRef.current = resolvedChannelId ?? null;
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "voice_join", room_id: state.currentRoomId }));
+        const joinMsg: any = { type: "voice_join", room_id: state.currentRoomId };
+        if (resolvedChannelId) joinMsg.channel_id = resolvedChannelId;
+        wsRef.current.send(JSON.stringify(joinMsg));
       }
       await createVoicePublisher();
       await loadVoiceMembers();
     } catch {
       alert("Could not access microphone. Please check permissions.");
     }
-  }, [state.currentRoomId, createVoicePublisher, loadVoiceMembers, dispatch]);
+  }, [state.currentRoomId, state.voiceChannelId, createVoicePublisher, loadVoiceMembers, dispatch]);
 
   const leaveVoice = useCallback(async () => {
     // Stop screen sharing via the screen hook cleanup
@@ -257,10 +264,12 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isScreenSharing: false, voiceRoomId: null } });
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "voice_leave", room_id: state.currentRoomId }));
+      const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };
+      if (state.voiceChannelId) leaveMsg.channel_id = state.voiceChannelId;
+      wsRef.current.send(JSON.stringify(leaveMsg));
     }
     await loadVoiceMembers();
-  }, [state.currentRoomId, dispatch, loadVoiceMembers]);
+  }, [state.currentRoomId, state.voiceChannelId, dispatch, loadVoiceMembers]);
 
   // ─── Mute ─────────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
@@ -272,7 +281,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     muteSound.volume = 0.2;
     muteSound.play().catch(() => {});
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: newMuted }));
+      wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: newMuted }));
     }
   }, [state.isMuted, state.currentRoomId, dispatch]);
 
@@ -283,7 +292,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
       dispatch({ type: "SET_VOICE_STATE", payload: { voiceInputMode: "ptt", isMuted: true } });
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: true }));
+        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
       }
     } else {
       if (localStreamRef.current) {
@@ -291,7 +300,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }
       dispatch({ type: "SET_VOICE_STATE", payload: { voiceInputMode: "open", isMuted: false } });
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: false }));
+        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
       }
     }
   }, [state.voiceInputMode, state.currentRoomId, dispatch]);
@@ -307,7 +316,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         unmuteSound.volume = 0.2;
         unmuteSound.play().catch(() => {});
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: false }));
+          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
         }
       }
     };
@@ -319,7 +328,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         muteSound.volume = 0.2;
         muteSound.play().catch(() => {});
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, muted: true }));
+          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
         }
       }
     };

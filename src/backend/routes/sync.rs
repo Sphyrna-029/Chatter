@@ -1,7 +1,7 @@
 use super::super::{
     dto::SyncQuery,
     helpers::{error_response, extract_token, get_reactions_for_events, get_user_from_token},
-    state::{AppState, RoomMemberRecord, RoomRecord, UserRecord},
+    state::{AppState, ChannelRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -238,6 +238,35 @@ pub(crate) async fn sync(
                 "sender": room_data.creator
             }));
         }
+
+        // Fetch channels for non-DM rooms
+        let mut channels_data: Vec<Value> = Vec::new();
+        if !room_data.is_dm {
+            let channels_coll = state.db.collection::<ChannelRecord>("channels");
+            if let Ok(mut ch_cursor) = channels_coll
+                .find(doc! { "room_id": room_id })
+                .sort(doc! { "position": 1, "created_at": 1 })
+                .await
+            {
+                while let Ok(Some(ch)) = ch_cursor.try_next().await {
+                    channels_data.push(json!({
+                        "channel_id": ch.channel_id,
+                        "name": ch.name,
+                        "channel_type": ch.channel_type,
+                        "topic": ch.topic,
+                        "position": ch.position,
+                        "category_id": ch.category_id,
+                    }));
+                }
+            }
+            state_events.push(json!({
+                "type": "m.room.channels",
+                "state_key": "",
+                "content": { "channels": channels_data },
+                "sender": room_data.creator
+            }));
+        }
+
         state_events.extend(member_events);
 
         joined_rooms_data.insert(

@@ -944,7 +944,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         )}
         <div className={`flex-1 min-w-0 text-center ${isMobile ? "hidden" : ""}`}>
           <h2 className="text-sm font-semibold">
-            {roomInfo?.name || "Unnamed Room"}
+            {state.currentChannelId && state.channels.length > 0
+              ? `# ${state.channels.find((c) => c.channel_id === state.currentChannelId)?.name || "channel"}`
+              : roomInfo?.name || "Unnamed Room"}
           </h2>
           {editingTopic ? (
             <input

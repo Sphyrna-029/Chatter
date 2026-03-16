@@ -252,21 +252,23 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_join" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
             let voice_members = {
                 let mut vc = state.voice_channels.write().await;
-                let room_vc = vc.entry(room_id.to_string()).or_insert_with(HashMap::new);
-                room_vc.insert(
+                let chan_vc = vc.entry(channel_id.to_string()).or_insert_with(HashMap::new);
+                chan_vc.insert(
                     user_id.to_string(),
                     VoiceMemberState {
                         muted: false,
                         screen_sharing: false,
                     },
                 );
-                room_vc.keys().cloned().collect::<Vec<_>>()
+                chan_vc.keys().cloned().collect::<Vec<_>>()
             };
             let event = json!({
                 "type": "voice_user_joined",
                 "room_id": room_id,
+                "channel_id": channel_id,
                 "user_id": user_id,
                 "voice_members": voice_members
             });
@@ -276,8 +278,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let existing_publishers: Vec<String> = {
                 let publishers = state.voice_publishers.read().await;
                 let vc = state.voice_channels.read().await;
-                if let Some(room_vc) = vc.get(room_id) {
-                    room_vc
+                if let Some(chan_vc) = vc.get(channel_id) {
+                    chan_vc
                         .keys()
                         .filter(|uid| uid.as_str() != user_id && publishers.contains_key(*uid))
                         .cloned()
@@ -290,22 +292,24 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let publishers_msg = json!({
                     "type": "voice_webrtc_publishers_list",
                     "room_id": room_id,
+                    "channel_id": channel_id,
                     "publishers": existing_publishers
                 });
                 send_to_user(&state, user_id, &publishers_msg).await;
             }
         }
         "voice_leave" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
             let (voice_members, was_screen_sharing) = {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(room_vc) = vc.get_mut(room_id) {
-                    if let Some(member) = room_vc.remove(user_id) {
+                if let Some(chan_vc) = vc.get_mut(channel_id) {
+                    if let Some(member) = chan_vc.remove(user_id) {
                         (
-                            room_vc.keys().cloned().collect::<Vec<_>>(),
+                            chan_vc.keys().cloned().collect::<Vec<_>>(),
                             member.screen_sharing,
                         )
                     } else {
-                        (room_vc.keys().cloned().collect::<Vec<_>>(), false)
+                        (chan_vc.keys().cloned().collect::<Vec<_>>(), false)
                     }
                 } else {
                     (vec![], false)
@@ -322,6 +326,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let event = json!({
                 "type": "voice_user_left",
                 "room_id": room_id,
+                "channel_id": channel_id,
                 "user_id": user_id,
                 "voice_members": voice_members
             });
@@ -345,10 +350,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_mute" => {
             let muted = msg.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(room_vc) = vc.get_mut(room_id) {
-                    if let Some(member) = room_vc.get_mut(user_id) {
+                if let Some(chan_vc) = vc.get_mut(channel_id) {
+                    if let Some(member) = chan_vc.get_mut(user_id) {
                         member.muted = muted;
                     }
                 }
@@ -356,16 +362,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let event = json!({
                 "type": "voice_user_muted",
                 "room_id": room_id,
+                "channel_id": channel_id,
                 "user_id": user_id,
                 "muted": muted
             });
             broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_start" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(room_vc) = vc.get_mut(room_id) {
-                    if let Some(member) = room_vc.get_mut(user_id) {
+                if let Some(chan_vc) = vc.get_mut(channel_id) {
+                    if let Some(member) = chan_vc.get_mut(user_id) {
                         member.screen_sharing = true;
                     }
                 }
@@ -378,10 +386,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_stop" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(room_vc) = vc.get_mut(room_id) {
-                    if let Some(member) = room_vc.get_mut(user_id) {
+                if let Some(chan_vc) = vc.get_mut(channel_id) {
+                    if let Some(member) = chan_vc.get_mut(user_id) {
                         member.screen_sharing = false;
                     }
                 }
@@ -396,7 +405,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "screen_webrtc_publish_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            handle_screen_webrtc_publish_offer(state.clone(), user_id, room_id, sdp).await;
+            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            handle_screen_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
         }
         "screen_webrtc_publish_candidate" => {
             if let Some(candidate_value) = msg.get("candidate") {
@@ -444,7 +454,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_webrtc_publish_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            handle_voice_webrtc_publish_offer(state.clone(), user_id, room_id, sdp).await;
+            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            handle_voice_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
         }
         "voice_webrtc_publish_candidate" => {
             if let Some(candidate_value) = msg.get("candidate") {

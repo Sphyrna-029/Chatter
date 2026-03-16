@@ -14,11 +14,35 @@ import { VoiceToolbar } from "./voice/VoiceToolbar";
 import { VoiceDebugPanel } from "./voice/VoiceDebugPanel";
 import { VoiceMemberList } from "./voice/VoiceMemberList";
 
+export type ConnectionQuality = 0 | 1 | 2 | 3 | 4;
+export interface ConnQualityData { quality: ConnectionQuality; pingMs: number | null; }
+
 interface VoiceControlsProps {
-  joinVoiceRef?: React.MutableRefObject<(() => void) | null>;
+  joinVoiceRef?: React.MutableRefObject<((channelId?: string) => void) | null>;
+  leaveVoiceRef?: React.MutableRefObject<(() => void) | null>;
+  toggleMuteRef?: React.MutableRefObject<(() => void) | null>;
+  startScreenShareRef?: React.MutableRefObject<(() => void) | null>;
+  stopScreenShareRef?: React.MutableRefObject<(() => void) | null>;
+  connQualityRef?: React.MutableRefObject<ConnQualityData>;
 }
 
-export function VoiceControls({ joinVoiceRef }: VoiceControlsProps) {
+function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerStats>): ConnectionQuality {
+  const pub = connStats["voice-pub"];
+  if (!pub || pub.connectionState === "new" || pub.connectionState === "connecting") return 0;
+  if (pub.connectionState === "failed" || pub.connectionState === "disconnected" || pub.connectionState === "closed") return 0;
+
+  const rttMs = (pub.rtt ?? 0) * 1000;
+  const jitterMs = (pub.audioJitter ?? 0) * 1000;
+  const loss = pub.audioPacketsLost ?? 0;
+
+  // Score: 4 = excellent, 3 = good, 2 = fair, 1 = poor
+  if (rttMs < 80 && jitterMs < 20 && loss < 5) return 4;
+  if (rttMs < 150 && jitterMs < 40 && loss < 20) return 3;
+  if (rttMs < 300 && jitterMs < 80 && loss < 50) return 2;
+  return 1;
+}
+
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, startScreenShareRef, stopScreenShareRef, connQualityRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
@@ -29,11 +53,31 @@ export function VoiceControls({ joinVoiceRef }: VoiceControlsProps) {
   const voice = useWebRTCVoice({ cleanupScreenRef });
   const screen = useWebRTCScreen();
 
-  // Expose joinVoice to parent via ref
+  // Expose voice actions to parent via refs
   useEffect(() => {
     if (joinVoiceRef) joinVoiceRef.current = voice.joinVoice;
     return () => { if (joinVoiceRef) joinVoiceRef.current = null; };
   }, [joinVoiceRef, voice.joinVoice]);
+
+  useEffect(() => {
+    if (leaveVoiceRef) leaveVoiceRef.current = voice.leaveVoice;
+    return () => { if (leaveVoiceRef) leaveVoiceRef.current = null; };
+  }, [leaveVoiceRef, voice.leaveVoice]);
+
+  useEffect(() => {
+    if (toggleMuteRef) toggleMuteRef.current = voice.toggleMute;
+    return () => { if (toggleMuteRef) toggleMuteRef.current = null; };
+  }, [toggleMuteRef, voice.toggleMute]);
+
+  useEffect(() => {
+    if (startScreenShareRef) startScreenShareRef.current = screen.startScreenShare;
+    return () => { if (startScreenShareRef) startScreenShareRef.current = null; };
+  }, [startScreenShareRef, screen.startScreenShare]);
+
+  useEffect(() => {
+    if (stopScreenShareRef) stopScreenShareRef.current = screen.stopScreenShare;
+    return () => { if (stopScreenShareRef) stopScreenShareRef.current = null; };
+  }, [stopScreenShareRef, screen.stopScreenShare]);
 
   // Wire up the cleanup ref after both hooks are initialized
   cleanupScreenRef.current = screen.fullCleanup;
@@ -50,6 +94,18 @@ export function VoiceControls({ joinVoiceRef }: VoiceControlsProps) {
   useEffect(() => {
     screen.updateConnStats(connStats);
   }, [connStats, screen.updateConnStats]);
+
+  // Expose connection quality to parent
+  useEffect(() => {
+    if (connQualityRef) {
+      const pub = connStats["voice-pub"];
+      const pingMs = pub?.rtt != null ? Math.round(pub.rtt * 1000) : null;
+      connQualityRef.current = {
+        quality: state.inVoiceChannel ? computeQuality(connStats) : 0,
+        pingMs: state.inVoiceChannel ? pingMs : null,
+      };
+    }
+  }, [connStats, connQualityRef, state.inVoiceChannel]);
 
   // Speaking detection
   const speakingUsers = useSpeakingDetection(

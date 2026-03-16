@@ -73,6 +73,7 @@ pub(crate) struct SendMessageRequest {
     pub(crate) body: String,
     pub(crate) in_reply_to: Option<String>,
     pub(crate) spoiler: Option<bool>,
+    pub(crate) channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -86,6 +87,7 @@ pub(crate) struct MessagesQuery {
     pub(crate) limit: Option<usize>,
     pub(crate) before: Option<usize>,
     pub(crate) around_ts: Option<i64>,
+    pub(crate) channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -234,4 +236,31 @@ pub(crate) struct GifSearchQuery {
     pub(crate) q: Option<String>,
     pub(crate) page: Option<u32>,
     pub(crate) per_page: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateChannelRequest {
+    pub(crate) name: String,
+    pub(crate) channel_type: String,
+    pub(crate) topic: Option<String>,
+    pub(crate) category_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateChannelRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) topic: Option<String>,
+    pub(crate) position: Option<i32>,
+    pub(crate) category_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateCategoryRequest {
+    pub(crate) name: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateCategoryRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) position: Option<i32>,
 }

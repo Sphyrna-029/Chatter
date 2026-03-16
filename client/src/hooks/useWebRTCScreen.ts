@@ -165,7 +165,9 @@ export function useWebRTCScreen() {
       screenStreamRef.current = null;
     }
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "screen_share_stop", room_id: state.currentRoomId }));
+      const screenStopMsg: any = { type: "screen_share_stop", room_id: state.currentRoomId };
+      if (state.voiceChannelId) screenStopMsg.channel_id = state.voiceChannelId;
+      wsRef.current.send(JSON.stringify(screenStopMsg));
     }
   }, [state.currentRoomId, state.userId, dispatch, wsRef]);
 
@@ -373,7 +375,9 @@ export function useWebRTCScreen() {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
       dispatch({ type: "SCREEN_SHARE_STARTED", payload: state.userId! });
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: state.userId! } });
-      wsRef.current!.send(JSON.stringify({ type: "screen_share_start", room_id: state.currentRoomId }));
+      const screenStartMsg: any = { type: "screen_share_start", room_id: state.currentRoomId };
+      if (state.voiceChannelId) screenStartMsg.channel_id = state.voiceChannelId;
+      wsRef.current!.send(JSON.stringify(screenStartMsg));
 
       const screenTrack = stream.getVideoTracks()[0];
       if ("contentHint" in screenTrack) {
@@ -395,7 +399,7 @@ export function useWebRTCScreen() {
       }
       pc.onicecandidate = (ev) => {
         if (!ev.candidate || !canSignal(wsRef)) return;
-        wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_candidate", room_id: state.currentRoomId, candidate: ev.candidate.toJSON() }));
+        wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_candidate", room_id: state.currentRoomId, channel_id: state.voiceChannelId || undefined, candidate: ev.candidate.toJSON() }));
       };
       const offer = await pc.createOffer();
       const mungedSdp = mungeScreenAudioSdp(offer.sdp!, {
@@ -404,7 +408,7 @@ export function useWebRTCScreen() {
       await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
       await tuneScreenVideoSender(videoSender, profile);
 
-      wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, sdp: mungedSdp }));
+      wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, channel_id: state.voiceChannelId || undefined, sdp: mungedSdp }));
     } catch (err: unknown) {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
       if (!(err instanceof DOMException && err.name === "NotAllowedError")) {

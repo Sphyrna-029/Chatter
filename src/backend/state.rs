@@ -385,6 +385,35 @@ pub(crate) struct TugOfWarPlayer {
     pub(crate) wps: f64,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ChannelCategoryRecord {
+    #[serde(rename = "_id")]
+    pub(crate) category_id: String,
+    pub(crate) room_id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) position: i32,
+    pub(crate) created_by: String,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ChannelRecord {
+    #[serde(rename = "_id")]
+    pub(crate) channel_id: String,
+    pub(crate) room_id: String,
+    pub(crate) name: String,
+    pub(crate) channel_type: String, // "text" | "voice"
+    #[serde(default)]
+    pub(crate) topic: String,
+    #[serde(default)]
+    pub(crate) position: i32,
+    #[serde(default)]
+    pub(crate) category_id: String,
+    pub(crate) created_by: String,
+    pub(crate) created_at: i64,
+}
+
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
 #[derive(Clone)]
@@ -428,8 +457,10 @@ pub(crate) struct CachedPreview {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct ScreenPublisherState {
     pub(crate) room_id: String,
+    pub(crate) channel_id: String,
     pub(crate) peer_connection: Arc<RTCPeerConnection>,
     pub(crate) media_ssrc: Option<u32>,
     pub(crate) video_codec: Option<RTCRtpCodecCapability>,
@@ -448,8 +479,10 @@ pub(crate) struct ScreenSubscriberState {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub(crate) struct VoicePublisherState {
     pub(crate) room_id: String,
+    pub(crate) channel_id: String,
     pub(crate) peer_connection: Arc<RTCPeerConnection>,
     pub(crate) audio_codec: Option<RTCRtpCodecCapability>,
     pub(crate) rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,

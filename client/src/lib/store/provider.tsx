@@ -62,6 +62,13 @@ import {
   apiGetThreadMessages,
   apiSendThreadMessage,
   apiSetThreadName,
+  apiGetChannels,
+  apiCreateChannel,
+  apiUpdateChannel,
+  apiDeleteChannel,
+  apiCreateCategory,
+  apiUpdateCategory,
+  apiDeleteCategory,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -389,8 +396,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectRoom = useCallback(
     async (roomId: string) => {
       dispatch({ type: "SELECT_ROOM", payload: roomId });
-      // Load messages
-      const msgData = await apiGetMessages(roomId);
+
+      // Load channels for non-DM rooms and auto-select default text channel
+      const roomInfo = stateRef.current.roomInfoMap[roomId];
+      const isDm = roomInfo?.is_direct;
+      let selectedChannelId: string | undefined;
+      if (!isDm) {
+        try {
+          const channelsData = await apiGetChannels(roomId);
+          dispatch({ type: "SET_CHANNELS", payload: channelsData.channels || [] });
+          dispatch({ type: "SET_CHANNEL_CATEGORIES", payload: channelsData.categories || [] });
+          const textChannels = (channelsData.channels || []).filter((c: any) => c.channel_type === "text");
+          if (textChannels.length > 0) {
+            selectedChannelId = textChannels[0].channel_id;
+            dispatch({ type: "SELECT_CHANNEL", payload: selectedChannelId! });
+          }
+        } catch {
+          dispatch({ type: "SET_CHANNELS", payload: [] });
+        }
+      }
+
+      // Load voice channel members for non-DM rooms
+      if (!isDm) {
+        try {
+          const voiceData = await apiGetVoiceMembers(roomId);
+          if (voiceData.voice_channels) {
+            const mapped: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> = {};
+            for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
+              mapped[chId] = (members as any[]).map((m: any) => ({
+                userId: m.user_id || m.userId,
+                muted: m.muted,
+                screen_sharing: m.screen_sharing,
+              }));
+            }
+            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
+          }
+        } catch {}
+      }
+
+      // Load messages (with channel_id if available)
+      const msgData = await apiGetMessages(roomId, 50, undefined, undefined, selectedChannelId);
       const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
         type: "SET_MESSAGES",
@@ -474,7 +519,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (cur.oldestMessageIndex === null || cur.oldestMessageIndex <= 0) return;
     dispatch({ type: "SET_LOADING_OLDER", payload: true });
     try {
-      const msgData = await apiGetMessages(cur.currentRoomId, 50, cur.oldestMessageIndex);
+      const msgData = await apiGetMessages(cur.currentRoomId, 50, cur.oldestMessageIndex, undefined, cur.currentChannelId || undefined);
       const olderMessages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
         type: "PREPEND_MESSAGES",
@@ -499,7 +544,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadMessagesAround = useCallback(async (roomId: string, ts: number) => {
-    const msgData = await apiGetMessages(roomId, 50, undefined, ts);
+    const msgData = await apiGetMessages(roomId, 50, undefined, ts, stateRef.current.currentChannelId || undefined);
     const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
     dispatch({
       type: "SET_MESSAGES",
@@ -522,7 +567,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendMessage = useCallback(
     async (body: string, inReplyTo?: string, spoiler?: boolean) => {
       if (!stateRef.current.currentRoomId) return;
-      await apiSendMessage(stateRef.current.currentRoomId, body, inReplyTo, spoiler);
+      await apiSendMessage(stateRef.current.currentRoomId, body, inReplyTo, spoiler, stateRef.current.currentChannelId || undefined);
     },
     []
   );
@@ -652,7 +697,56 @@ export function AppProvider({ children }: { children: ReactNode }) {
         type: "SET_ACTIVE_SCREEN_SHARERS",
         payload: sharers,
       });
+      // Also load per-channel voice members
+      if (voiceData.voice_channels) {
+        const mapped: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> = {};
+        for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
+          mapped[chId] = (members as any[]).map((m: any) => ({
+            userId: m.user_id || m.userId,
+            muted: m.muted,
+            screen_sharing: m.screen_sharing,
+          }));
+        }
+        dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
+      }
     } catch {}
+  }, []);
+
+  const selectChannel = useCallback(async (channelId: string) => {
+    dispatch({ type: "SELECT_CHANNEL", payload: channelId });
+    const cur = stateRef.current;
+    if (!cur.currentRoomId) return;
+    // Load messages for the new channel
+    const msgData = await apiGetMessages(cur.currentRoomId, 50, undefined, undefined, channelId);
+    const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
+    dispatch({
+      type: "SET_MESSAGES",
+      payload: {
+        messages,
+        start: msgData.start,
+        hasMore: msgData.has_more,
+      },
+    });
+    for (const msg of messages) {
+      if (msg.reactions && Object.keys(msg.reactions).length > 0) {
+        dispatch({
+          type: "SET_REACTIONS",
+          payload: { eventId: msg.event_id, reactions: msg.reactions },
+        });
+      }
+    }
+  }, []);
+
+  const createChannel = useCallback(async (roomId: string, name: string, channelType: string, topic?: string, categoryId?: string) => {
+    await apiCreateChannel(roomId, { name, channel_type: channelType, topic, category_id: categoryId });
+  }, []);
+
+  const updateChannel = useCallback(async (roomId: string, channelId: string, data: { name?: string; topic?: string }) => {
+    await apiUpdateChannel(roomId, channelId, data);
+  }, []);
+
+  const deleteChannel = useCallback(async (roomId: string, channelId: string) => {
+    await apiDeleteChannel(roomId, channelId);
   }, []);
 
   const sendTyping = useCallback(() => {
@@ -872,6 +966,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         unbanMember,
         setMemberRole,
         setNameColors,
+        selectChannel,
+        createChannel,
+        updateChannel,
+        deleteChannel,
         loadRoomGroups,
         createRoomGroup,
         deleteRoomGroup,

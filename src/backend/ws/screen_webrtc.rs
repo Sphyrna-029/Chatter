@@ -46,19 +46,18 @@ pub(crate) async fn send_screen_viewers_update(state: &AppState, sharer_user_id:
     send_to_user(state, sharer_user_id, &msg).await;
 }
 
-pub(crate) async fn user_in_voice_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
+/// Check if user is in any voice channel (channel_id-keyed map).
+/// The room_id param is kept for backward compat but we search all channels.
+pub(crate) async fn user_in_voice_room(state: &AppState, _room_id: &str, user_id: &str) -> bool {
     let vc = state.voice_channels.read().await;
-    vc.get(room_id)
-        .and_then(|members| members.get(user_id))
-        .is_some()
+    vc.values().any(|members| members.contains_key(user_id))
 }
 
-pub(crate) async fn user_is_sharing_screen(state: &AppState, room_id: &str, user_id: &str) -> bool {
+pub(crate) async fn user_is_sharing_screen(state: &AppState, _room_id: &str, user_id: &str) -> bool {
     let vc = state.voice_channels.read().await;
-    vc.get(room_id)
-        .and_then(|members| members.get(user_id))
-        .map(|member| member.screen_sharing)
-        .unwrap_or(false)
+    vc.values().any(|members| {
+        members.get(user_id).map(|m| m.screen_sharing).unwrap_or(false)
+    })
 }
 
 pub(crate) async fn set_user_screen_sharing(
@@ -191,6 +190,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
     state: Arc<AppState>,
     user_id: &str,
     room_id: &str,
+    channel_id: &str,
     sdp: &str,
 ) {
     if room_id.is_empty() || sdp.is_empty() {
@@ -237,6 +237,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             user_id.to_string(),
             ScreenPublisherState {
                 room_id: room_id.to_string(),
+                channel_id: channel_id.to_string(),
                 peer_connection: peer_connection.clone(),
                 media_ssrc: None,
                 video_codec: None,

@@ -399,10 +399,11 @@ export async function apiGetAllRooms() {
 
 // ─── Messages ───────────────────────────────────────────────────────────────
 
-export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number) {
+export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number, channelId?: string) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
   if (before !== undefined) url += `&before=${before}`;
   if (aroundTs !== undefined) url += `&around_ts=${aroundTs}`;
+  if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json() as Promise<{
@@ -413,7 +414,7 @@ export async function apiGetMessages(roomId: string, limit = 50, before?: number
   }>;
 }
 
-export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string, spoiler?: boolean) {
+export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string, spoiler?: boolean, channelId?: string) {
   const txnId = Date.now();
   const payload: Record<string, string | boolean> = { msgtype: "m.text", body };
   if (inReplyTo) {
@@ -421,6 +422,9 @@ export async function apiSendMessage(roomId: string, body: string, inReplyTo?: s
   }
   if (spoiler) {
     payload.spoiler = true;
+  }
+  if (channelId) {
+    payload.channel_id = channelId;
   }
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.room.message/${txnId}`,
@@ -537,6 +541,7 @@ export async function apiGetVoiceMembers(roomId: string) {
   if (!res.ok) throw new Error("Failed to load voice members");
   return res.json() as Promise<{
     voice_members: VoiceMember[];
+    voice_channels?: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]>;
   }>;
 }
 
@@ -599,6 +604,104 @@ export interface RoomInfo {
   has_password?: boolean;
   room_type?: string;
   read_only?: boolean;
+}
+
+// ─── Channels ───────────────────────────────────────────────────────────────
+
+export interface ChannelCategory {
+  category_id: string;
+  name: string;
+  position: number;
+}
+
+export interface Channel {
+  channel_id: string;
+  room_id?: string;
+  name: string;
+  channel_type: "text" | "voice";
+  topic: string;
+  position: number;
+  category_id?: string;
+  created_by?: string;
+  created_at?: number;
+}
+
+export async function apiGetChannels(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/channels`);
+  if (!res.ok) throw new Error("Failed to load channels");
+  return res.json() as Promise<{ channels: Channel[]; categories: ChannelCategory[] }>;
+}
+
+export async function apiCreateChannel(roomId: string, data: { name: string; channel_type: string; topic?: string; category_id?: string }) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/channels`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to create channel");
+  }
+  return res.json() as Promise<{ channel_id: string }>;
+}
+
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string }) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to update channel");
+  }
+  return res.json();
+}
+
+export async function apiDeleteChannel(roomId: string, channelId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to delete channel");
+  }
+  return res.json();
+}
+
+// ─── Channel Categories ─────────────────────────────────────────────────────
+
+export async function apiCreateCategory(roomId: string, name: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/categories`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to create category");
+  }
+  return res.json() as Promise<{ category_id: string }>;
+}
+
+export async function apiUpdateCategory(roomId: string, categoryId: string, data: { name?: string; position?: number }) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/categories/${categoryId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to update category");
+  }
+  return res.json();
+}
+
+export async function apiDeleteCategory(roomId: string, categoryId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/categories/${categoryId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to delete category");
+  }
+  return res.json();
 }
 
 // ─── Room Settings ──────────────────────────────────────────────────────────

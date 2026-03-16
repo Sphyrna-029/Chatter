@@ -32,26 +32,51 @@ pub(crate) async fn get_voice_channel_status(
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
+    // Fetch channels for this room to know which channel_ids belong to it
+    let channels_coll = state.db.collection::<super::super::state::ChannelRecord>("channels");
+    let mut channel_ids: Vec<String> = Vec::new();
+    if let Ok(mut cursor) = channels_coll
+        .find(mongodb::bson::doc! { "room_id": &room_id, "channel_type": "voice" })
+        .await
+    {
+        while let Ok(Some(ch)) = futures_util::TryStreamExt::try_next(&mut cursor).await {
+            channel_ids.push(ch.channel_id);
+        }
+    }
+
     let vc = state.voice_channels.read().await;
-    let voice_members: Vec<Value> = vc
-        .get(&room_id)
-        .map(|members| {
-            members
-                .iter()
-                .map(|(uid, vs)| {
-                    json!({
-                        "user_id": uid,
-                        "muted": vs.muted,
-                        "screen_sharing": vs.screen_sharing
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+
+    // Build voice_members list (flat, for backward compat) and voice_channels map (by channel_id)
+    let mut voice_members: Vec<Value> = Vec::new();
+    let mut voice_channels_map = serde_json::Map::new();
+
+    // Also check the room_id key for backward compat (pre-channels data)
+    let mut keys_to_check = channel_ids.clone();
+    keys_to_check.push(room_id.clone());
+
+    for key in &keys_to_check {
+        if let Some(members) = vc.get(key) {
+            let mut channel_members: Vec<Value> = Vec::new();
+            for (uid, vs) in members {
+                let entry = json!({
+                    "user_id": uid,
+                    "muted": vs.muted,
+                    "screen_sharing": vs.screen_sharing,
+                    "channel_id": key
+                });
+                voice_members.push(entry.clone());
+                channel_members.push(entry);
+            }
+            if !channel_members.is_empty() {
+                voice_channels_map.insert(key.clone(), json!(channel_members));
+            }
+        }
+    }
 
     Ok(Json(json!({
         "room_id": room_id,
-        "voice_members": voice_members
+        "voice_members": voice_members,
+        "voice_channels": Value::Object(voice_channels_map)
     })))
 }
 

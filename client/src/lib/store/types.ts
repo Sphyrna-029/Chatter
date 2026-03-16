@@ -1,4 +1,4 @@
-import type { MatrixMessage, RoomInfo, RoomGroup } from "../api";
+import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory } from "../api";
 import type { Dispatch } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -20,6 +20,13 @@ export interface AppState {
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
   userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }>;
+  // Channels
+  channels: Channel[];
+  channelCategories: ChannelCategory[];
+  currentChannelId: string | null;
+  // Voice channels: channel_id -> list of user_ids in that voice channel
+  voiceChannelMembers: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]>;
+  voiceChannelId: string | null;
   // Voice
   inVoiceChannel: boolean;
   isMuted: boolean;
@@ -39,6 +46,8 @@ export interface AppState {
   // UI
   roomMentions: Record<string, number>;
   roomUnreadCounts: Record<string, number>;
+  channelUnreadCounts: Record<string, number>;
+  channelMentions: Record<string, number>;
   currentView: "chat" | "voice";
   replyingTo: MatrixMessage | null;
   // Threads
@@ -84,7 +93,7 @@ export type Action =
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
-  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing">> }
+  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "voiceChannelId">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
@@ -126,7 +135,20 @@ export type Action =
   | { type: "ADD_OUTGOING_REQUEST"; payload: { userId: string; requestId: string } }
   | { type: "REMOVE_OUTGOING_REQUEST"; payload: string }
   | { type: "ADD_BLOCKED_USER"; payload: string }
-  | { type: "REMOVE_BLOCKED_USER"; payload: string };
+  | { type: "REMOVE_BLOCKED_USER"; payload: string }
+  | { type: "SET_CHANNELS"; payload: Channel[] }
+  | { type: "SET_CHANNEL_CATEGORIES"; payload: ChannelCategory[] }
+  | { type: "ADD_CHANNEL_CATEGORY"; payload: ChannelCategory }
+  | { type: "UPDATE_CHANNEL_CATEGORY"; payload: Partial<ChannelCategory> & { category_id: string } }
+  | { type: "REMOVE_CHANNEL_CATEGORY"; payload: string }
+  | { type: "SELECT_CHANNEL"; payload: string | null }
+  | { type: "ADD_CHANNEL"; payload: Channel }
+  | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
+  | { type: "REMOVE_CHANNEL"; payload: string }
+  | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> }
+  | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
+  | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
+  | { type: "CLEAR_CHANNEL_UNREAD"; payload: string };
 
 export const initialState: AppState = {
   accessToken: null,
@@ -141,6 +163,11 @@ export const initialState: AppState = {
   loadingOlderMessages: false,
   roomMembers: [],
   userPresence: {},
+  channels: [],
+  channelCategories: [],
+  currentChannelId: null,
+  voiceChannelMembers: {},
+  voiceChannelId: null,
   inVoiceChannel: false,
   isMuted: false,
   voiceInputMode: "open",
@@ -154,6 +181,8 @@ export const initialState: AppState = {
   screenViewers: {},
   roomMentions: {},
   roomUnreadCounts: {},
+  channelUnreadCounts: {},
+  channelMentions: {},
   currentView: "chat",
   replyingTo: null,
   activeThreadEventId: null,
@@ -211,6 +240,11 @@ export interface AppContextValue {
   unbanMember: (roomId: string, userId: string) => Promise<void>;
   setMemberRole: (roomId: string, userId: string, role: string) => Promise<void>;
   setNameColors: (roomId: string, ownerColor?: string, modColor?: string) => Promise<void>;
+  // Channels
+  selectChannel: (channelId: string) => Promise<void>;
+  createChannel: (roomId: string, name: string, channelType: string, topic?: string, categoryId?: string) => Promise<void>;
+  updateChannel: (roomId: string, channelId: string, data: { name?: string; topic?: string }) => Promise<void>;
+  deleteChannel: (roomId: string, channelId: string) => Promise<void>;
   // Room Groups
   loadRoomGroups: () => Promise<void>;
   createRoomGroup: (name: string) => Promise<void>;

@@ -73,6 +73,17 @@ pub(crate) async fn send_message(
         ));
     }
 
+    // Resolve channel_id: use provided or fall back to default text channel
+    let channel_id = if let Some(cid) = req.channel_id.as_deref() {
+        cid.to_string()
+    } else if !room.is_dm {
+        // Find the default (first) text channel
+        use super::channels::ensure_default_channels;
+        ensure_default_channels(&state, &room_id, &user_id).await
+    } else {
+        String::new()
+    };
+
     let event_id = generate_id("$");
     let timestamp = now_millis();
 
@@ -112,7 +123,7 @@ pub(crate) async fn send_message(
         }
     }
 
-    let event = json!({
+    let mut event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
@@ -120,6 +131,9 @@ pub(crate) async fn send_message(
         "event_id": event_id,
         "origin_server_ts": timestamp
     });
+    if !channel_id.is_empty() {
+        event["channel_id"] = json!(channel_id);
+    }
 
     // Store in MongoDB
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
@@ -186,7 +200,15 @@ pub(crate) async fn get_room_messages(
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
 
     // Exclude thread messages (those with a thread_id field) from room message feed
-    let base_filter = doc! { "room_id": &room_id, "thread_id": { "$exists": false } };
+    // If channel_id is provided, filter by it; otherwise show messages without channel_id (backward compat)
+    let base_filter = if let Some(ref cid) = query.channel_id {
+        doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
+            { "channel_id": cid },
+            { "channel_id": { "$exists": false } }
+        ] }
+    } else {
+        doc! { "room_id": &room_id, "thread_id": { "$exists": false } }
+    };
 
     // Get total count for this room (excluding thread messages)
     let total = msg_coll
@@ -196,8 +218,16 @@ pub(crate) async fn get_room_messages(
 
     let (start, end, has_more) = if let Some(around_ts) = query.around_ts {
         // Count messages with timestamp <= around_ts to find the position
+        let around_filter = if let Some(ref cid) = query.channel_id {
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
+                { "channel_id": cid },
+                { "channel_id": { "$exists": false } }
+            ] }
+        } else {
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } }
+        };
         let pos = msg_coll
-            .count_documents(doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } })
+            .count_documents(around_filter)
             .await
             .unwrap_or(0) as usize;
         let half = (limit as usize) / 2;
