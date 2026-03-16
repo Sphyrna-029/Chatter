@@ -59,6 +59,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
+  const [editReadOnly, setEditReadOnly] = useState(false);
   const [name, setName] = useState("");
   const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [topic, setTopic] = useState("");
@@ -150,7 +151,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const handleEdit = async () => {
     if (!editChannelId || !roomId) return;
     try {
-      await updateChannel(roomId, editChannelId, { name: name.trim() || undefined, topic: topic.trim() });
+      await updateChannel(roomId, editChannelId, { name: name.trim() || undefined, topic: topic.trim(), read_only: editReadOnly });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -174,6 +175,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     setEditChannelId(ch.channel_id);
     setName(ch.name);
     setTopic(ch.topic || "");
+    setEditReadOnly(ch.read_only ?? false);
     setEditOpen(true);
   };
 
@@ -614,6 +616,15 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                 placeholder="Channel topic"
               />
             </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editReadOnly}
+                onChange={(e) => setEditReadOnly(e.target.checked)}
+                className="rounded border-input"
+              />
+              <span className="text-sm">Read-only (only owners/moderators can post)</span>
+            </label>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>

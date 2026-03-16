@@ -5,7 +5,7 @@ use super::super::{
         get_thread_counts_for_events, get_user_from_token, get_user_role, is_moderator_or_owner,
         now_millis, send_to_user,
     },
-    state::{AppState, RoomRecord},
+    state::{AppState, ChannelRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, Query, State},
@@ -83,6 +83,22 @@ pub(crate) async fn send_message(
     } else {
         String::new()
     };
+
+    // Check per-channel read-only
+    if !channel_id.is_empty() {
+        let channels_coll = state.db.collection::<ChannelRecord>("channels");
+        if let Ok(Some(ch)) = channels_coll.find_one(mongodb::bson::doc! { "_id": &channel_id }).await {
+            if ch.read_only {
+                let role = get_user_role(&state, &room_id, &user_id).await;
+                if role != "owner" && role != "moderator" {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "This channel is read-only",
+                    ));
+                }
+            }
+        }
+    }
 
     let event_id = generate_id("$");
     let timestamp = now_millis();

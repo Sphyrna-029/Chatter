@@ -252,6 +252,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) topic: Option<String>,
     pub(crate) position: Option<i32>,
     pub(crate) category_id: Option<String>,
+    pub(crate) read_only: Option<bool>,
 }
 
 #[derive(Deserialize)]

@@ -410,6 +410,8 @@ pub(crate) struct ChannelRecord {
     pub(crate) position: i32,
     #[serde(default)]
     pub(crate) category_id: String,
+    #[serde(default)]
+    pub(crate) read_only: bool,
     pub(crate) created_by: String,
     pub(crate) created_at: i64,
 }

@@ -622,6 +622,7 @@ export interface Channel {
   topic: string;
   position: number;
   category_id?: string;
+  read_only?: boolean;
   created_by?: string;
   created_at?: number;
 }
@@ -644,7 +645,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

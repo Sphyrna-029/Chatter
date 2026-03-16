@@ -741,7 +741,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiCreateChannel(roomId, { name, channel_type: channelType, topic, category_id: categoryId });
   }, []);
 
-  const updateChannel = useCallback(async (roomId: string, channelId: string, data: { name?: string; topic?: string }) => {
+  const updateChannel = useCallback(async (roomId: string, channelId: string, data: { name?: string; topic?: string; read_only?: boolean }) => {
     await apiUpdateChannel(roomId, channelId, data);
   }, []);
 

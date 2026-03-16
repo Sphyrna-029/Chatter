@@ -256,6 +256,7 @@ pub(crate) async fn sync(
                         "topic": ch.topic,
                         "position": ch.position,
                         "category_id": ch.category_id,
+                        "read_only": ch.read_only,
                     }));
                 }
             }

@@ -1270,11 +1270,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         const currentRoomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
         const myMember = state.roomMembers.find((m) => m.userId === state.userId);
         const myRole = myMember?.role || "member";
-        const isReadOnlyForMe = currentRoomInfo?.read_only && myRole === "member";
+        const currentChannel = state.currentChannelId ? state.channels.find((c) => c.channel_id === state.currentChannelId) : null;
+        const isReadOnlyForMe = (currentRoomInfo?.read_only || currentChannel?.read_only) && myRole === "member";
         if (isReadOnlyForMe) {
           return (
             <div className="border-t p-3 flex items-center justify-center text-sm text-muted-foreground">
-              This room is read-only. Only owners and moderators can send messages.
+              {currentChannel?.read_only ? "This channel" : "This room"} is read-only. Only owners and moderators can send messages.
             </div>
           );
         }

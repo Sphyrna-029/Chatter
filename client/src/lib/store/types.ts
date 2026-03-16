@@ -243,7 +243,7 @@ export interface AppContextValue {
   // Channels
   selectChannel: (channelId: string) => Promise<void>;
   createChannel: (roomId: string, name: string, channelType: string, topic?: string, categoryId?: string) => Promise<void>;
-  updateChannel: (roomId: string, channelId: string, data: { name?: string; topic?: string }) => Promise<void>;
+  updateChannel: (roomId: string, channelId: string, data: { name?: string; topic?: string; read_only?: boolean }) => Promise<void>;
   deleteChannel: (roomId: string, channelId: string) => Promise<void>;
   // Room Groups
   loadRoomGroups: () => Promise<void>;

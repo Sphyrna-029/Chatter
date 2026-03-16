@@ -51,6 +51,7 @@ pub(crate) async fn list_channels(
             "topic": ch.topic,
             "position": ch.position,
             "category_id": ch.category_id,
+            "read_only": ch.read_only,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
         }));
@@ -130,6 +131,7 @@ pub(crate) async fn create_channel(
         topic: req.topic.unwrap_or_default(),
         position: max_pos,
         category_id: req.category_id.unwrap_or_default(),
+        read_only: false,
         created_by: user_id.clone(),
         created_at: now_millis(),
     };
@@ -148,6 +150,7 @@ pub(crate) async fn create_channel(
             "topic": channel.topic,
             "position": channel.position,
             "category_id": channel.category_id,
+            "read_only": channel.read_only,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
         }
@@ -204,6 +207,10 @@ pub(crate) async fn update_channel(
     if let Some(ref category_id) = req.category_id {
         set_doc.insert("category_id", category_id.as_str());
         content.insert("category_id".to_string(), json!(category_id));
+    }
+    if let Some(read_only) = req.read_only {
+        set_doc.insert("read_only", read_only);
+        content.insert("read_only".to_string(), json!(read_only));
     }
 
     if !set_doc.is_empty() {
@@ -308,6 +315,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             topic: String::new(),
             position: 0,
             category_id: String::new(),
+            read_only: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
@@ -324,6 +332,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             topic: String::new(),
             position: 1,
             category_id: String::new(),
+            read_only: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
