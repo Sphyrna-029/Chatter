@@ -425,15 +425,20 @@ export function ChatLayout() {
                     <ResizableHandle withHandle />
                     <ResizablePanel defaultSize={50} minSize={15}>
                       <div className="h-full flex flex-col min-h-0">
-                        <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                        {state.activeThreadEventId ? (
+                          <ThreadPanel />
+                        ) : (
+                          <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                        )}
                       </div>
                     </ResizablePanel>
                   </ResizablePanelGroup>
                 </div>
+              ) : state.activeThreadEventId ? (
+                <ThreadPanel />
               ) : (
                 <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
               )}
-              {state.activeThreadEventId && !isMobile && <ThreadPanel />}
               {!isMobile && (
                 <MembersPanel
                   collapsed={membersCollapsed}
@@ -455,19 +460,6 @@ export function ChatLayout() {
               <SheetDescription>Room members list</SheetDescription>
             </SheetHeader>
             <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {/* Mobile thread drawer */}
-      {isMobile && (
-        <Sheet open={!!state.activeThreadEventId} onOpenChange={(open) => { if (!open) closeThread(); }}>
-          <SheetContent side="right" className="w-80 p-0">
-            <SheetHeader className="sr-only">
-              <SheetTitle>Thread</SheetTitle>
-              <SheetDescription>Thread conversation</SheetDescription>
-            </SheetHeader>
-            <ThreadPanel />
           </SheetContent>
         </Sheet>
       )}

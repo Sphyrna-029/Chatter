@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { MessageItem } from "./MessageItem";
@@ -65,19 +65,20 @@ export function ThreadPanel() {
   const replyCount = threadMessages.length;
 
   return (
-    <div className="flex flex-col border-l border-border bg-background w-80 shrink-0 min-h-0">
+    <div className="flex flex-col border-border bg-background flex-1 min-h-0 min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border shrink-0">
-        <span className="text-sm font-semibold">Thread</span>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0">
         <Button
           variant="ghost"
-          size="icon"
-          className="h-6 w-6"
+          size="sm"
+          className="h-7 gap-1.5 px-2 text-sm"
           onClick={closeThread}
-          title="Close thread"
+          title="Back to chat"
         >
-          <X className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4" />
+          Back to chat
         </Button>
+        <span className="text-sm font-semibold text-muted-foreground">· Thread</span>
       </div>
 
       {/* Scrollable content */}
