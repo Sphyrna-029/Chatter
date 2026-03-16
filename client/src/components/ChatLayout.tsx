@@ -116,6 +116,7 @@ export function ChatLayout() {
   const startScreenShareRef = useRef<(() => void) | null>(null);
   const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null });
   const stopScreenShareRef = useRef<(() => void) | null>(null);
+  const setUserVolumeRef = useRef<((userId: string, vol: number) => void) | null>(null);
   const [isPiP, setIsPiP] = useState(false);
   // True when we want PiP but auto-enter failed (Firefox requires user gesture)
   const [pipWanted, setPipWanted] = useState(false);
@@ -419,6 +420,7 @@ export function ChatLayout() {
                   }}
                   isScreenSharing={state.isScreenSharing}
                   connQualityRef={connQualityRef}
+                  setUserVolumeRef={setUserVolumeRef}
                 />
               )}
               {/* VoiceControls: shown standalone for DMs/rooms without channels, hidden but mounted for WebRTC when channels exist */}
@@ -431,6 +433,7 @@ export function ChatLayout() {
                     startScreenShareRef={startScreenShareRef}
                     stopScreenShareRef={stopScreenShareRef}
                     connQualityRef={connQualityRef}
+                    setUserVolumeRef={setUserVolumeRef}
                   />
                 </div>
               )}

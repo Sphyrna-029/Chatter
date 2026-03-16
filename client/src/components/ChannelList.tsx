@@ -2,7 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
-  Hash, Volume2, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
+  Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
@@ -36,6 +36,7 @@ interface ChannelListProps {
   onToggleScreenShare?: () => void;
   isScreenSharing?: boolean;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
+  setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
 }
 
 function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: number | null }) {
@@ -53,7 +54,7 @@ function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: n
   );
 }
 
-export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleScreenShare, isScreenSharing, connQualityRef }: ChannelListProps) {
+export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -70,6 +71,21 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     const id = setInterval(() => setConnData(connQualityRef.current), 2000);
     return () => clearInterval(id);
   }, [state.inVoiceChannel, connQualityRef]);
+
+  // Per-user local volume (0-1) and expanded volume control
+  const [userVolumes, setUserVolumes] = useState<Record<string, number>>({});
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
+
+  const handleVolumeChange = useCallback((userId: string, vol: number) => {
+    setUserVolumes((prev) => ({ ...prev, [userId]: vol }));
+    setUserVolumeRef?.current?.(userId, vol);
+  }, [setUserVolumeRef]);
+
+  const toggleLocalMute = useCallback((userId: string) => {
+    const current = userVolumes[userId] ?? 1;
+    const newVol = current > 0 ? 0 : 1;
+    handleVolumeChange(userId, newVol);
+  }, [userVolumes, handleVolumeChange]);
 
   // Category dialogs
   const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
@@ -276,18 +292,51 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         </div>
         {isVoice && members.length > 0 && (
           <div className="ml-7 space-y-0.5 pb-1">
-            {members.map((m) => (
-              <div
-                key={m.userId}
-                className="flex items-center gap-1.5 px-1 py-0.5 text-xs text-muted-foreground"
-              >
-                <div className={`h-1.5 w-1.5 rounded-full ${m.muted ? "bg-red-400" : "bg-green-400"}`} />
-                <span className="truncate">{displayUserId(m.userId)}</span>
-                {m.screen_sharing && (
-                  <Monitor className="h-3 w-3 shrink-0 text-purple-400 ml-auto" />
-                )}
-              </div>
-            ))}
+            {members.map((m) => {
+              const isMe = m.userId === state.userId;
+              const localVol = userVolumes[m.userId] ?? 1;
+              const isLocalMuted = localVol === 0;
+              const isExpanded = expandedUser === m.userId;
+              return (
+                <div key={m.userId}>
+                  <div
+                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm text-muted-foreground rounded transition-colors ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
+                    onClick={() => !isMe && setExpandedUser(isExpanded ? null : m.userId)}
+                  >
+                    <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${isLocalMuted && !isMe ? "bg-yellow-400" : m.muted ? "bg-red-400" : "bg-green-400"}`} />
+                    <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
+                    {m.screen_sharing && (
+                      <Monitor className="h-3 w-3 shrink-0 text-purple-400 ml-auto" />
+                    )}
+                  </div>
+                  {isExpanded && !isMe && (
+                    <div className="flex items-center gap-1.5 px-1 py-1 ml-3">
+                      <button
+                        onClick={() => toggleLocalMute(m.userId)}
+                        className="shrink-0 p-0.5 rounded hover:bg-accent transition-colors"
+                        title={isLocalMuted ? "Unmute for me" : "Mute for me"}
+                      >
+                        {isLocalMuted
+                          ? <VolumeX className="h-3.5 w-3.5 text-red-400" />
+                          : localVol < 0.5
+                            ? <Volume1 className="h-3.5 w-3.5 text-muted-foreground" />
+                            : <Volume2 className="h-3.5 w-3.5 text-muted-foreground" />
+                        }
+                      </button>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={Math.round(localVol * 100)}
+                        onChange={(e) => handleVolumeChange(m.userId, parseInt(e.target.value) / 100)}
+                        className="flex-1 h-1 accent-primary cursor-pointer"
+                      />
+                      <span className="text-[10px] w-7 text-right tabular-nums text-muted-foreground">{Math.round(localVol * 100)}%</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

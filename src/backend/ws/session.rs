@@ -381,6 +381,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let event = json!({
                 "type": "screen_share_started",
                 "room_id": room_id,
+                "channel_id": channel_id,
                 "user_id": user_id
             });
             broadcast_to_room(&state, room_id, &event).await;
@@ -399,6 +400,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let event = json!({
                 "type": "screen_share_stopped",
                 "room_id": room_id,
+                "channel_id": channel_id,
                 "user_id": user_id
             });
             broadcast_to_room(&state, room_id, &event).await;

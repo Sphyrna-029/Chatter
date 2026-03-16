@@ -24,6 +24,7 @@ interface VoiceControlsProps {
   startScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   stopScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
+  setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
 }
 
 function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerStats>): ConnectionQuality {
@@ -42,7 +43,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
   return 1;
 }
 
-export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, startScreenShareRef, stopScreenShareRef, connQualityRef }: VoiceControlsProps) {
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
@@ -78,6 +79,11 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, star
     if (stopScreenShareRef) stopScreenShareRef.current = screen.stopScreenShare;
     return () => { if (stopScreenShareRef) stopScreenShareRef.current = null; };
   }, [stopScreenShareRef, screen.stopScreenShare]);
+
+  useEffect(() => {
+    if (setUserVolumeRef) setUserVolumeRef.current = voice.setUserVolume;
+    return () => { if (setUserVolumeRef) setUserVolumeRef.current = null; };
+  }, [setUserVolumeRef, voice.setUserVolume]);
 
   // Wire up the cleanup ref after both hooks are initialized
   cleanupScreenRef.current = screen.fullCleanup;
