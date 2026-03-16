@@ -474,6 +474,27 @@ export async function apiAddReaction(
   return res.json();
 }
 
+// ─── Threads ─────────────────────────────────────────────────────────────────
+
+export async function apiGetThreadMessages(roomId: string, threadEventId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/threads/${threadEventId}`);
+  if (!res.ok) throw new Error("Failed to load thread messages");
+  return res.json() as Promise<{ root: MatrixMessage; messages: MatrixMessage[] }>;
+}
+
+export async function apiSendThreadMessage(roomId: string, threadEventId: string, body: string) {
+  const txnId = Date.now();
+  const res = await authenticatedFetch(
+    `/api/rooms/${roomId}/threads/${threadEventId}/${txnId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ msgtype: "m.text", body }),
+    }
+  );
+  if (!res.ok) throw new Error("Failed to send thread message");
+  return res.json();
+}
+
 // ─── Search ──────────────────────────────────────────────────────────────────
 
 export async function apiSearchMessages(
@@ -518,6 +539,8 @@ export interface MatrixMessage {
   room_id: string;
   origin_server_ts: number;
   type: string;
+  thread_id?: string;
+  thread_reply_count?: number;
   content: {
     body: string;
     msgtype: string;

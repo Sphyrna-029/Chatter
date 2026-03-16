@@ -12,6 +12,7 @@ import { WatchPartyArea } from "./WatchPartyArea";
 import { WhiteboardArea } from "./WhiteboardArea";
 import { ActivityPage } from "./ActivityPage";
 import { MembersPanel } from "./MembersPanel";
+import { ThreadPanel } from "./ThreadPanel";
 import { VoiceControls } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
@@ -100,7 +101,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, loadRooms, loadFriends, loadRoomGroups, selectRoom } = useAppContext();
+  const { state, loadRooms, loadFriends, loadRoomGroups, selectRoom, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -432,6 +433,7 @@ export function ChatLayout() {
               ) : (
                 <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
               )}
+              {state.activeThreadEventId && !isMobile && <ThreadPanel />}
               {!isMobile && (
                 <MembersPanel
                   collapsed={membersCollapsed}
@@ -453,6 +455,19 @@ export function ChatLayout() {
               <SheetDescription>Room members list</SheetDescription>
             </SheetHeader>
             <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
+          </SheetContent>
+        </Sheet>
+      )}
+
+      {/* Mobile thread drawer */}
+      {isMobile && (
+        <Sheet open={!!state.activeThreadEventId} onOpenChange={(open) => { if (!open) closeThread(); }}>
+          <SheetContent side="right" className="w-80 p-0">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Thread</SheetTitle>
+              <SheetDescription>Thread conversation</SheetDescription>
+            </SheetHeader>
+            <ThreadPanel />
           </SheetContent>
         </Sheet>
       )}

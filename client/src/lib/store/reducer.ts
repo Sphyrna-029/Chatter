@@ -39,6 +39,9 @@ export function reducer(state: AppState, action: Action): AppState {
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
+        activeThreadEventId: null,
+        threadRootMessage: null,
+        threadMessages: [],
       };
     }
     case "SET_MESSAGES":
@@ -207,6 +210,33 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_REPLYING_TO":
       return { ...state, replyingTo: action.payload };
+    case "OPEN_THREAD":
+      return {
+        ...state,
+        activeThreadEventId: action.payload.eventId,
+        threadRootMessage: action.payload.root,
+        threadMessages: action.payload.messages,
+      };
+    case "CLOSE_THREAD":
+      return {
+        ...state,
+        activeThreadEventId: null,
+        threadRootMessage: null,
+        threadMessages: [],
+      };
+    case "ADD_THREAD_MESSAGE":
+      if (state.activeThreadEventId !== action.payload.thread_id) return state;
+      if (state.threadMessages.some((m) => m.event_id === action.payload.event_id)) return state;
+      return { ...state, threadMessages: [...state.threadMessages, action.payload] };
+    case "UPDATE_THREAD_REPLY_COUNT":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, thread_reply_count: action.payload.count }
+            : m
+        ),
+      };
     case "UPDATE_ROOM_TOPIC":
       return {
         ...state,

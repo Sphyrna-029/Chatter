@@ -2,7 +2,8 @@ use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_reactions_for_events,
-        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, send_to_user,
+        get_thread_counts_for_events, get_user_from_token, get_user_role, is_moderator_or_owner,
+        now_millis, send_to_user,
     },
     state::{AppState, RoomRecord},
 };
@@ -184,16 +185,19 @@ pub(crate) async fn get_room_messages(
     let limit = query.limit.unwrap_or(50) as i64;
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
 
-    // Get total count for this room
+    // Exclude thread messages (those with a thread_id field) from room message feed
+    let base_filter = doc! { "room_id": &room_id, "thread_id": { "$exists": false } };
+
+    // Get total count for this room (excluding thread messages)
     let total = msg_coll
-        .count_documents(doc! { "room_id": &room_id })
+        .count_documents(base_filter.clone())
         .await
         .unwrap_or(0) as usize;
 
     let (start, end, has_more) = if let Some(around_ts) = query.around_ts {
         // Count messages with timestamp <= around_ts to find the position
         let pos = msg_coll
-            .count_documents(doc! { "room_id": &room_id, "origin_server_ts": { "$lte": around_ts } })
+            .count_documents(doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } })
             .await
             .unwrap_or(0) as usize;
         let half = (limit as usize) / 2;
@@ -209,7 +213,7 @@ pub(crate) async fn get_room_messages(
     // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
     let fetch_count = (end - start) as i64;
     let mut cursor = msg_coll
-        .find(doc! { "room_id": &room_id })
+        .find(base_filter)
         .sort(doc! { "origin_server_ts": 1 })
         .skip(start as u64)
         .limit(fetch_count)
@@ -226,21 +230,31 @@ pub(crate) async fn get_room_messages(
         }
     }
 
-    // Batch-fetch reactions for all messages in the chunk
+    // Batch-fetch reactions and thread reply counts for all messages in the chunk
     let event_ids: Vec<String> = chunk
         .iter()
         .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
         .collect();
     let reactions_map = get_reactions_for_events(&state, &event_ids).await;
+    let thread_counts = get_thread_counts_for_events(&state, &event_ids).await;
 
-    // Attach reactions to each message
+    // Attach reactions and thread reply counts to each message
     for msg in chunk.iter_mut() {
-        if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
-            if let Some(reactions) = reactions_map.get(eid) {
+        let eid = msg.get("event_id").and_then(|v| v.as_str()).map(String::from);
+        if let Some(eid) = eid {
+            if let Some(reactions) = reactions_map.get(&eid) {
                 if !reactions.is_empty() {
                     msg.as_object_mut().unwrap().insert(
                         "reactions".to_string(),
                         serde_json::to_value(reactions).unwrap(),
+                    );
+                }
+            }
+            if let Some(&count) = thread_counts.get(&eid) {
+                if count > 0 {
+                    msg.as_object_mut().unwrap().insert(
+                        "thread_reply_count".to_string(),
+                        serde_json::to_value(count).unwrap(),
                     );
                 }
             }
@@ -453,6 +467,185 @@ pub(crate) async fn edit_message(
 
     broadcast_to_room(&state, &room_id, &edit_event).await;
     Ok(Json(json!({"event_id": edit_event_id})))
+}
+
+pub(crate) async fn get_thread_messages(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, thread_event_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    // Fetch the root message
+    let root_doc = msg_coll
+        .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread root message not found"))?;
+
+    let mut root_doc = root_doc;
+    root_doc.remove("_id");
+    let root_msg = serde_json::to_value(&root_doc).unwrap_or(serde_json::Value::Null);
+
+    // Fetch thread replies
+    let mut cursor = msg_coll
+        .find(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .sort(doc! { "origin_server_ts": 1 })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+
+    let mut messages: Vec<Value> = Vec::new();
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        let mut doc = doc;
+        doc.remove("_id");
+        if let Ok(val) = serde_json::to_value(&doc) {
+            messages.push(val);
+        }
+    }
+
+    // Attach reactions to thread messages
+    let event_ids: Vec<String> = messages
+        .iter()
+        .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let reactions_map = get_reactions_for_events(&state, &event_ids).await;
+    for msg in messages.iter_mut() {
+        if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
+            if let Some(reactions) = reactions_map.get(eid) {
+                if !reactions.is_empty() {
+                    msg.as_object_mut().unwrap().insert(
+                        "reactions".to_string(),
+                        serde_json::to_value(reactions).unwrap(),
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "root": root_msg,
+        "messages": messages
+    })))
+}
+
+pub(crate) async fn send_thread_message(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, thread_event_id, txn_id)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<SendMessageRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let _ = txn_id;
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    if room.read_only {
+        let role = get_user_role(&state, &room_id, &user_id).await;
+        if role != "owner" && role != "moderator" {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "This room is read-only",
+            ));
+        }
+    }
+
+    const MAX_MESSAGE_LENGTH: usize = 4000;
+    let emoji_marker = regex::Regex::new(r":emoji\{[^}]+\}:").unwrap();
+    let display_body = emoji_marker.replace_all(&req.body, "X");
+    if display_body.len() > MAX_MESSAGE_LENGTH {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Message exceeds maximum length of 4000 characters",
+        ));
+    }
+
+    let event_id = generate_id("$");
+    let timestamp = now_millis();
+
+    let content = json!({
+        "msgtype": req.msgtype.unwrap_or_else(|| "m.text".to_string()),
+        "body": req.body
+    });
+
+    let event = json!({
+        "type": "m.room.message",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": content,
+        "event_id": event_id,
+        "thread_id": thread_event_id,
+        "origin_server_ts": timestamp
+    });
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(doc) = mongodb::bson::to_document(&event) {
+        let _ = msg_coll.insert_one(doc).await;
+    }
+
+    // Count total thread replies for the broadcast
+    let reply_count = msg_coll
+        .count_documents(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .await
+        .unwrap_or(0);
+
+    // Broadcast to all room members so they can update thread reply counts
+    let broadcast_event = json!({
+        "type": "m.thread.message",
+        "room_id": room_id,
+        "sender": user_id,
+        "event_id": event_id,
+        "thread_id": thread_event_id,
+        "content": content,
+        "thread_reply_count": reply_count,
+        "origin_server_ts": timestamp
+    });
+
+    broadcast_to_room(&state, &room_id, &broadcast_event).await;
+
+    Ok(Json(json!({"event_id": event_id})))
 }
 
 pub(crate) async fn search_messages(

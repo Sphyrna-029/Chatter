@@ -127,6 +127,29 @@ export function createWsMessageHandler(
           payload: { eventId: msg.event_id, reactions: msg.reactions },
         });
       }
+    } else if (msg.type === "m.thread.message") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        // Update thread reply count on the root message
+        dispatch({
+          type: "UPDATE_THREAD_REPLY_COUNT",
+          payload: { eventId: msg.thread_id, count: msg.thread_reply_count },
+        });
+        // If the thread panel is open for this thread, add the message
+        if (stateRef.current.activeThreadEventId === msg.thread_id) {
+          dispatch({
+            type: "ADD_THREAD_MESSAGE",
+            payload: {
+              event_id: msg.event_id,
+              sender: msg.sender,
+              room_id: msg.room_id,
+              origin_server_ts: msg.origin_server_ts,
+              type: "m.room.message",
+              thread_id: msg.thread_id,
+              content: msg.content,
+            },
+          });
+        }
+      }
     } else if (msg.type === "user_typing") {
       if (
         msg.room_id === stateRef.current.currentRoomId &&

@@ -59,6 +59,8 @@ import {
   apiBlockUser,
   apiUnblockUser,
   apiGetServerInfo,
+  apiGetThreadMessages,
+  apiSendThreadMessage,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -540,6 +542,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const openThread = useCallback(async (eventId: string) => {
+    if (!stateRef.current.currentRoomId) return;
+    const data = await apiGetThreadMessages(stateRef.current.currentRoomId, eventId);
+    dispatch({
+      type: "OPEN_THREAD",
+      payload: { eventId, root: data.root, messages: data.messages },
+    });
+  }, []);
+
+  const closeThread = useCallback(() => {
+    dispatch({ type: "CLOSE_THREAD" });
+  }, []);
+
+  const sendThreadMessage = useCallback(async (body: string) => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId || !cur.activeThreadEventId) return;
+    await apiSendThreadMessage(cur.currentRoomId, cur.activeThreadEventId, body);
+  }, []);
+
   const addReaction = useCallback(
     async (eventId: string, emoji: string) => {
       if (!stateRef.current.currentRoomId || !stateRef.current.userId) return;
@@ -816,6 +837,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadOlderMessages,
         loadMessagesAround,
         sendMessage,
+        openThread,
+        closeThread,
+        sendThreadMessage,
         deleteMessage,
         editMessage,
         addReaction,

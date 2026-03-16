@@ -356,6 +356,41 @@ pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Valu
     }
 }
 
+/// Batch-query thread reply counts for multiple event IDs.
+/// Returns a map from event_id -> reply_count.
+pub(crate) async fn get_thread_counts_for_events(
+    state: &AppState,
+    event_ids: &[String],
+) -> std::collections::HashMap<String, u64> {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let mut result: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+
+    if event_ids.is_empty() {
+        return result;
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let bson_ids: Vec<mongodb::bson::Bson> = event_ids
+        .iter()
+        .map(|id| mongodb::bson::Bson::String(id.clone()))
+        .collect();
+
+    if let Ok(mut cursor) = msg_coll
+        .find(doc! { "thread_id": { "$in": bson_ids } })
+        .await
+    {
+        while let Ok(Some(doc)) = cursor.try_next().await {
+            if let Ok(thread_id) = doc.get_str("thread_id") {
+                *result.entry(thread_id.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    result
+}
+
 /// Batch-query reactions for multiple event IDs.
 /// Returns a map from event_id -> { emoji -> [user_id, ...] }.
 pub(crate) async fn get_reactions_for_events(
