@@ -305,7 +305,12 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     className={`flex items-center gap-1.5 px-1 py-0.5 text-sm text-muted-foreground rounded transition-colors ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
                     onClick={() => !isMe && setExpandedUser(isExpanded ? null : m.userId)}
                   >
-                    <div className={`h-1.5 w-1.5 rounded-full shrink-0 ${isLocalMuted && !isMe ? "bg-yellow-400" : m.muted ? "bg-red-400" : "bg-green-400"}`} />
+                    {isLocalMuted && !isMe
+                      ? <MicOff className="h-3 w-3 shrink-0 text-yellow-400" />
+                      : m.muted
+                        ? <MicOff className="h-3 w-3 shrink-0 text-red-400" />
+                        : <Mic className="h-3 w-3 shrink-0 text-green-400" />
+                    }
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
                     {m.screen_sharing && (
                       <Monitor className="h-3 w-3 shrink-0 text-purple-400 ml-auto" />
