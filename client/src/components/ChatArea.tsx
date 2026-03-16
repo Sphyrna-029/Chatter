@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { apiUploadFile, apiSearchMessages, type MatrixMessage } from "@/lib/api";
+import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -68,7 +68,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround, openThread } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -239,7 +239,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchFilter, setSearchFilter] = useState<"all" | "user" | "file">("all");
+  const [searchFilter, setSearchFilter] = useState<"all" | "user" | "file" | "thread">("all");
   const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "video" | "audio" | "document">("all");
   const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -809,6 +809,23 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // Debounced search execution
   useEffect(() => {
     if (!searchOpen || !state.currentRoomId) return;
+
+    if (searchFilter === "thread") {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = setTimeout(async () => {
+        setSearchLoading(true);
+        try {
+          const results = await apiGetRoomThreads(state.currentRoomId!, searchQuery.trim() || undefined);
+          setSearchResults(results);
+        } catch {
+          setSearchResults([]);
+        } finally {
+          setSearchLoading(false);
+        }
+      }, 300);
+      return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }
+
     if (searchFilter !== "file" && !searchQuery.trim()) {
       setSearchResults([]);
       return;
@@ -841,6 +858,17 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setSearchResults([]);
     setSearchFilter("all");
     setFileTypeFilter("all");
+  };
+
+  // Format relative time for thread list
+  const formatThreadTime = (ts: number) => {
+    const date = new Date(ts);
+    const now = Date.now();
+    const diff = now - ts;
+    if (diff < 60_000) return "just now";
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return date.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
   // Scroll to a message after search closes and messages are rendered
@@ -985,6 +1013,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     ? "Search by username..."
                     : searchFilter === "file"
                     ? "Search by filename..."
+                    : searchFilter === "thread"
+                    ? "Search threads..."
                     : "Search messages..."
                 }
                 value={searchQuery}
@@ -1001,7 +1031,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </button>
           </div>
           <div className="flex gap-1">
-            {(["all", "user", "file"] as const).map((f) => (
+            {(["all", "user", "file", "thread"] as const).map((f) => (
               <Button
                 key={f}
                 variant={searchFilter === f ? "default" : "outline"}
@@ -1012,7 +1042,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                   if (f !== "file") setFileTypeFilter("all");
                 }}
               >
-                {f === "all" ? "All" : f === "user" ? "Users" : "Files"}
+                {f === "all" ? "All" : f === "user" ? "Users" : f === "file" ? "Files" : "Threads"}
               </Button>
             ))}
           </div>
@@ -1052,41 +1082,76 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     Searching...
                   </div>
                 )}
-                {!searchLoading && searchResults.length === 0 && (searchQuery.trim() || searchFilter === "file") && (
+                {!searchLoading && searchResults.length === 0 && searchFilter === "thread" && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    {searchQuery.trim() ? "No threads found" : "No threads in this room yet"}
+                  </div>
+                )}
+                {!searchLoading && searchResults.length === 0 && searchFilter !== "thread" && (searchQuery.trim() || searchFilter === "file") && (
                   <div className="text-center text-xs text-muted-foreground py-4">
                     {searchFilter === "file" ? "No files found" : "No results found"}
                   </div>
                 )}
-                {!searchLoading && searchResults.length === 0 && !searchQuery.trim() && searchFilter !== "file" && (
+                {!searchLoading && searchResults.length === 0 && !searchQuery.trim() && searchFilter !== "file" && searchFilter !== "thread" && (
                   <div className="text-center text-xs text-muted-foreground py-4">
                     Type to search messages
                   </div>
                 )}
-                {searchResults.map((msg, i) => {
-                  const prev = searchResults[i - 1];
-                  const grouped =
-                    !!prev &&
-                    prev.content.msgtype !== "m.system" &&
-                    msg.content.msgtype !== "m.system" &&
-                    prev.sender === msg.sender &&
-                    msg.origin_server_ts - prev.origin_server_ts < 60000;
-                  return (
-                    <div
-                      key={msg.event_id}
-                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
-                      onClick={async () => {
-                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
-                        if (!alreadyLoaded && state.currentRoomId) {
-                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
-                        }
-                        closeSearch();
-                        setScrollToEventId(msg.event_id);
-                      }}
-                    >
-                      <MessageItem message={msg} grouped={grouped} />
-                    </div>
-                  );
-                })}
+                {searchFilter === "thread"
+                  ? searchResults.map((thread) => {
+                      const senderName =
+                        state.userPresence[thread.sender]?.displayName ||
+                        displayUserId(thread.sender);
+                      const replyCount = thread.thread_reply_count ?? 0;
+                      return (
+                        <div
+                          key={thread.event_id}
+                          className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                          onClick={() => {
+                            closeSearch();
+                            openThread(thread.event_id);
+                          }}
+                        >
+                          <MessageSquare className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {thread.thread_name || thread.content.body}
+                            </p>
+                            {thread.thread_name && (
+                              <p className="text-xs text-muted-foreground truncate">{thread.content.body}</p>
+                            )}
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {replyCount} {replyCount === 1 ? "reply" : "replies"} · by {senderName} · {formatThreadTime(thread.origin_server_ts)}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })
+                  : searchResults.map((msg, i) => {
+                      const prev = searchResults[i - 1];
+                      const grouped =
+                        !!prev &&
+                        prev.content.msgtype !== "m.system" &&
+                        msg.content.msgtype !== "m.system" &&
+                        prev.sender === msg.sender &&
+                        msg.origin_server_ts - prev.origin_server_ts < 60000;
+                      return (
+                        <div
+                          key={msg.event_id}
+                          className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                          onClick={async () => {
+                            const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
+                            if (!alreadyLoaded && state.currentRoomId) {
+                              await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                            }
+                            closeSearch();
+                            setScrollToEventId(msg.event_id);
+                          }}
+                        >
+                          <MessageItem message={msg} grouped={grouped} />
+                        </div>
+                      );
+                    })}
               </>
             ) : (
               <>

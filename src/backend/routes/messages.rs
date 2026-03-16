@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest},
+    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_reactions_for_events,
         get_thread_counts_for_events, get_user_from_token, get_user_role, is_moderator_or_owner,
@@ -709,6 +709,106 @@ pub(crate) async fn set_thread_name(
     broadcast_to_room(&state, &room_id, &broadcast).await;
 
     Ok(Json(json!({ "ok": true })))
+}
+
+pub(crate) async fn get_room_threads(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Query(query): Query<ThreadListQuery>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    // Collect all distinct thread_ids used in this room
+    let raw_ids = msg_coll
+        .distinct(
+            "thread_id",
+            doc! { "room_id": &room_id, "thread_id": { "$exists": true } },
+        )
+        .await
+        .unwrap_or_default();
+
+    let thread_ids: Vec<String> = raw_ids
+        .into_iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    if thread_ids.is_empty() {
+        return Ok(Json(json!({ "threads": [] })));
+    }
+
+    // Fetch the root messages for those thread ids
+    let mut cursor = msg_coll
+        .find(doc! { "event_id": { "$in": &thread_ids }, "room_id": &room_id })
+        .sort(doc! { "origin_server_ts": -1 })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+
+    let mut root_msgs: Vec<Value> = Vec::new();
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        let mut doc = doc;
+        doc.remove("_id");
+        if let Ok(val) = serde_json::to_value(&doc) {
+            root_msgs.push(val);
+        }
+    }
+
+    // Attach reply counts
+    let event_ids: Vec<String> = root_msgs
+        .iter()
+        .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let counts = get_thread_counts_for_events(&state, &event_ids).await;
+    for msg in root_msgs.iter_mut() {
+        if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
+            let count = counts.get(eid).copied().unwrap_or(0);
+            msg.as_object_mut()
+                .unwrap()
+                .insert("thread_reply_count".to_string(), json!(count));
+        }
+    }
+
+    // Optional text filter against thread_name and content.body
+    if let Some(q) = query.q.as_deref() {
+        let q = q.to_lowercase();
+        if !q.is_empty() {
+            root_msgs.retain(|msg| {
+                let name_match = msg
+                    .get("thread_name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase().contains(&q))
+                    .unwrap_or(false);
+                let body_match = msg
+                    .get("content")
+                    .and_then(|c| c.get("body"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase().contains(&q))
+                    .unwrap_or(false);
+                name_match || body_match
+            });
+        }
+    }
+
+    Ok(Json(json!({ "threads": root_msgs })))
 }
 
 pub(crate) async fn search_messages(

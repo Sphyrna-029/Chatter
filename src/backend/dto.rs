@@ -225,6 +225,11 @@ pub(crate) struct SetThreadNameRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct ThreadListQuery {
+    pub(crate) q: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct GifSearchQuery {
     pub(crate) q: Option<String>,
     pub(crate) page: Option<u32>,

@@ -482,6 +482,15 @@ export async function apiGetThreadMessages(roomId: string, threadEventId: string
   return res.json() as Promise<{ root: MatrixMessage; messages: MatrixMessage[] }>;
 }
 
+export async function apiGetRoomThreads(roomId: string, query?: string): Promise<MatrixMessage[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/threads?${params}`);
+  if (!res.ok) throw new Error("Failed to load threads");
+  const data = await res.json();
+  return data.threads as MatrixMessage[];
+}
+
 export async function apiSetThreadName(roomId: string, threadEventId: string, name: string) {
   const res = await authenticatedFetch(
     `/api/rooms/${roomId}/threads/${threadEventId}/name`,
