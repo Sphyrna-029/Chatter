@@ -358,8 +358,38 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     );
   };
 
+  // ─── Resize handle ─────────────────────────────────────────────────────
+  const [width, setWidth] = useState(208); // 13rem = 208px
+  const resizing = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!resizing.current) return;
+      const newW = Math.min(400, Math.max(140, startW.current + (ev.clientX - startX.current)));
+      setWidth(newW);
+    };
+    const onUp = () => {
+      resizing.current = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, [width]);
+
   return (
-    <div className="w-52 border-r flex flex-col h-full shrink-0 bg-sidebar">
+    <div className="border-r flex flex-col h-full shrink-0 bg-sidebar relative" style={{ width }}>
       {/* Room name header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
         <span className="text-sm font-semibold truncate">{roomInfo?.name || "Room"}</span>
@@ -591,6 +621,12 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Resize handle */}
+      <div
+        onMouseDown={onResizeStart}
+        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+      />
     </div>
   );
 }

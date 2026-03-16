@@ -10,10 +10,13 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use webrtc::{
     api::{
-        interceptor_registry::register_default_interceptors, media_engine::MediaEngine, APIBuilder,
-        API,
+        interceptor_registry::register_default_interceptors, media_engine::MediaEngine,
+        setting_engine::SettingEngine, APIBuilder, API,
     },
-    ice_transport::{ice_candidate::RTCIceCandidateInit, ice_server::RTCIceServer},
+    ice_transport::{
+        ice_candidate::RTCIceCandidateInit, ice_candidate_type::RTCIceCandidateType,
+        ice_server::RTCIceServer,
+    },
     interceptor::registry::Registry,
     peer_connection::{configuration::RTCConfiguration, RTCPeerConnection},
 };
@@ -60,10 +63,24 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
     registry = register_default_interceptors(registry, &mut media_engine)
         .expect("register_default_interceptors failed");
 
+    let mut setting_engine = SettingEngine::default();
+
+    // If WEBRTC_IP is set (e.g. the server's LAN IP), advertise it as a host
+    // candidate so that peers on the same subnet can connect directly without
+    // relying on STUN/TURN.
+    if let Ok(ip) = std::env::var("WEBRTC_IP") {
+        let ips: Vec<String> = ip.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        if !ips.is_empty() {
+            println!("WebRTC: advertising NAT 1:1 IPs as host candidates: {:?}", ips);
+            setting_engine.set_nat_1to1_ips(ips, RTCIceCandidateType::Host);
+        }
+    }
+
     Arc::new(
         APIBuilder::new()
             .with_media_engine(media_engine)
             .with_interceptor_registry(registry)
+            .with_setting_engine(setting_engine)
             .build(),
     )
 }
