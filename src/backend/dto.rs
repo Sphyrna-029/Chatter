@@ -220,6 +220,11 @@ pub(crate) struct SetGroupCollapsedRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct SetThreadNameRequest {
+    pub(crate) name: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct GifSearchQuery {
     pub(crate) q: Option<String>,
     pub(crate) page: Option<u32>,

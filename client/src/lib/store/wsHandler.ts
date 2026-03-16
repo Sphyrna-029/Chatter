@@ -150,6 +150,13 @@ export function createWsMessageHandler(
           });
         }
       }
+    } else if (msg.type === "m.thread.name") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({
+          type: "SET_THREAD_NAME",
+          payload: { eventId: msg.thread_id, name: msg.name },
+        });
+      }
     } else if (msg.type === "user_typing") {
       if (
         msg.room_id === stateRef.current.currentRoomId &&

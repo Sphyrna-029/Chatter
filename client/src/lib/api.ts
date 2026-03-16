@@ -482,6 +482,14 @@ export async function apiGetThreadMessages(roomId: string, threadEventId: string
   return res.json() as Promise<{ root: MatrixMessage; messages: MatrixMessage[] }>;
 }
 
+export async function apiSetThreadName(roomId: string, threadEventId: string, name: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${roomId}/threads/${threadEventId}/name`,
+    { method: "PUT", body: JSON.stringify({ name }) }
+  );
+  if (!res.ok) throw new Error("Failed to set thread name");
+}
+
 export async function apiSendThreadMessage(roomId: string, threadEventId: string, body: string) {
   const txnId = Date.now();
   const res = await authenticatedFetch(
@@ -541,6 +549,7 @@ export interface MatrixMessage {
   type: string;
   thread_id?: string;
   thread_reply_count?: number;
+  thread_name?: string;
   content: {
     body: string;
     msgtype: string;

@@ -237,6 +237,19 @@ export function reducer(state: AppState, action: Action): AppState {
             : m
         ),
       };
+    case "SET_THREAD_NAME":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, thread_name: action.payload.name }
+            : m
+        ),
+        threadRootMessage:
+          state.threadRootMessage?.event_id === action.payload.eventId
+            ? { ...state.threadRootMessage, thread_name: action.payload.name }
+            : state.threadRootMessage,
+      };
     case "UPDATE_ROOM_TOPIC":
       return {
         ...state,

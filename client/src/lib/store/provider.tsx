@@ -61,6 +61,7 @@ import {
   apiGetServerInfo,
   apiGetThreadMessages,
   apiSendThreadMessage,
+  apiSetThreadName,
   type RoomInfo,
 } from "../api";
 import type { AppContextValue } from "./types";
@@ -561,6 +562,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiSendThreadMessage(cur.currentRoomId, cur.activeThreadEventId, body);
   }, []);
 
+  const setThreadName = useCallback(async (name: string) => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId || !cur.activeThreadEventId) return;
+    await apiSetThreadName(cur.currentRoomId, cur.activeThreadEventId, name);
+    dispatch({
+      type: "SET_THREAD_NAME",
+      payload: { eventId: cur.activeThreadEventId, name },
+    });
+  }, []);
+
   const addReaction = useCallback(
     async (eventId: string, emoji: string) => {
       if (!stateRef.current.currentRoomId || !stateRef.current.userId) return;
@@ -840,6 +851,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         openThread,
         closeThread,
         sendThreadMessage,
+        setThreadName,
         deleteMessage,
         editMessage,
         addReaction,

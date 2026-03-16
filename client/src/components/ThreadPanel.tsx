@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { MessageItem } from "./MessageItem";
@@ -14,10 +14,13 @@ import {
 } from "@/components/ui/popover";
 
 export function ThreadPanel() {
-  const { state, closeThread, sendThreadMessage } = useAppContext();
+  const { state, closeThread, sendThreadMessage, setThreadName } = useAppContext();
   const [body, setBody] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { threadRootMessage, threadMessages, userPresence, currentRoomId, roomInfoMap } = state;
@@ -51,6 +54,26 @@ export function ThreadPanel() {
     inputRef.current?.focus();
   }, []);
 
+  const startEditingName = useCallback(() => {
+    setNameDraft(threadRootMessage?.thread_name ?? "");
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 0);
+  }, [threadRootMessage?.thread_name]);
+
+  const commitName = useCallback(async () => {
+    setEditingName(false);
+    const trimmed = nameDraft.trim();
+    if (trimmed === (threadRootMessage?.thread_name ?? "")) return;
+    try {
+      await setThreadName(trimmed);
+    } catch {}
+  }, [nameDraft, setThreadName, threadRootMessage?.thread_name]);
+
+  const cancelEditName = useCallback(() => {
+    setEditingName(false);
+    setNameDraft("");
+  }, []);
+
   if (!threadRootMessage) return null;
 
   const rootSender = userPresence[threadRootMessage.sender]?.displayName
@@ -67,18 +90,54 @@ export function ThreadPanel() {
   return (
     <div className="flex flex-col border-border bg-background flex-1 min-h-0 min-w-0">
       {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0">
+      <div className="group flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0">
         <Button
           variant="ghost"
           size="sm"
-          className="h-7 gap-1.5 px-2 text-sm"
+          className="h-7 gap-1.5 px-2 text-sm shrink-0"
           onClick={closeThread}
           title="Back to chat"
         >
           <ArrowLeft className="h-4 w-4" />
           Back to chat
         </Button>
-        <span className="text-sm font-semibold text-muted-foreground">· Thread</span>
+        <div className="flex items-center gap-1 flex-1 min-w-0">
+          {editingName ? (
+            <>
+              <input
+                ref={nameInputRef}
+                className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-b border-primary outline-none"
+                value={nameDraft}
+                placeholder="Thread name…"
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitName();
+                  if (e.key === "Escape") cancelEditName();
+                }}
+                maxLength={80}
+              />
+              <button onClick={commitName} title="Save" className="text-primary hover:text-primary/80 shrink-0">
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button onClick={cancelEditName} title="Cancel" className="text-muted-foreground hover:text-foreground shrink-0">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-sm font-semibold truncate">
+                {threadRootMessage.thread_name || "Thread"}
+              </span>
+              <button
+                onClick={startEditingName}
+                title="Set thread name"
+                className="text-muted-foreground hover:text-foreground transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+              >
+                <Pencil className="h-3 w-3" />
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Scrollable content */}

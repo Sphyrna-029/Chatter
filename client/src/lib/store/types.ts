@@ -101,6 +101,7 @@ export type Action =
   | { type: "CLOSE_THREAD" }
   | { type: "ADD_THREAD_MESSAGE"; payload: MatrixMessage }
   | { type: "UPDATE_THREAD_REPLY_COUNT"; payload: { eventId: string; count: number } }
+  | { type: "SET_THREAD_NAME"; payload: { eventId: string; name: string } }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
   | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean; read_only?: boolean } }
@@ -187,6 +188,7 @@ export interface AppContextValue {
   openThread: (eventId: string) => Promise<void>;
   closeThread: () => void;
   sendThreadMessage: (body: string) => Promise<void>;
+  setThreadName: (name: string) => Promise<void>;
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;

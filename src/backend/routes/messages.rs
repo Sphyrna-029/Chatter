@@ -1,5 +1,5 @@
 use super::super::{
-    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest},
+    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_reactions_for_events,
         get_thread_counts_for_events, get_user_from_token, get_user_role, is_moderator_or_owner,
@@ -646,6 +646,69 @@ pub(crate) async fn send_thread_message(
     broadcast_to_room(&state, &room_id, &broadcast_event).await;
 
     Ok(Json(json!({"event_id": event_id})))
+}
+
+pub(crate) async fn set_thread_name(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, thread_event_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<SetThreadNameRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    let exists = msg_coll
+        .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    if !exists {
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            "Thread root message not found",
+        ));
+    }
+
+    let name = req.name.trim().to_string();
+
+    msg_coll
+        .update_one(
+            doc! { "event_id": &thread_event_id, "room_id": &room_id },
+            doc! { "$set": { "thread_name": &name } },
+        )
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB update failed"))?;
+
+    let broadcast = json!({
+        "type": "m.thread.name",
+        "room_id": room_id,
+        "thread_id": thread_event_id,
+        "name": name,
+        "sender": user_id,
+    });
+    broadcast_to_room(&state, &room_id, &broadcast).await;
+
+    Ok(Json(json!({ "ok": true })))
 }
 
 pub(crate) async fn search_messages(

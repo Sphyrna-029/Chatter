@@ -9,7 +9,7 @@ use super::{
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
         media::{delete_upload, gif_search, link_preview, list_uploads, serve_upload, upload_chunk, upload_complete, upload_file, upload_init},
-        messages::{edit_message, get_room_messages, get_thread_messages, redact_message, search_messages, send_message, send_thread_message},
+        messages::{edit_message, get_room_messages, get_thread_messages, redact_message, search_messages, send_message, send_thread_message, set_thread_name},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
@@ -128,6 +128,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/rooms/{room_id}/name-colors", put(set_name_colors))
            // Threads
            .route("/api/rooms/{room_id}/threads/{event_id}", get(get_thread_messages))
+           .route("/api/rooms/{room_id}/threads/{event_id}/name", put(set_thread_name))
            .route("/api/rooms/{room_id}/threads/{event_id}/{txn_id}", put(send_thread_message))
            // Search
            .route("/api/rooms/{room_id}/search", get(search_messages))
