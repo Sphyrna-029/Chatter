@@ -156,6 +156,7 @@ export function useWebRTCScreen() {
   const stopScreenShare = useCallback(async () => {
     dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
     if (state.userId) {
+      dispatch({ type: "SCREEN_SHARE_STOPPED", payload: state.userId });
       screenStreamsMap.delete(state.userId);
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
     }
@@ -169,7 +170,15 @@ export function useWebRTCScreen() {
       if (state.voiceChannelId) screenStopMsg.channel_id = state.voiceChannelId;
       wsRef.current.send(JSON.stringify(screenStopMsg));
     }
-  }, [state.currentRoomId, state.userId, dispatch, wsRef]);
+    // Update per-channel voice members locally
+    if (state.voiceChannelId && state.userId) {
+      const cur = { ...state.voiceChannelMembers };
+      cur[state.voiceChannelId] = (cur[state.voiceChannelId] || []).map((m: any) =>
+        m.userId === state.userId ? { ...m, screen_sharing: false } : m
+      );
+      dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+    }
+  }, [state.currentRoomId, state.userId, state.voiceChannelId, state.voiceChannelMembers, dispatch, wsRef]);
 
   // ─── WS Message handler for Screen WebRTC signaling ────────────────────────
   useEffect(() => {
