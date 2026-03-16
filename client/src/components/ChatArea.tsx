@@ -929,19 +929,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       )}
       {/* Header — compact on mobile since MobileHeader shows room name */}
       <div className={`flex items-center justify-between border-b px-4 ${isMobile ? "py-1.5" : "py-3"}`}>
-        {/* Join voice button — only visible when not already in voice */}
-        {onJoinVoice && !state.inVoiceChannel ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="shrink-0 text-xs"
-            onClick={onJoinVoice}
-          >
-            Join Voice
-          </Button>
-        ) : (
-          <div className={isMobile ? "w-0" : "w-8"} />
-        )}
+        <div className={isMobile ? "w-0" : "w-8"} />
         <div className={`flex-1 min-w-0 text-center ${isMobile ? "hidden" : ""}`}>
           <h2 className="text-sm font-semibold">
             {state.currentChannelId && state.channels.length > 0
