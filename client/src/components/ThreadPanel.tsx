@@ -6,14 +6,24 @@ import { MessageItem } from "./MessageItem";
 import { displayUserId } from "@/lib/utils";
 import { AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { EmojiPicker } from "./EmojiPicker";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export function ThreadPanel() {
   const { state, closeThread, sendThreadMessage } = useAppContext();
   const [body, setBody] = useState("");
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { threadRootMessage, threadMessages, userPresence, userId } = state;
+  const { threadRootMessage, threadMessages, userPresence, currentRoomId, roomInfoMap } = state;
+
+  const roomCustomEmojis = currentRoomId ? (roomInfoMap[currentRoomId]?.custom_emojis ?? []) : [];
+  const emojiAliases = currentRoomId ? (roomInfoMap[currentRoomId]?.emoji_aliases ?? {}) : {};
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -34,6 +44,12 @@ export function ThreadPanel() {
       handleSend();
     }
   };
+
+  const insertEmoji = useCallback((emoji: string) => {
+    setBody((prev) => prev + emoji);
+    setEmojiOpen(false);
+    inputRef.current?.focus();
+  }, []);
 
   if (!threadRootMessage) return null;
 
@@ -119,7 +135,7 @@ export function ThreadPanel() {
           <textarea
             ref={inputRef}
             className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground max-h-24 min-h-[1.25rem]"
-            placeholder={`Reply in thread…`}
+            placeholder="Reply in thread…"
             value={body}
             rows={1}
             onChange={(e) => {
@@ -129,6 +145,23 @@ export function ThreadPanel() {
             }}
             onKeyDown={handleKeyDown}
           />
+          <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+            <PopoverTrigger asChild>
+              <button
+                className="text-base leading-none hover:scale-110 transition-transform cursor-pointer shrink-0"
+                title="Emoji"
+              >
+                😊
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" align="end" className="w-auto p-0">
+              <EmojiPicker
+                onSelect={insertEmoji}
+                roomCustomEmojis={roomCustomEmojis}
+                emojiAliases={emojiAliases}
+              />
+            </PopoverContent>
+          </Popover>
           <Button
             size="sm"
             className="h-7 px-2 shrink-0"
