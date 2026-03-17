@@ -415,10 +415,36 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   };
 
   // ─── Resize handle ─────────────────────────────────────────────────────
-  const [width, setWidth] = useState(208); // 13rem = 208px
+  const [width, setWidth] = useState(() => {
+    // Auto-size to fit room name: measure text width + padding for icons/buttons
+    const name = roomInfo?.name || "Room";
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif"; // text-sm font-semibold
+      const textW = ctx.measureText(name).width;
+      // Add padding: 12px left + 12px right + ~60px for action buttons
+      return Math.min(400, Math.max(180, Math.ceil(textW + 84)));
+    }
+    return 208;
+  });
   const resizing = useRef(false);
+  const manuallyResized = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
+
+  // Re-auto-size when switching rooms (unless user manually resized)
+  useEffect(() => {
+    if (manuallyResized.current) return;
+    const name = roomInfo?.name || "Room";
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif";
+      const textW = ctx.measureText(name).width;
+      setWidth(Math.min(400, Math.max(180, Math.ceil(textW + 84))));
+    }
+  }, [roomInfo?.name]);
 
   const onResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -433,6 +459,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     };
     const onUp = () => {
       resizing.current = false;
+      manuallyResized.current = true;
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";

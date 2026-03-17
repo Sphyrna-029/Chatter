@@ -22,9 +22,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
   const currentRoomRef = useRef(state.currentRoomId);
+  const voiceRoomIdRef = useRef(state.voiceRoomId);
   const voiceChannelIdRef = useRef(state.voiceChannelId);
   useEffect(() => { inVoiceRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
+  useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
   useEffect(() => { voiceChannelIdRef.current = state.voiceChannelId; }, [state.voiceChannelId]);
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
@@ -39,7 +41,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (!ev.candidate || !canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_publish_candidate",
-        room_id: currentRoomRef.current,
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
         candidate: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex, usernameFragment: ev.candidate.usernameFragment },
       }));
     };
@@ -48,7 +50,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     await pc.setLocalDescription(offer);
     wsRef.current!.send(JSON.stringify({
       type: "voice_webrtc_publish_offer",
-      room_id: currentRoomRef.current,
+      room_id: voiceRoomIdRef.current || currentRoomRef.current,
       channel_id: voiceChannelIdRef.current || undefined,
       sdp: offer.sdp,
     }));
@@ -67,7 +69,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (!ev.candidate || !canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_candidate",
-        room_id: currentRoomRef.current,
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
         speaker_user_id: speakerUserId,
         candidate: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex, usernameFragment: ev.candidate.usernameFragment },
       }));
@@ -115,7 +117,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_offer",
-        room_id: currentRoomRef.current,
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
         speaker_user_id: speakerUserId,
         sdp: offer.sdp,
       }));

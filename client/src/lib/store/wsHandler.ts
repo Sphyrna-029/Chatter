@@ -197,8 +197,9 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
-        // Update per-channel voice members
-        if (msg.channel_id) {
+        // Only update per-channel voice members if the event is for the currently viewed room
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
           const cur = { ...stateRef.current.voiceChannelMembers };
           const members = cur[msg.channel_id] || [];
           if (!members.some((m: any) => m.userId === msg.user_id)) {
@@ -214,8 +215,9 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
-        // Update per-channel voice members
-        if (msg.channel_id) {
+        // Only update per-channel voice members if the event is for the currently viewed room
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
           const cur = { ...stateRef.current.voiceChannelMembers };
           cur[msg.channel_id] = (cur[msg.channel_id] || []).filter((m: any) => m.userId !== msg.user_id);
           dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
@@ -231,8 +233,9 @@ export function createWsMessageHandler(
           type: "VOICE_USER_MUTED",
           payload: { userId: msg.user_id, muted: msg.muted },
         });
-        // Update per-channel voice members mute state
-        if (msg.channel_id) {
+        // Only update per-channel voice members if the event is for the currently viewed room
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
           const cur = { ...stateRef.current.voiceChannelMembers };
           cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
             m.userId === msg.user_id ? { ...m, muted: msg.muted } : m
@@ -244,8 +247,9 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
-        // Update per-channel voice members screen_sharing state
-        if (msg.channel_id) {
+        // Only update per-channel voice members if the event is for the currently viewed room
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
           const cur = { ...stateRef.current.voiceChannelMembers };
           cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
             m.userId === msg.user_id ? { ...m, screen_sharing: true } : m
@@ -257,8 +261,9 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
-        // Update per-channel voice members screen_sharing state
-        if (msg.channel_id) {
+        // Only update per-channel voice members if the event is for the currently viewed room
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
           const cur = { ...stateRef.current.voiceChannelMembers };
           cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
             m.userId === msg.user_id ? { ...m, screen_sharing: false } : m

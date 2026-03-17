@@ -431,7 +431,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 screen_sharing: m.screen_sharing,
               }));
             }
+            // Only show voice members for the room being viewed — don't carry
+            // over members from a different room's voice channels.
             dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
+          } else {
+            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: {} });
           }
         } catch {}
       }
