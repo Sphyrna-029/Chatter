@@ -54,10 +54,16 @@ export function createWsMessageHandler(
   return (msg: any) => {
     if (msg.type === "m.room.message") {
       if (msg.room_id === stateRef.current.currentRoomId) {
-        dispatch({ type: "ADD_MESSAGE", payload: msg });
-        // Track per-channel unreads/mentions for messages in a different channel
         const msgChannelId = msg.channel_id || msg.content?.channel_id;
-        if (msgChannelId && msgChannelId !== stateRef.current.currentChannelId && msg.sender !== stateRef.current.userId && msg.content?.msgtype !== "m.system") {
+        const currentChannelId = stateRef.current.currentChannelId;
+        // Only add to displayed messages if it belongs to the current channel
+        const isForCurrentChannel = msgChannelId
+          ? msgChannelId === currentChannelId
+          : !currentChannelId;
+        if (isForCurrentChannel) {
+          dispatch({ type: "ADD_MESSAGE", payload: msg });
+        } else if (msgChannelId && msg.sender !== stateRef.current.userId && msg.content?.msgtype !== "m.system") {
+          // Track per-channel unreads/mentions for messages in a different channel
           dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
           const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
           if (myUsername && msg.content?.body?.includes(`@${myUsername}`)) {
