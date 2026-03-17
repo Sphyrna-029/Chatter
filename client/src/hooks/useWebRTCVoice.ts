@@ -212,6 +212,35 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async (channelId?: string) => {
     if (!state.currentRoomId) return;
+
+    // If already in a voice channel, leave it first
+    if (inVoiceRef.current) {
+      await cleanupScreenRef.current();
+
+      if (voicePublisherPcRef.current) {
+        voicePublisherPcRef.current.close();
+        voicePublisherPcRef.current = null;
+      }
+      voiceSubscriberPcsRef.current.forEach((pc) => pc.close());
+      voiceSubscriberPcsRef.current.clear();
+      voiceAudioElementsRef.current.forEach((el) => { el.srcObject = null; });
+      voiceAudioElementsRef.current.clear();
+      voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
+      voiceRetryTimersRef.current.clear();
+      pendingVoiceSubsRef.current.clear();
+
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+        localStreamRef.current = null;
+      }
+
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        const leaveMsg: any = { type: "voice_leave", room_id: voiceRoomIdRef.current || state.currentRoomId };
+        if (voiceChannelIdRef.current) leaveMsg.channel_id = voiceChannelIdRef.current;
+        wsRef.current.send(JSON.stringify(leaveMsg));
+      }
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {

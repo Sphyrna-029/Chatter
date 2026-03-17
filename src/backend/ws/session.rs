@@ -253,6 +253,55 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_join" => {
             let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+
+            // Remove user from any other voice channel they're currently in
+            {
+                let mut vc = state.voice_channels.write().await;
+                let mut old_channels: Vec<(String, Vec<String>, bool)> = Vec::new();
+                for (old_cid, members) in vc.iter_mut() {
+                    if old_cid != channel_id {
+                        if let Some(member) = members.remove(user_id) {
+                            let remaining = members.keys().cloned().collect::<Vec<_>>();
+                            old_channels.push((old_cid.clone(), remaining, member.screen_sharing));
+                        }
+                    }
+                }
+                drop(vc);
+
+                for (old_cid, remaining_members, was_screen_sharing) in old_channels {
+                    // Teardown old voice WebRTC connections
+                    teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                    let _ = teardown_voice_publisher(&state, user_id).await;
+                    teardown_screen_subscriptions_for_viewer(&state, user_id).await;
+                    let publisher_room = teardown_screen_publisher(&state, user_id).await;
+
+                    let leave_event = json!({
+                        "type": "voice_user_left",
+                        "room_id": room_id,
+                        "channel_id": old_cid,
+                        "user_id": user_id,
+                        "voice_members": remaining_members
+                    });
+                    broadcast_to_room(&state, room_id, &leave_event).await;
+
+                    if was_screen_sharing {
+                        let event = json!({
+                            "type": "screen_share_stopped",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    } else if let Some(ref published_room_id) = publisher_room {
+                        let event = json!({
+                            "type": "screen_share_stopped",
+                            "room_id": published_room_id,
+                            "user_id": user_id
+                        });
+                        broadcast_to_room(&state, published_room_id, &event).await;
+                    }
+                }
+            }
+
             let voice_members = {
                 let mut vc = state.voice_channels.write().await;
                 let chan_vc = vc.entry(channel_id.to_string()).or_insert_with(HashMap::new);

@@ -50,6 +50,8 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   // Drag-and-drop state
   const [draggedRoomId, setDraggedRoomId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+  const [dragOverRoomId, setDragOverRoomId] = useState<string | null>(null);
+  const [dragOverSide, setDragOverSide] = useState<"before" | "after">("before");
 
   const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || displayUserId(state.userId ?? "") || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
@@ -120,10 +122,54 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         onDragEnd={() => {
           setDraggedRoomId(null);
           setDragOverGroupId(null);
+          setDragOverRoomId(null);
+        }}
+        onDragOver={(e) => {
+          if (isDm || !draggedRoomId || draggedRoomId === roomId) return;
+          e.preventDefault();
+          e.stopPropagation();
+          e.dataTransfer.dropEffect = "move";
+          const rect = e.currentTarget.getBoundingClientRect();
+          const midX = rect.left + rect.width / 2;
+          setDragOverSide(e.clientX < midX ? "before" : "after");
+          setDragOverRoomId(roomId);
+          setDragOverGroupId(null);
+        }}
+        onDragLeave={(e) => {
+          if (dragOverRoomId === roomId && !e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDragOverRoomId(null);
+          }
+        }}
+        onDrop={(e) => {
+          if (isDm) return;
+          e.preventDefault();
+          e.stopPropagation();
+          const srcId = e.dataTransfer.getData("text/plain");
+          if (!srcId || srcId === roomId) return;
+          // Find which group the target room is in
+          const targetGroup = state.roomGroups.find((g) => g.room_ids.includes(roomId));
+          const sourceGroup = state.roomGroups.find((g) => g.room_ids.includes(srcId));
+          if (targetGroup) {
+            // Remove from source group if different
+            if (sourceGroup && sourceGroup.group_id !== targetGroup.group_id) {
+              setGroupRooms(sourceGroup.group_id, sourceGroup.room_ids.filter((id) => id !== srcId));
+            }
+            // Build new order: remove srcId, insert at target position
+            const newIds = targetGroup.room_ids.filter((id) => id !== srcId);
+            const targetIdx = newIds.indexOf(roomId);
+            const insertIdx = dragOverSide === "before" ? targetIdx : targetIdx + 1;
+            newIds.splice(insertIdx, 0, srcId);
+            setGroupRooms(targetGroup.group_id, newIds);
+          }
+          setDraggedRoomId(null);
+          setDragOverGroupId(null);
+          setDragOverRoomId(null);
         }}
         className={cn(
           "group/card relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer",
           draggedRoomId === roomId && "opacity-50",
+          dragOverRoomId === roomId && dragOverSide === "before" && "border-l-primary border-l-2",
+          dragOverRoomId === roomId && dragOverSide === "after" && "border-r-primary border-r-2",
         )}
         style={{
           minHeight: "5.5rem",
