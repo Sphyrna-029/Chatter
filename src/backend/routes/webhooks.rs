@@ -54,6 +54,7 @@ pub(crate) async fn create_webhook(
         creator: user_id,
         name,
         avatar_url: body.avatar_url.unwrap_or_default(),
+        channel_id: body.channel_id.unwrap_or_default(),
         created_at: now_millis(),
     };
 
@@ -100,6 +101,7 @@ pub(crate) async fn list_webhooks(
                 "webhook_id": wh.webhook_id,
                 "name": wh.name,
                 "avatar_url": wh.avatar_url,
+                "channel_id": wh.channel_id,
                 "created_at": wh.created_at,
                 "url": format!("/api/webhooks/{}", wh.webhook_id),
             }));
@@ -284,7 +286,7 @@ pub(crate) async fn execute_webhook(
     let ts = now_millis();
     let sender = format!("webhook:{}", webhook_id);
 
-    let event = json!({
+    let mut event = json!({
         "type": "m.room.message",
         "room_id": webhook.room_id,
         "sender": sender,
@@ -298,6 +300,11 @@ pub(crate) async fn execute_webhook(
         "event_id": event_id,
         "origin_server_ts": ts,
     });
+
+    // Route to configured channel if set
+    if !webhook.channel_id.is_empty() {
+        event["channel_id"] = json!(webhook.channel_id);
+    }
 
     // Store in MongoDB
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");

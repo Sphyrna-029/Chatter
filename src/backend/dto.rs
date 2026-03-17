@@ -199,6 +199,7 @@ pub(crate) struct FriendActionRequest {
 pub(crate) struct CreateWebhookRequest {
     pub(crate) name: String,
     pub(crate) avatar_url: Option<String>,
+    pub(crate) channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]

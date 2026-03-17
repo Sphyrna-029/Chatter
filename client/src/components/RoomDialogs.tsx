@@ -481,6 +481,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [webhookAvatarUploading, setWebhookAvatarUploading] = useState(false);
   const [webhookLoading, setWebhookLoading] = useState(false);
   const [copiedWebhookId, setCopiedWebhookId] = useState<string | null>(null);
+  const [webhookChannelId, setWebhookChannelId] = useState("");
   const webhookAvatarInputRef = useRef<HTMLInputElement>(null);
 
   // Banned users state
@@ -1081,6 +1082,20 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                       <ImagePlus className="w-4 h-4" />
                     </Button>
                   </div>
+                  <div>
+                    <select
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                      value={webhookChannelId}
+                      onChange={(e) => setWebhookChannelId(e.target.value)}
+                    >
+                      <option value="">Default channel</option>
+                      {state.channels.map((ch) => (
+                        <option key={ch.channel_id} value={ch.channel_id}>
+                          # {ch.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <Button
                     type="button"
                     variant="outline"
@@ -1089,16 +1104,18 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     onClick={async () => {
                       setWebhookLoading(true);
                       try {
-                        const result = await apiCreateWebhook(roomId, webhookName.trim(), webhookAvatarUrl.trim() || undefined);
+                        const result = await apiCreateWebhook(roomId, webhookName.trim(), webhookAvatarUrl.trim() || undefined, webhookChannelId || undefined);
                         setWebhooks((prev) => [...prev, {
                           webhook_id: result.webhook_id,
                           name: webhookName.trim(),
                           avatar_url: webhookAvatarUrl.trim(),
+                          channel_id: webhookChannelId || undefined,
                           created_at: Date.now(),
                           url: result.url,
                         }]);
                         setWebhookName("");
                         setWebhookAvatarUrl("");
+                        setWebhookChannelId("");
                       } catch (e: any) {
                         alert(e.message || "Failed to create webhook");
                       } finally {
@@ -1130,6 +1147,12 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           )}
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate">{wh.name}</div>
+                            {wh.channel_id && (() => {
+                              const ch = state.channels.find((c) => c.channel_id === wh.channel_id);
+                              return ch ? (
+                                <div className="text-[10px] text-muted-foreground truncate">→ #{ch.name}</div>
+                              ) : null;
+                            })()}
                             <div className="font-mono text-[10px] text-muted-foreground truncate">{fullUrl}</div>
                           </div>
                           <Button

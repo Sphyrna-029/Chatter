@@ -301,6 +301,8 @@ pub(crate) struct WebhookRecord {
     pub(crate) creator: String,
     pub(crate) name: String,
     pub(crate) avatar_url: String,
+    #[serde(default)]
+    pub(crate) channel_id: String,
     pub(crate) created_at: i64,
 }
 

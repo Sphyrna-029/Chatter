@@ -1492,14 +1492,15 @@ export interface Webhook {
   webhook_id: string;
   name: string;
   avatar_url: string;
+  channel_id?: string;
   created_at: number;
   url: string;
 }
 
-export async function apiCreateWebhook(roomId: string, name: string, avatarUrl?: string) {
+export async function apiCreateWebhook(roomId: string, name: string, avatarUrl?: string, channelId?: string) {
   const res = await authenticatedFetch(`/api/rooms/${roomId}/webhooks`, {
     method: "POST",
-    body: JSON.stringify({ name, avatar_url: avatarUrl }),
+    body: JSON.stringify({ name, avatar_url: avatarUrl, channel_id: channelId }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
