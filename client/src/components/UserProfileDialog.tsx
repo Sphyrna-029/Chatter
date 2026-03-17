@@ -395,7 +395,7 @@ export function UserProfileDialog({
           className={cn("relative shrink-0", isSelf && "cursor-pointer group")}
           onClick={handleAvatarClick}
         >
-          <Avatar className="h-16 w-16 border-4 border-background">
+          <Avatar className="h-24 w-24 border-4 border-background">
             <AuthAvatarImage src={avatarPreview} />
             <AvatarFallback className="text-xl bg-secondary">
               {initial}
