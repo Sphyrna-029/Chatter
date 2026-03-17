@@ -509,7 +509,7 @@ export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
         {grouped ? (
           <span className="w-8 flex-shrink-0" />
         ) : (
-          <Avatar className={cn("h-8 w-8 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
+          <Avatar className={cn("h-10 w-10 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
             <AuthAvatarImage src={avatarUrl} />
             <AvatarFallback className="text-xs font-semibold bg-secondary">
               {initial}

@@ -103,7 +103,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
         )}
       >
         <div className="relative flex-shrink-0">
-          <Avatar className="h-7 w-7">
+          <Avatar className="h-9 w-9">
             <AuthAvatarImage src={presence?.avatarUrl} />
             <AvatarFallback className="text-xs bg-secondary">
               {initial}
