@@ -25,11 +25,10 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     ? state.roomInfoMap[state.currentRoomId]
     : null;
 
-  // Get view_roles for the currently selected channel
-  const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
-  const channelViewRoles = currentChannel?.view_roles ?? [];
-
   const grouped = useMemo(() => {
+    const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
+    const channelViewRoles = currentChannel?.view_roles ?? [];
+
     const owners: typeof state.roomMembers = [];
     const moderators: typeof state.roomMembers = [];
     const members: typeof state.roomMembers = [];
@@ -46,7 +45,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
       else members.push(m);
     }
     return { owners, moderators, members };
-  }, [state.roomMembers, channelViewRoles, state.memberCustomRoles]);
+  }, [state.roomMembers, state.channels, state.currentChannelId, state.memberCustomRoles]);
 
   if (!state.currentRoomId) return null;
 
