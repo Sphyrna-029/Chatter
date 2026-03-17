@@ -229,6 +229,22 @@ pub(crate) async fn is_moderator_or_owner(state: &AppState, room_id: &str, user_
     role == "owner" || role == "moderator"
 }
 
+/// Get the custom role IDs assigned to a user in a room.
+pub(crate) async fn get_user_custom_role_ids(state: &AppState, room_id: &str, user_id: &str) -> Vec<String> {
+    use super::state::MemberCustomRoleRecord;
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let mut role_ids = Vec::new();
+    if let Ok(mut cursor) = coll.find(doc! { "room_id": room_id, "user_id": user_id }).await {
+        while let Ok(Some(r)) = cursor.try_next().await {
+            role_ids.push(r.role_id);
+        }
+    }
+    role_ids
+}
+
 /// Broadcast a JSON value to all WebSocket-connected members of a room.
 /// Uses the write-through room_members cache (no DB call).
 pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: &Value) {

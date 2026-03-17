@@ -413,6 +413,30 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         blockedUsers: state.blockedUsers.filter((id) => id !== action.payload),
       };
+    case "SET_CUSTOM_ROLES":
+      return { ...state, customRoles: action.payload };
+    case "ADD_CUSTOM_ROLE":
+      if (state.customRoles.some((r) => r.role_id === action.payload.role_id)) return state;
+      return { ...state, customRoles: [...state.customRoles, action.payload] };
+    case "UPDATE_CUSTOM_ROLE":
+      return {
+        ...state,
+        customRoles: state.customRoles.map((r) =>
+          r.role_id === action.payload.role_id ? { ...r, ...action.payload } : r
+        ),
+      };
+    case "REMOVE_CUSTOM_ROLE":
+      return {
+        ...state,
+        customRoles: state.customRoles.filter((r) => r.role_id !== action.payload),
+      };
+    case "SET_MEMBER_CUSTOM_ROLES":
+      return { ...state, memberCustomRoles: action.payload };
+    case "UPDATE_MEMBER_CUSTOM_ROLES":
+      return {
+        ...state,
+        memberCustomRoles: { ...state.memberCustomRoles, [action.payload.userId]: action.payload.roleIds },
+      };
     case "SET_CHANNELS":
       return { ...state, channels: action.payload };
     case "SET_CHANNEL_CATEGORIES":

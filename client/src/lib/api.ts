@@ -623,8 +623,92 @@ export interface Channel {
   position: number;
   category_id?: string;
   read_only?: boolean;
+  view_roles?: string[];
+  write_roles?: string[];
   created_by?: string;
   created_at?: number;
+}
+
+// ─── Custom Roles ────────────────────────────────────────────────────────────
+
+export interface RolePermissions {
+  send_messages: boolean;
+  manage_channels: boolean;
+  manage_roles: boolean;
+  manage_messages: boolean;
+  kick_members: boolean;
+  ban_members: boolean;
+  mention_everyone: boolean;
+}
+
+export interface CustomRole {
+  role_id: string;
+  room_id: string;
+  name: string;
+  color: string;
+  position: number;
+  permissions: RolePermissions;
+  created_by?: string;
+  created_at?: number;
+}
+
+export async function apiGetRoles(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/roles`);
+  if (!res.ok) throw new Error("Failed to load roles");
+  return res.json() as Promise<{ roles: CustomRole[] }>;
+}
+
+export async function apiCreateRole(roomId: string, data: { name: string; color?: string; permissions?: Partial<RolePermissions> }) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/roles`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to create role");
+  }
+  return res.json() as Promise<{ role_id: string }>;
+}
+
+export async function apiUpdateRole(roomId: string, roleId: string, data: { name?: string; color?: string; position?: number; permissions?: Partial<RolePermissions> }) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/roles/${encodeURIComponent(roleId)}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to update role");
+  }
+  return res.json();
+}
+
+export async function apiDeleteRole(roomId: string, roleId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/roles/${encodeURIComponent(roleId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to delete role");
+  }
+  return res.json();
+}
+
+export async function apiGetAllMemberRoles(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/member-roles`);
+  if (!res.ok) throw new Error("Failed to load member roles");
+  return res.json() as Promise<{ member_roles: Record<string, string[]> }>;
+}
+
+export async function apiAssignMemberRoles(roomId: string, userId: string, roleIds: string[]) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(userId)}/custom-roles`, {
+    method: "PUT",
+    body: JSON.stringify({ role_ids: roleIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to assign roles");
+  }
+  return res.json();
 }
 
 export async function apiGetChannels(roomId: string) {
@@ -645,7 +729,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[] }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

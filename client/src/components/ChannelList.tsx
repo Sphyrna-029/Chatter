@@ -3,7 +3,7 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen,
+  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import {
@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { RoleManagementDialog } from "./RoleManagementDialog";
 
 interface ChannelListProps {
   onJoinVoiceChannel: (channelId: string) => void;
@@ -60,6 +61,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
   const [editReadOnly, setEditReadOnly] = useState(false);
+  const [editViewRoles, setEditViewRoles] = useState<string[]>([]);
+  const [editWriteRoles, setEditWriteRoles] = useState<string[]>([]);
   const [name, setName] = useState("");
   const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [topic, setTopic] = useState("");
@@ -96,6 +99,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
 
   // Collapsed categories
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+  // Roles dialog
+  const [rolesOpen, setRolesOpen] = useState(false);
 
   // Mobile collapse — default collapsed on small screens
   const [panelCollapsed, setPanelCollapsed] = useState(() => window.innerWidth < 768);
@@ -156,7 +161,14 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const handleEdit = async () => {
     if (!editChannelId || !roomId) return;
     try {
-      await updateChannel(roomId, editChannelId, { name: name.trim() || undefined, topic: topic.trim(), read_only: editReadOnly });
+      await apiUpdateChannel(roomId, editChannelId, {
+        name: name.trim() || undefined,
+        topic: topic.trim(),
+        read_only: editReadOnly,
+        view_roles: editViewRoles,
+        write_roles: editWriteRoles,
+      });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -181,6 +193,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     setName(ch.name);
     setTopic(ch.topic || "");
     setEditReadOnly(ch.read_only ?? false);
+    setEditViewRoles(ch.view_roles ?? []);
+    setEditWriteRoles(ch.write_roles ?? []);
     setEditOpen(true);
   };
 
@@ -373,9 +387,11 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             }}
             onEdit={() => openEditDialog(ch)}
             onDelete={() => handleDelete(ch.channel_id)}
-            icon={isVoice
-              ? <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-              : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
+            icon={(ch.view_roles?.length ?? 0) > 0
+              ? <Lock className="h-4 w-4 shrink-0 text-yellow-500" />
+              : isVoice
+                ? <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
+                : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
             }
             showGrip={canManage}
           />
@@ -601,6 +617,13 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
+                  <button
+                    onClick={() => setRolesOpen(true)}
+                    className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                    title="Manage roles"
+                  >
+                    <Shield className="h-3.5 w-3.5" />
+                  </button>
                 </>
               )}
               <button
@@ -776,6 +799,50 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
               />
               <span className="text-sm">Read-only (only owners/moderators can post)</span>
             </label>
+            {state.customRoles.length > 0 && (
+              <>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Restrict visibility to roles</Label>
+                  <p className="text-[10px] text-muted-foreground/70 mb-1">If none selected, everyone can see this channel.</p>
+                  <div className="space-y-1 max-h-28 overflow-y-auto">
+                    {state.customRoles.map((r) => (
+                      <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editViewRoles.includes(r.role_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setEditViewRoles((prev) => [...prev, r.role_id]);
+                            else setEditViewRoles((prev) => prev.filter((id) => id !== r.role_id));
+                          }}
+                          className="rounded border-input"
+                        />
+                        <span className="text-sm" style={{ color: r.color || undefined }}>{r.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Restrict sending to roles</Label>
+                  <p className="text-[10px] text-muted-foreground/70 mb-1">If none selected, normal send rules apply.</p>
+                  <div className="space-y-1 max-h-28 overflow-y-auto">
+                    {state.customRoles.map((r) => (
+                      <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={editWriteRoles.includes(r.role_id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setEditWriteRoles((prev) => [...prev, r.role_id]);
+                            else setEditWriteRoles((prev) => prev.filter((id) => id !== r.role_id));
+                          }}
+                          className="rounded border-input"
+                        />
+                        <span className="text-sm" style={{ color: r.color || undefined }}>{r.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
@@ -832,6 +899,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <RoleManagementDialog open={rolesOpen} onOpenChange={setRolesOpen} />
 
       {/* Resize handle */}
       {!panelCollapsed && (

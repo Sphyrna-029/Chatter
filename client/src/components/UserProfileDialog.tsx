@@ -143,7 +143,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser } = useAppContext();
+  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser, assignMemberRoles } = useAppContext();
   const isSelf = userId === state.userId;
   const username = displayUserId(userId) || displayName;
   const presence = state.userPresence[userId];
@@ -765,6 +765,42 @@ export function UserProfileDialog({
 
             return (
               <div className="w-full space-y-1.5">
+                {/* Custom role assignment */}
+                {state.customRoles.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Roles</p>
+                    <div className="flex flex-wrap gap-1">
+                      {state.customRoles.map((role) => {
+                        const userRoles = state.memberCustomRoles[userId] || [];
+                        const hasRole = userRoles.includes(role.role_id);
+                        return (
+                          <button
+                            key={role.role_id}
+                            className={cn(
+                              "inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border transition-colors",
+                              hasRole ? "opacity-100" : "opacity-40 hover:opacity-70"
+                            )}
+                            style={{
+                              color: role.color || undefined,
+                              borderColor: role.color || undefined,
+                              backgroundColor: hasRole ? `${role.color}15` : undefined,
+                            }}
+                            onClick={async () => {
+                              const current = state.memberCustomRoles[userId] || [];
+                              const next = hasRole
+                                ? current.filter((id) => id !== role.role_id)
+                                : [...current, role.role_id];
+                              await assignMemberRoles(state.currentRoomId!, userId, next);
+                            }}
+                            title={hasRole ? `Remove ${role.name}` : `Assign ${role.name}`}
+                          >
+                            {role.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 {isOwner && targetRole === "member" && (
                   <Button
                     variant="outline"

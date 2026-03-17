@@ -253,6 +253,28 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) position: Option<i32>,
     pub(crate) category_id: Option<String>,
     pub(crate) read_only: Option<bool>,
+    pub(crate) view_roles: Option<Vec<String>>,
+    pub(crate) write_roles: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct CreateCustomRoleRequest {
+    pub(crate) name: String,
+    pub(crate) color: Option<String>,
+    pub(crate) permissions: Option<super::state::RolePermissions>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct UpdateCustomRoleRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) color: Option<String>,
+    pub(crate) position: Option<i32>,
+    pub(crate) permissions: Option<super::state::RolePermissions>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct AssignMemberRolesRequest {
+    pub(crate) role_ids: Vec<String>,
 }
 
 #[derive(Deserialize)]

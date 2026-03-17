@@ -1,4 +1,4 @@
-import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory } from "../api";
+import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole } from "../api";
 import type { Dispatch } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -68,6 +68,9 @@ export interface AppState {
   totpVerified: boolean;
   // Room Groups
   roomGroups: RoomGroup[];
+  // Custom Roles
+  customRoles: CustomRole[];
+  memberCustomRoles: Record<string, string[]>; // user_id -> role_ids
   // Friends
   friends: string[];
   incomingFriendRequests: { userId: string; requestId: string }[];
@@ -136,6 +139,12 @@ export type Action =
   | { type: "REMOVE_OUTGOING_REQUEST"; payload: string }
   | { type: "ADD_BLOCKED_USER"; payload: string }
   | { type: "REMOVE_BLOCKED_USER"; payload: string }
+  | { type: "SET_CUSTOM_ROLES"; payload: CustomRole[] }
+  | { type: "ADD_CUSTOM_ROLE"; payload: CustomRole }
+  | { type: "UPDATE_CUSTOM_ROLE"; payload: Partial<CustomRole> & { role_id: string } }
+  | { type: "REMOVE_CUSTOM_ROLE"; payload: string }
+  | { type: "SET_MEMBER_CUSTOM_ROLES"; payload: Record<string, string[]> }
+  | { type: "UPDATE_MEMBER_CUSTOM_ROLES"; payload: { userId: string; roleIds: string[] } }
   | { type: "SET_CHANNELS"; payload: Channel[] }
   | { type: "SET_CHANNEL_CATEGORIES"; payload: ChannelCategory[] }
   | { type: "ADD_CHANNEL_CATEGORY"; payload: ChannelCategory }
@@ -196,6 +205,8 @@ export const initialState: AppState = {
   uploadLimitBytes: 0,
   totpVerified: false,
   roomGroups: [],
+  customRoles: [],
+  memberCustomRoles: {},
   friends: [],
   incomingFriendRequests: [],
   outgoingFriendRequests: [],
@@ -245,6 +256,12 @@ export interface AppContextValue {
   createChannel: (roomId: string, name: string, channelType: string, topic?: string, categoryId?: string) => Promise<void>;
   updateChannel: (roomId: string, channelId: string, data: { name?: string; topic?: string; read_only?: boolean }) => Promise<void>;
   deleteChannel: (roomId: string, channelId: string) => Promise<void>;
+  // Custom Roles
+  loadRoles: () => Promise<void>;
+  createRole: (roomId: string, name: string, color?: string, permissions?: Partial<import("../api").RolePermissions>) => Promise<void>;
+  updateRole: (roomId: string, roleId: string, data: { name?: string; color?: string; position?: number; permissions?: Partial<import("../api").RolePermissions> }) => Promise<void>;
+  deleteRole: (roomId: string, roleId: string) => Promise<void>;
+  assignMemberRoles: (roomId: string, userId: string, roleIds: string[]) => Promise<void>;
   // Room Groups
   loadRoomGroups: () => Promise<void>;
   createRoomGroup: (name: string) => Promise<void>;

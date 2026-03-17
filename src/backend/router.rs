@@ -7,6 +7,7 @@ use super::{
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
+        roles::{list_roles, create_role, update_role, delete_role, get_member_roles, assign_member_roles, list_all_member_roles},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
         media::{delete_upload, gif_search, link_preview, list_uploads, serve_upload, upload_chunk, upload_complete, upload_file, upload_init},
@@ -130,6 +131,11 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Channels
            .route("/api/rooms/{room_id}/channels", get(list_channels).post(create_channel))
            .route("/api/rooms/{room_id}/channels/{channel_id}", put(update_channel).delete(delete_channel))
+           // Custom Roles
+           .route("/api/rooms/{room_id}/roles", get(list_roles).post(create_role))
+           .route("/api/rooms/{room_id}/roles/{role_id}", put(update_role).delete(delete_role))
+           .route("/api/rooms/{room_id}/members/{user_id}/custom-roles", get(get_member_roles).put(assign_member_roles))
+           .route("/api/rooms/{room_id}/member-roles", get(list_all_member_roles))
            .route("/api/rooms/{room_id}/categories", post(create_category))
            .route("/api/rooms/{room_id}/categories/{category_id}", put(update_category).delete(delete_category))
            // Threads

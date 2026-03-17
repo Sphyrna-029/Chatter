@@ -19,3 +19,4 @@ pub(crate) mod steam;
 pub(crate) mod spotify;
 pub(crate) mod watchparty;
 pub(crate) mod whiteboard;
+pub(crate) mod roles;

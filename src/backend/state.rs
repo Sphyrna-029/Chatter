@@ -423,8 +423,71 @@ pub(crate) struct ChannelRecord {
     pub(crate) category_id: String,
     #[serde(default)]
     pub(crate) read_only: bool,
+    #[serde(default)]
+    pub(crate) view_roles: Vec<String>,   // role_ids that can see this channel (empty = everyone)
+    #[serde(default)]
+    pub(crate) write_roles: Vec<String>,  // role_ids that can send messages (empty = normal rules)
     pub(crate) created_by: String,
     pub(crate) created_at: i64,
+}
+
+// ─── Custom Roles ────────────────────────────────────────────────────────────
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub(crate) struct RolePermissions {
+    #[serde(default = "default_true")]
+    pub(crate) send_messages: bool,
+    #[serde(default)]
+    pub(crate) manage_channels: bool,
+    #[serde(default)]
+    pub(crate) manage_roles: bool,
+    #[serde(default)]
+    pub(crate) manage_messages: bool,
+    #[serde(default)]
+    pub(crate) kick_members: bool,
+    #[serde(default)]
+    pub(crate) ban_members: bool,
+    #[serde(default)]
+    pub(crate) mention_everyone: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for RolePermissions {
+    fn default() -> Self {
+        Self {
+            send_messages: true,
+            manage_channels: false,
+            manage_roles: false,
+            manage_messages: false,
+            kick_members: false,
+            ban_members: false,
+            mention_everyone: false,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct CustomRoleRecord {
+    #[serde(rename = "_id")]
+    pub(crate) role_id: String,
+    pub(crate) room_id: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) color: String,
+    #[serde(default)]
+    pub(crate) position: i32,
+    #[serde(default)]
+    pub(crate) permissions: RolePermissions,
+    pub(crate) created_by: String,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct MemberCustomRoleRecord {
+    pub(crate) room_id: String,
+    pub(crate) user_id: String,
+    pub(crate) role_id: String,
 }
 
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────

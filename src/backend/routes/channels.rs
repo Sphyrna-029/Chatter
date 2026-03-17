@@ -2,7 +2,7 @@ use super::super::{
     dto::{CreateChannelRequest, UpdateChannelRequest, CreateCategoryRequest, UpdateCategoryRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_role,
-        get_user_from_token, now_millis,
+        get_user_from_token, now_millis, get_user_custom_role_ids,
     },
     state::{AppState, ChannelRecord, ChannelCategoryRecord, RoomRecord},
 };
@@ -41,8 +41,18 @@ pub(crate) async fn list_channels(
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
 
+    let role = get_user_role(&state, &room_id, &user_id).await;
+    let is_privileged = role == "owner" || role == "moderator";
+    let user_custom_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+
     let mut channels: Vec<Value> = Vec::new();
     while let Ok(Some(ch)) = cursor.try_next().await {
+        // Filter by view_roles: if non-empty, only privileged users or users with a matching role can see it
+        if !ch.view_roles.is_empty() && !is_privileged {
+            if !ch.view_roles.iter().any(|r| user_custom_roles.contains(r)) {
+                continue;
+            }
+        }
         channels.push(json!({
             "channel_id": ch.channel_id,
             "room_id": ch.room_id,
@@ -52,6 +62,8 @@ pub(crate) async fn list_channels(
             "position": ch.position,
             "category_id": ch.category_id,
             "read_only": ch.read_only,
+            "view_roles": ch.view_roles,
+            "write_roles": ch.write_roles,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
         }));
@@ -132,6 +144,8 @@ pub(crate) async fn create_channel(
         position: max_pos,
         category_id: req.category_id.unwrap_or_default(),
         read_only: false,
+        view_roles: vec![],
+        write_roles: vec![],
         created_by: user_id.clone(),
         created_at: now_millis(),
     };
@@ -151,6 +165,8 @@ pub(crate) async fn create_channel(
             "position": channel.position,
             "category_id": channel.category_id,
             "read_only": channel.read_only,
+            "view_roles": channel.view_roles,
+            "write_roles": channel.write_roles,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
         }
@@ -211,6 +227,16 @@ pub(crate) async fn update_channel(
     if let Some(read_only) = req.read_only {
         set_doc.insert("read_only", read_only);
         content.insert("read_only".to_string(), json!(read_only));
+    }
+    if let Some(ref view_roles) = req.view_roles {
+        let bson_arr: Vec<mongodb::bson::Bson> = view_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        set_doc.insert("view_roles", bson_arr);
+        content.insert("view_roles".to_string(), json!(view_roles));
+    }
+    if let Some(ref write_roles) = req.write_roles {
+        let bson_arr: Vec<mongodb::bson::Bson> = write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        set_doc.insert("write_roles", bson_arr);
+        content.insert("write_roles".to_string(), json!(write_roles));
     }
 
     if !set_doc.is_empty() {
@@ -316,6 +342,8 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             position: 0,
             category_id: String::new(),
             read_only: false,
+            view_roles: vec![],
+            write_roles: vec![],
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
@@ -333,6 +361,8 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             position: 1,
             category_id: String::new(),
             read_only: false,
+            view_roles: vec![],
+            write_roles: vec![],
             created_by: creator.to_string(),
             created_at: now_millis(),
         })

@@ -121,6 +121,20 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             {member.role === "moderator" && (
               <Shield className="h-3 w-3 text-blue-400 shrink-0" />
             )}
+            {(state.memberCustomRoles[member.userId] || []).map((roleId) => {
+              const role = state.customRoles.find((r) => r.role_id === roleId);
+              if (!role) return null;
+              return (
+                <span
+                  key={roleId}
+                  className="shrink-0 inline-flex items-center rounded px-1 text-[8px] font-semibold leading-tight border"
+                  style={{ color: role.color || undefined, borderColor: role.color || undefined }}
+                  title={role.name}
+                >
+                  {role.name}
+                </span>
+              );
+            })}
             {presence?.isMobile && status !== "offline" && (
               <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
             )}

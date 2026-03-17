@@ -69,6 +69,12 @@ import {
   apiCreateCategory,
   apiUpdateCategory,
   apiDeleteCategory,
+  apiGetRoles,
+  apiCreateRole,
+  apiUpdateRole,
+  apiDeleteRole,
+  apiGetAllMemberRoles,
+  apiAssignMemberRoles,
   type RoomInfo,
 } from "../api";
 import { fetchIceServers } from "../webrtc";
@@ -416,6 +422,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch {
           dispatch({ type: "SET_CHANNELS", payload: [] });
         }
+
+        // Load custom roles and member role assignments
+        try {
+          const [rolesData, memberRolesData] = await Promise.all([
+            apiGetRoles(roomId),
+            apiGetAllMemberRoles(roomId),
+          ]);
+          dispatch({ type: "SET_CUSTOM_ROLES", payload: rolesData.roles || [] });
+          dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: memberRolesData.member_roles || {} });
+        } catch {
+          dispatch({ type: "SET_CUSTOM_ROLES", payload: [] });
+          dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: {} });
+        }
       }
 
       // Load voice channel members for non-DM rooms
@@ -755,6 +774,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiDeleteChannel(roomId, channelId);
   }, []);
 
+  // ─── Custom Roles ─────────────────────────────────────────────────────
+  const loadRoles = useCallback(async () => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    try {
+      const [rolesData, memberRolesData] = await Promise.all([
+        apiGetRoles(roomId),
+        apiGetAllMemberRoles(roomId),
+      ]);
+      dispatch({ type: "SET_CUSTOM_ROLES", payload: rolesData.roles || [] });
+      dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: memberRolesData.member_roles || {} });
+    } catch {}
+  }, [dispatch]);
+
+  const createRole = useCallback(async (roomId: string, name: string, color?: string, permissions?: Partial<import("../api").RolePermissions>) => {
+    await apiCreateRole(roomId, { name, color, permissions });
+  }, []);
+
+  const updateRole = useCallback(async (roomId: string, roleId: string, data: { name?: string; color?: string; position?: number; permissions?: Partial<import("../api").RolePermissions> }) => {
+    await apiUpdateRole(roomId, roleId, data);
+  }, []);
+
+  const deleteRole = useCallback(async (roomId: string, roleId: string) => {
+    await apiDeleteRole(roomId, roleId);
+  }, []);
+
+  const assignMemberRoles = useCallback(async (roomId: string, userId: string, roleIds: string[]) => {
+    await apiAssignMemberRoles(roomId, userId, roleIds);
+  }, []);
+
   const sendTyping = useCallback(() => {
     if (!stateRef.current.currentRoomId) return;
     if (typingTimeoutRef.current) return;
@@ -976,6 +1025,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         createChannel,
         updateChannel,
         deleteChannel,
+        loadRoles,
+        createRole,
+        updateRole,
+        deleteRole,
+        assignMemberRoles,
         loadRoomGroups,
         createRoomGroup,
         deleteRoomGroup,

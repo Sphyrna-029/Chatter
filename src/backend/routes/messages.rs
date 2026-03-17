@@ -2,8 +2,8 @@ use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_reactions_for_events,
-        get_thread_counts_for_events, get_user_from_token, get_user_role, is_moderator_or_owner,
-        now_millis, send_to_user,
+        get_thread_counts_for_events, get_user_from_token, get_user_role, get_user_custom_role_ids,
+        is_moderator_or_owner, now_millis, send_to_user,
     },
     state::{AppState, ChannelRecord, RoomRecord},
 };
@@ -84,16 +84,38 @@ pub(crate) async fn send_message(
         String::new()
     };
 
-    // Check per-channel read-only
+    // Check per-channel permissions
     if !channel_id.is_empty() {
         let channels_coll = state.db.collection::<ChannelRecord>("channels");
         if let Ok(Some(ch)) = channels_coll.find_one(mongodb::bson::doc! { "_id": &channel_id }).await {
-            if ch.read_only {
-                let role = get_user_role(&state, &room_id, &user_id).await;
-                if role != "owner" && role != "moderator" {
+            let role = get_user_role(&state, &room_id, &user_id).await;
+            let is_privileged = role == "owner" || role == "moderator";
+
+            if ch.read_only && !is_privileged {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "This channel is read-only",
+                ));
+            }
+
+            // Check view_roles: user must be able to see the channel to send messages
+            if !ch.view_roles.is_empty() && !is_privileged {
+                let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
                     return Err(error_response(
                         StatusCode::FORBIDDEN,
-                        "This channel is read-only",
+                        "You do not have access to this channel",
+                    ));
+                }
+            }
+
+            // Check write_roles: if set, only those roles can send
+            if !ch.write_roles.is_empty() && !is_privileged {
+                let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "You do not have permission to send messages in this channel",
                     ));
                 }
             }

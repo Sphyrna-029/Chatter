@@ -401,6 +401,27 @@ export function createWsMessageHandler(
         dispatch({ type: "REMOVE_CHANNEL_CATEGORY", payload: msg.category_id });
       }
     }
+    // Custom role events
+    else if (msg.type === "m.room.role_created") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.role) {
+        dispatch({ type: "ADD_CUSTOM_ROLE", payload: msg.role });
+      }
+    }
+    else if (msg.type === "m.room.role_updated") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.content) {
+        dispatch({ type: "UPDATE_CUSTOM_ROLE", payload: msg.content });
+      }
+    }
+    else if (msg.type === "m.room.role_deleted") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.role_id) {
+        dispatch({ type: "REMOVE_CUSTOM_ROLE", payload: msg.role_id });
+      }
+    }
+    else if (msg.type === "m.room.member_roles_updated") {
+      if (msg.room_id === stateRef.current.currentRoomId && msg.user_id) {
+        dispatch({ type: "UPDATE_MEMBER_CUSTOM_ROLES", payload: { userId: msg.user_id, roleIds: msg.role_ids || [] } });
+      }
+    }
     // Forum real-time events — dispatch as custom events for ForumArea to handle
     else if (msg.type === "forum.post.created" || msg.type === "forum.post.deleted" ||
              msg.type === "forum.comment.created" || msg.type === "forum.comment.deleted" ||
