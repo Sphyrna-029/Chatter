@@ -89,11 +89,20 @@ export function VoiceMemberList({
                   {name}{isSelf && " (You)"}
                 </span>
               </div>
-              {/* Sharing badge */}
+              {/* Sharing badge — clickable to open/toggle stream */}
               {isSharing && (
-                <span className="text-[10px] text-purple-400 font-semibold px-1 py-0.5 rounded-md bg-purple-500/10 mt-0.5 w-fit">
-                  📺 Sharing
-                </span>
+                <button
+                  type="button"
+                  onClick={() => onWatchUser(memberId)}
+                  className={cn(
+                    "text-[10px] font-semibold px-1 py-0.5 rounded-md mt-0.5 w-fit transition-colors cursor-pointer",
+                    isWatching
+                      ? "text-purple-200 bg-purple-600/40 hover:bg-purple-600/60"
+                      : "text-purple-400 bg-purple-500/10 hover:bg-purple-500/20"
+                  )}
+                >
+                  📺 {isWatching ? "Watching" : "Watch Stream"}
+                </button>
               )}
               {/* Volume slider and watch — only for users in voice */}
               {inVoiceChannel && !isSelf && (
