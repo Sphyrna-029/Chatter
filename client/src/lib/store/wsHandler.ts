@@ -215,7 +215,7 @@ export function createWsMessageHandler(
           const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
           const members = (msg.voice_members as string[]).map((uid: string) => {
             const ex = existing.find((m) => m.userId === uid);
-            return ex ?? { userId: uid, muted: false, screen_sharing: false };
+            return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
           });
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }
@@ -237,7 +237,7 @@ export function createWsMessageHandler(
           const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
           const members = (msg.voice_members as string[]).map((uid: string) => {
             const ex = existing.find((m) => m.userId === uid);
-            return ex ?? { userId: uid, muted: false, screen_sharing: false };
+            return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
           });
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }
@@ -252,18 +252,24 @@ export function createWsMessageHandler(
     } else if (msg.type === "voice_user_muted") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
-        dispatch({
-          type: "VOICE_USER_MUTED",
-          payload: { userId: msg.user_id, muted: msg.muted },
-        });
-        // Only update per-channel voice members if the event is for the currently viewed room
+        dispatch({ type: "VOICE_USER_MUTED", payload: { userId: msg.user_id, muted: msg.muted } });
         const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
         if (msg.channel_id && isCurrentRoom) {
-          const cur = { ...stateRef.current.voiceChannelMembers };
-          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
-            m.userId === msg.user_id ? { ...m, muted: msg.muted } : m
+          const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
+            m.userId === msg.user_id ? { ...m, muted: msg.muted as boolean } : m
           );
-          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
+        }
+      }
+    } else if (msg.type === "voice_user_deafened") {
+      const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+      if (isVoiceRoom) {
+        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
+        if (msg.channel_id && isCurrentRoom) {
+          const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
+            m.userId === msg.user_id ? { ...m, deafened: msg.deafened as boolean } : m
+          );
+          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }
       }
     } else if (msg.type === "screen_share_started") {

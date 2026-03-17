@@ -61,6 +61,7 @@ pub(crate) async fn get_voice_channel_status(
                 let entry = json!({
                     "user_id": uid,
                     "muted": vs.muted,
+                    "deafened": vs.deafened,
                     "screen_sharing": vs.screen_sharing,
                     "channel_id": key
                 });

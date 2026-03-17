@@ -511,6 +511,7 @@ pub(crate) struct WatchPartyState {
 #[derive(Clone)]
 pub(crate) struct VoiceMemberState {
     pub(crate) muted: bool,
+    pub(crate) deafened: bool,
     pub(crate) screen_sharing: bool,
 }
 

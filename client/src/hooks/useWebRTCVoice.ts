@@ -455,6 +455,14 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       el.muted = newDeafened;
     });
     dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: "voice_deafen",
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
+        channel_id: voiceChannelIdRef.current || undefined,
+        deafened: newDeafened,
+      }));
+    }
   }, [state.isDeafened, dispatch]);
 
   return {

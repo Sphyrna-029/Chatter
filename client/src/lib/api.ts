@@ -541,7 +541,7 @@ export async function apiGetVoiceMembers(roomId: string) {
   if (!res.ok) throw new Error("Failed to load voice members");
   return res.json() as Promise<{
     voice_members: VoiceMember[];
-    voice_channels?: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]>;
+    voice_channels?: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]>;
   }>;
 }
 
@@ -585,6 +585,7 @@ export interface MatrixMessage {
 export interface VoiceMember {
   user_id: string;
   muted: boolean;
+  deafened: boolean;
   screen_sharing: boolean;
 }
 

@@ -448,11 +448,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const voiceData = await apiGetVoiceMembers(roomId);
           if (voiceData.voice_channels) {
-            const mapped: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> = {};
+            const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> = {};
             for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
               mapped[chId] = (members as any[]).map((m: any) => ({
                 userId: m.user_id || m.userId,
                 muted: m.muted,
+                deafened: m.deafened ?? false,
                 screen_sharing: m.screen_sharing,
               }));
             }
@@ -730,11 +731,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       // Also load per-channel voice members
       if (voiceData.voice_channels) {
-        const mapped: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> = {};
+        const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> = {};
         for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
           mapped[chId] = (members as any[]).map((m: any) => ({
             userId: m.user_id || m.userId,
             muted: m.muted,
+            deafened: m.deafened ?? false,
             screen_sharing: m.screen_sharing,
           }));
         }

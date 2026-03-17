@@ -278,6 +278,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     user_id.to_string(),
                     VoiceMemberState {
                         muted: false,
+                        deafened: false,
                         screen_sharing: false,
                     },
                 );
@@ -416,6 +417,26 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "channel_id": channel_id,
                 "user_id": user_id,
                 "muted": muted
+            });
+            broadcast_to_room(&state, room_id, &event).await;
+        }
+        "voice_deafen" => {
+            let deafened = msg.get("deafened").and_then(|v| v.as_bool()).unwrap_or(false);
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            {
+                let mut vc = state.voice_channels.write().await;
+                if let Some(chan_vc) = vc.get_mut(channel_id) {
+                    if let Some(member) = chan_vc.get_mut(user_id) {
+                        member.deafened = deafened;
+                    }
+                }
+            }
+            let event = json!({
+                "type": "voice_user_deafened",
+                "room_id": room_id,
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "deafened": deafened
             });
             broadcast_to_room(&state, room_id, &event).await;
         }

@@ -423,19 +423,24 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                         : <Mic className="h-3 w-3 shrink-0 text-green-400" />
                     }
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
-                    {m.screen_sharing && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
-                        }}
-                        className="ml-auto shrink-0 p-0.5 rounded hover:bg-purple-500/20 transition-colors"
-                        title={`Watch ${displayUserId(m.userId)}'s screen`}
-                      >
-                        <Monitor className="h-3 w-3 text-purple-400" />
-                      </button>
-                    )}
+                    <div className="ml-auto flex items-center gap-1 shrink-0">
+                      {m.deafened && (
+                        <HeadphoneOff className="h-3 w-3 text-red-400" title="Deafened" />
+                      )}
+                      {m.screen_sharing && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
+                          }}
+                          className="shrink-0 p-0.5 rounded hover:bg-purple-500/20 transition-colors"
+                          title={`Watch ${displayUserId(m.userId)}'s screen`}
+                        >
+                          <Monitor className="h-3 w-3 text-purple-400" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {isExpanded && !isMe && (
                     <div className="flex items-center gap-1.5 px-1 py-1 ml-3">
