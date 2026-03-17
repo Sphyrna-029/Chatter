@@ -539,25 +539,117 @@ fn validate_url_for_ssrf(url: &str) -> Result<Vec<SocketAddr>, &'static str> {
     Ok(addrs)
 }
 
-pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
-    let pattern = format!("property=\"{}\"", property);
-    let pos = html.find(&pattern)?;
-    let snippet = &html[pos..];
-    let content_start = snippet.find("content=\"")? + 9;
-    let content_end = snippet[content_start..].find('"')? + content_start;
-    let value = snippet[content_start..content_end].to_string();
-    if value.is_empty() {
-        return None;
+/// Decode common HTML entities in a string.
+fn decode_html_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&#x27;", "'")
+        .replace("&#x2F;", "/")
+        .replace("&nbsp;", " ")
+}
+
+/// Extract content from a <meta> tag attribute value, handling both single and double quotes.
+fn extract_meta_content(tag: &str) -> Option<String> {
+    // Try content="..." or content='...'
+    let lower = tag.to_lowercase();
+    let content_pos = lower.find("content")?;
+    let rest = &tag[content_pos..];
+    // Skip past "content", optional whitespace, "="
+    let eq_pos = rest.find('=')?;
+    let after_eq = rest[eq_pos + 1..].trim_start();
+    let (quote, after_quote) = if after_eq.starts_with('"') {
+        ('"', &after_eq[1..])
+    } else if after_eq.starts_with('\'') {
+        ('\'', &after_eq[1..])
+    } else {
+        // Unquoted — take until whitespace or >
+        let end = after_eq.find(|c: char| c.is_whitespace() || c == '>' || c == '/').unwrap_or(after_eq.len());
+        let val = after_eq[..end].trim().to_string();
+        if val.is_empty() { return None; }
+        return Some(decode_html_entities(&val));
+    };
+    let end = after_quote.find(quote)?;
+    let val = after_quote[..end].trim().to_string();
+    if val.is_empty() { return None; }
+    Some(decode_html_entities(&val))
+}
+
+/// Find all <meta ...> tags in the HTML (case-insensitive).
+fn find_meta_tags(html: &str) -> Vec<String> {
+    let mut tags = Vec::new();
+    let lower = html.to_lowercase();
+    let mut search_from = 0;
+    while let Some(start) = lower[search_from..].find("<meta") {
+        let abs_start = search_from + start;
+        // Find the end of this tag
+        if let Some(end) = html[abs_start..].find('>') {
+            tags.push(html[abs_start..abs_start + end + 1].to_string());
+            search_from = abs_start + end + 1;
+        } else {
+            break;
+        }
     }
-    Some(value)
+    tags
+}
+
+/// Check if a meta tag has a matching property or name attribute.
+fn meta_tag_matches(tag: &str, attr_value: &str) -> bool {
+    let lower = tag.to_lowercase();
+    let target = attr_value.to_lowercase();
+    // Check property="value" or name="value" with either quote style
+    for attr in &["property", "name"] {
+        for quote in &['"', '\''] {
+            let pattern = format!("{}={}{}{}", attr, quote, target, quote);
+            if lower.contains(&pattern) {
+                return true;
+            }
+            // Also handle spaces around =
+            let pattern_spaced = format!("{} = {}{}{}", attr, quote, target, quote);
+            if lower.contains(&pattern_spaced) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
+    let meta_tags = find_meta_tags(html);
+    for tag in &meta_tags {
+        if meta_tag_matches(tag, property) {
+            if let Some(content) = extract_meta_content(tag) {
+                return Some(content);
+            }
+        }
+    }
+    None
+}
+
+/// Extract a meta tag by name attribute (e.g. "description", "twitter:title").
+fn extract_meta_name(html: &str, name: &str) -> Option<String> {
+    let meta_tags = find_meta_tags(html);
+    for tag in &meta_tags {
+        if meta_tag_matches(tag, name) {
+            if let Some(content) = extract_meta_content(tag) {
+                return Some(content);
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
-    let start = html.find("<title")?.checked_add(6)?;
-    let rest = &html[start..];
+    let lower = html.to_lowercase();
+    let start = lower.find("<title")?;
+    let rest = &html[start + 6..];
     let after_open = rest.find('>')? + 1;
-    let end = rest[after_open..].find("</title>")?;
-    let title = rest[after_open..after_open + end].trim().to_string();
+    let end_lower = rest[after_open..].to_lowercase();
+    let end = end_lower.find("</title>")?;
+    let title = decode_html_entities(rest[after_open..after_open + end].trim());
     if title.is_empty() {
         return None;
     }
@@ -719,18 +811,29 @@ pub(crate) async fn link_preview(
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
         };
 
-        let og_title = extract_og_tag(&body, "og:title");
-        let og_description = extract_og_tag(&body, "og:description");
-        let og_image = extract_og_tag(&body, "og:image");
-        let og_site_name = extract_og_tag(&body, "og:site_name");
+        // Try OG tags first, then twitter: card tags, then plain meta tags, then <title>
+        let title = extract_og_tag(&body, "og:title")
+            .or_else(|| extract_meta_name(&body, "twitter:title"))
+            .or_else(|| extract_meta_name(&body, "title"))
+            .or_else(|| extract_title_tag(&body));
 
-        let title = og_title.or_else(|| extract_title_tag(&body));
+        let description = extract_og_tag(&body, "og:description")
+            .or_else(|| extract_meta_name(&body, "twitter:description"))
+            .or_else(|| extract_meta_name(&body, "description"));
+
+        let image = extract_og_tag(&body, "og:image")
+            .or_else(|| extract_meta_name(&body, "twitter:image"))
+            .or_else(|| extract_meta_name(&body, "twitter:image:src"));
+
+        let site_name = extract_og_tag(&body, "og:site_name")
+            .or_else(|| extract_meta_name(&body, "twitter:site"))
+            .or_else(|| extract_meta_name(&body, "application-name"));
 
         CachedPreview {
             title,
-            description: og_description,
-            image: og_image,
-            site_name: og_site_name,
+            description,
+            image,
+            site_name,
         }
     };
 
