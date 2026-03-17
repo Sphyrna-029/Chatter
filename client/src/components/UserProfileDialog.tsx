@@ -760,7 +760,7 @@ export function UserProfileDialog({
             const targetRole = state.roomMembers.find(m => m.userId === userId)?.role;
             const isOwner = myRole === "owner";
             const isMod = myRole === "moderator";
-            const canManage = (isOwner && targetRole !== "owner") ||
+            const canManage = isOwner ||
               (isMod && targetRole === "member");
             const canSeeRoles = isSelf || isOwner || isMod;
             const userRoleIds = state.memberCustomRoles[userId] || [];
