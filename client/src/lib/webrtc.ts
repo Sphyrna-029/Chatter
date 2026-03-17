@@ -21,8 +21,10 @@ export function getWebRTCConfig(): RTCConfiguration {
   return _cachedConfig ?? DEFAULT_WEBRTC_CONFIG;
 }
 
-export const VOICE_SUBSCRIBE_RETRY_MS = 1000;
-export const SCREEN_SUBSCRIBE_RETRY_MS = 1000;
+export const VOICE_SUBSCRIBE_RETRY_MS = 1500;
+export const SCREEN_SUBSCRIBE_RETRY_MS = 1500;
+export const VOICE_SUBSCRIBE_MAX_RETRIES = 8;
+export const VOICE_SUBSCRIBE_MAX_BACKOFF_MS = 30_000;
 
 export interface PeerStats {
   rtt: number | null;

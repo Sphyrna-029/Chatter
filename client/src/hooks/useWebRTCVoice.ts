@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, canSignal } from "@/lib/webrtc";
+import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, canSignal } from "@/lib/webrtc";
 
 interface UseWebRTCVoiceOptions {
   cleanupScreenRef: React.MutableRefObject<() => Promise<void>>;
@@ -18,6 +18,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voiceUserVolumesRef = useRef<Record<string, number>>({});
   const pendingVoiceSubsRef = useRef<Set<string>>(new Set());
   const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const voiceRetryCountsRef = useRef<Map<string, number>>(new Map());
 
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
@@ -90,7 +91,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     // Detect failed or stuck connections and retry
     pc.onconnectionstatechange = () => {
       if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
-      if (pc.connectionState === "failed") {
+      if (pc.connectionState === "connected") {
+        // Successful connection — reset backoff counter
+        voiceRetryCountsRef.current.delete(speakerUserId);
+      } else if (pc.connectionState === "disconnected") {
+        // Transient loss — attempt ICE restart before giving up
+        try { pc.restartIce(); } catch {}
+      } else if (pc.connectionState === "failed") {
         try { pc.close(); } catch {}
         voiceSubscriberPcsRef.current.delete(speakerUserId);
         pendingVoiceSubsRef.current.delete(speakerUserId);
@@ -129,7 +136,18 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     if (voiceRetryTimersRef.current.has(speakerUserId)) return;
     if (voiceSubscriberPcsRef.current.has(speakerUserId)) return;
 
-    const timer = setTimeout(() => {
+    const attempt = (voiceRetryCountsRef.current.get(speakerUserId) ?? 0) + 1;
+    if (attempt > VOICE_SUBSCRIBE_MAX_RETRIES) {
+      console.warn("[voice] Max retries reached for", speakerUserId, "— giving up");
+      voiceRetryCountsRef.current.delete(speakerUserId);
+      return;
+    }
+    voiceRetryCountsRef.current.set(speakerUserId, attempt);
+
+    // Exponential backoff: 1.5s, 3s, 6s, 12s … capped at 30s
+    const delay = Math.min(VOICE_SUBSCRIBE_RETRY_MS * 2 ** (attempt - 1), VOICE_SUBSCRIBE_MAX_BACKOFF_MS);
+
+    const timer = setTimeout(async () => {
       voiceRetryTimersRef.current.delete(speakerUserId);
       if (
         inVoiceRef.current &&
@@ -137,10 +155,12 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         !voiceSubscriberPcsRef.current.has(speakerUserId) &&
         !pendingVoiceSubsRef.current.has(speakerUserId)
       ) {
-        console.log("[voice] Retrying subscription to", speakerUserId);
+        // Re-fetch ICE config in case TURN credentials rotated
+        await fetchIceServers();
+        console.log(`[voice] Retrying subscription to ${speakerUserId} (attempt ${attempt})`);
         createVoiceSub(speakerUserId);
       }
-    }, VOICE_SUBSCRIBE_RETRY_MS);
+    }, delay);
 
     voiceRetryTimersRef.current.set(speakerUserId, timer);
   };
@@ -189,6 +209,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
             clearTimeout(timer);
             voiceRetryTimersRef.current.delete(msg.user_id);
           }
+          // Fresh publisher — reset backoff so we start from the beginning
+          voiceRetryCountsRef.current.delete(msg.user_id);
           createVoiceSub(msg.user_id);
         }
       } else if (msg.type === "voice_webrtc_error") {
@@ -230,6 +252,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voiceAudioElementsRef.current.clear();
       voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
       voiceRetryTimersRef.current.clear();
+      voiceRetryCountsRef.current.clear();
       pendingVoiceSubsRef.current.clear();
 
       if (localStreamRef.current) {
