@@ -283,6 +283,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             let room_id = room_id.clone();
             let user_id = user_id.clone();
             Box::pin(async move {
+                println!("screen-pub [{}]: peer connection state -> {:?}", user_id, pc_state);
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
@@ -308,6 +309,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             let user_id = user_id.clone();
             Box::pin(async move {
                 let codec = track.codec();
+                println!("screen-pub [{}]: on_track fired, kind={}, ssrc={}", user_id, codec.capability.mime_type, track.ssrc());
                 let codec_capability = RTCRtpCodecCapability {
                     mime_type: codec.capability.mime_type.clone(),
                     clock_rate: codec.capability.clock_rate,
