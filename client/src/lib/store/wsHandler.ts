@@ -247,6 +247,10 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
+        // Auto-open the screen viewer for other users when someone starts sharing
+        if (msg.user_id !== stateRef.current.userId && stateRef.current.inVoiceChannel) {
+          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: msg.user_id } });
+        }
         // Only update per-channel voice members if the event is for the currently viewed room
         const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
         if (msg.channel_id && isCurrentRoom) {
