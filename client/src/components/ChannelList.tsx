@@ -100,6 +100,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   // Drag state
   const [dragChannelId, setDragChannelId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ categoryId: string } | null>(null);
+  const [dropChannelId, setDropChannelId] = useState<string | null>(null);
+  const [dropSide, setDropSide] = useState<"before" | "after">("before");
 
   const roomId = state.currentRoomId;
   if (!roomId) return null;
@@ -226,6 +228,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setDropTarget({ categoryId });
+    setDropChannelId(null);
   };
 
   const handleDragLeave = () => {
@@ -236,6 +239,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     e.preventDefault();
     setDropTarget(null);
     setDragChannelId(null);
+    setDropChannelId(null);
     const channelId = e.dataTransfer.getData("text/plain");
     if (!channelId || !roomId) return;
 
@@ -253,9 +257,83 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     }
   };
 
+  const handleChannelDragOver = (e: React.DragEvent, targetChannelId: string) => {
+    if (!canManage || !dragChannelId || dragChannelId === targetChannelId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    setDropSide(e.clientY < midY ? "before" : "after");
+    setDropChannelId(targetChannelId);
+    setDropTarget(null);
+  };
+
+  const handleChannelDragLeave = (e: React.DragEvent, channelId: string) => {
+    if (dropChannelId === channelId && !e.currentTarget.contains(e.relatedTarget as Node)) {
+      setDropChannelId(null);
+    }
+  };
+
+  const handleChannelDrop = async (e: React.DragEvent, targetChannelId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const srcId = e.dataTransfer.getData("text/plain");
+    if (!srcId || srcId === targetChannelId || !roomId) {
+      setDragChannelId(null);
+      setDropChannelId(null);
+      setDropTarget(null);
+      return;
+    }
+
+    const srcChannel = channels.find((c) => c.channel_id === srcId);
+    const targetChannel = channels.find((c) => c.channel_id === targetChannelId);
+    if (!srcChannel || !targetChannel) return;
+
+    const targetCatId = targetChannel.category_id || "";
+    // Get siblings in the target category, sorted by position
+    const siblings = channels
+      .filter((c) => (c.category_id || "") === targetCatId && c.channel_id !== srcId)
+      .sort((a, b) => a.position - b.position);
+
+    const targetIdx = siblings.findIndex((c) => c.channel_id === targetChannelId);
+    const insertIdx = dropSide === "before" ? targetIdx : targetIdx + 1;
+
+    // Compute new positions for all channels in this category
+    const reordered = [...siblings];
+    reordered.splice(insertIdx, 0, srcChannel);
+
+    try {
+      // Update positions for all reordered channels + move category if needed
+      const updates = reordered.map((ch, i) => {
+        const update: { position?: number; category_id?: string } = {};
+        if (ch.position !== i) update.position = i;
+        if (ch.channel_id === srcId && (srcChannel.category_id || "") !== targetCatId) {
+          update.category_id = targetCatId;
+        }
+        return { channelId: ch.channel_id, update };
+      }).filter((u) => u.update.position !== undefined || u.update.category_id !== undefined);
+
+      for (const { channelId, update } of updates) {
+        await apiUpdateChannel(roomId, channelId, update);
+        dispatch({
+          type: "UPDATE_CHANNEL",
+          payload: { channel_id: channelId, ...update },
+        });
+      }
+    } catch (err: any) {
+      alert(err.message || "Failed to reorder channel");
+    }
+
+    setDragChannelId(null);
+    setDropChannelId(null);
+    setDropTarget(null);
+  };
+
   const handleDragEnd = () => {
     setDragChannelId(null);
     setDropTarget(null);
+    setDropChannelId(null);
   };
 
   // ─── Render helpers ────────────────────────────────────────────────────
@@ -268,7 +346,14 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         <div
           draggable={canManage}
           onDragStart={(e) => handleDragStart(e, ch.channel_id)}
-          className={dragChannelId === ch.channel_id ? "opacity-40" : ""}
+          onDragOver={(e) => handleChannelDragOver(e, ch.channel_id)}
+          onDragLeave={(e) => handleChannelDragLeave(e, ch.channel_id)}
+          onDrop={(e) => handleChannelDrop(e, ch.channel_id)}
+          className={`${dragChannelId === ch.channel_id ? "opacity-40" : ""} ${
+            dropChannelId === ch.channel_id && dropSide === "before" ? "border-t-2 border-t-primary" : ""
+          } ${
+            dropChannelId === ch.channel_id && dropSide === "after" ? "border-b-2 border-b-primary" : ""
+          }`}
         >
           <ChannelItem
             channel={ch}
