@@ -494,6 +494,14 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_VOICE_CHANNEL_MEMBERS":
       return { ...state, voiceChannelMembers: action.payload };
+    case "SET_VOICE_CHANNEL":
+      return {
+        ...state,
+        voiceChannelMembers: {
+          ...state.voiceChannelMembers,
+          [action.payload.channelId]: action.payload.members,
+        },
+      };
     case "SET_CHANNEL_MENTION":
       return {
         ...state,

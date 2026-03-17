@@ -207,15 +207,17 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
-        // Only update per-channel voice members if the event is for the currently viewed room
+        // Use the server's authoritative voice_members list and dispatch a single-channel
+        // update (SET_VOICE_CHANNEL) so rapid join+leave events for different channels
+        // cannot clobber each other via a stale stateRef snapshot.
         const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const cur = { ...stateRef.current.voiceChannelMembers };
-          const members = cur[msg.channel_id] || [];
-          if (!members.some((m: any) => m.userId === msg.user_id)) {
-            cur[msg.channel_id] = [...members, { userId: msg.user_id, muted: false, screen_sharing: false }];
-            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
-          }
+        if (msg.channel_id && isCurrentRoom && Array.isArray(msg.voice_members)) {
+          const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
+          const members = (msg.voice_members as string[]).map((uid: string) => {
+            const ex = existing.find((m) => m.userId === uid);
+            return ex ?? { userId: uid, muted: false, screen_sharing: false };
+          });
+          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }
         const inSameChannel = stateRef.current.inVoiceChannel &&
           (msg.channel_id
@@ -229,12 +231,15 @@ export function createWsMessageHandler(
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
-        // Only update per-channel voice members if the event is for the currently viewed room
+        // Same pattern: use server's authoritative remaining list and a single-channel dispatch.
         const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const cur = { ...stateRef.current.voiceChannelMembers };
-          cur[msg.channel_id] = (cur[msg.channel_id] || []).filter((m: any) => m.userId !== msg.user_id);
-          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+        if (msg.channel_id && isCurrentRoom && Array.isArray(msg.voice_members)) {
+          const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
+          const members = (msg.voice_members as string[]).map((uid: string) => {
+            const ex = existing.find((m) => m.userId === uid);
+            return ex ?? { userId: uid, muted: false, screen_sharing: false };
+          });
+          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }
         const inSameChannelLeave = stateRef.current.inVoiceChannel &&
           (msg.channel_id

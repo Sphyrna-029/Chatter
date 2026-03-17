@@ -156,6 +156,7 @@ export type Action =
   | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
   | { type: "REMOVE_CHANNEL"; payload: string }
   | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; screen_sharing: boolean }[]> }
+  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; screen_sharing: boolean }[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string };
