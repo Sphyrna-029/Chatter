@@ -15,7 +15,7 @@ use webrtc::{
     },
     ice_transport::{
         ice_candidate::RTCIceCandidateInit, ice_candidate_type::RTCIceCandidateType,
-        ice_server::RTCIceServer,
+        ice_credential_type::RTCIceCredentialType, ice_server::RTCIceServer,
     },
     interceptor::registry::Registry,
     peer_connection::{configuration::RTCConfiguration, RTCPeerConnection},
@@ -103,6 +103,7 @@ fn default_webrtc_config() -> RTCConfiguration {
                 urls: turn_url.split(',').map(|s| s.trim().to_string()).collect(),
                 username,
                 credential,
+                credential_type: RTCIceCredentialType::Password,
                 ..Default::default()
             });
         }
