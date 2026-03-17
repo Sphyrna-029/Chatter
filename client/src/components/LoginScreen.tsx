@@ -208,6 +208,10 @@ export function LoginScreen() {
         setError("Password must be at least 6 characters");
         return;
       }
+      if (regPassword.length > 64) {
+        setError("Password must be at most 64 characters");
+        return;
+      }
 
       if (regPassword !== regConfirm) {
         setError("Passwords do not match");
