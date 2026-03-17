@@ -29,7 +29,7 @@ services:
       #Set spotify redirect URI to https://yourdomain.com/api/auth/spotify/callback
 
       ################  WEBRTC  ################
-      #WEBRTC_IP: your-public-ip (required if behind NAT, comma-separated for LAN+WAN e.g. "203.0.113.1,192.168.1.100")
+      #WEBRTC_IP: your-public-ip (required if behind NAT; LAN clients connect via local IP automatically)
       TURN_URL: "turn:host.docker.internal:3478"
       TURN_USERNAME: ${TURN_USERNAME:-chatter}
       TURN_PASSWORD: ${TURN_PASSWORD:-changeme}

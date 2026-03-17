@@ -65,13 +65,14 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
 
     let mut setting_engine = SettingEngine::default();
 
-    // If WEBRTC_IP is set (e.g. the server's public IP), advertise it as a host
-    // candidate so that remote peers can connect through NAT.
+    // If WEBRTC_IP is set (e.g. the server's public IP), advertise it as a
+    // server-reflexive candidate so remote peers can connect through NAT while
+    // LAN peers can still connect via the local host candidate.
     if let Ok(ip) = std::env::var("WEBRTC_IP") {
         let ips: Vec<String> = ip.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         if !ips.is_empty() {
-            println!("WebRTC: advertising NAT 1:1 IPs as host candidates: {:?}", ips);
-            setting_engine.set_nat_1to1_ips(ips, RTCIceCandidateType::Host);
+            println!("WebRTC: advertising NAT 1:1 IPs as srflx candidates: {:?}", ips);
+            setting_engine.set_nat_1to1_ips(ips, RTCIceCandidateType::Srflx);
         }
     }
 
