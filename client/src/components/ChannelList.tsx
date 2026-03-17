@@ -40,6 +40,7 @@ interface ChannelListProps {
   isScreenSharing?: boolean;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
   setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
+  speakingUsersRef?: React.MutableRefObject<Set<string>>;
 }
 
 function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: number | null }) {
@@ -57,7 +58,7 @@ function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: n
   );
 }
 
-export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef }: ChannelListProps) {
+export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -78,6 +79,14 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     const id = setInterval(() => setConnData(connQualityRef.current), 2000);
     return () => clearInterval(id);
   }, [state.inVoiceChannel, connQualityRef]);
+
+  // Speaking indicator polling
+  const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (!state.inVoiceChannel || !speakingUsersRef) return;
+    const id = setInterval(() => setSpeakingUsers(new Set(speakingUsersRef.current)), 100);
+    return () => clearInterval(id);
+  }, [state.inVoiceChannel, speakingUsersRef]);
 
   // Per-user local volume (0-1) and expanded volume control
   const [userVolumes, setUserVolumes] = useState<Record<string, number>>({});
@@ -410,10 +419,11 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
               const localVol = userVolumes[m.userId] ?? 1;
               const isLocalMuted = localVol === 0;
               const isExpanded = expandedUser === m.userId;
+              const isSpeaking = speakingUsers.has(m.userId) && !m.muted && !isLocalMuted;
               return (
                 <div key={m.userId}>
                   <div
-                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm text-muted-foreground rounded transition-colors ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
+                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm rounded transition-colors ${isSpeaking ? "text-green-400 bg-green-500/10 shadow-[0_0_6px_1px_rgba(74,222,128,0.35)]" : "text-muted-foreground"} ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
                     onClick={() => !isMe && setExpandedUser(isExpanded ? null : m.userId)}
                   >
                     {isLocalMuted && !isMe
@@ -425,7 +435,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
                       {m.deafened && (
-                        <HeadphoneOff className="h-3 w-3 text-red-400" title="Deafened" />
+                        <HeadphoneOff className="h-3 w-3 text-red-400" aria-label="Deafened" />
                       )}
                       {m.screen_sharing && (
                         <button

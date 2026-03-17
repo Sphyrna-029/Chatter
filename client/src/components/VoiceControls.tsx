@@ -26,6 +26,7 @@ interface VoiceControlsProps {
   stopScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
   setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
+  speakingUsersRef?: React.MutableRefObject<Set<string>>;
 }
 
 function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerStats>): ConnectionQuality {
@@ -44,7 +45,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
   return 1;
 }
 
-export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef }: VoiceControlsProps) {
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
@@ -126,6 +127,8 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
     voice.localStreamRef,
     voice.voiceAudioElementsRef,
   );
+  // Expose to parent (e.g. ChannelList speaking indicator)
+  if (speakingUsersRef) speakingUsersRef.current = speakingUsers;
 
   // Volume control bridge
   const setUserVolume = useCallback((userId: string, vol: number) => {
