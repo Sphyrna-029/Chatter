@@ -3,6 +3,8 @@ import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, canSignal } from "@/lib/webrtc";
 
+const VOICE_PUBLISH_MAX_RETRIES = 5;
+
 interface UseWebRTCVoiceOptions {
   cleanupScreenRef: React.MutableRefObject<() => Promise<void>>;
 }
@@ -19,6 +21,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const pendingVoiceSubsRef = useRef<Set<string>>(new Set());
   const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const voiceRetryCountsRef = useRef<Map<string, number>>(new Map());
+  const voicePublishRetryCountRef = useRef(0);
+  const createVoicePublisherRef = useRef<() => Promise<void>>(async () => {});
 
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
@@ -47,6 +51,29 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }));
     };
 
+    pc.onconnectionstatechange = () => {
+      if (pc !== voicePublisherPcRef.current) return;
+      if (pc.connectionState === "connected") {
+        voicePublishRetryCountRef.current = 0;
+      } else if (pc.connectionState === "failed") {
+        const attempt = voicePublishRetryCountRef.current + 1;
+        console.warn(`[voice] Publisher connection failed (attempt ${attempt}/${VOICE_PUBLISH_MAX_RETRIES})`);
+        try { pc.close(); } catch {}
+        voicePublisherPcRef.current = null;
+        if (attempt <= VOICE_PUBLISH_MAX_RETRIES && inVoiceRef.current) {
+          voicePublishRetryCountRef.current = attempt;
+          const delay = Math.min(VOICE_SUBSCRIBE_RETRY_MS * 2 ** (attempt - 1), VOICE_SUBSCRIBE_MAX_BACKOFF_MS);
+          setTimeout(async () => {
+            if (!inVoiceRef.current || voicePublisherPcRef.current) return;
+            await fetchIceServers();
+            await createVoicePublisherRef.current();
+          }, delay);
+        } else {
+          voicePublishRetryCountRef.current = 0;
+        }
+      }
+    };
+
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     wsRef.current!.send(JSON.stringify({
@@ -56,6 +83,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       sdp: offer.sdp,
     }));
   }, []);
+  // Keep ref in sync so the publisher failure handler can re-invoke it
+  createVoicePublisherRef.current = createVoicePublisher;
 
   // ─── Voice subscriber ─────────────────────────────────────────────────────
   const createVoiceSub = useCallback((speakerUserId: string) => {
@@ -253,6 +282,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
       voiceRetryTimersRef.current.clear();
       voiceRetryCountsRef.current.clear();
+      voicePublishRetryCountRef.current = 0;
       pendingVoiceSubsRef.current.clear();
 
       if (localStreamRef.current) {
@@ -305,6 +335,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceAudioElementsRef.current.clear();
     voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
     voiceRetryTimersRef.current.clear();
+    voicePublishRetryCountRef.current = 0;
     pendingVoiceSubsRef.current.clear();
 
     if (localStreamRef.current) {
