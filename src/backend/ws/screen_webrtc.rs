@@ -478,6 +478,8 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     sharer_user_id: &str,
     sdp: &str,
 ) {
+    println!("screen-sub: {} wants to subscribe to {}'s screen in room {}", viewer_user_id, sharer_user_id, room_id);
+
     if room_id.is_empty() || sharer_user_id.is_empty() || sdp.is_empty() {
         let error = json!({
             "type": "screen_webrtc_error",
@@ -550,6 +552,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let publisher_peer_connection = publisher_state.peer_connection.clone();
 
     let Some(publisher_media_ssrc) = publisher_state.media_ssrc else {
+        println!("screen-sub: SSRC not ready for {}'s screen (viewer: {})", sharer_user_id, viewer_user_id);
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -560,6 +563,8 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         send_to_user(&state, viewer_user_id, &error).await;
         return;
     };
+
+    println!("screen-sub: SSRC ready ({}), creating subscriber PC for {} -> {}", publisher_media_ssrc, sharer_user_id, viewer_user_id);
 
     let Some(codec_capability) = publisher_state.video_codec.clone() else {
         let error = json!({
@@ -639,6 +644,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
             let viewer_user_id = viewer_user_id.clone();
             let sharer_user_id = sharer_user_id.clone();
             Box::pin(async move {
+                println!("screen-sub [{} -> {}]: peer connection state -> {:?}", sharer_user_id, viewer_user_id, pc_state);
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
