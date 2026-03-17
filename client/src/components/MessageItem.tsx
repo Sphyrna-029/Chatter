@@ -327,9 +327,10 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
 interface MessageItemProps {
   message: MatrixMessage;
   grouped?: boolean;
+  inThread?: boolean;
 }
 
-export function MessageItem({ message, grouped }: MessageItemProps) {
+export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction, openThread } = useAppContext();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -658,7 +659,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
           )}
 
           {/* Thread reply count indicator */}
-          {!isDeleted && (message.thread_reply_count ?? 0) > 0 && (
+          {!inThread && !isDeleted && (message.thread_reply_count ?? 0) > 0 && (
             <button
               className="flex items-center gap-1.5 mt-1 text-xs text-primary hover:underline cursor-pointer"
               onClick={() => openThread(message.event_id)}
@@ -771,7 +772,7 @@ export function MessageItem({ message, grouped }: MessageItemProps) {
             >
               <span className="text-xs">↩</span>
             </Button>
-            {!isWebhook && message.content.msgtype !== "m.system" && (
+            {!inThread && !isWebhook && message.content.msgtype !== "m.system" && (
               <Button
                 variant="ghost"
                 size="icon"

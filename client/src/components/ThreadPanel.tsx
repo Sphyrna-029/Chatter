@@ -182,7 +182,7 @@ export function ThreadPanel() {
               prevMsg.sender === msg.sender &&
               msg.origin_server_ts - prevMsg.origin_server_ts < 5 * 60 * 1000;
             return (
-              <MessageItem key={msg.event_id} message={msg} grouped={grouped} />
+              <MessageItem key={msg.event_id} message={msg} grouped={grouped} inThread />
             );
           })}
           <div ref={messagesEndRef} />
@@ -191,10 +191,10 @@ export function ThreadPanel() {
 
       {/* Input area */}
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-border">
-        <div className="flex items-end gap-2 rounded-md border border-input bg-background px-3 py-2">
+        <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
           <textarea
             ref={inputRef}
-            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground max-h-24 min-h-[1.25rem]"
+            className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground max-h-24 min-h-[1.25rem] self-center"
             placeholder="Reply in thread…"
             value={body}
             rows={1}
