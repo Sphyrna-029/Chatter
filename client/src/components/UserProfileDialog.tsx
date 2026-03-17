@@ -22,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { GripVertical, X } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "online", label: "Online", color: "bg-green-500" },
@@ -753,6 +754,7 @@ export function UserProfileDialog({
             );
           })()}
 
+          {/* Roles display & management */}
           {state.currentRoomId && (() => {
             const myRole = state.roomMembers.find(m => m.userId === state.userId)?.role;
             const targetRole = state.roomMembers.find(m => m.userId === userId)?.role;
@@ -760,45 +762,98 @@ export function UserProfileDialog({
             const isMod = myRole === "moderator";
             const canManage = (isOwner && targetRole !== "owner") ||
               (isMod && targetRole === "member");
+            const canSeeRoles = isSelf || isOwner || isMod;
+            const userRoleIds = state.memberCustomRoles[userId] || [];
+            const assignedRoles = userRoleIds
+              .map((rid) => state.customRoles.find((r) => r.role_id === rid))
+              .filter(Boolean) as typeof state.customRoles;
+            const unassignedRoles = state.customRoles.filter((r) => !userRoleIds.includes(r.role_id));
 
-            if (!canManage) return null;
+            if (!canSeeRoles || (assignedRoles.length === 0 && !canManage)) return null;
 
             return (
               <div className="w-full space-y-1.5">
-                {/* Custom role assignment */}
-                {state.customRoles.length > 0 && (
+                {assignedRoles.length > 0 && (
                   <div className="space-y-1">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Roles</p>
-                    <div className="flex flex-wrap gap-1">
-                      {state.customRoles.map((role) => {
-                        const userRoles = state.memberCustomRoles[userId] || [];
-                        const hasRole = userRoles.includes(role.role_id);
-                        return (
-                          <button
-                            key={role.role_id}
-                            className={cn(
-                              "inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border transition-colors",
-                              hasRole ? "opacity-100" : "opacity-40 hover:opacity-70"
-                            )}
-                            style={{
-                              color: role.color || undefined,
-                              borderColor: role.color || undefined,
-                              backgroundColor: hasRole ? `${role.color}15` : undefined,
-                            }}
-                            onClick={async () => {
-                              const current = state.memberCustomRoles[userId] || [];
-                              const next = hasRole
-                                ? current.filter((id) => id !== role.role_id)
-                                : [...current, role.role_id];
-                              await assignMemberRoles(state.currentRoomId!, userId, next);
-                            }}
-                            title={hasRole ? `Remove ${role.name}` : `Assign ${role.name}`}
-                          >
-                            {role.name}
-                          </button>
-                        );
-                      })}
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Roles {canManage && <span className="normal-case font-normal">(drag to reorder)</span>}
+                    </p>
+                    <div className="flex flex-col gap-0.5">
+                      {assignedRoles.map((role, idx) => (
+                        <div
+                          key={role.role_id}
+                          draggable={canManage}
+                          onDragStart={(e) => {
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", role.role_id);
+                          }}
+                          onDragOver={(e) => {
+                            if (!canManage) return;
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={async (e) => {
+                            e.preventDefault();
+                            const draggedId = e.dataTransfer.getData("text/plain");
+                            if (!draggedId || draggedId === role.role_id) return;
+                            const current = [...userRoleIds];
+                            const fromIdx = current.indexOf(draggedId);
+                            if (fromIdx === -1) return;
+                            current.splice(fromIdx, 1);
+                            const toIdx = current.indexOf(role.role_id);
+                            current.splice(toIdx, 0, draggedId);
+                            await assignMemberRoles(state.currentRoomId!, userId, current);
+                          }}
+                          className={cn(
+                            "flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium border",
+                            canManage && "cursor-grab active:cursor-grabbing"
+                          )}
+                          style={{
+                            color: role.color || undefined,
+                            borderColor: role.color || undefined,
+                            backgroundColor: role.color ? `${role.color}15` : undefined,
+                          }}
+                        >
+                          {canManage && <GripVertical className="h-3 w-3 shrink-0 opacity-50" />}
+                          <span className="flex-1">{role.name}</span>
+                          {idx === 0 && <span className="text-[9px] opacity-60 uppercase">color</span>}
+                          {canManage && (
+                            <button
+                              className="ml-auto opacity-50 hover:opacity-100 transition-opacity"
+                              title={`Remove ${role.name}`}
+                              onClick={async () => {
+                                const next = userRoleIds.filter((id) => id !== role.role_id);
+                                await assignMemberRoles(state.currentRoomId!, userId, next);
+                              }}
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
+                  </div>
+                )}
+                {/* Unassigned roles to add */}
+                {canManage && unassignedRoles.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {unassignedRoles.map((role) => (
+                      <button
+                        key={role.role_id}
+                        className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium border opacity-40 hover:opacity-70 transition-opacity"
+                        style={{
+                          color: role.color || undefined,
+                          borderColor: role.color || undefined,
+                        }}
+                        onClick={async () => {
+                          const next = [...userRoleIds, role.role_id];
+                          await assignMemberRoles(state.currentRoomId!, userId, next);
+                        }}
+                        title={`Assign ${role.name}`}
+                      >
+                        + {role.name}
+                      </button>
+                    ))}
                   </div>
                 )}
                 {isOwner && targetRole === "member" && (

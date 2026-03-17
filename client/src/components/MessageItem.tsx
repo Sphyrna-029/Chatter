@@ -440,12 +440,20 @@ export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
     (myRole === "owner" && senderRole !== "owner") ||
     (myRole === "moderator" && senderRole === "member");
 
+  // Role color: first custom role with a color wins as fallback
+  const senderRoleIds = state.memberCustomRoles[message.sender] || [];
+  const senderTopRoleColor = senderRoleIds.reduce<string | undefined>((acc, rid) => {
+    if (acc) return acc;
+    const r = state.customRoles.find((cr) => cr.role_id === rid);
+    return r?.color || acc;
+  }, undefined);
+
   const senderNameColor =
     senderRole === "owner" && roomInfo?.owner_name_color
       ? roomInfo.owner_name_color
       : senderRole === "moderator" && roomInfo?.mod_name_color
         ? roomInfo.mod_name_color
-        : undefined;
+        : senderTopRoleColor;
 
   const nameFontUrl = !isWebhook ? state.userPresence[message.sender]?.nameFontUrl : undefined;
   if (nameFontUrl) {

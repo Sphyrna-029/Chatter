@@ -70,12 +70,20 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     const effectiveName = presence?.displayName || member.displayName;
     const initial = effectiveName[0]?.toUpperCase() || "?";
 
+    // Role color: first custom role with a color wins as fallback
+    const userRoleIds = state.memberCustomRoles[member.userId] || [];
+    const topRoleColor = userRoleIds.reduce<string | undefined>((acc, rid) => {
+      if (acc) return acc;
+      const r = state.customRoles.find((cr) => cr.role_id === rid);
+      return r?.color || acc;
+    }, undefined);
+
     const nameColor =
       member.role === "owner" && roomInfo?.owner_name_color
         ? roomInfo.owner_name_color
         : member.role === "moderator" && roomInfo?.mod_name_color
           ? roomInfo.mod_name_color
-          : undefined;
+          : topRoleColor;
 
     const nameFontUrl = presence?.nameFontUrl;
     if (nameFontUrl) {
@@ -131,20 +139,6 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             {member.role === "moderator" && (
               <Shield className="h-3 w-3 text-blue-400 shrink-0" />
             )}
-            {(state.memberCustomRoles[member.userId] || []).map((roleId) => {
-              const role = state.customRoles.find((r) => r.role_id === roleId);
-              if (!role) return null;
-              return (
-                <span
-                  key={roleId}
-                  className="shrink-0 inline-flex items-center rounded px-1 text-[8px] font-semibold leading-tight border"
-                  style={{ color: role.color || undefined, borderColor: role.color || undefined }}
-                  title={role.name}
-                >
-                  {role.name}
-                </span>
-              );
-            })}
             {presence?.isMobile && status !== "offline" && (
               <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
             )}
