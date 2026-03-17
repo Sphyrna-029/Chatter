@@ -507,7 +507,7 @@ export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
     <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-1 -mt-0.5" : "pt-4 pb-2")} data-event-id={message.event_id}>
       <div className="flex items-start gap-3">
         {grouped ? (
-          <span className="w-8 flex-shrink-0" />
+          <span className="w-10 flex-shrink-0" />
         ) : (
           <Avatar className={cn("h-10 w-10 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
             <AuthAvatarImage src={avatarUrl} />
