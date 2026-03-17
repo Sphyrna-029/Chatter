@@ -282,6 +282,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ...(action.payload.unlisted !== undefined && { unlisted: action.payload.unlisted }),
             ...(action.payload.has_password !== undefined && { has_password: action.payload.has_password }),
             ...(action.payload.read_only !== undefined && { read_only: action.payload.read_only }),
+            ...(action.payload.banner_url !== undefined && { banner_url: action.payload.banner_url }),
           },
         },
       };
