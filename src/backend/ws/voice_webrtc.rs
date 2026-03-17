@@ -208,15 +208,27 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
     {
         let state_clone = state.clone();
         let user_id = user_id.to_string();
+        let this_pc = peer_connection.clone();
         peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
             let state = state_clone.clone();
             let user_id = user_id.clone();
+            let this_pc = this_pc.clone();
             Box::pin(async move {
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
                         | RTCPeerConnectionState::Closed
                 ) {
+                    // Guard: if a newer publisher has replaced this one, don't tear it down.
+                    // This prevents a race where the old PC's Closed callback fires after
+                    // channel-switch has already stored a new publisher for the same user.
+                    {
+                        let publishers = state.voice_publishers.read().await;
+                        match publishers.get(&user_id) {
+                            Some(p) if !Arc::ptr_eq(&p.peer_connection, &this_pc) => return,
+                            _ => {}
+                        }
+                    }
                     let _ = teardown_voice_publisher(&state, &user_id).await;
                 }
             })
@@ -518,16 +530,27 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
         let state_clone = state.clone();
         let listener_user_id = listener_user_id.to_string();
         let speaker_user_id = speaker_user_id.to_string();
+        let this_pc = peer_connection.clone();
         peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
             let state = state_clone.clone();
             let listener_user_id = listener_user_id.clone();
             let speaker_user_id = speaker_user_id.clone();
+            let this_pc = this_pc.clone();
             Box::pin(async move {
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed
                         | RTCPeerConnectionState::Closed
                 ) {
+                    // Guard: if a newer subscriber has replaced this one, don't tear it down.
+                    {
+                        let key = voice_subscriber_key(&listener_user_id, &speaker_user_id);
+                        let subs = state.voice_subscribers.read().await;
+                        match subs.get(&key) {
+                            Some(s) if !Arc::ptr_eq(&s.peer_connection, &this_pc) => return,
+                            _ => {}
+                        }
+                    }
                     teardown_voice_subscriber_pair(&state, &listener_user_id, &speaker_user_id)
                         .await;
                 }

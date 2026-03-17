@@ -278,23 +278,34 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
         let state_clone = state.clone();
         let room_id = room_id.to_string();
         let user_id = user_id.to_string();
+        let this_pc = peer_connection.clone();
         peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
             let state = state_clone.clone();
             let room_id = room_id.clone();
             let user_id = user_id.clone();
+            let this_pc = this_pc.clone();
             Box::pin(async move {
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
-                ) && teardown_screen_publisher(&state, &user_id).await.is_some()
-                {
-                    set_user_screen_sharing(&state, &room_id, &user_id, false).await;
-                    let event = json!({
-                        "type": "screen_share_stopped",
-                        "room_id": room_id,
-                        "user_id": user_id
-                    });
-                    broadcast_to_room(&state, &room_id, &event).await;
+                ) {
+                    // Guard: if a newer publisher has replaced this one, don't tear it down.
+                    {
+                        let publishers = state.screen_publishers.read().await;
+                        match publishers.get(&user_id) {
+                            Some(p) if !Arc::ptr_eq(&p.peer_connection, &this_pc) => return,
+                            _ => {}
+                        }
+                    }
+                    if teardown_screen_publisher(&state, &user_id).await.is_some() {
+                        set_user_screen_sharing(&state, &room_id, &user_id, false).await;
+                        let event = json!({
+                            "type": "screen_share_stopped",
+                            "room_id": room_id,
+                            "user_id": user_id
+                        });
+                        broadcast_to_room(&state, &room_id, &event).await;
+                    }
                 }
             })
         }));
@@ -632,15 +643,26 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         let state_clone = state.clone();
         let viewer_user_id = viewer_user_id.to_string();
         let sharer_user_id = sharer_user_id.to_string();
+        let this_pc = peer_connection.clone();
         peer_connection.on_peer_connection_state_change(Box::new(move |pc_state| {
             let state = state_clone.clone();
             let viewer_user_id = viewer_user_id.clone();
             let sharer_user_id = sharer_user_id.clone();
+            let this_pc = this_pc.clone();
             Box::pin(async move {
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) {
+                    // Guard: if a newer subscriber has replaced this one, don't tear it down.
+                    {
+                        let key = subscriber_key(&viewer_user_id, &sharer_user_id);
+                        let subs = state.screen_subscribers.read().await;
+                        match subs.get(&key) {
+                            Some(s) if !Arc::ptr_eq(&s.peer_connection, &this_pc) => return,
+                            _ => {}
+                        }
+                    }
                     teardown_screen_subscriber_pair(&state, &viewer_user_id, &sharer_user_id).await;
                 }
             })
