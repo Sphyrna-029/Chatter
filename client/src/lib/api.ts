@@ -1277,7 +1277,7 @@ export async function apiGetServerInfo(): Promise<{ invite_only: boolean; requir
   return res.json();
 }
 
-export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string; storage_limit_bytes: number; room_creation_limit: number; require_auth_for_uploads: boolean }> {
+export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string; storage_limit_bytes: number; room_creation_limit: number; require_auth_for_uploads: boolean; room_creation_disabled: boolean }> {
   const res = await authenticatedFetch("/api/admin/settings");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -1286,7 +1286,7 @@ export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; inv
   return res.json();
 }
 
-export async function apiAdminUpdateSettings(settings: { invite_only?: boolean; storage_limit_bytes?: number; room_creation_limit?: number; require_auth_for_uploads?: boolean }): Promise<void> {
+export async function apiAdminUpdateSettings(settings: { invite_only?: boolean; storage_limit_bytes?: number; room_creation_limit?: number; require_auth_for_uploads?: boolean; room_creation_disabled?: boolean }): Promise<void> {
   const res = await authenticatedFetch("/api/admin/settings", {
     method: "PUT",
     body: JSON.stringify(settings),
