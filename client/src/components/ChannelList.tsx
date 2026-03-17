@@ -313,7 +313,17 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     }
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
                     {m.screen_sharing && (
-                      <Monitor className="h-3 w-3 shrink-0 text-purple-400 ml-auto" />
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
+                        }}
+                        className="ml-auto shrink-0 p-0.5 rounded hover:bg-purple-500/20 transition-colors"
+                        title={`Watch ${displayUserId(m.userId)}'s screen`}
+                      >
+                        <Monitor className="h-3 w-3 text-purple-400" />
+                      </button>
                     )}
                   </div>
                   {isExpanded && !isMe && (
