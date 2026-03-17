@@ -3,7 +3,7 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
+  Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -35,6 +35,7 @@ interface ChannelListProps {
   onJoinVoiceChannel: (channelId: string) => void;
   onLeaveVoice?: () => void;
   onToggleMute?: () => void;
+  onToggleDeafen?: () => void;
   onToggleScreenShare?: () => void;
   isScreenSharing?: boolean;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
@@ -56,7 +57,7 @@ function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: n
   );
 }
 
-export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef }: ChannelListProps) {
+export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -732,14 +733,26 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             <SignalBars quality={connData.quality} pingMs={connData.pingMs} />
             <button
               onClick={onToggleMute}
+              disabled={state.isDeafened}
               className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                state.isMuted
+                state.isMuted || state.isDeafened
                   ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
               }`}
-              title={state.isMuted ? "Unmute" : "Mute"}
+              title={state.isDeafened ? "Undeafen to unmute" : state.isMuted ? "Unmute" : "Mute"}
             >
-              {state.isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+              {state.isMuted || state.isDeafened ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={onToggleDeafen}
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                state.isDeafened
+                  ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                  : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              }`}
+              title={state.isDeafened ? "Undeafen" : "Deafen"}
+            >
+              <HeadphoneOff className="h-3.5 w-3.5" />
             </button>
             {onToggleScreenShare && (
               <button

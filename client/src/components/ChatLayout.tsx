@@ -113,6 +113,7 @@ export function ChatLayout() {
   const joinVoiceRef = useRef<((channelId?: string) => void) | null>(null);
   const leaveVoiceRef = useRef<(() => void) | null>(null);
   const toggleMuteRef = useRef<(() => void) | null>(null);
+  const toggleDeafenRef = useRef<(() => void) | null>(null);
   const startScreenShareRef = useRef<(() => void) | null>(null);
   const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null });
   const stopScreenShareRef = useRef<(() => void) | null>(null);
@@ -411,6 +412,7 @@ export function ChatLayout() {
                   }}
                   onLeaveVoice={() => leaveVoiceRef.current?.()}
                   onToggleMute={() => toggleMuteRef.current?.()}
+                  onToggleDeafen={() => toggleDeafenRef.current?.()}
                   onToggleScreenShare={() => {
                     if (state.isScreenSharing) {
                       stopScreenShareRef.current?.();
@@ -430,6 +432,7 @@ export function ChatLayout() {
                     joinVoiceRef={joinVoiceRef}
                     leaveVoiceRef={leaveVoiceRef}
                     toggleMuteRef={toggleMuteRef}
+                    toggleDeafenRef={toggleDeafenRef}
                     startScreenShareRef={startScreenShareRef}
                     stopScreenShareRef={stopScreenShareRef}
                     connQualityRef={connQualityRef}

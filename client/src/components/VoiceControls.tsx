@@ -21,6 +21,7 @@ interface VoiceControlsProps {
   joinVoiceRef?: React.MutableRefObject<((channelId?: string) => void) | null>;
   leaveVoiceRef?: React.MutableRefObject<(() => void) | null>;
   toggleMuteRef?: React.MutableRefObject<(() => void) | null>;
+  toggleDeafenRef?: React.MutableRefObject<(() => void) | null>;
   startScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   stopScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
@@ -43,7 +44,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
   return 1;
 }
 
-export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef }: VoiceControlsProps) {
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
@@ -69,6 +70,11 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, star
     if (toggleMuteRef) toggleMuteRef.current = voice.toggleMute;
     return () => { if (toggleMuteRef) toggleMuteRef.current = null; };
   }, [toggleMuteRef, voice.toggleMute]);
+
+  useEffect(() => {
+    if (toggleDeafenRef) toggleDeafenRef.current = voice.toggleDeafen;
+    return () => { if (toggleDeafenRef) toggleDeafenRef.current = null; };
+  }, [toggleDeafenRef, voice.toggleDeafen]);
 
   useEffect(() => {
     if (startScreenShareRef) startScreenShareRef.current = screen.startScreenShare;
