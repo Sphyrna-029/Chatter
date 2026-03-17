@@ -3,7 +3,7 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical,
+  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import {
@@ -96,6 +96,9 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
 
   // Collapsed categories
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
+
+  // Mobile collapse — default collapsed on small screens
+  const [panelCollapsed, setPanelCollapsed] = useState(() => window.innerWidth < 768);
 
   // Drag state
   const [dragChannelId, setDragChannelId] = useState<string | null>(null);
@@ -567,31 +570,52 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   }, [width]);
 
   return (
-    <div className="border-r flex flex-col h-full shrink-0 bg-sidebar relative" style={{ width }}>
+    <div className="border-r flex flex-col h-full shrink-0 bg-sidebar relative transition-[width] duration-200" style={{ width: panelCollapsed ? 40 : width }}>
       {/* Room name header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-sm font-semibold truncate">{roomInfo?.name || "Room"}</span>
-        {canManage && (
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => setCategoryCreateOpen(true)}
-              className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              title="Create category"
-            >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { setChannelType("text"); setCreateCategoryId(""); setCreateOpen(true); }}
-              className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-              title="Create channel"
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-          </div>
+        {panelCollapsed ? (
+          <button
+            onClick={() => setPanelCollapsed(false)}
+            className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors mx-auto"
+            title="Show channels"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        ) : (
+          <>
+            <span className="text-sm font-semibold truncate">{roomInfo?.name || "Room"}</span>
+            <div className="flex items-center gap-0.5">
+              {canManage && (
+                <>
+                  <button
+                    onClick={() => setCategoryCreateOpen(true)}
+                    className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                    title="Create category"
+                  >
+                    <FolderPlus className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => { setChannelType("text"); setCreateCategoryId(""); setCreateOpen(true); }}
+                    className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                    title="Create channel"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => setPanelCollapsed(true)}
+                className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors md:hidden"
+                title="Hide channels"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </>
         )}
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className={`flex-1 ${panelCollapsed ? "hidden" : ""}`}>
         <div className="py-1">
           {/* Uncategorized channels — drop zone for removing from category */}
           <div
@@ -609,7 +633,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
       </ScrollArea>
 
       {/* Voice controls toolbar */}
-      {state.inVoiceChannel && (
+      {!panelCollapsed && state.inVoiceChannel && (
         <div className="border-t px-2 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center gap-1 px-1">
             <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
@@ -810,10 +834,12 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
       </Dialog>
 
       {/* Resize handle */}
-      <div
-        onMouseDown={onResizeStart}
-        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
-      />
+      {!panelCollapsed && (
+        <div
+          onMouseDown={onResizeStart}
+          className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"
+        />
+      )}
     </div>
   );
 }
