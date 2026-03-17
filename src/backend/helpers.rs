@@ -1,6 +1,6 @@
 use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
-    state::{AppState, ReactionRecord, RoomMemberRecord},
+    state::{AppState, ChannelRecord, ReactionRecord, RoomMemberRecord},
 };
 use axum::{
     extract::ws::Message,
@@ -264,6 +264,20 @@ pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: 
     }
 }
 
+/// Find the channel marked as `system_channel` for a room (if any).
+/// Returns the channel_id if one exists.
+pub(crate) async fn get_system_channel_id(state: &AppState, room_id: &str) -> Option<String> {
+    let coll = state.db.collection::<ChannelRecord>("channels");
+    if let Ok(Some(ch)) = coll
+        .find_one(mongodb::bson::doc! { "room_id": room_id, "system_channel": true })
+        .await
+    {
+        Some(ch.channel_id)
+    } else {
+        None
+    }
+}
+
 /// Join a user to a room, broadcasting member join + system message.
 /// Updates both MongoDB and the in-memory cache.
 /// Returns Ok(true) if newly added, Ok(false) if already a member, Err if banned.
@@ -340,7 +354,7 @@ pub(crate) async fn do_join_room(
         .next()
         .unwrap_or(user_id)
         .trim_start_matches('@');
-    let sys_event = json!({
+    let mut sys_event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
@@ -351,6 +365,11 @@ pub(crate) async fn do_join_room(
         "event_id": generate_id("$"),
         "origin_server_ts": now_millis()
     });
+
+    // Route to system channel if one is configured
+    if let Some(sys_ch) = get_system_channel_id(state, room_id).await {
+        sys_event["channel_id"] = json!(sys_ch);
+    }
 
     // Store system message in MongoDB
     let msg_collection = state

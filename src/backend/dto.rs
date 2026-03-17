@@ -255,6 +255,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) read_only: Option<bool>,
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
+    pub(crate) system_channel: Option<bool>,
 }
 
 #[derive(Deserialize)]

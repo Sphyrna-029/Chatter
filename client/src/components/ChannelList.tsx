@@ -63,6 +63,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [editReadOnly, setEditReadOnly] = useState(false);
   const [editViewRoles, setEditViewRoles] = useState<string[]>([]);
   const [editWriteRoles, setEditWriteRoles] = useState<string[]>([]);
+  const [editSystemChannel, setEditSystemChannel] = useState(false);
   const [name, setName] = useState("");
   const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [topic, setTopic] = useState("");
@@ -167,8 +168,9 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         read_only: editReadOnly,
         view_roles: editViewRoles,
         write_roles: editWriteRoles,
+        system_channel: editSystemChannel,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, system_channel: editSystemChannel } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -195,6 +197,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     setEditReadOnly(ch.read_only ?? false);
     setEditViewRoles(ch.view_roles ?? []);
     setEditWriteRoles(ch.write_roles ?? []);
+    setEditSystemChannel(ch.system_channel ?? false);
     setEditOpen(true);
   };
 
@@ -798,6 +801,15 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                 className="rounded border-input"
               />
               <span className="text-sm">Read-only (only owners/moderators can post)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={editSystemChannel}
+                onChange={(e) => setEditSystemChannel(e.target.checked)}
+                className="rounded border-input"
+              />
+              <span className="text-sm">System messages channel (join/leave/kick/ban)</span>
             </label>
             {state.customRoles.length > 0 && (
               <>

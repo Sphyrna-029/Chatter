@@ -25,17 +25,28 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     ? state.roomInfoMap[state.currentRoomId]
     : null;
 
+  // Get view_roles for the currently selected channel
+  const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
+  const channelViewRoles = currentChannel?.view_roles ?? [];
+
   const grouped = useMemo(() => {
     const owners: typeof state.roomMembers = [];
     const moderators: typeof state.roomMembers = [];
     const members: typeof state.roomMembers = [];
+
     for (const m of state.roomMembers) {
+      // If channel has view_roles, filter: owners/mods always pass, others need a matching role
+      if (channelViewRoles.length > 0 && m.role !== "owner" && m.role !== "moderator") {
+        const userRoles = state.memberCustomRoles[m.userId] || [];
+        if (!channelViewRoles.some((r) => userRoles.includes(r))) continue;
+      }
+
       if (m.role === "owner") owners.push(m);
       else if (m.role === "moderator") moderators.push(m);
       else members.push(m);
     }
     return { owners, moderators, members };
-  }, [state.roomMembers]);
+  }, [state.roomMembers, channelViewRoles, state.memberCustomRoles]);
 
   if (!state.currentRoomId) return null;
 
@@ -198,7 +209,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           Members
         </h3>
         <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">
-          {state.roomMembers.length}
+          {grouped.owners.length + grouped.moderators.length + grouped.members.length}
         </span>
         <button
           onClick={onToggle}

@@ -2,7 +2,7 @@ use super::super::{
     dto::{CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
+        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
     },
     state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
@@ -419,7 +419,7 @@ pub(crate) async fn leave_room(
             .next()
             .unwrap_or(&user_id)
             .trim_start_matches('@');
-        let sys_event = json!({
+        let mut sys_event = json!({
             "type": "m.room.message",
             "room_id": room_id,
             "sender": user_id,
@@ -430,6 +430,9 @@ pub(crate) async fn leave_room(
             "event_id": generate_id("$"),
             "origin_server_ts": now_millis()
         });
+        if let Some(sys_ch) = get_system_channel_id(&state, &room_id).await {
+            sys_event["channel_id"] = json!(sys_ch);
+        }
 
         // Store system message in MongoDB
         let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
@@ -851,7 +854,7 @@ pub(crate) async fn kick_member(
         .next()
         .unwrap_or(&target_user_id)
         .trim_start_matches('@');
-    let sys_event = json!({
+    let mut sys_event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
@@ -862,6 +865,9 @@ pub(crate) async fn kick_member(
         "event_id": generate_id("$"),
         "origin_server_ts": now_millis()
     });
+    if let Some(sys_ch) = get_system_channel_id(&state, &room_id).await {
+        sys_event["channel_id"] = json!(sys_ch);
+    }
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
         let _ = msg_coll.insert_one(doc).await;
@@ -958,7 +964,7 @@ pub(crate) async fn ban_member(
         .next()
         .unwrap_or(&target_user_id)
         .trim_start_matches('@');
-    let sys_event = json!({
+    let mut sys_event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
@@ -969,6 +975,9 @@ pub(crate) async fn ban_member(
         "event_id": generate_id("$"),
         "origin_server_ts": now_millis()
     });
+    if let Some(sys_ch) = get_system_channel_id(&state, &room_id).await {
+        sys_event["channel_id"] = json!(sys_ch);
+    }
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
         let _ = msg_coll.insert_one(doc).await;
@@ -1088,7 +1097,7 @@ pub(crate) async fn set_member_role(
     } else {
         "demoted to member"
     };
-    let sys_event = json!({
+    let mut sys_event = json!({
         "type": "m.room.message",
         "room_id": room_id,
         "sender": user_id,
@@ -1099,6 +1108,9 @@ pub(crate) async fn set_member_role(
         "event_id": generate_id("$"),
         "origin_server_ts": now_millis()
     });
+    if let Some(sys_ch) = get_system_channel_id(&state, &room_id).await {
+        sys_event["channel_id"] = json!(sys_ch);
+    }
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
         let _ = msg_coll.insert_one(doc).await;

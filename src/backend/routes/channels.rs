@@ -64,6 +64,7 @@ pub(crate) async fn list_channels(
             "read_only": ch.read_only,
             "view_roles": ch.view_roles,
             "write_roles": ch.write_roles,
+            "system_channel": ch.system_channel,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
         }));
@@ -146,6 +147,7 @@ pub(crate) async fn create_channel(
         read_only: false,
         view_roles: vec![],
         write_roles: vec![],
+        system_channel: false,
         created_by: user_id.clone(),
         created_at: now_millis(),
     };
@@ -167,6 +169,7 @@ pub(crate) async fn create_channel(
             "read_only": channel.read_only,
             "view_roles": channel.view_roles,
             "write_roles": channel.write_roles,
+            "system_channel": channel.system_channel,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
         }
@@ -237,6 +240,19 @@ pub(crate) async fn update_channel(
         let bson_arr: Vec<mongodb::bson::Bson> = write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
         set_doc.insert("write_roles", bson_arr);
         content.insert("write_roles".to_string(), json!(write_roles));
+    }
+    if let Some(system_channel) = req.system_channel {
+        // If enabling, clear any other system channel in this room first
+        if system_channel {
+            let _ = channels_coll
+                .update_many(
+                    doc! { "room_id": &room_id, "system_channel": true },
+                    doc! { "$set": { "system_channel": false } },
+                )
+                .await;
+        }
+        set_doc.insert("system_channel", system_channel);
+        content.insert("system_channel".to_string(), json!(system_channel));
     }
 
     if !set_doc.is_empty() {
@@ -344,6 +360,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             read_only: false,
             view_roles: vec![],
             write_roles: vec![],
+            system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
@@ -363,6 +380,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             read_only: false,
             view_roles: vec![],
             write_roles: vec![],
+            system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
