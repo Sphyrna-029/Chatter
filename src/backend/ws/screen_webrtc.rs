@@ -481,6 +481,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     println!("screen-sub: {} wants to subscribe to {}'s screen in room {}", viewer_user_id, sharer_user_id, room_id);
 
     if room_id.is_empty() || sharer_user_id.is_empty() || sdp.is_empty() {
+        println!("screen-sub: REJECTED empty fields (room={}, sharer={}, sdp_len={})", room_id.is_empty(), sharer_user_id.is_empty(), sdp.is_empty());
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -493,10 +494,13 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     }
 
     if viewer_user_id == sharer_user_id {
+        println!("screen-sub: REJECTED self-subscribe {} == {}", viewer_user_id, sharer_user_id);
         return;
     }
 
-    if !user_in_voice_room(&state, room_id, viewer_user_id).await {
+    let in_voice = user_in_voice_room(&state, room_id, viewer_user_id).await;
+    println!("screen-sub: user_in_voice_room({}) = {}", viewer_user_id, in_voice);
+    if !in_voice {
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
