@@ -178,6 +178,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, star
       <VoiceToolbar
         inVoiceChannel={state.inVoiceChannel}
         isMuted={state.isMuted}
+        isDeafened={state.isDeafened}
         voiceInputMode={state.voiceInputMode}
         isScreenSharing={state.isScreenSharing}
         screenFps={screen.screenFps}
@@ -192,6 +193,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, star
         onJoinVoice={voice.joinVoice}
         onLeaveVoice={voice.leaveVoice}
         onToggleMute={voice.toggleMute}
+        onToggleDeafen={voice.toggleDeafen}
         onToggleInputMode={voice.toggleInputMode}
         onStartScreenShare={screen.startScreenShare}
         onStopScreenShare={screen.stopScreenShare}

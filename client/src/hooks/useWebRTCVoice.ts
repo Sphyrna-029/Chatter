@@ -255,7 +255,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current = stream;
 
       const resolvedChannelId = channelId || state.voiceChannelId || undefined;
-      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
+      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, isDeafened: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -292,7 +292,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current = null;
     }
 
-    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null } });
+    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null } });
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };
@@ -375,6 +375,15 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     if (audioEl) audioEl.volume = vol;
   }, []);
 
+  // ─── Deafen ───────────────────────────────────────────────────────────────
+  const toggleDeafen = useCallback(() => {
+    const newDeafened = !state.isDeafened;
+    voiceAudioElementsRef.current.forEach((el) => {
+      el.muted = newDeafened;
+    });
+    dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
+  }, [state.isDeafened, dispatch]);
+
   return {
     localStreamRef,
     voicePublisherPcRef,
@@ -383,6 +392,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     joinVoice,
     leaveVoice,
     toggleMute,
+    toggleDeafen,
     toggleInputMode,
     setUserVolume,
   };

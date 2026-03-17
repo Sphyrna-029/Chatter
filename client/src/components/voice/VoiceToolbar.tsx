@@ -4,6 +4,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRad
 interface VoiceToolbarProps {
   inVoiceChannel: boolean;
   isMuted: boolean;
+  isDeafened: boolean;
   voiceInputMode: "open" | "ptt";
   isScreenSharing: boolean;
   screenFps: 30 | 60;
@@ -11,6 +12,7 @@ interface VoiceToolbarProps {
   onJoinVoice: () => void;
   onLeaveVoice: () => void;
   onToggleMute: () => void;
+  onToggleDeafen: () => void;
   onToggleInputMode: () => void;
   hideScreenShare?: boolean;
   onStartScreenShare: () => void;
@@ -22,6 +24,7 @@ interface VoiceToolbarProps {
 export function VoiceToolbar({
   inVoiceChannel,
   isMuted,
+  isDeafened,
   voiceInputMode,
   isScreenSharing,
   screenFps,
@@ -29,6 +32,7 @@ export function VoiceToolbar({
   onJoinVoice,
   onLeaveVoice,
   onToggleMute,
+  onToggleDeafen,
   onToggleInputMode,
   hideScreenShare,
   onStartScreenShare,
@@ -50,14 +54,27 @@ export function VoiceToolbar({
       </Button>
 
       {voiceInputMode === "open" && (
-        <Button
-          size="sm"
-          variant={isMuted ? "destructive" : "outline"}
-          onClick={onToggleMute}
-          className="text-xs w-full"
-        >
-          {isMuted ? "🔇 Unmute" : "🎤 Mute"}
-        </Button>
+        <div className="flex gap-1.5">
+          <Button
+            size="sm"
+            variant={isMuted || isDeafened ? "destructive" : "outline"}
+            onClick={onToggleMute}
+            className="text-xs flex-1"
+            disabled={isDeafened}
+            title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
+          >
+            {isMuted || isDeafened ? "🔇 Unmute" : "🎤 Mute"}
+          </Button>
+          <Button
+            size="sm"
+            variant={isDeafened ? "destructive" : "outline"}
+            onClick={onToggleDeafen}
+            className="text-xs flex-1"
+            title={isDeafened ? "Undeafen" : "Deafen"}
+          >
+            {isDeafened ? "🔕 Undeafen" : "🔕 Deafen"}
+          </Button>
+        </div>
       )}
 
       <Button
