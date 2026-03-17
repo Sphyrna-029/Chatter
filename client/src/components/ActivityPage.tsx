@@ -7,12 +7,22 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash } from "lucide-react";
 
 interface RoomActivity {
   roomId: string;
   lastMessage?: { sender: string; body: string; timestamp: number };
   memberCount: number;
+}
+
+interface PersonStat {
+  userId: string;
+  messageCount: number;
+}
+
+interface RoomStat {
+  roomId: string;
+  messageCount: number;
 }
 
 function relativeTime(ts: number): string {
@@ -40,6 +50,8 @@ export function ActivityPage() {
   const [loading, setLoading] = useState(true);
   const [blockedExpanded, setBlockedExpanded] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
+  const [topPeople, setTopPeople] = useState<PersonStat[]>([]);
+  const [topRooms, setTopRooms] = useState<RoomStat[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,8 +103,40 @@ export function ActivityPage() {
           return tb - ta;
         });
 
+        // Compute stats: top people and top rooms
+        const myUserId = state.userId;
+        const peopleCounts: Record<string, number> = {};
+        const roomCounts: Record<string, number> = {};
+
+        for (const roomId of state.joinedRoomIds) {
+          const roomData = roomJoin[roomId];
+          if (!roomData?.timeline?.events) continue;
+          const msgs = roomData.timeline.events.filter(
+            (e: any) => e.type === "m.room.message" && e.content?.body
+          );
+          roomCounts[roomId] = msgs.length;
+          for (const msg of msgs) {
+            const sender = msg.sender;
+            if (sender && sender !== myUserId) {
+              peopleCounts[sender] = (peopleCounts[sender] || 0) + 1;
+            }
+          }
+        }
+
+        const sortedPeople = Object.entries(peopleCounts)
+          .map(([userId, messageCount]) => ({ userId, messageCount }))
+          .sort((a, b) => b.messageCount - a.messageCount)
+          .slice(0, 5);
+
+        const sortedRooms = Object.entries(roomCounts)
+          .map(([roomId, messageCount]) => ({ roomId, messageCount }))
+          .sort((a, b) => b.messageCount - a.messageCount)
+          .slice(0, 3);
+
         if (!cancelled) {
           setActivities(result);
+          setTopPeople(sortedPeople);
+          setTopRooms(sortedRooms);
           setLoading(false);
         }
       } catch {
@@ -102,7 +146,7 @@ export function ActivityPage() {
 
     fetchActivity();
     return () => { cancelled = true; };
-  }, [state.joinedRoomIds]);
+  }, [state.joinedRoomIds, state.userId]);
 
   const mentionedRooms = Object.entries(state.roomMentions).filter(
     ([, count]) => count > 0
@@ -127,6 +171,84 @@ export function ActivityPage() {
             Your rooms and recent conversations
           </p>
         </div>
+
+        {/* Stats — Top People & Top Rooms */}
+        {!loading && (topPeople.length > 0 || topRooms.length > 0) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Top People */}
+            {topPeople.length > 0 && (
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  <BarChart3 className="h-4 w-4" />
+                  Top People
+                </h2>
+                <div className="space-y-1.5">
+                  {topPeople.map((person, i) => {
+                    const presence = state.userPresence[person.userId];
+                    const displayName = presence?.displayName || displayUserId(person.userId);
+                    const avatarUrl = presence?.avatarUrl || "";
+                    const initial = displayName[0]?.toUpperCase() || "?";
+                    return (
+                      <button
+                        key={person.userId}
+                        onClick={() => setProfileUserId(person.userId)}
+                        className="flex items-center gap-2.5 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                      >
+                        <span className="text-xs text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
+                        <div className="relative shrink-0">
+                          <Avatar className="h-6 w-6">
+                            <AuthAvatarImage src={avatarUrl} />
+                            <AvatarFallback className="text-[10px] bg-secondary">{initial}</AvatarFallback>
+                          </Avatar>
+                        </div>
+                        <span className="text-sm font-medium truncate flex-1">{displayName}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {person.messageCount} msg{person.messageCount !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* Top Rooms */}
+            {topRooms.length > 0 && (
+              <section className="rounded-lg border border-border p-4 space-y-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                  <Hash className="h-4 w-4" />
+                  Most Active Rooms
+                </h2>
+                <div className="space-y-1.5">
+                  {topRooms.map((room, i) => {
+                    const info = state.roomInfoMap[room.roomId];
+                    const name = info?.name || "Unnamed";
+                    return (
+                      <button
+                        key={room.roomId}
+                        onClick={() => selectRoom(room.roomId)}
+                        className="flex items-center gap-2.5 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                      >
+                        <span className="text-xs text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-[10px] font-bold shrink-0">
+                          {info?.icon_url ? (
+                            <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
+                          ) : (
+                            name.charAt(0).toUpperCase()
+                          )}
+                        </span>
+                        <span className="text-sm font-medium truncate flex-1">{name}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {room.messageCount} msg{room.messageCount !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </div>
+        )}
 
         {/* Unread Mentions — full width above the two-column layout */}
         {mentionedRooms.length > 0 && (
