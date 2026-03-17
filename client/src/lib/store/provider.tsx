@@ -818,6 +818,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         JSON.stringify({
           type: "typing",
           room_id: stateRef.current.currentRoomId,
+          ...(stateRef.current.currentChannelId ? { channel_id: stateRef.current.currentChannelId } : {}),
         })
       );
     }

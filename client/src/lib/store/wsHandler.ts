@@ -176,9 +176,13 @@ export function createWsMessageHandler(
         });
       }
     } else if (msg.type === "user_typing") {
+      const typingChannelMatches = msg.channel_id
+        ? msg.channel_id === stateRef.current.currentChannelId
+        : !stateRef.current.currentChannelId;
       if (
         msg.room_id === stateRef.current.currentRoomId &&
-        msg.user_id !== stateRef.current.userId
+        msg.user_id !== stateRef.current.userId &&
+        typingChannelMatches
       ) {
         // Track typing user with 3s auto-expiry
         dispatch({ type: "SET_TYPING_USER", payload: msg.user_id });

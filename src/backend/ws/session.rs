@@ -244,11 +244,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     p.last_typing = now_secs();
                 }
             }
-            let event = json!({
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
+            let mut event = json!({
                 "type": "user_typing",
                 "room_id": room_id,
                 "user_id": user_id
             });
+            if !channel_id.is_empty() {
+                event["channel_id"] = json!(channel_id);
+            }
             broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_join" => {
