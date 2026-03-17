@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { WEBRTC_CONFIG, VOICE_SUBSCRIBE_RETRY_MS, canSignal } from "@/lib/webrtc";
+import { getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, canSignal } from "@/lib/webrtc";
 
 interface UseWebRTCVoiceOptions {
   cleanupScreenRef: React.MutableRefObject<() => Promise<void>>;
@@ -30,7 +30,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Voice publisher ──────────────────────────────────────────────────────
   const createVoicePublisher = useCallback(async () => {
     if (!localStreamRef.current || !canSignal(wsRef)) return;
-    const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+    const pc = new RTCPeerConnection(getWebRTCConfig());
     voicePublisherPcRef.current = pc;
     const audioTrack = localStreamRef.current?.getAudioTracks()[0];
     if (audioTrack) pc.addTrack(audioTrack, localStreamRef.current!);
@@ -59,7 +59,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     if (speakerUserId === state.userId || !canSignal(wsRef)) return;
     if (voiceSubscriberPcsRef.current.has(speakerUserId) || pendingVoiceSubsRef.current.has(speakerUserId)) return;
 
-    const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+    const pc = new RTCPeerConnection(getWebRTCConfig());
     voiceSubscriberPcsRef.current.set(speakerUserId, pc);
     pendingVoiceSubsRef.current.add(speakerUserId);
 

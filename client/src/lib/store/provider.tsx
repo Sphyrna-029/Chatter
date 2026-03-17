@@ -71,6 +71,7 @@ import {
   apiDeleteCategory,
   type RoomInfo,
 } from "../api";
+import { fetchIceServers } from "../webrtc";
 import type { AppContextValue } from "./types";
 import { initialState } from "./types";
 import { reducer } from "./reducer";
@@ -96,11 +97,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   }, [state]);
 
-  // Fetch public server settings on mount
+  // Fetch public server settings and ICE config on mount
   useEffect(() => {
     apiGetServerInfo().then((info) => {
       dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.storage_limit_bytes ?? 0 } });
     }).catch(() => {});
+    fetchIceServers();
   }, []);
 
   // Restore tokens from localStorage on mount

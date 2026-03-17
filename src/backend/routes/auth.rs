@@ -121,6 +121,30 @@ pub(crate) async fn server_info(
     Json(json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads, "storage_limit_bytes": settings.storage_limit_bytes }))
 }
 
+/// GET /api/ice-servers — returns ICE server config (STUN + TURN) for client WebRTC
+pub(crate) async fn ice_servers() -> Json<Value> {
+    let mut servers = vec![json!({ "urls": ["stun:stun.l.google.com:19302"] })];
+
+    // TURN_PUBLIC_URL is the client-facing TURN address (e.g. turn:yourdomain.com:3478).
+    // Falls back to TURN_URL if not set (works when TURN_URL is already public).
+    let turn_url = std::env::var("TURN_PUBLIC_URL")
+        .or_else(|_| std::env::var("TURN_URL"))
+        .unwrap_or_default();
+
+    if !turn_url.is_empty() {
+        let username = std::env::var("TURN_USERNAME").unwrap_or_default();
+        let credential = std::env::var("TURN_PASSWORD").unwrap_or_default();
+        let client_urls: Vec<String> = turn_url.split(',').map(|s| s.trim().to_string()).collect();
+        servers.push(json!({
+            "urls": client_urls,
+            "username": username,
+            "credential": credential,
+        }));
+    }
+
+    Json(json!({ "iceServers": servers }))
+}
+
 pub(crate) async fn register(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RegisterRequest>,

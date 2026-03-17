@@ -31,6 +31,7 @@ services:
       ################  WEBRTC  ################
       #WEBRTC_IP: your-public-ip (required if behind NAT; LAN clients connect via local IP automatically)
       TURN_URL: "turn:host.docker.internal:3478"
+      #TURN_PUBLIC_URL: "turn:yourdomain.com:3478" (client-facing TURN address, falls back to TURN_URL)
       TURN_USERNAME: ${TURN_USERNAME:-chatter}
       TURN_PASSWORD: ${TURN_PASSWORD:-changeme}
 

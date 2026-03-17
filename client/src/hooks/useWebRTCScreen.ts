@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import {
-  WEBRTC_CONFIG,
+  getWebRTCConfig,
   SCREEN_SUBSCRIBE_RETRY_MS,
   canSignal,
   getScreenSharePublishProfile,
@@ -73,7 +73,7 @@ export function useWebRTCScreen() {
     // Guard: don't create duplicate subscriptions
     if (screenSubPcsRef.current.has(sharerId) || pendingScreenSubsRef.current.has(sharerId)) return;
 
-    const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+    const pc = new RTCPeerConnection(getWebRTCConfig());
     screenSubPcsRef.current.set(sharerId, pc);
     pendingScreenSubsRef.current.add(sharerId);
 
@@ -394,7 +394,7 @@ export function useWebRTCScreen() {
       }
       screenTrack.onended = () => stopScreenShare();
 
-      const pc = new RTCPeerConnection(WEBRTC_CONFIG);
+      const pc = new RTCPeerConnection(getWebRTCConfig());
       screenPubPcRef.current = pc;
       const videoSender = pc.addTrack(screenTrack, stream);
       await tuneScreenVideoSender(videoSender, profile);

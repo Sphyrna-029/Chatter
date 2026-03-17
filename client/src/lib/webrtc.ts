@@ -1,6 +1,25 @@
-export const WEBRTC_CONFIG = {
+// Fallback config used until the server responds
+const DEFAULT_WEBRTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
 };
+
+// Populated from /api/ice-servers on startup
+let _cachedConfig: RTCConfiguration | null = null;
+
+export async function fetchIceServers(): Promise<void> {
+  try {
+    const res = await fetch("/api/ice-servers");
+    if (res.ok) {
+      _cachedConfig = await res.json();
+    }
+  } catch {
+    // Use default config
+  }
+}
+
+export function getWebRTCConfig(): RTCConfiguration {
+  return _cachedConfig ?? DEFAULT_WEBRTC_CONFIG;
+}
 
 export const VOICE_SUBSCRIBE_RETRY_MS = 1000;
 export const SCREEN_SUBSCRIBE_RETRY_MS = 1000;
