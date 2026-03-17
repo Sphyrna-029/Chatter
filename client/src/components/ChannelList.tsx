@@ -703,7 +703,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         </div>
       )}
 
-      <ScrollArea className={`flex-1 ${panelCollapsed ? "hidden" : ""}`}>
+      <ScrollArea className={`flex-1 min-h-0 ${panelCollapsed ? "hidden" : ""}`}>
         <div className="py-1">
           {/* Uncategorized channels — drop zone for removing from category */}
           <div
