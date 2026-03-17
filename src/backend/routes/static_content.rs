@@ -97,3 +97,7 @@ pub(crate) async fn versions() -> Json<Value> {
         "versions": ["r0.5.0", "r0.6.0", "r0.6.1"]
     }))
 }
+
+pub(crate) async fn build_version() -> Json<Value> {
+    Json(json!({ "version": env!("BUILD_TIMESTAMP") }))
+}

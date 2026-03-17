@@ -24,7 +24,7 @@ use super::{
         watchparty::get_watchparty_state,
         steam::{steam_callback, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
         spotify::{spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink},
-        static_content::{serve_client, serve_invite_page, versions},
+        static_content::{build_version, serve_client, serve_invite_page, versions},
         sync::sync,
         whiteboard::get_strokes,
     },
@@ -52,6 +52,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .nest("/external", external_router)  // Use nest with the new router
            // Matrix versions
            .route("/_matrix/client/versions", get(versions))
+           .route("/api/version", get(build_version))
            // Auth
            .route("/_matrix/client/r0/register", post(register))
            .route("/_matrix/client/r0/login", post(login))

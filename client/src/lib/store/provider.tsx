@@ -7,6 +7,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { useVersionCheck } from "@/hooks/useVersionCheck";
 import { displayUserId } from "@/lib/utils";
 import {
   setAccessToken,
@@ -92,6 +93,7 @@ export function useAppContext() {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  useVersionCheck();
   const [state, dispatch] = useReducer(reducer, initialState);
   const wsRef = useRef<WebSocket | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
