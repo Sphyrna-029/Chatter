@@ -57,6 +57,7 @@ pub async fn build_state() -> Arc<AppState> {
         voice_subscribers: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
         totp_attempts: RwLock::new(HashMap::new()),
+        pending_registrations: RwLock::new(HashMap::new()),
         tank_games: RwLock::new(HashMap::new()),
         watch_party_rooms: RwLock::new(HashMap::new()),
         tug_of_war_games: RwLock::new(HashMap::new()),

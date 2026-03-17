@@ -12,6 +12,15 @@ use webrtc::{
 
 pub(crate) type WsSender = mpsc::UnboundedSender<Message>;
 
+/// Holds registration data in memory until TOTP is verified.
+#[derive(Clone)]
+pub(crate) struct PendingRegistration {
+    pub(crate) password_hash: String,
+    pub(crate) totp_secret: String,
+    pub(crate) is_admin: bool,
+    pub(crate) created_at: f64,
+}
+
 pub(crate) struct ServerSettings {
     pub(crate) invite_only: bool,
     pub(crate) invite_code: String,
@@ -47,6 +56,7 @@ pub struct AppState {
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
+    pub(crate) pending_registrations: RwLock<HashMap<String, PendingRegistration>>,
     pub(crate) tank_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
     pub(crate) tug_of_war_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,

@@ -9,7 +9,7 @@ use super::super::{
         format_user_id, generate_id, get_user_from_token, hash_password, validate_username,
         verify_password,
     },
-    state::{AppState, RefreshTokenRecord, UserRecord},
+    state::{AppState, PendingRegistration, RefreshTokenRecord, UserRecord},
 };
 use axum::{
     extract::State,
@@ -96,14 +96,15 @@ pub(crate) async fn check_username(
 
     let user_id = format_user_id(username);
     let users = state.db.collection::<UserRecord>("users");
-    let exists = users
+    let exists_in_db = users
         .find_one(doc! { "_id": &user_id })
         .await
         .ok()
         .flatten()
         .is_some();
+    let exists_pending = state.pending_registrations.read().await.contains_key(&user_id);
 
-    Ok(Json(json!({ "available": !exists })))
+    Ok(Json(json!({ "available": !exists_in_db && !exists_pending })))
 }
 
 /// GET /api/server/info
@@ -144,10 +145,13 @@ pub(crate) async fn register(
     if req.password.len() < 6 {
         return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
     }
+    if req.password.len() > 64 {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
+    }
 
     let user_id = format_user_id(username);
 
-    // Check if user exists in MongoDB
+    // Check if user exists in MongoDB or is pending TOTP verification
     let users = state.db.collection::<UserRecord>("users");
     if users
         .find_one(doc! { "_id": &user_id })
@@ -164,42 +168,33 @@ pub(crate) async fn register(
 
     let password_hash = hash_password(&req.password);
 
-    // First user to register becomes admin
+    // First user to register becomes admin (count existing + pending)
     let user_count = users.count_documents(doc! {}).await.unwrap_or(0);
-    let is_admin = user_count == 0;
+    let pending_count = state.pending_registrations.read().await.len() as u64;
+    let is_admin = user_count == 0 && pending_count == 0;
 
     // Generate TOTP secret (20 random bytes, base32-encoded)
     let mut secret_bytes = [0u8; 20];
     rand::Rng::fill(&mut rand::thread_rng(), &mut secret_bytes[..]);
     let totp_secret = Secret::Raw(secret_bytes.to_vec()).to_encoded().to_string();
 
-    let user_record = UserRecord {
-        user_id: user_id.clone(),
-        password_hash,
-        avatar_url: String::new(),
-        about: String::new(),
-        banner_url: String::new(),
-        display_name: String::new(),
-        totp_secret: totp_secret.clone(),
-        totp_verified: false,
-        recovery_codes: Vec::new(),
-        custom_status: String::new(),
-        manual_status: None,
-        is_admin,
-        disabled: false,
-        name_font_url: String::new(),
-        must_reset_password: false,
-        steam_id: None,
-        hide_steam_game: false,
-        spotify_refresh_token: None,
-        hide_spotify: false,
-    };
-    users.insert_one(user_record).await.map_err(|_| {
-        error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to create user",
-        )
-    })?;
+    // Store in pending registrations instead of creating the user in DB.
+    // The user will be persisted only after successful TOTP verification.
+    {
+        use super::super::helpers::now_secs;
+        let mut pending = state.pending_registrations.write().await;
+
+        // Clean up stale pending registrations older than 10 minutes
+        let now = now_secs();
+        pending.retain(|_, p| now - p.created_at < 600.0);
+
+        pending.insert(user_id.clone(), PendingRegistration {
+            password_hash,
+            totp_secret: totp_secret.clone(),
+            is_admin,
+            created_at: now,
+        });
+    }
 
     // Build TOTP URI for QR code
     let totp = build_totp(&totp_secret, username)
@@ -255,6 +250,81 @@ pub(crate) async fn totp_verify(
         entry.count += 1;
     }
 
+    // Check if this is a pending registration (account not yet created)
+    let pending = {
+        let pending_map = state.pending_registrations.read().await;
+        pending_map.get(&user_id).cloned()
+    };
+
+    if let Some(pending_reg) = pending {
+        // Verify TOTP against the pending registration's secret
+        let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let totp = build_totp(&pending_reg.totp_secret, username)
+            .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
+
+        if !totp.check_current(&req.code).unwrap_or(false) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Invalid TOTP code"));
+        }
+
+        // Clear attempts on success
+        {
+            let mut attempts = state.totp_attempts.write().await;
+            attempts.remove(&user_id);
+        }
+
+        // Generate recovery codes
+        let (plaintext_codes, hashed_codes) = generate_recovery_codes(5);
+
+        // NOW create the user in the database
+        let users = state.db.collection::<UserRecord>("users");
+        let user_record = UserRecord {
+            user_id: user_id.clone(),
+            password_hash: pending_reg.password_hash,
+            avatar_url: String::new(),
+            about: String::new(),
+            banner_url: String::new(),
+            display_name: String::new(),
+            totp_secret: pending_reg.totp_secret,
+            totp_verified: true,
+            recovery_codes: hashed_codes,
+            custom_status: String::new(),
+            manual_status: None,
+            is_admin: pending_reg.is_admin,
+            disabled: false,
+            name_font_url: String::new(),
+            must_reset_password: false,
+            steam_id: None,
+            hide_steam_game: false,
+            spotify_refresh_token: None,
+            hide_spotify: false,
+        };
+        users.insert_one(user_record).await.map_err(|_| {
+            error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create user")
+        })?;
+
+        // Remove from pending registrations
+        {
+            let mut pending_map = state.pending_registrations.write().await;
+            pending_map.remove(&user_id);
+        }
+
+        // Issue tokens
+        let access_token = create_access_token(&user_id, &state.jwt_secret);
+        let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
+        store_refresh_token(&state, &refresh_token, &user_id).await;
+
+        return Ok(Json(json!({
+            "verified": true,
+            "recovery_codes": plaintext_codes,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user_id": user_id,
+            "is_admin": pending_reg.is_admin,
+            "totp_verified": true
+        })));
+    }
+
+    // Existing user flow (e.g. TOTP setup for existing accounts)
     let users = state.db.collection::<UserRecord>("users");
     let user = users
         .find_one(doc! { "_id": &user_id })
@@ -487,6 +557,9 @@ pub(crate) async fn force_reset_password(
     if req.new_password.len() < 6 {
         return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
     }
+    if req.new_password.len() > 64 {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
+    }
 
     let users = state.db.collection::<UserRecord>("users");
     let user = users
@@ -523,6 +596,9 @@ pub(crate) async fn change_password(
 
     if req.new_password.len() < 6 {
         return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+    }
+    if req.new_password.len() > 64 {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
     }
 
     let users = state.db.collection::<UserRecord>("users");
