@@ -45,6 +45,7 @@ export function AdminDashboard() {
   const [storageLimitMb, setStorageLimitMb] = useState(0);
   const [roomCreationLimit, setRoomCreationLimit] = useState(0);
   const [requireAuthForUploads, setRequireAuthForUploads] = useState(false);
+  const [roomCreationDisabled, setRoomCreationDisabled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordUser, setTempPasswordUser] = useState<string | null>(null);
@@ -66,6 +67,7 @@ export function AdminDashboard() {
         setStorageLimitMb(Math.round(s.storage_limit_bytes / (1024 * 1024)));
         setRoomCreationLimit(s.room_creation_limit);
         setRequireAuthForUploads(s.require_auth_for_uploads);
+        setRoomCreationDisabled(s.room_creation_disabled ?? false);
       }
     } catch (e: any) {
       console.error("Admin load error:", e.message);
@@ -195,6 +197,7 @@ export function AdminDashboard() {
               storageLimitMb={storageLimitMb}
               roomCreationLimit={roomCreationLimit}
               requireAuthForUploads={requireAuthForUploads}
+              roomCreationDisabled={roomCreationDisabled}
               onToggleInviteOnly={async (val) => {
                 try {
                   await apiAdminUpdateSettings({ invite_only: val });
@@ -236,6 +239,14 @@ export function AdminDashboard() {
                 try {
                   await apiAdminUpdateSettings({ require_auth_for_uploads: val });
                   setRequireAuthForUploads(val);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onToggleRoomCreationDisabled={async (val) => {
+                try {
+                  await apiAdminUpdateSettings({ room_creation_disabled: val });
+                  setRoomCreationDisabled(val);
                 } catch (e: any) {
                   alert(e.message);
                 }
@@ -424,12 +435,14 @@ function SettingsTab({
   storageLimitMb,
   roomCreationLimit,
   requireAuthForUploads,
+  roomCreationDisabled,
   onToggleInviteOnly,
   onRefreshInvite,
   onCopyInvite,
   onSaveStorageLimit,
   onSaveRoomCreationLimit,
   onToggleRequireAuthForUploads,
+  onToggleRoomCreationDisabled,
 }: {
   inviteOnly: boolean;
   inviteCode: string;
@@ -437,12 +450,14 @@ function SettingsTab({
   storageLimitMb: number;
   roomCreationLimit: number;
   requireAuthForUploads: boolean;
+  roomCreationDisabled: boolean;
   onToggleInviteOnly: (val: boolean) => void;
   onRefreshInvite: () => void;
   onCopyInvite: () => void;
   onSaveStorageLimit: (mb: number) => void;
   onSaveRoomCreationLimit: (val: number) => void;
   onToggleRequireAuthForUploads: (val: boolean) => void;
+  onToggleRoomCreationDisabled: (val: boolean) => void;
 }) {
   const [localLimit, setLocalLimit] = useState(storageLimitMb);
   const limitChanged = localLimit !== storageLimitMb;
@@ -534,6 +549,39 @@ function SettingsTab({
         </div>
         <p className="text-[11px] text-muted-foreground">
           {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB.`}
+        </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold">Disable Room Creation</h3>
+            <p className="text-xs text-muted-foreground">
+              Prevent all non-admin users from creating new rooms. Server owners can still create rooms.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={roomCreationDisabled}
+            onClick={() => onToggleRoomCreationDisabled(!roomCreationDisabled)}
+            className={cn(
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0",
+              roomCreationDisabled ? "bg-primary" : "bg-muted"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 transform rounded-full bg-background transition-transform",
+                roomCreationDisabled ? "translate-x-6" : "translate-x-1"
+              )}
+            />
+          </button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {roomCreationDisabled
+            ? "Only server owners/admins can create rooms."
+            : "All users can create rooms (subject to the per-user limit below)."}
         </p>
       </div>
 

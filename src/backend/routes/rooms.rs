@@ -4,7 +4,7 @@ use super::super::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
         get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
     },
-    state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord},
+    state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
 use super::channels::ensure_default_channels;
 use axum::{
@@ -149,6 +149,29 @@ pub(crate) async fn create_room(
                 broadcast_to_room(&state, &room_id, &event).await;
 
                 return Ok(Json(json!({"room_id": room_id})));
+            }
+        }
+    }
+
+    // Enforce room creation disabled (non-DM only, admins bypass)
+    if !is_dm {
+        let settings = state.server_settings.read().await;
+        if settings.room_creation_disabled {
+            drop(settings);
+            let is_admin = state
+                .db
+                .collection::<UserRecord>("users")
+                .find_one(doc! { "_id": &user_id })
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.is_admin)
+                .unwrap_or(false);
+            if !is_admin {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Room creation has been disabled by the server owner",
+                ));
             }
         }
     }

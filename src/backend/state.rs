@@ -18,6 +18,7 @@ pub(crate) struct ServerSettings {
     pub(crate) storage_limit_bytes: u64, // 0 = unlimited
     pub(crate) room_creation_limit: u64, // 0 = unlimited
     pub(crate) require_auth_for_uploads: bool,
+    pub(crate) room_creation_disabled: bool,
 }
 
 pub struct AppState {

@@ -400,7 +400,8 @@ pub(crate) async fn admin_get_settings(
         "invite_code": settings.invite_code,
         "storage_limit_bytes": settings.storage_limit_bytes,
         "room_creation_limit": settings.room_creation_limit,
-        "require_auth_for_uploads": settings.require_auth_for_uploads
+        "require_auth_for_uploads": settings.require_auth_for_uploads,
+        "room_creation_disabled": settings.room_creation_disabled
     })))
 }
 
@@ -426,6 +427,9 @@ pub(crate) async fn admin_update_settings(
     }
     if let Some(require_auth) = body.get("require_auth_for_uploads").and_then(|v| v.as_bool()) {
         set_doc.insert("require_auth_for_uploads", require_auth);
+    }
+    if let Some(room_creation_disabled) = body.get("room_creation_disabled").and_then(|v| v.as_bool()) {
+        set_doc.insert("room_creation_disabled", room_creation_disabled);
     }
 
     if set_doc.is_empty() {
@@ -455,6 +459,9 @@ pub(crate) async fn admin_update_settings(
         }
         if let Ok(val) = set_doc.get_bool("require_auth_for_uploads") {
             settings.require_auth_for_uploads = val;
+        }
+        if let Ok(val) = set_doc.get_bool("room_creation_disabled") {
+            settings.room_creation_disabled = val;
         }
     }
 
