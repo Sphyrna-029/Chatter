@@ -283,7 +283,6 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             let room_id = room_id.clone();
             let user_id = user_id.clone();
             Box::pin(async move {
-                println!("screen-pub [{}]: peer connection state -> {:?}", user_id, pc_state);
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
@@ -309,7 +308,6 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             let user_id = user_id.clone();
             Box::pin(async move {
                 let codec = track.codec();
-                println!("screen-pub [{}]: on_track fired, kind={}, ssrc={}", user_id, codec.capability.mime_type, track.ssrc());
                 let codec_capability = RTCRtpCodecCapability {
                     mime_type: codec.capability.mime_type.clone(),
                     clock_rate: codec.capability.clock_rate,
@@ -478,10 +476,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     sharer_user_id: &str,
     sdp: &str,
 ) {
-    println!("screen-sub: {} wants to subscribe to {}'s screen in room {}", viewer_user_id, sharer_user_id, room_id);
-
     if room_id.is_empty() || sharer_user_id.is_empty() || sdp.is_empty() {
-        println!("screen-sub: REJECTED empty fields (room={}, sharer={}, sdp_len={})", room_id.is_empty(), sharer_user_id.is_empty(), sdp.is_empty());
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -494,13 +489,10 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     }
 
     if viewer_user_id == sharer_user_id {
-        println!("screen-sub: REJECTED self-subscribe {} == {}", viewer_user_id, sharer_user_id);
         return;
     }
 
-    let in_voice = user_in_voice_room(&state, room_id, viewer_user_id).await;
-    println!("screen-sub: user_in_voice_room({}) = {}", viewer_user_id, in_voice);
-    if !in_voice {
+    if !user_in_voice_room(&state, room_id, viewer_user_id).await {
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -512,10 +504,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         return;
     }
 
-    let is_sharing = user_is_sharing_screen(&state, room_id, sharer_user_id).await;
-    let pub_exists = { state.screen_publishers.read().await.contains_key(sharer_user_id) };
-    println!("screen-sub: checks for {} -> sharing_flag={}, publisher_exists={}", sharer_user_id, is_sharing, pub_exists);
-    if !is_sharing {
+    if !user_is_sharing_screen(&state, room_id, sharer_user_id).await {
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -559,7 +548,6 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
     let publisher_peer_connection = publisher_state.peer_connection.clone();
 
     let Some(publisher_media_ssrc) = publisher_state.media_ssrc else {
-        println!("screen-sub: SSRC not ready for {}'s screen (viewer: {})", sharer_user_id, viewer_user_id);
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
@@ -570,8 +558,6 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         send_to_user(&state, viewer_user_id, &error).await;
         return;
     };
-
-    println!("screen-sub: SSRC ready ({}), creating subscriber PC for {} -> {}", publisher_media_ssrc, sharer_user_id, viewer_user_id);
 
     let Some(codec_capability) = publisher_state.video_codec.clone() else {
         let error = json!({
@@ -651,7 +637,6 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
             let viewer_user_id = viewer_user_id.clone();
             let sharer_user_id = sharer_user_id.clone();
             Box::pin(async move {
-                println!("screen-sub [{} -> {}]: peer connection state -> {:?}", sharer_user_id, viewer_user_id, pc_state);
                 if matches!(
                     pc_state,
                     RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed

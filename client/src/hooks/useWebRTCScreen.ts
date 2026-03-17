@@ -67,8 +67,12 @@ export function useWebRTCScreen() {
   // Refs to avoid stale closures
   const currentRoomRef = useRef(state.currentRoomId);
   const voiceRoomIdRef = useRef(state.voiceRoomId);
+  const inVoiceChannelRef = useRef(state.inVoiceChannel);
+  const activeScreenSharersRef = useRef(state.activeScreenSharers);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
+  useEffect(() => { inVoiceChannelRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
+  useEffect(() => { activeScreenSharersRef.current = state.activeScreenSharers; }, [state.activeScreenSharers]);
 
   const ensureScreenSub = (sharerId: string) => {
     if (!canSignal(wsRef) || sharerId === state.userId) return;
@@ -141,8 +145,8 @@ export function useWebRTCScreen() {
       screenRetryTimersRef.current.delete(sharerId);
       // Only retry if still in voice and the sharer is still active
       if (
-        state.inVoiceChannel &&
-        state.activeScreenSharers.includes(sharerId) &&
+        inVoiceChannelRef.current &&
+        activeScreenSharersRef.current.includes(sharerId) &&
         sharerId !== state.userId &&
         !screenSubPcsRef.current.has(sharerId) &&
         !pendingScreenSubsRef.current.has(sharerId)
