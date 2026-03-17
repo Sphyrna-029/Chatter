@@ -794,7 +794,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const updateRole = useCallback(async (roomId: string, roleId: string, data: { name?: string; color?: string; position?: number; permissions?: Partial<import("../api").RolePermissions> }) => {
     await apiUpdateRole(roomId, roleId, data);
-  }, []);
+    dispatch({ type: "UPDATE_CUSTOM_ROLE", payload: { role_id: roleId, ...data } });
+  }, [dispatch]);
 
   const deleteRole = useCallback(async (roomId: string, roleId: string) => {
     await apiDeleteRole(roomId, roleId);
