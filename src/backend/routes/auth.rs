@@ -102,7 +102,13 @@ pub(crate) async fn check_username(
         .ok()
         .flatten()
         .is_some();
-    let exists_pending = state.pending_registrations.read().await.contains_key(&user_id);
+    let exists_pending = {
+        use super::super::helpers::now_secs;
+        let mut pending = state.pending_registrations.write().await;
+        let now = now_secs();
+        pending.retain(|_, p| now - p.created_at < 600.0);
+        pending.contains_key(&user_id)
+    };
 
     Ok(Json(json!({ "available": !exists_in_db && !exists_pending })))
 }
@@ -252,7 +258,10 @@ pub(crate) async fn totp_verify(
 
     // Check if this is a pending registration (account not yet created)
     let pending = {
-        let pending_map = state.pending_registrations.read().await;
+        use super::super::helpers::now_secs;
+        let mut pending_map = state.pending_registrations.write().await;
+        let now = now_secs();
+        pending_map.retain(|_, p| now - p.created_at < 600.0);
         pending_map.get(&user_id).cloned()
     };
 
