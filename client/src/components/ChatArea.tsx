@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, type MatrixMessage } from "@/lib/api";
+import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare } from "lucide-react";
@@ -936,48 +936,53 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               ? `# ${state.channels.find((c) => c.channel_id === state.currentChannelId)?.name || "channel"}`
               : roomInfo?.name || "Unnamed Room"}
           </h2>
-          {editingTopic ? (
-            <input
-              ref={topicInputRef}
-              className="w-full max-w-xs mx-auto block text-xs text-center bg-transparent border-b border-primary outline-none text-muted-foreground"
-              value={topicDraft}
-              onChange={(e) => setTopicDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.currentTarget.blur();
-                } else if (e.key === "Escape") {
+          {(() => {
+            const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
+            const channelTopic = currentChannel?.topic || "";
+            return editingTopic ? (
+              <input
+                ref={topicInputRef}
+                className="w-full max-w-xs mx-auto block text-xs text-center bg-transparent border-b border-primary outline-none text-muted-foreground"
+                value={topicDraft}
+                onChange={(e) => setTopicDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.currentTarget.blur();
+                  } else if (e.key === "Escape") {
+                    setEditingTopic(false);
+                  }
+                }}
+                onBlur={async () => {
+                  const trimmed = topicDraft.trim();
+                  if (trimmed !== channelTopic && state.currentRoomId && state.currentChannelId) {
+                    await apiUpdateChannel(state.currentRoomId, state.currentChannelId, { topic: trimmed });
+                    dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: state.currentChannelId, topic: trimmed } });
+                  }
                   setEditingTopic(false);
-                }
-              }}
-              onBlur={() => {
-                const trimmed = topicDraft.trim();
-                if (trimmed !== (roomInfo?.topic || "") && state.currentRoomId) {
-                  updateTopic(state.currentRoomId, trimmed);
-                }
-                setEditingTopic(false);
-              }}
-              autoFocus
-            />
-          ) : (
-            <div
-              className="overflow-hidden max-w-xs mx-auto cursor-pointer"
-              onClick={() => {
-                setTopicDraft(roomInfo?.topic || "");
-                setEditingTopic(true);
-              }}
-              title="Click to edit topic"
-            >
-              {roomInfo?.topic ? (
-                <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
-                  {roomInfo.topic}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground/50 italic">
-                  Click to set a topic
-                </p>
-              )}
-            </div>
-          )}
+                }}
+                autoFocus
+              />
+            ) : (
+              <div
+                className="overflow-hidden max-w-xs mx-auto cursor-pointer"
+                onClick={() => {
+                  setTopicDraft(channelTopic);
+                  setEditingTopic(true);
+                }}
+                title="Click to edit channel topic"
+              >
+                {channelTopic ? (
+                  <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
+                    {channelTopic}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground/50 italic">
+                    Click to set a topic
+                  </p>
+                )}
+              </div>
+            );
+          })()}
         </div>
         <Button
           variant="ghost"
