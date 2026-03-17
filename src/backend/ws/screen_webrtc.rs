@@ -508,7 +508,10 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
         return;
     }
 
-    if !user_is_sharing_screen(&state, room_id, sharer_user_id).await {
+    let is_sharing = user_is_sharing_screen(&state, room_id, sharer_user_id).await;
+    let pub_exists = { state.screen_publishers.read().await.contains_key(sharer_user_id) };
+    println!("screen-sub: checks for {} -> sharing_flag={}, publisher_exists={}", sharer_user_id, is_sharing, pub_exists);
+    if !is_sharing {
         let error = json!({
             "type": "screen_webrtc_error",
             "scope": "subscribe",
