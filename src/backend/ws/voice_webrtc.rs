@@ -1,7 +1,7 @@
 use super::screen_webrtc::user_in_voice_room;
 use crate::backend::{
     constants::VOICE_RTP_BUFFER_SIZE,
-    helpers::{broadcast_to_room, send_to_user},
+    helpers::{broadcast_to_voice_channel, send_to_user},
     state::{AppState, VoicePublisherState, VoiceSubscriberState},
     webrtc::{create_peer_connection, ice_candidate_to_json, parse_ice_candidate},
 };
@@ -264,18 +264,21 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                     }
                 }
 
-                // Notify all voice members that this publisher's track is now ready
-                let room_id = {
+                // Notify only the members of the publisher's voice channel that the
+                // track is ready. Broadcasting to the whole room would cause users
+                // in other voice channels to subscribe, leaking audio across channels.
+                let room_channel = {
                     let publishers = state.voice_publishers.read().await;
-                    publishers.get(&user_id).map(|p| p.room_id.clone())
+                    publishers.get(&user_id).map(|p| (p.room_id.clone(), p.channel_id.clone()))
                 };
-                if let Some(room_id) = room_id {
+                if let Some((room_id, channel_id)) = room_channel {
                     let event = json!({
                         "type": "voice_webrtc_publisher_ready",
                         "room_id": room_id,
+                        "channel_id": channel_id,
                         "user_id": user_id
                     });
-                    broadcast_to_room(&state, &room_id, &event).await;
+                    broadcast_to_voice_channel(&state, &channel_id, &event).await;
                 }
 
                 // Read RTP from publisher and broadcast
@@ -414,13 +417,21 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
         return;
     }
 
-    if !user_in_voice_room(&state, room_id, listener_user_id).await {
+    // Both users must be in the same voice channel. Subscribing across channels
+    // would leak audio to users who have already switched away.
+    let in_same_channel = {
+        let vc = state.voice_channels.read().await;
+        vc.values().any(|members| {
+            members.contains_key(listener_user_id) && members.contains_key(speaker_user_id)
+        })
+    };
+    if !in_same_channel {
         let error = json!({
             "type": "voice_webrtc_error",
             "scope": "subscribe",
             "room_id": room_id,
             "speaker_user_id": speaker_user_id,
-            "detail": "You must be in the room voice channel before subscribing"
+            "detail": "You must be in the same voice channel as the speaker"
         });
         send_to_user(&state, listener_user_id, &error).await;
         return;

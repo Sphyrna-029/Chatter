@@ -264,6 +264,30 @@ pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: 
     }
 }
 
+/// Broadcast a JSON value only to WebSocket-connected users currently in a
+/// specific voice channel. Used to scope events like publisher_ready so
+/// users in other channels are not mistakenly notified.
+pub(crate) async fn broadcast_to_voice_channel(
+    state: &AppState,
+    channel_id: &str,
+    message: &Value,
+) {
+    let members: Vec<String> = {
+        let vc = state.voice_channels.read().await;
+        match vc.get(channel_id) {
+            Some(m) => m.keys().cloned().collect(),
+            None => return,
+        }
+    };
+    let text = message.to_string();
+    let ws_map = state.active_websockets.read().await;
+    for uid in &members {
+        if let Some(tx) = ws_map.get(uid) {
+            let _ = tx.send(Message::Text(text.clone().into()));
+        }
+    }
+}
+
 /// Find the channel marked as `system_channel` for a room (if any).
 /// Returns the channel_id if one exists.
 pub(crate) async fn get_system_channel_id(state: &AppState, room_id: &str) -> Option<String> {

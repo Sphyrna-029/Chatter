@@ -224,8 +224,30 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
             if (uid !== state.userId) createVoiceSub(uid);
           }
         }
+      } else if (msg.type === "voice_user_left") {
+        // Immediately tear down the subscriber PC for a user who left the channel.
+        // Without this, audio continues until the server-side close propagates, and
+        // the failed-state retry loop can re-subscribe them after they've switched channels.
+        const leftId = msg.user_id;
+        if (leftId && leftId !== state.userId) {
+          const oldPc = voiceSubscriberPcsRef.current.get(leftId);
+          if (oldPc) {
+            try { oldPc.close(); } catch {}
+            voiceSubscriberPcsRef.current.delete(leftId);
+          }
+          pendingVoiceSubsRef.current.delete(leftId);
+          const timer = voiceRetryTimersRef.current.get(leftId);
+          if (timer) { clearTimeout(timer); voiceRetryTimersRef.current.delete(leftId); }
+          voiceRetryCountsRef.current.delete(leftId);
+          const audioEl = voiceAudioElementsRef.current.get(leftId);
+          if (audioEl) { audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
+        }
       } else if (msg.type === "voice_webrtc_publisher_ready") {
         if (state.inVoiceChannel && msg.user_id !== state.userId) {
+          // Only subscribe if the publisher is in our voice channel.
+          // When someone switches channels their new publisher fires publisher_ready
+          // for the new channel — users in the old channel must not subscribe.
+          if (msg.channel_id && msg.channel_id !== voiceChannelIdRef.current) return;
           // Clean up any previously failed attempt so we can retry fresh
           const oldPc = voiceSubscriberPcsRef.current.get(msg.user_id);
           if (oldPc) {
