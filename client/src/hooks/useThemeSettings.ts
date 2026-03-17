@@ -94,16 +94,6 @@ export const THEMES: ThemeDefinition[] = [
       primary: "#ff073a",
     },
   },
-  {
-    id: "marathon",
-    name: "Marathon",
-    colors: {
-      background: "#0b0d13",
-      card: "#161a24",
-      accent: "#00e64d",
-      primary: "#d0d4dc",
-    },
-  },
 ];
 
 const STORAGE_KEY = "chatter_theme";
