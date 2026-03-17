@@ -353,52 +353,50 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_leave" => {
             let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
-            let (voice_members, was_screen_sharing) = {
+            let result = {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
-                    if let Some(member) = chan_vc.remove(user_id) {
-                        (
-                            chan_vc.keys().cloned().collect::<Vec<_>>(),
-                            member.screen_sharing,
-                        )
-                    } else {
-                        (chan_vc.keys().cloned().collect::<Vec<_>>(), false)
-                    }
+                    chan_vc.remove(user_id).map(|member| {
+                        (chan_vc.keys().cloned().collect::<Vec<_>>(), member.screen_sharing)
+                    })
                 } else {
-                    (vec![], false)
+                    None
                 }
             };
 
-            // Teardown voice WebRTC
-            teardown_voice_subscriptions_for_listener(&state, user_id).await;
-            let _ = teardown_voice_publisher(&state, user_id).await;
+            // Only teardown and broadcast if the user was actually in this channel.
+            // If result is None the user already left (e.g. via voice_join switching
+            // channels), so doing nothing avoids tearing down the new connection.
+            if let Some((voice_members, was_screen_sharing)) = result {
+                teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                let _ = teardown_voice_publisher(&state, user_id).await;
+                teardown_screen_subscriptions_for_viewer(&state, user_id).await;
+                let publisher_room = teardown_screen_publisher(&state, user_id).await;
 
-            teardown_screen_subscriptions_for_viewer(&state, user_id).await;
-            let publisher_room = teardown_screen_publisher(&state, user_id).await;
-
-            let event = json!({
-                "type": "voice_user_left",
-                "room_id": room_id,
-                "channel_id": channel_id,
-                "user_id": user_id,
-                "voice_members": voice_members
-            });
-            broadcast_to_room(&state, room_id, &event).await;
-
-            if was_screen_sharing {
                 let event = json!({
-                    "type": "screen_share_stopped",
+                    "type": "voice_user_left",
                     "room_id": room_id,
-                    "user_id": user_id
+                    "channel_id": channel_id,
+                    "user_id": user_id,
+                    "voice_members": voice_members
                 });
                 broadcast_to_room(&state, room_id, &event).await;
-            } else if let Some(published_room_id) = publisher_room {
-                let event = json!({
-                    "type": "screen_share_stopped",
-                    "room_id": published_room_id,
-                    "user_id": user_id
-                });
-                broadcast_to_room(&state, &published_room_id, &event).await;
+
+                if was_screen_sharing {
+                    let event = json!({
+                        "type": "screen_share_stopped",
+                        "room_id": room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                } else if let Some(published_room_id) = publisher_room {
+                    let event = json!({
+                        "type": "screen_share_stopped",
+                        "room_id": published_room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, &published_room_id, &event).await;
+                }
             }
         }
         "voice_mute" => {

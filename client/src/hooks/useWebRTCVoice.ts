@@ -213,7 +213,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const joinVoice = useCallback(async (channelId?: string) => {
     if (!state.currentRoomId) return;
 
-    // If already in a voice channel, leave it first
+    // If already in a voice channel, tear down local state first.
+    // Do NOT send voice_leave — the server's voice_join handler already removes
+    // the user from any previous channel atomically, avoiding a race where a
+    // stale voice_leave could arrive after voice_join and destroy the new connection.
     if (inVoiceRef.current) {
       await cleanupScreenRef.current();
 
@@ -232,12 +235,6 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
-      }
-
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const leaveMsg: any = { type: "voice_leave", room_id: voiceRoomIdRef.current || state.currentRoomId };
-        if (voiceChannelIdRef.current) leaveMsg.channel_id = voiceChannelIdRef.current;
-        wsRef.current.send(JSON.stringify(leaveMsg));
       }
     }
 
