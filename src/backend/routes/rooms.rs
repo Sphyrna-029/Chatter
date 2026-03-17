@@ -92,6 +92,7 @@ pub(crate) async fn create_room(
                     password_hash: String::new(),
                     room_type: String::new(),
                     read_only: false,
+                    banner_url: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -267,6 +268,7 @@ pub(crate) async fn create_room(
         password_hash,
         room_type: req.room_type.unwrap_or_default(),
         read_only: false,
+        banner_url: String::new(),
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -781,6 +783,10 @@ pub(crate) async fn update_room_settings(
     if let Some(read_only) = req.read_only {
         set_doc.insert("read_only", read_only);
         content.insert("read_only".to_string(), json!(read_only));
+    }
+    if let Some(ref banner_url) = req.banner_url {
+        set_doc.insert("banner_url", banner_url.as_str());
+        content.insert("banner_url".to_string(), json!(banner_url));
     }
 
     if !set_doc.is_empty() {

@@ -229,6 +229,12 @@ pub(crate) async fn sync(
                 "content": {"read_only": room_data.read_only},
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.banner",
+                "state_key": "",
+                "content": {"banner_url": room_data.banner_url},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

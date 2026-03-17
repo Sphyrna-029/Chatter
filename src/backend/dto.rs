@@ -121,6 +121,7 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) password: Option<String>,
     pub(crate) remove_password: Option<bool>,
     pub(crate) read_only: Option<bool>,
+    pub(crate) banner_url: Option<String>,
 }
 
 #[derive(Deserialize)]

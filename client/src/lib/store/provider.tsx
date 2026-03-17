@@ -369,6 +369,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const readOnlyEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.read_only"
         );
+        const bannerEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.banner"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -385,6 +388,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           has_password: hasPasswordEvent?.content?.has_password || false,
           room_type: roomTypeEvent?.content?.room_type || "text",
           read_only: readOnlyEvent?.content?.read_only || false,
+          banner_url: bannerEvent?.content?.banner_url || "",
         };
       } else {
         roomInfoMap[roomId] = {

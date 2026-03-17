@@ -116,7 +116,7 @@ export type Action =
   | { type: "SET_THREAD_NAME"; payload: { eventId: string; name: string } }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
-  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean; read_only?: boolean } }
+  | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean; read_only?: boolean; banner_url?: string } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
   | { type: "SET_WS_CONNECTED"; payload: boolean }

@@ -3,12 +3,13 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield,
+  Mic, MicOff, PhoneOff, Monitor, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
+import { AuthImage } from "./AuthImage";
 import {
   apiCreateCategory, apiUpdateCategory, apiDeleteCategory,
-  apiUpdateChannel,
+  apiUpdateChannel, apiUploadFile, apiUpdateRoomSettings,
 } from "@/lib/api";
 import type { Channel, ChannelCategory } from "@/lib/api";
 import {
@@ -102,6 +103,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   // Roles dialog
   const [rolesOpen, setRolesOpen] = useState(false);
+  // Banner upload
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   // Mobile collapse — default collapsed on small screens
   const [panelCollapsed, setPanelCollapsed] = useState(() => window.innerWidth < 768);
@@ -640,6 +643,64 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
           </>
         )}
       </div>
+
+      {/* Room banner */}
+      {!panelCollapsed && (
+        <div className="relative shrink-0">
+          {roomInfo?.banner_url ? (
+            <div
+              className={`relative h-24 overflow-hidden ${canManage ? "cursor-pointer" : ""}`}
+              onClick={() => canManage && bannerInputRef.current?.click()}
+            >
+              <AuthImage
+                src={roomInfo.banner_url}
+                alt="Room banner"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-sidebar" />
+              {canManage && (
+                <button
+                  className="absolute top-1 right-1 p-0.5 rounded bg-black/50 text-white/70 hover:text-white opacity-0 hover:opacity-100 transition-opacity"
+                  title="Remove banner"
+                  onClick={async () => {
+                    if (!roomId) return;
+                    await apiUpdateRoomSettings(roomId, { banner_url: "" });
+                    dispatch({ type: "UPDATE_ROOM_SETTINGS", payload: { roomId, banner_url: "" } });
+                  }}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          ) : canManage ? (
+            <button
+              className="w-full flex items-center justify-center gap-1 py-1.5 text-[10px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
+              onClick={() => bannerInputRef.current?.click()}
+              title="Set room banner"
+            >
+              <ImagePlus className="h-3 w-3" /> Set Banner
+            </button>
+          ) : null}
+          <input
+            ref={bannerInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              if (!file || !roomId) return;
+              e.target.value = "";
+              try {
+                const { url } = await apiUploadFile(file);
+                await apiUpdateRoomSettings(roomId, { banner_url: url });
+                dispatch({ type: "UPDATE_ROOM_SETTINGS", payload: { roomId, banner_url: url } });
+              } catch (err: any) {
+                alert(err.message || "Failed to upload banner");
+              }
+            }}
+          />
+        </div>
+      )}
 
       <ScrollArea className={`flex-1 ${panelCollapsed ? "hidden" : ""}`}>
         <div className="py-1">

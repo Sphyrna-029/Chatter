@@ -604,6 +604,7 @@ export interface RoomInfo {
   has_password?: boolean;
   room_type?: string;
   read_only?: boolean;
+  banner_url?: string;
 }
 
 // ─── Channels ───────────────────────────────────────────────────────────────
@@ -993,7 +994,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; banner_url?: string }
 ) {
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,

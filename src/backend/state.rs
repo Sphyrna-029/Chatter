@@ -140,6 +140,8 @@ pub(crate) struct RoomRecord {
     pub(crate) room_type: String,
     #[serde(default)]
     pub(crate) read_only: bool,
+    #[serde(default)]
+    pub(crate) banner_url: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

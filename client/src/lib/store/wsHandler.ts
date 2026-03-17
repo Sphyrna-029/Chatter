@@ -330,6 +330,7 @@ export function createWsMessageHandler(
           unlisted: msg.content?.unlisted,
           has_password: msg.content?.has_password,
           read_only: msg.content?.read_only,
+          banner_url: msg.content?.banner_url,
         },
       });
     }
