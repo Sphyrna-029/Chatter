@@ -28,10 +28,17 @@ services:
       #SPOTIFY_CLIENT_SECRET: spotify integration
       #Set spotify redirect URI to https://yourdomain.com/api/auth/spotify/callback
 
+      ################  WEBRTC  ################
+      #WEBRTC_IP: your-public-ip (required if behind NAT)
+      TURN_URL: "turn:coturn:3478"
+      TURN_USERNAME: ${TURN_USERNAME:-chatter}
+      TURN_PASSWORD: ${TURN_PASSWORD:-changeme}
+
     volumes:
       - uploads:/app/external
     depends_on:
       - mongodb
+      - coturn
     restart: unless-stopped
     #labels:
     #Traefik reverse proxy example config
@@ -40,6 +47,13 @@ services:
     #traefik.http.routers.chatter.rule: "Host(`yourdomain.com`)"
     #traefik.http.routers.chatter.tls.certResolver: "your-tls-resolver"
     #traefik.http.routers.chatter.tls: "true"
+
+  coturn:
+    image: coturn/coturn:latest
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    restart: unless-stopped
 
 volumes:
   mongo_data:

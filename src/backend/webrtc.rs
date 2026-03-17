@@ -65,9 +65,8 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
 
     let mut setting_engine = SettingEngine::default();
 
-    // If WEBRTC_IP is set (e.g. the server's LAN IP), advertise it as a host
-    // candidate so that peers on the same subnet can connect directly without
-    // relying on STUN/TURN.
+    // If WEBRTC_IP is set (e.g. the server's public IP), advertise it as a host
+    // candidate so that remote peers can connect through NAT.
     if let Ok(ip) = std::env::var("WEBRTC_IP") {
         let ips: Vec<String> = ip.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         if !ips.is_empty() {
@@ -75,6 +74,7 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
             setting_engine.set_nat_1to1_ips(ips, RTCIceCandidateType::Host);
         }
     }
+
 
     Arc::new(
         APIBuilder::new()
@@ -86,11 +86,30 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
 }
 
 fn default_webrtc_config() -> RTCConfiguration {
+    let mut ice_servers = vec![RTCIceServer {
+        urls: vec!["stun:stun.l.google.com:19302".to_string()],
+        ..Default::default()
+    }];
+
+    // Add TURN server if configured via environment variables.
+    // Example: TURN_URL=turn:your-server.com:3478
+    //          TURN_USERNAME=user
+    //          TURN_PASSWORD=pass
+    if let Ok(turn_url) = std::env::var("TURN_URL") {
+        if !turn_url.is_empty() {
+            let username = std::env::var("TURN_USERNAME").unwrap_or_default();
+            let credential = std::env::var("TURN_PASSWORD").unwrap_or_default();
+            ice_servers.push(RTCIceServer {
+                urls: turn_url.split(',').map(|s| s.trim().to_string()).collect(),
+                username,
+                credential,
+                ..Default::default()
+            });
+        }
+    }
+
     RTCConfiguration {
-        ice_servers: vec![RTCIceServer {
-            urls: vec!["stun:stun.l.google.com:19302".to_string()],
-            ..Default::default()
-        }],
+        ice_servers,
         ..Default::default()
     }
 }
