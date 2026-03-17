@@ -217,7 +217,11 @@ export function createWsMessageHandler(
             dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
           }
         }
-        if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
+        const inSameChannel = stateRef.current.inVoiceChannel &&
+          (msg.channel_id
+            ? msg.channel_id === stateRef.current.voiceChannelId
+            : msg.room_id === stateRef.current.voiceRoomId);
+        if (inSameChannel || msg.user_id === stateRef.current.userId) {
           new Audio("/external/vc-join.wav").play().catch(() => {});
         }
       }
@@ -232,7 +236,11 @@ export function createWsMessageHandler(
           cur[msg.channel_id] = (cur[msg.channel_id] || []).filter((m: any) => m.userId !== msg.user_id);
           dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
         }
-        if (stateRef.current.inVoiceChannel || msg.user_id === stateRef.current.userId) {
+        const inSameChannelLeave = stateRef.current.inVoiceChannel &&
+          (msg.channel_id
+            ? msg.channel_id === stateRef.current.voiceChannelId
+            : msg.room_id === stateRef.current.voiceRoomId);
+        if (inSameChannelLeave || msg.user_id === stateRef.current.userId) {
           playLeaveSound();
         }
       }
