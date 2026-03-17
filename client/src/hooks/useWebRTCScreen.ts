@@ -66,7 +66,9 @@ export function useWebRTCScreen() {
 
   // Refs to avoid stale closures
   const currentRoomRef = useRef(state.currentRoomId);
+  const voiceRoomIdRef = useRef(state.voiceRoomId);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
+  useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
 
   const ensureScreenSub = (sharerId: string) => {
     if (!canSignal(wsRef) || sharerId === state.userId) return;
@@ -81,7 +83,7 @@ export function useWebRTCScreen() {
       if (!ev.candidate || !canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "screen_webrtc_subscribe_candidate",
-        room_id: state.currentRoomId,
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
         sharer_user_id: sharerId,
         candidate: ev.candidate.toJSON(),
       }));
@@ -123,7 +125,7 @@ export function useWebRTCScreen() {
       await pc.setLocalDescription(offer);
       wsRef.current!.send(JSON.stringify({
         type: "screen_webrtc_subscribe_offer",
-        room_id: state.currentRoomId,
+        room_id: voiceRoomIdRef.current || currentRoomRef.current,
         sharer_user_id: sharerId,
         sdp: offer.sdp,
       }));
