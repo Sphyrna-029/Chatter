@@ -4,6 +4,7 @@ import { useVoiceSettings } from "@/hooks/useVoiceSettings";
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, canSignal } from "@/lib/webrtc";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
+const VOICE_PUBLISH_ANSWER_TIMEOUT_MS = 10_000;
 
 interface UseWebRTCVoiceOptions {
   cleanupScreenRef: React.MutableRefObject<() => Promise<void>>;
@@ -22,6 +23,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const voiceRetryCountsRef = useRef<Map<string, number>>(new Map());
   const voicePublishRetryCountRef = useRef(0);
+  const voicePublishAnswerReceivedRef = useRef(false);
   const createVoicePublisherRef = useRef<() => Promise<void>>(async () => {});
 
   // Refs to avoid stale closures
@@ -76,12 +78,33 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    if (!canSignal(wsRef)) return;
+    voicePublishAnswerReceivedRef.current = false;
     wsRef.current!.send(JSON.stringify({
       type: "voice_webrtc_publish_offer",
       room_id: voiceRoomIdRef.current || currentRoomRef.current,
       channel_id: voiceChannelIdRef.current || undefined,
       sdp: offer.sdp,
     }));
+
+    // Timeout: if no answer arrives within threshold, tear down and retry
+    setTimeout(() => {
+      if (pc !== voicePublisherPcRef.current) return;
+      if (voicePublishAnswerReceivedRef.current) return;
+      console.warn("[voice] Publisher offer timed out waiting for answer, retrying");
+      try { pc.close(); } catch {}
+      voicePublisherPcRef.current = null;
+      const attempt = voicePublishRetryCountRef.current + 1;
+      if (attempt <= VOICE_PUBLISH_MAX_RETRIES && inVoiceRef.current) {
+        voicePublishRetryCountRef.current = attempt;
+        const delay = Math.min(VOICE_PUBLISH_INITIAL_RETRY_MS * 2 ** (attempt - 1), VOICE_PUBLISH_MAX_BACKOFF_MS);
+        setTimeout(async () => {
+          if (!inVoiceRef.current || voicePublisherPcRef.current) return;
+          await fetchIceServers();
+          await createVoicePublisherRef.current();
+        }, delay);
+      }
+    }, VOICE_PUBLISH_ANSWER_TIMEOUT_MS);
   }, []);
   // Keep ref in sync so the publisher failure handler can re-invoke it
   createVoicePublisherRef.current = createVoicePublisher;
@@ -106,6 +129,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     };
 
     pc.ontrack = (ev) => {
+      // Guard: if this PC was replaced, ignore stale track events
+      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
       let audioEl = voiceAudioElementsRef.current.get(speakerUserId);
       if (!audioEl) {
         audioEl = new Audio();
@@ -163,13 +188,20 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       // Guard: if this PC was replaced before the offer resolved, don't send a stale offer
       if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
       await pc.setLocalDescription(offer);
+      if (!canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_offer",
         room_id: voiceRoomIdRef.current || currentRoomRef.current,
         speaker_user_id: speakerUserId,
         sdp: offer.sdp,
       }));
-    }).catch(() => {});
+    }).catch(() => {
+      // Offer creation failed — tear down so retry can start fresh
+      try { pc.close(); } catch {}
+      voiceSubscriberPcsRef.current.delete(speakerUserId);
+      pendingVoiceSubsRef.current.delete(speakerUserId);
+      scheduleVoiceRetry(speakerUserId);
+    });
   }, [state.userId]);
 
   const scheduleVoiceRetryRef = useRef<(speakerUserId: string) => void>(() => {});
@@ -212,6 +244,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     const handler = async (e: Event) => {
       const msg = (e as CustomEvent).detail;
       if (msg.type === "voice_webrtc_publish_answer" && voicePublisherPcRef.current) {
+        voicePublishAnswerReceivedRef.current = true;
         try {
           await voicePublisherPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
         } catch {}
@@ -252,7 +285,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
           if (timer) { clearTimeout(timer); voiceRetryTimersRef.current.delete(leftId); }
           voiceRetryCountsRef.current.delete(leftId);
           const audioEl = voiceAudioElementsRef.current.get(leftId);
-          if (audioEl) { audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
+          if (audioEl) { audioEl.pause(); audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
         }
       } else if (msg.type === "voice_webrtc_publisher_ready") {
         if (state.inVoiceChannel && msg.user_id !== state.userId) {
@@ -292,7 +325,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, createVoiceSub]);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async (channelId?: string) => {
@@ -311,7 +344,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }
       voiceSubscriberPcsRef.current.forEach((pc) => pc.close());
       voiceSubscriberPcsRef.current.clear();
-      voiceAudioElementsRef.current.forEach((el) => { el.srcObject = null; });
+      voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
       voiceAudioElementsRef.current.clear();
       voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
       voiceRetryTimersRef.current.clear();
@@ -365,7 +398,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     }
     voiceSubscriberPcsRef.current.forEach((pc) => pc.close());
     voiceSubscriberPcsRef.current.clear();
-    voiceAudioElementsRef.current.forEach((el) => { el.srcObject = null; });
+    voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
     voiceAudioElementsRef.current.clear();
     voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
     voiceRetryTimersRef.current.clear();

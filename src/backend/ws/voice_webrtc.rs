@@ -37,7 +37,9 @@ pub(crate) async fn teardown_voice_subscriber_pair(
 
     if let Some(subscriber) = subscriber {
         subscriber.forward_task.abort();
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[voice] teardown_voice_subscriber_pair close error: {e}");
+        }
     }
 }
 
@@ -64,7 +66,9 @@ pub(crate) async fn teardown_voice_subscriptions_for_listener(
 
     for subscriber in subscribers {
         subscriber.forward_task.abort();
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[voice] teardown_voice_subscriptions_for_listener close error: {e}");
+        }
     }
 }
 
@@ -91,7 +95,9 @@ pub(crate) async fn teardown_voice_subscriptions_for_speaker(
 
     for subscriber in subscribers {
         subscriber.forward_task.abort();
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[voice] teardown_voice_subscriptions_for_speaker close error: {e}");
+        }
     }
 }
 
@@ -113,7 +119,9 @@ pub(crate) async fn teardown_voice_publisher(
     };
 
     teardown_voice_subscriptions_for_speaker(state, speaker_user_id).await;
-    let _ = publisher.peer_connection.close().await;
+    if let Err(e) = publisher.peer_connection.close().await {
+        eprintln!("[voice] teardown_voice_publisher close error for {speaker_user_id}: {e}");
+    }
     Some(publisher.room_id)
 }
 
@@ -305,9 +313,16 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                 }
 
                 // Read RTP from publisher and broadcast
+                let rtp_user_id = user_id.clone();
                 tokio::spawn(async move {
-                    while let Ok((rtp_packet, _)) = track.read_rtp().await {
-                        let _ = rtp_sender.send(rtp_packet);
+                    loop {
+                        match track.read_rtp().await {
+                            Ok((rtp_packet, _)) => { let _ = rtp_sender.send(rtp_packet); }
+                            Err(e) => {
+                                eprintln!("[voice] RTP read ended for publisher {rtp_user_id}: {e}");
+                                break;
+                            }
+                        }
                     }
                 });
             })
@@ -604,7 +619,9 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
             "detail": format!("Failed adding relay track: {}", err)
         });
         send_to_user(&state, listener_user_id, &error).await;
-        let _ = peer_connection.close().await;
+        if let Err(e) = peer_connection.close().await {
+            eprintln!("[voice] subscribe add_track cleanup close error: {e}");
+        }
         return;
     }
 

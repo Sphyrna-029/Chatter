@@ -90,7 +90,9 @@ pub(crate) async fn teardown_screen_subscriber_pair(
         if let Some(audio_task) = subscriber.audio_forward_task {
             audio_task.abort();
         }
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[screen] teardown_screen_subscriber_pair close error: {e}");
+        }
         send_screen_viewers_update(state, sharer_user_id).await;
     }
 }
@@ -128,7 +130,9 @@ pub(crate) async fn teardown_screen_subscriptions_for_viewer(
         if let Some(audio_task) = subscriber.audio_forward_task {
             audio_task.abort();
         }
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[screen] teardown_screen_subscriptions_for_viewer close error: {e}");
+        }
     }
 
     for sharer_id in affected_sharers {
@@ -162,7 +166,9 @@ pub(crate) async fn teardown_screen_subscriptions_for_sharer(
         if let Some(audio_task) = subscriber.audio_forward_task {
             audio_task.abort();
         }
-        let _ = subscriber.peer_connection.close().await;
+        if let Err(e) = subscriber.peer_connection.close().await {
+            eprintln!("[screen] teardown_screen_subscriptions_for_sharer close error: {e}");
+        }
     }
 }
 
@@ -181,7 +187,9 @@ pub(crate) async fn teardown_screen_publisher(
     };
 
     teardown_screen_subscriptions_for_sharer(state, sharer_user_id).await;
-    let _ = publisher.peer_connection.close().await;
+    if let Err(e) = publisher.peer_connection.close().await {
+        eprintln!("[screen] teardown_screen_publisher close error for {sharer_user_id}: {e}");
+    }
     send_screen_viewers_update(state, sharer_user_id).await;
     Some(publisher.room_id)
 }
@@ -687,7 +695,9 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
                 "detail": format!("Failed adding relay track: {}", err)
             });
             send_to_user(&state, viewer_user_id, &error).await;
-            let _ = peer_connection.close().await;
+            if let Err(e) = peer_connection.close().await {
+                eprintln!("[screen] subscribe add_track cleanup close error: {e}");
+            }
             return;
         }
     };

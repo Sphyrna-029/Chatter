@@ -3,6 +3,8 @@ import { useAppContext, screenStreamsMap } from "@/lib/store";
 import {
   getWebRTCConfig,
   SCREEN_SUBSCRIBE_RETRY_MS,
+  VOICE_SUB_STUCK_NEW_MS,
+  VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
   getScreenSharePublishProfile,
   mungeScreenAudioSdp,
@@ -60,6 +62,7 @@ export function useWebRTCScreen() {
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
   const [screenFps, setScreenFps] = useState<30 | 60>(30);
+  const screenShareStartingRef = useRef(false);
 
   // Ref for frozen detection external stats
   const connStatsRef = useRef<Record<string, PeerStats>>({});
@@ -94,6 +97,8 @@ export function useWebRTCScreen() {
     };
 
     pc.ontrack = (ev) => {
+      // Guard: if this PC was replaced, ignore stale track events
+      if (pc !== screenSubPcsRef.current.get(sharerId)) return;
       // Accumulate tracks into a single stream per sharer.
       let stream = screenStreamsMap.get(sharerId);
       if (stream) {
@@ -111,7 +116,7 @@ export function useWebRTCScreen() {
     // Detect failed or stuck connections and retry
     pc.onconnectionstatechange = () => {
       if (pc !== screenSubPcsRef.current.get(sharerId)) return;
-      if (pc.connectionState === "failed") {
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
         try { pc.close(); } catch { /* noop */ }
         screenSubPcsRef.current.delete(sharerId);
         pendingScreenSubsRef.current.delete(sharerId);
@@ -121,19 +126,50 @@ export function useWebRTCScreen() {
       }
     };
 
+    // Timeout: if still "new" after threshold, signaling was lost — tear down and retry
+    setTimeout(() => {
+      if (pc !== screenSubPcsRef.current.get(sharerId)) return;
+      if (pc.connectionState === "new") {
+        console.warn("[screen-share] Subscription to", sharerId, "stuck in 'new', retrying");
+        try { pc.close(); } catch {}
+        screenSubPcsRef.current.delete(sharerId);
+        pendingScreenSubsRef.current.delete(sharerId);
+        scheduleScreenRetry(sharerId);
+      }
+    }, VOICE_SUB_STUCK_NEW_MS);
+
+    // Timeout: if still "connecting" after threshold, ICE negotiation stuck — retry
+    setTimeout(() => {
+      if (pc !== screenSubPcsRef.current.get(sharerId)) return;
+      if (pc.connectionState === "connecting") {
+        console.warn("[screen-share] Subscription to", sharerId, "stuck in 'connecting', retrying");
+        try { pc.close(); } catch {}
+        screenSubPcsRef.current.delete(sharerId);
+        pendingScreenSubsRef.current.delete(sharerId);
+        scheduleScreenRetry(sharerId);
+      }
+    }, VOICE_SUB_STUCK_CONNECTING_MS);
+
     pc.addTransceiver("video", { direction: "recvonly" });
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.createOffer().then(async (offer) => {
       // Guard: if this PC was replaced before the offer resolved, don't send a stale offer
       if (pc !== screenSubPcsRef.current.get(sharerId)) return;
       await pc.setLocalDescription(offer);
+      if (!canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "screen_webrtc_subscribe_offer",
         room_id: voiceRoomIdRef.current || currentRoomRef.current,
         sharer_user_id: sharerId,
         sdp: offer.sdp,
       }));
-    }).catch(() => { /* noop */ });
+    }).catch(() => {
+      // Offer creation failed — tear down so retry can start fresh
+      try { pc.close(); } catch {}
+      screenSubPcsRef.current.delete(sharerId);
+      pendingScreenSubsRef.current.delete(sharerId);
+      scheduleScreenRetry(sharerId);
+    });
   };
 
   const scheduleScreenRetry = (sharerId: string) => {
@@ -376,6 +412,9 @@ export function useWebRTCScreen() {
   // ─── Screen share publish/stop ─────────────────────────────────────────────
   const startScreenShare = useCallback(async () => {
     if (!state.inVoiceChannel || !canSignal(wsRef)) return;
+    // Prevent concurrent starts
+    if (screenShareStartingRef.current) return;
+    screenShareStartingRef.current = true;
     const profile = getScreenSharePublishProfile(screenFps);
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
@@ -390,15 +429,20 @@ export function useWebRTCScreen() {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
       dispatch({ type: "SCREEN_SHARE_STARTED", payload: state.userId! });
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: state.userId! } });
-      const screenStartMsg: any = { type: "screen_share_start", room_id: state.currentRoomId };
-      if (state.voiceChannelId) screenStartMsg.channel_id = state.voiceChannelId;
-      wsRef.current!.send(JSON.stringify(screenStartMsg));
+      if (canSignal(wsRef)) {
+        const screenStartMsg: any = { type: "screen_share_start", room_id: state.currentRoomId };
+        if (state.voiceChannelId) screenStartMsg.channel_id = state.voiceChannelId;
+        wsRef.current!.send(JSON.stringify(screenStartMsg));
+      }
 
       const screenTrack = stream.getVideoTracks()[0];
       if ("contentHint" in screenTrack) {
         screenTrack.contentHint = profile.contentHint;
       }
-      screenTrack.onended = () => stopScreenShare();
+      // Guard: only stop if this is still the active stream
+      screenTrack.onended = () => {
+        if (screenStreamRef.current === stream) stopScreenShare();
+      };
 
       const pc = new RTCPeerConnection(getWebRTCConfig());
       screenPubPcRef.current = pc;
@@ -423,13 +467,23 @@ export function useWebRTCScreen() {
       await pc.setLocalDescription({ type: "offer", sdp: mungedSdp });
       await tuneScreenVideoSender(videoSender, profile);
 
-      wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, channel_id: state.voiceChannelId || undefined, sdp: mungedSdp }));
+      if (canSignal(wsRef)) {
+        wsRef.current!.send(JSON.stringify({ type: "screen_webrtc_publish_offer", room_id: state.currentRoomId, channel_id: state.voiceChannelId || undefined, sdp: mungedSdp }));
+      }
     } catch (err: unknown) {
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: false } });
+      // Clean up stream if it was acquired but signaling failed
+      if (screenStreamRef.current) {
+        screenStreamRef.current.getTracks().forEach((t) => { t.onended = null; t.stop(); });
+        screenStreamRef.current = null;
+      }
+      if (screenPubPcRef.current) { screenPubPcRef.current.close(); screenPubPcRef.current = null; }
       if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
         const message = err instanceof Error ? err.message : "Unknown error";
         alert("Could not start screen sharing: " + message);
       }
+    } finally {
+      screenShareStartingRef.current = false;
     }
   }, [state.inVoiceChannel, state.currentRoomId, screenFps, state.userId, dispatch, stopScreenShare, wsRef]);
 
