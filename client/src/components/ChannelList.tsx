@@ -447,15 +447,15 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                   >
                     {isLocalMuted && !isMe
                       ? <MicOff className="h-3 w-3 shrink-0 text-yellow-400" />
-                      : m.muted
+                      : m.muted || m.deafened
                         ? <MicOff className="h-3 w-3 shrink-0 text-red-400" />
                         : <Mic className="h-3 w-3 shrink-0 text-green-400" />
                     }
+                    {m.deafened && (
+                      <HeadphoneOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Deafened" />
+                    )}
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
-                      {m.deafened && (
-                        <HeadphoneOff className="h-3 w-3 text-red-400" aria-label="Deafened" />
-                      )}
                       {m.screen_sharing && (
                         <button
                           type="button"

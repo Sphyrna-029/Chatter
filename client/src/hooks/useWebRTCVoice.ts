@@ -375,6 +375,15 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, isDeafened: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
+      // Persist voice session for auto-rejoin on refresh
+      try {
+        sessionStorage.setItem("voiceSession", JSON.stringify({
+          roomId: state.currentRoomId,
+          channelId: resolvedChannelId ?? null,
+          timestamp: Date.now(),
+        }));
+      } catch {}
+
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const joinMsg: any = { type: "voice_join", room_id: state.currentRoomId };
         if (resolvedChannelId) joinMsg.channel_id = resolvedChannelId;
@@ -411,6 +420,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     }
 
     dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null, voiceChannelName: null } });
+    try { sessionStorage.removeItem("voiceSession"); } catch {}
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };

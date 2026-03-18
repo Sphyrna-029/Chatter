@@ -132,6 +132,38 @@ export function ChatLayout() {
     loadRoomGroups();
   }, [loadRooms, loadFriends, loadRoomGroups]);
 
+  // Auto-rejoin voice channel on page refresh (within 30 seconds)
+  const autoRejoinAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (autoRejoinAttemptedRef.current) return;
+    if (!state.wsConnected) return;
+    // Wait until rooms are loaded so selectRoom works
+    if (Object.keys(state.roomInfoMap).length === 0) return;
+    autoRejoinAttemptedRef.current = true;
+
+    try {
+      const raw = sessionStorage.getItem("voiceSession");
+      if (!raw) return;
+      const session = JSON.parse(raw) as { roomId: string; channelId: string | null; timestamp: number };
+      if (Date.now() - session.timestamp > 30_000) {
+        sessionStorage.removeItem("voiceSession");
+        return;
+      }
+      // Clear so we don't retry on subsequent renders
+      sessionStorage.removeItem("voiceSession");
+
+      // Navigate to the room then join voice after a short delay for state to settle
+      selectRoom(session.roomId);
+      setTimeout(() => {
+        const ch = state.channels.find((c) => c.channel_id === session.channelId);
+        if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
+        joinVoiceRef.current?.(session.channelId ?? undefined);
+      }, 500);
+    } catch {
+      sessionStorage.removeItem("voiceSession");
+    }
+  }, [state.wsConnected, state.roomInfoMap, state.channels, selectRoom, dispatch]);
+
   const isDmRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.is_direct === true
     : false;
@@ -605,10 +637,10 @@ function VoiceBar({
       <div className="flex items-center gap-1">
         <button
           onClick={onToggleMute}
-          className={`p-1.5 rounded-md transition-colors ${isMuted ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
-          title={isMuted ? "Unmute" : "Mute"}
+          className={`p-1.5 rounded-md transition-colors ${isMuted || isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
         >
-          {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+          {isMuted || isDeafened ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
         <button
           onClick={onToggleDeafen}
