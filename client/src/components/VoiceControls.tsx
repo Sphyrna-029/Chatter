@@ -109,18 +109,19 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
     screen.updateConnStats(connStats);
   }, [connStats, screen.updateConnStats]);
 
-  // Expose connection quality to parent
-  useEffect(() => {
-    if (connQualityRef) {
-      const pub = connStats["voice-pub"];
-      const pingMs = pub?.rtt != null ? Math.round(pub.rtt * 1000) : null;
-      connQualityRef.current = {
-        quality: state.inVoiceChannel ? computeQuality(connStats) : 0,
-        pingMs: state.inVoiceChannel ? pingMs : null,
-        status: (state.inVoiceChannel ? pub?.connectionState ?? "new" : "closed") as VoiceConnectionStatus,
-      };
-    }
-  }, [connStats, connQualityRef, state.inVoiceChannel]);
+  // Expose connection quality to parent — update on every render so the ref
+  // is always fresh (the ChannelList polls this ref via setInterval).
+  if (connQualityRef) {
+    const pub = connStats["voice-pub"];
+    const pingMs = pub?.rtt != null ? Math.round(pub.rtt * 1000) : null;
+    connQualityRef.current = {
+      quality: state.inVoiceChannel ? computeQuality(connStats) : 0,
+      pingMs: state.inVoiceChannel ? pingMs : null,
+      status: (state.inVoiceChannel
+        ? pub?.connectionState ?? voice.voicePublisherPcRef.current?.connectionState ?? "new"
+        : "closed") as VoiceConnectionStatus,
+    };
+  }
 
   // Speaking detection
   const speakingUsers = useSpeakingDetection(

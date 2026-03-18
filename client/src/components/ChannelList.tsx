@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
@@ -88,8 +88,14 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [topic, setTopic] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("");
 
-  // Connection quality polling
-  const [connData, setConnData] = useState<ConnQualityData>({ quality: 0, pingMs: null, status: "closed" });
+  // Connection quality polling — initialize from the ref so remounts don't flash stale status
+  const [connData, setConnData] = useState<ConnQualityData>(() =>
+    connQualityRef?.current ?? { quality: 0, pingMs: null, status: "closed" }
+  );
+  // Sync immediately on mount (before paint) so we never render stale status
+  useLayoutEffect(() => {
+    if (connQualityRef) setConnData(connQualityRef.current);
+  }, [connQualityRef]);
   useEffect(() => {
     if (!state.inVoiceChannel || !connQualityRef) return;
     setConnData(connQualityRef.current);
@@ -758,22 +764,29 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
       {!panelCollapsed && state.inVoiceChannel && (
         <div className="border-t px-2 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center gap-1 px-1">
-            <div className={`h-2 w-2 rounded-full ${
-              connData.status === "connected" ? "bg-green-500" :
-              connData.status === "failed" || connData.status === "disconnected" ? "bg-red-500" :
-              "bg-yellow-500"
-            } animate-pulse`} />
-            <span className={`text-xs font-medium truncate ${
-              connData.status === "connected" ? "text-green-400" :
-              connData.status === "failed" || connData.status === "disconnected" ? "text-red-400" :
-              "text-yellow-400"
-            }`}>
-              {connData.status === "connected" ? "Voice Connected" :
-               connData.status === "connecting" || connData.status === "new" ? "Connecting..." :
-               connData.status === "failed" ? "Connection Failed" :
-               connData.status === "disconnected" ? "Reconnecting..." :
-               "Voice Connected"}
-            </span>
+            {(() => {
+              // Derive effective status — treat "closed" as connected when we know we're in voice
+              // (can happen briefly on ChannelList remount before the first poll)
+              const s = connData.status === "closed" && state.inVoiceChannel ? "connected" : connData.status;
+              const isOk = s === "connected";
+              const isBad = s === "failed" || s === "disconnected";
+              return (
+                <>
+                  <div className={`h-2 w-2 rounded-full ${
+                    isOk ? "bg-green-500" : isBad ? "bg-red-500" : "bg-yellow-500"
+                  } animate-pulse`} />
+                  <span className={`text-xs font-medium truncate ${
+                    isOk ? "text-green-400" : isBad ? "text-red-400" : "text-yellow-400"
+                  }`}>
+                    {isOk ? "Voice Connected" :
+                     s === "connecting" || s === "new" ? "Connecting..." :
+                     s === "failed" ? "Connection Failed" :
+                     s === "disconnected" ? "Reconnecting..." :
+                     "Voice Connected"}
+                  </span>
+                </>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-1">
             <SignalBars quality={connData.quality} pingMs={connData.pingMs} />

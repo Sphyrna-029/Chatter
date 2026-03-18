@@ -461,22 +461,20 @@ export function ChatLayout() {
                   speakingUsersRef={speakingUsersRef}
                 />
               )}
-              {/* VoiceControls: shown standalone for DMs/rooms without channels, hidden but mounted for WebRTC when channels exist */}
-              {!isForumRoom && !isWhiteboardRoom && (
-                <div className={hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom ? "sr-only" : "contents"}>
-                  <VoiceControls
-                    joinVoiceRef={joinVoiceRef}
-                    leaveVoiceRef={leaveVoiceRef}
-                    toggleMuteRef={toggleMuteRef}
-                    toggleDeafenRef={toggleDeafenRef}
-                    startScreenShareRef={startScreenShareRef}
-                    stopScreenShareRef={stopScreenShareRef}
-                    connQualityRef={connQualityRef}
-                    setUserVolumeRef={setUserVolumeRef}
-                    speakingUsersRef={speakingUsersRef}
-                  />
-                </div>
-              )}
+              {/* VoiceControls: always mounted (sr-only when not needed) so WebRTC/stats stay alive */}
+              <div className={hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
+                <VoiceControls
+                  joinVoiceRef={joinVoiceRef}
+                  leaveVoiceRef={leaveVoiceRef}
+                  toggleMuteRef={toggleMuteRef}
+                  toggleDeafenRef={toggleDeafenRef}
+                  startScreenShareRef={startScreenShareRef}
+                  stopScreenShareRef={stopScreenShareRef}
+                  connQualityRef={connQualityRef}
+                  setUserVolumeRef={setUserVolumeRef}
+                  speakingUsersRef={speakingUsersRef}
+                />
+              </div>
               {isTankWarRoom ? (
                 <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isTugOfWarRoom ? (
