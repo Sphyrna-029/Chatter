@@ -498,6 +498,25 @@ export function ChatLayout() {
               )}
             </div>
             )}
+            {/* Voice bar when user is in voice but viewing a different room */}
+            {state.inVoiceChannel && !isOnVoiceRoom && (
+              <VoiceBar
+                channelName={state.voiceChannelName || "Voice"}
+                roomName={voiceRoomName}
+                occupiedSince={state.voiceChannelId ? state.voiceChannelOccupiedSince[state.voiceChannelId] : undefined}
+                isMuted={state.isMuted}
+                isDeafened={state.isDeafened}
+                isScreenSharing={state.isScreenSharing}
+                onNavigate={() => { if (state.voiceRoomId) selectRoom(state.voiceRoomId); }}
+                onToggleMute={() => toggleMuteRef.current?.()}
+                onToggleDeafen={() => toggleDeafenRef.current?.()}
+                onToggleScreenShare={() => {
+                  if (state.isScreenSharing) stopScreenShareRef.current?.();
+                  else startScreenShareRef.current?.();
+                }}
+                onHangUp={() => leaveVoiceRef.current?.()}
+              />
+            )}
           </SidebarInset>
         </div>
       </SidebarProvider>
@@ -518,25 +537,6 @@ export function ChatLayout() {
       <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} />
       <JoinRoomDialog open={joinOpen} onOpenChange={setJoinOpen} />
 
-      {/* Floating voice bar when user is in voice but viewing a different room */}
-      {state.inVoiceChannel && !isOnVoiceRoom && (
-        <VoiceBar
-          channelName={state.voiceChannelName || "Voice"}
-          roomName={voiceRoomName}
-          occupiedSince={state.voiceChannelId ? state.voiceChannelOccupiedSince[state.voiceChannelId] : undefined}
-          isMuted={state.isMuted}
-          isDeafened={state.isDeafened}
-          isScreenSharing={state.isScreenSharing}
-          onNavigate={() => { if (state.voiceRoomId) selectRoom(state.voiceRoomId); }}
-          onToggleMute={() => toggleMuteRef.current?.()}
-          onToggleDeafen={() => toggleDeafenRef.current?.()}
-          onToggleScreenShare={() => {
-            if (state.isScreenSharing) stopScreenShareRef.current?.();
-            else startScreenShareRef.current?.();
-          }}
-          onHangUp={() => leaveVoiceRef.current?.()}
-        />
-      )}
 
       <Toaster />
     </>
@@ -581,7 +581,7 @@ function VoiceBar({
   onNavigate, onToggleMute, onToggleDeafen, onToggleScreenShare, onHangUp,
 }: VoiceBarProps) {
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-3 bg-zinc-900/95 backdrop-blur border-t border-zinc-700 px-4 py-2">
+    <div className="flex items-center gap-3 shrink-0 bg-zinc-900 border-t border-zinc-700 px-4 py-2">
       {/* Channel name link + timer */}
       <button
         onClick={onNavigate}
