@@ -25,6 +25,12 @@ export const VOICE_SUBSCRIBE_RETRY_MS = 1500;
 export const SCREEN_SUBSCRIBE_RETRY_MS = 1500;
 export const VOICE_SUBSCRIBE_MAX_RETRIES = 8;
 export const VOICE_SUBSCRIBE_MAX_BACKOFF_MS = 30_000;
+// Publisher retries should be fast — it's the critical path for voice
+export const VOICE_PUBLISH_INITIAL_RETRY_MS = 300;
+export const VOICE_PUBLISH_MAX_BACKOFF_MS = 5_000;
+// Timeouts for detecting stuck peer connections
+export const VOICE_SUB_STUCK_NEW_MS = 2500;
+export const VOICE_SUB_STUCK_CONNECTING_MS = 10_000;
 
 export interface PeerStats {
   rtt: number | null;

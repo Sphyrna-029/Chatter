@@ -50,6 +50,9 @@ pub struct AppState {
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied
     pub(crate) voice_channel_occupied_since: RwLock<HashMap<String, u64>>,
+    // Queued subscribe offers waiting for a publisher's audio track to arrive
+    // Key = speaker_user_id
+    pub(crate) pending_voice_subscribes: RwLock<HashMap<String, Vec<PendingVoiceSubscribe>>>,
     pub(crate) user_presence: RwLock<HashMap<String, PresenceRecord>>,
     pub(crate) webrtc_api: Arc<API>,
     pub(crate) screen_publishers: RwLock<HashMap<String, ScreenPublisherState>>,
@@ -508,6 +511,12 @@ pub(crate) struct WatchPartyState {
     pub(crate) position_updated_at: f64,
     pub(crate) host_user_id: String,
     pub(crate) duration_secs: f64,
+}
+
+#[derive(Clone)]
+pub(crate) struct PendingVoiceSubscribe {
+    pub(crate) listener_user_id: String,
+    pub(crate) sdp: String,
 }
 
 #[derive(Clone)]

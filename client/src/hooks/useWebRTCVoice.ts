@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, canSignal } from "@/lib/webrtc";
+import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, canSignal } from "@/lib/webrtc";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
 
@@ -62,7 +62,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         voicePublisherPcRef.current = null;
         if (attempt <= VOICE_PUBLISH_MAX_RETRIES && inVoiceRef.current) {
           voicePublishRetryCountRef.current = attempt;
-          const delay = Math.min(VOICE_SUBSCRIBE_RETRY_MS * 2 ** (attempt - 1), VOICE_SUBSCRIBE_MAX_BACKOFF_MS);
+          const delay = Math.min(VOICE_PUBLISH_INITIAL_RETRY_MS * 2 ** (attempt - 1), VOICE_PUBLISH_MAX_BACKOFF_MS);
           setTimeout(async () => {
             if (!inVoiceRef.current || voicePublisherPcRef.current) return;
             await fetchIceServers();
@@ -134,7 +134,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }
     };
 
-    // Timeout: if still "new" after 5s, the signaling was lost — tear down and retry
+    // Timeout: if still "new" after 2.5s, the signaling was lost — tear down and retry
     setTimeout(() => {
       if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
       if (pc.connectionState === "new") {
@@ -144,7 +144,19 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         pendingVoiceSubsRef.current.delete(speakerUserId);
         scheduleVoiceRetry(speakerUserId);
       }
-    }, 5000);
+    }, VOICE_SUB_STUCK_NEW_MS);
+
+    // Timeout: if still "connecting" after 10s, ICE negotiation is stuck — tear down and retry
+    setTimeout(() => {
+      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
+      if (pc.connectionState === "connecting") {
+        console.warn("[voice] Subscription to", speakerUserId, "stuck in 'connecting', retrying");
+        try { pc.close(); } catch {}
+        voiceSubscriberPcsRef.current.delete(speakerUserId);
+        pendingVoiceSubsRef.current.delete(speakerUserId);
+        scheduleVoiceRetry(speakerUserId);
+      }
+    }, VOICE_SUB_STUCK_CONNECTING_MS);
 
     pc.addTransceiver("audio", { direction: "recvonly" });
     pc.createOffer().then(async (offer) => {

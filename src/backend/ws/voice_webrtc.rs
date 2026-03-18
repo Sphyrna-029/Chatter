@@ -2,7 +2,7 @@ use super::screen_webrtc::user_in_voice_room;
 use crate::backend::{
     constants::VOICE_RTP_BUFFER_SIZE,
     helpers::{broadcast_to_voice_channel, send_to_user},
-    state::{AppState, VoicePublisherState, VoiceSubscriberState},
+    state::{AppState, PendingVoiceSubscribe, VoicePublisherState, VoiceSubscriberState},
     webrtc::{create_peer_connection, ice_candidate_to_json, parse_ice_candidate},
 };
 use serde_json::{json, Value};
@@ -103,6 +103,9 @@ pub(crate) async fn teardown_voice_publisher(
         let mut publishers = state.voice_publishers.write().await;
         publishers.remove(speaker_user_id)
     };
+
+    // Clear any queued subscribe offers waiting on this publisher's track
+    state.pending_voice_subscribes.write().await.remove(speaker_user_id);
 
     let publisher = match publisher {
         Some(p) => p,
@@ -271,14 +274,34 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                     let publishers = state.voice_publishers.read().await;
                     publishers.get(&user_id).map(|p| (p.room_id.clone(), p.channel_id.clone()))
                 };
-                if let Some((room_id, channel_id)) = room_channel {
+                if let Some((ref room_id, ref channel_id)) = room_channel {
                     let event = json!({
                         "type": "voice_webrtc_publisher_ready",
                         "room_id": room_id,
                         "channel_id": channel_id,
                         "user_id": user_id
                     });
-                    broadcast_to_voice_channel(&state, &channel_id, &event).await;
+                    broadcast_to_voice_channel(&state, channel_id, &event).await;
+                }
+
+                // Drain any subscribe offers that arrived before the track was ready.
+                // These were queued instead of rejected, so subscribers don't have to
+                // retry with backoff — they get fulfilled instantly.
+                let pending_subs = {
+                    let mut pending = state.pending_voice_subscribes.write().await;
+                    pending.remove(&user_id).unwrap_or_default()
+                };
+                if !pending_subs.is_empty() {
+                    let room_id = room_channel.as_ref().map(|(r, _)| r.as_str()).unwrap_or("");
+                    for sub in pending_subs {
+                        handle_voice_webrtc_subscribe_offer(
+                            state.clone(),
+                            &sub.listener_user_id,
+                            room_id,
+                            &user_id,
+                            &sub.sdp,
+                        ).await;
+                    }
                 }
 
                 // Read RTP from publisher and broadcast
@@ -466,28 +489,24 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
         return;
     }
 
-    let Some(codec_capability) = publisher_state.audio_codec.clone() else {
-        let error = json!({
-            "type": "voice_webrtc_error",
-            "scope": "subscribe",
-            "room_id": room_id,
-            "speaker_user_id": speaker_user_id,
-            "detail": "Speaker audio track not ready yet; retry shortly"
-        });
-        send_to_user(&state, listener_user_id, &error).await;
-        return;
-    };
-
-    let Some(publisher_rtp_sender) = publisher_state.rtp_sender.clone() else {
-        let error = json!({
-            "type": "voice_webrtc_error",
-            "scope": "subscribe",
-            "room_id": room_id,
-            "speaker_user_id": speaker_user_id,
-            "detail": "Speaker RTP stream not ready yet; retry shortly"
-        });
-        send_to_user(&state, listener_user_id, &error).await;
-        return;
+    let (codec_capability, publisher_rtp_sender) = match (
+        publisher_state.audio_codec.clone(),
+        publisher_state.rtp_sender.clone(),
+    ) {
+        (Some(codec), Some(rtp)) => (codec, rtp),
+        _ => {
+            // Track not ready yet — queue the subscribe and it will be fulfilled
+            // automatically when the publisher's on_track fires. No error sent to
+            // client, no backoff retry needed.
+            let mut pending = state.pending_voice_subscribes.write().await;
+            pending.entry(speaker_user_id.to_string()).or_default().push(
+                PendingVoiceSubscribe {
+                    listener_user_id: listener_user_id.to_string(),
+                    sdp: sdp.to_string(),
+                },
+            );
+            return;
+        }
     };
 
     teardown_voice_subscriber_pair(&state, listener_user_id, speaker_user_id).await;

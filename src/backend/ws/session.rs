@@ -342,14 +342,22 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             });
             broadcast_to_room(&state, room_id, &event).await;
 
-            // Send list of existing voice publishers to the new joiner
+            // Send list of existing voice publishers to the new joiner.
+            // Only include publishers whose audio track is already ready (has codec).
+            // Publishers still negotiating will send publisher_ready when their
+            // track arrives, triggering subscription at that point.
             let existing_publishers: Vec<String> = {
                 let publishers = state.voice_publishers.read().await;
                 let vc = state.voice_channels.read().await;
                 if let Some(chan_vc) = vc.get(channel_id) {
                     chan_vc
                         .keys()
-                        .filter(|uid| uid.as_str() != user_id && publishers.contains_key(*uid))
+                        .filter(|uid| {
+                            uid.as_str() != user_id
+                                && publishers
+                                    .get(*uid)
+                                    .map_or(false, |p| p.audio_codec.is_some())
+                        })
                         .cloned()
                         .collect()
                 } else {
