@@ -218,6 +218,9 @@ export function createWsMessageHandler(
             return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
           });
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
+          if (msg.occupied_since) {
+            dispatch({ type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE", payload: { channelId: msg.channel_id, since: msg.occupied_since as number } });
+          }
         }
         const inSameChannel = stateRef.current.inVoiceChannel &&
           (msg.channel_id
@@ -240,6 +243,7 @@ export function createWsMessageHandler(
             return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
           });
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
+          dispatch({ type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE", payload: { channelId: msg.channel_id, since: msg.occupied_since as number | null ?? null } });
         }
         const inSameChannelLeave = stateRef.current.inVoiceChannel &&
           (msg.channel_id

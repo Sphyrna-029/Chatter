@@ -262,7 +262,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             // channel in one write-lock hold. This prevents a second voice_join from racing
             // in between the removal and the insert, which caused users to appear in two
             // channels simultaneously.
-            let (old_channels, voice_members) = {
+            let (old_channels, voice_members, channel_was_empty) = {
                 let mut vc = state.voice_channels.write().await;
                 let mut old_channels: Vec<(String, Vec<String>, bool)> = Vec::new();
                 for (old_cid, members) in vc.iter_mut() {
@@ -274,6 +274,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     }
                 }
                 let chan_vc = vc.entry(channel_id.to_string()).or_insert_with(HashMap::new);
+                let channel_was_empty = chan_vc.is_empty();
                 chan_vc.insert(
                     user_id.to_string(),
                     VoiceMemberState {
@@ -283,7 +284,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
-                (old_channels, voice_members)
+                (old_channels, voice_members, channel_was_empty)
+            };
+
+            // Record when this channel became occupied (0 -> 1 members)
+            let occupied_since_ms = if channel_was_empty {
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+                state.voice_channel_occupied_since.write().await.insert(channel_id.to_string(), now_ms);
+                now_ms
+            } else {
+                state.voice_channel_occupied_since.read().await.get(channel_id).copied().unwrap_or(0)
             };
 
             // Teardowns and broadcasts happen after the lock is released
@@ -324,7 +337,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "room_id": room_id,
                 "channel_id": channel_id,
                 "user_id": user_id,
-                "voice_members": voice_members
+                "voice_members": voice_members,
+                "occupied_since": occupied_since_ms
             });
             broadcast_to_room(&state, room_id, &event).await;
 
@@ -374,12 +388,21 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let publisher_room = teardown_screen_publisher(&state, user_id).await;
 
+                // Clear occupied_since when channel empties
+                let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
+                    state.voice_channel_occupied_since.write().await.remove(channel_id);
+                    None
+                } else {
+                    state.voice_channel_occupied_since.read().await.get(channel_id).copied()
+                };
+
                 let event = json!({
                     "type": "voice_user_left",
                     "room_id": room_id,
                     "channel_id": channel_id,
                     "user_id": user_id,
-                    "voice_members": voice_members
+                    "voice_members": voice_members,
+                    "occupied_since": occupied_since_ms
                 });
                 broadcast_to_room(&state, room_id, &event).await;
 
@@ -1435,23 +1458,33 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
 
     let mut stopped_screen_rooms = HashSet::new();
 
-    for (room_id, was_screen_sharing, voice_members) in voice_rooms {
+    for (room_or_channel_id, was_screen_sharing, voice_members) in voice_rooms {
+        // Clear occupied_since if channel is now empty
+        let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
+            state.voice_channel_occupied_since.write().await.remove(&room_or_channel_id);
+            None
+        } else {
+            state.voice_channel_occupied_since.read().await.get(&room_or_channel_id).copied()
+        };
+
         let event = json!({
             "type": "voice_user_left",
-            "room_id": room_id,
+            "room_id": room_or_channel_id,
+            "channel_id": room_or_channel_id,
             "user_id": user_id,
-            "voice_members": voice_members
+            "voice_members": voice_members,
+            "occupied_since": occupied_since_ms
         });
-        broadcast_to_room(state, &room_id, &event).await;
+        broadcast_to_room(state, &room_or_channel_id, &event).await;
 
         if was_screen_sharing {
             let event = json!({
                 "type": "screen_share_stopped",
-                "room_id": room_id,
+                "room_id": room_or_channel_id,
                 "user_id": user_id
             });
-            broadcast_to_room(state, &room_id, &event).await;
-            stopped_screen_rooms.insert(room_id);
+            broadcast_to_room(state, &room_or_channel_id, &event).await;
+            stopped_screen_rooms.insert(room_or_channel_id);
         }
     }
 

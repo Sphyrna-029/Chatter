@@ -542,6 +542,7 @@ export async function apiGetVoiceMembers(roomId: string) {
   return res.json() as Promise<{
     voice_members: VoiceMember[];
     voice_channels?: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]>;
+    occupied_since?: Record<string, number>;
   }>;
 }
 

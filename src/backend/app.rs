@@ -49,6 +49,7 @@ pub async fn build_state() -> Arc<AppState> {
         banned_users: RwLock::new(banned_users),
         active_websockets: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
+        voice_channel_occupied_since: RwLock::new(HashMap::new()),
         user_presence: RwLock::new(HashMap::new()),
         webrtc_api,
         screen_publishers: RwLock::new(HashMap::new()),

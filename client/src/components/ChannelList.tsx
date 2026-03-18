@@ -58,6 +58,22 @@ function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: n
   );
 }
 
+function VoiceTimer({ since }: { since: number }) {
+  const [elapsed, setElapsed] = useState(() => Date.now() - since);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - since), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  const totalSecs = Math.floor(elapsed / 1000);
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  const str = h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+  return <span className="text-green-400 text-[10px] font-mono ml-1 shrink-0">{str}</span>;
+}
+
 export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
@@ -373,6 +389,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const renderChannel = (ch: Channel) => {
     const isVoice = ch.channel_type === "voice";
     const members = isVoice ? (state.voiceChannelMembers[ch.channel_id] || []) : [];
+    const occupiedSince = isVoice && members.length > 0 ? state.voiceChannelOccupiedSince[ch.channel_id] : undefined;
 
     return (
       <div key={ch.channel_id} onDragEnd={handleDragEnd} className="mt-1">
@@ -410,6 +427,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                 : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
             }
             showGrip={canManage}
+            badge={occupiedSince ? <VoiceTimer since={occupiedSince} /> : undefined}
           />
         </div>
         {isVoice && members.length > 0 && (
@@ -1025,6 +1043,7 @@ function ChannelItem({
   onDelete,
   icon,
   showGrip,
+  badge,
 }: {
   channel: { channel_id: string; name: string; topic?: string };
   isSelected: boolean;
@@ -1036,6 +1055,7 @@ function ChannelItem({
   onDelete: () => void;
   icon: React.ReactNode;
   showGrip?: boolean;
+  badge?: React.ReactNode;
 }) {
   const unreadHighlight = !isSelected && hasUnread;
   return (
@@ -1055,6 +1075,7 @@ function ChannelItem({
       )}
       {icon}
       <span className="truncate text-sm">{channel.name}</span>
+      {badge}
       {(mentionCount ?? 0) > 0 && (
         <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shrink-0">
           {mentionCount! > 99 ? "99+" : mentionCount}

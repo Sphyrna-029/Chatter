@@ -34,6 +34,7 @@ export function reducer(state: AppState, action: Action): AppState {
         voiceMembers: preserveVoice ? state.voiceMembers : [],
         voiceMemberStates: preserveVoice ? state.voiceMemberStates : {},
         voiceChannelMembers: preserveVoice ? state.voiceChannelMembers : {},
+        voiceChannelOccupiedSince: preserveVoice ? state.voiceChannelOccupiedSince : {},
         activeScreenSharers: preserveVoice ? state.activeScreenSharers : [],
         screenViewerOpen: preserveVoice ? state.screenViewerOpen : false,
         selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
@@ -502,6 +503,22 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload.channelId]: action.payload.members,
         },
       };
+    case "SET_VOICE_CHANNEL_OCCUPIED_SINCE":
+      return { ...state, voiceChannelOccupiedSince: action.payload };
+    case "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE": {
+      if (action.payload.since == null) {
+        const next = { ...state.voiceChannelOccupiedSince };
+        delete next[action.payload.channelId];
+        return { ...state, voiceChannelOccupiedSince: next };
+      }
+      return {
+        ...state,
+        voiceChannelOccupiedSince: {
+          ...state.voiceChannelOccupiedSince,
+          [action.payload.channelId]: action.payload.since,
+        },
+      };
+    }
     case "SET_CHANNEL_MENTION":
       return {
         ...state,

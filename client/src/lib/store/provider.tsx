@@ -460,8 +460,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             // Only show voice members for the room being viewed — don't carry
             // over members from a different room's voice channels.
             dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
+            dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: (voiceData.occupied_since as Record<string, number>) || {} });
           } else {
             dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: {} });
+            dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: {} });
           }
         } catch {}
       }
@@ -741,6 +743,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }));
         }
         dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
+        dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: (voiceData.occupied_since as Record<string, number>) || {} });
       }
     } catch {}
   }, []);

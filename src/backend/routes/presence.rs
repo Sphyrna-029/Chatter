@@ -45,10 +45,12 @@ pub(crate) async fn get_voice_channel_status(
     }
 
     let vc = state.voice_channels.read().await;
+    let occupied_since_map = state.voice_channel_occupied_since.read().await;
 
     // Build voice_members list (flat, for backward compat) and voice_channels map (by channel_id)
     let mut voice_members: Vec<Value> = Vec::new();
     let mut voice_channels_map = serde_json::Map::new();
+    let mut occupied_since_out = serde_json::Map::new();
 
     // Also check the room_id key for backward compat (pre-channels data)
     let mut keys_to_check = channel_ids.clone();
@@ -70,6 +72,9 @@ pub(crate) async fn get_voice_channel_status(
             }
             if !channel_members.is_empty() {
                 voice_channels_map.insert(key.clone(), json!(channel_members));
+                if let Some(&since) = occupied_since_map.get(key) {
+                    occupied_since_out.insert(key.clone(), json!(since));
+                }
             }
         }
     }
@@ -77,7 +82,8 @@ pub(crate) async fn get_voice_channel_status(
     Ok(Json(json!({
         "room_id": room_id,
         "voice_members": voice_members,
-        "voice_channels": Value::Object(voice_channels_map)
+        "voice_channels": Value::Object(voice_channels_map),
+        "occupied_since": Value::Object(occupied_since_out)
     })))
 }
 

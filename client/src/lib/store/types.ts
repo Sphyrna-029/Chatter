@@ -44,6 +44,8 @@ export interface AppState {
   screenViewerOpen: boolean;
   selectedScreenSharer: string | null;
   screenViewers: Record<string, string[]>;
+  // Voice channel occupied-since timestamps (ms epoch), keyed by channel_id
+  voiceChannelOccupiedSince: Record<string, number>;
   // UI
   roomMentions: Record<string, number>;
   roomUnreadCounts: Record<string, number>;
@@ -157,6 +159,8 @@ export type Action =
   | { type: "REMOVE_CHANNEL"; payload: string }
   | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> }
   | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[] } }
+  | { type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: Record<string, number> }
+  | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string };
@@ -191,6 +195,7 @@ export const initialState: AppState = {
   screenViewerOpen: false,
   selectedScreenSharer: null,
   screenViewers: {},
+  voiceChannelOccupiedSince: {},
   roomMentions: {},
   roomUnreadCounts: {},
   channelUnreadCounts: {},
