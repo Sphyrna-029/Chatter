@@ -406,7 +406,7 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {hasChannels && !isForumRoom && !isWhiteboardRoom && !isTugOfWarRoom && !isWatchPartyRoom && (
+              {hasChannels && !isForumRoom && !isWhiteboardRoom && !isTankWarRoom && !isTugOfWarRoom && !isWatchPartyRoom && (
                 <ChannelList
                   onJoinVoiceChannel={(channelId) => {
                     const ch = state.channels.find((c) => c.channel_id === channelId);
@@ -431,7 +431,7 @@ export function ChatLayout() {
               )}
               {/* VoiceControls: shown standalone for DMs/rooms without channels, hidden but mounted for WebRTC when channels exist */}
               {!isForumRoom && !isWhiteboardRoom && (
-                <div className={hasChannels ? "sr-only" : "contents"}>
+                <div className={hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom ? "sr-only" : "contents"}>
                   <VoiceControls
                     joinVoiceRef={joinVoiceRef}
                     leaveVoiceRef={leaveVoiceRef}
