@@ -89,10 +89,11 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [createCategoryId, setCreateCategoryId] = useState("");
 
   // Connection quality polling
-  const [connData, setConnData] = useState<ConnQualityData>({ quality: 0, pingMs: null });
+  const [connData, setConnData] = useState<ConnQualityData>({ quality: 0, pingMs: null, status: "closed" });
   useEffect(() => {
     if (!state.inVoiceChannel || !connQualityRef) return;
-    const id = setInterval(() => setConnData(connQualityRef.current), 2000);
+    setConnData(connQualityRef.current);
+    const id = setInterval(() => setConnData(connQualityRef.current), 500);
     return () => clearInterval(id);
   }, [state.inVoiceChannel, connQualityRef]);
 
@@ -757,9 +758,21 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
       {!panelCollapsed && state.inVoiceChannel && (
         <div className="border-t px-2 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center gap-1 px-1">
-            <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-            <span className="text-xs text-green-400 font-medium truncate">
-              Voice Connected
+            <div className={`h-2 w-2 rounded-full ${
+              connData.status === "connected" ? "bg-green-500" :
+              connData.status === "failed" || connData.status === "disconnected" ? "bg-red-500" :
+              "bg-yellow-500"
+            } animate-pulse`} />
+            <span className={`text-xs font-medium truncate ${
+              connData.status === "connected" ? "text-green-400" :
+              connData.status === "failed" || connData.status === "disconnected" ? "text-red-400" :
+              "text-yellow-400"
+            }`}>
+              {connData.status === "connected" ? "Voice Connected" :
+               connData.status === "connecting" || connData.status === "new" ? "Connecting..." :
+               connData.status === "failed" ? "Connection Failed" :
+               connData.status === "disconnected" ? "Reconnecting..." :
+               "Voice Connected"}
             </span>
           </div>
           <div className="flex items-center gap-1">

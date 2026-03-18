@@ -115,7 +115,7 @@ export function ChatLayout() {
   const toggleMuteRef = useRef<(() => void) | null>(null);
   const toggleDeafenRef = useRef<(() => void) | null>(null);
   const startScreenShareRef = useRef<(() => void) | null>(null);
-  const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null });
+  const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null, status: "closed" });
   const stopScreenShareRef = useRef<(() => void) | null>(null);
   const setUserVolumeRef = useRef<((userId: string, vol: number) => void) | null>(null);
   const speakingUsersRef = useRef<Set<string>>(new Set());
