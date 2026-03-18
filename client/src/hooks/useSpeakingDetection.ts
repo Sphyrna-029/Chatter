@@ -9,7 +9,8 @@ export function useSpeakingDetection(
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
   const audioContextRef = useRef<AudioContext | null>(null);
   const localAnalyserRef = useRef<AnalyserNode | null>(null);
-  const remoteAnalysersRef = useRef<Map<string, { analyser: AnalyserNode; source: MediaStreamAudioSourceNode }>>(new Map());
+  const localStreamIdRef = useRef<string | null>(null);
+  const remoteAnalysersRef = useRef<Map<string, { analyser: AnalyserNode; source: MediaStreamAudioSourceNode; streamId: string }>>(new Map());
 
   useEffect(() => {
     if (!inVoiceChannel) {
@@ -17,6 +18,7 @@ export function useSpeakingDetection(
       remoteAnalysersRef.current.forEach(({ source }) => { try { source.disconnect(); } catch {} });
       remoteAnalysersRef.current.clear();
       localAnalyserRef.current = null;
+      localStreamIdRef.current = null;
       if (audioContextRef.current) {
         audioContextRef.current.close().catch(() => {});
         audioContextRef.current = null;
@@ -29,38 +31,74 @@ export function useSpeakingDetection(
     const ctx = new AudioContext();
     audioContextRef.current = ctx;
 
-    // Set up local mic analyser
-    if (localStreamRef.current) {
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      const source = ctx.createMediaStreamSource(localStreamRef.current);
-      source.connect(analyser);
-      localAnalyserRef.current = analyser;
-    }
-
     const dataArray = new Uint8Array(128);
     let rafId: number;
 
     const detect = () => {
+      if (ctx.state === "closed") return;
       const next = new Set<string>();
 
-      // Check local mic
-      if (localAnalyserRef.current && userId) {
-        localAnalyserRef.current.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        if (sum / dataArray.length > SPEAKING_THRESHOLD) {
-          next.add(userId);
+      // Lazily attach local mic analyser when the stream becomes available
+      // (or re-attach if the stream changed, e.g. after rejoin)
+      const localStream = localStreamRef.current;
+      if (localStream && userId) {
+        if (localStream.id !== localStreamIdRef.current) {
+          try {
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            const source = ctx.createMediaStreamSource(localStream);
+            source.connect(analyser);
+            localAnalyserRef.current = analyser;
+            localStreamIdRef.current = localStream.id;
+          } catch {}
+        }
+        if (localAnalyserRef.current) {
+          localAnalyserRef.current.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          if (sum / dataArray.length > SPEAKING_THRESHOLD) {
+            next.add(userId);
+          }
         }
       }
 
-      // Check remote peers
-      remoteAnalysersRef.current.forEach(({ analyser }, uid) => {
-        analyser.getByteFrequencyData(dataArray);
-        let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        if (sum / dataArray.length > SPEAKING_THRESHOLD) {
-          next.add(uid);
+      // Lazily attach remote analysers and detect speech in one pass.
+      // This handles new audio elements (from ontrack) and stream replacements
+      // (from subscriber PC retries) without needing a separate useEffect.
+      voiceAudioElementsRef.current.forEach((audioEl, uid) => {
+        const stream = audioEl.srcObject as MediaStream | null;
+        if (!stream) return;
+
+        const existing = remoteAnalysersRef.current.get(uid);
+        // Attach a new analyser if we don't have one for this user, or if the
+        // underlying stream changed (subscriber PC was torn down and recreated).
+        if (!existing || existing.streamId !== stream.id) {
+          if (existing) { try { existing.source.disconnect(); } catch {} }
+          try {
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            const source = ctx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            remoteAnalysersRef.current.set(uid, { analyser, source, streamId: stream.id });
+          } catch {}
+        }
+
+        const entry = remoteAnalysersRef.current.get(uid);
+        if (entry) {
+          entry.analyser.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          if (sum / dataArray.length > SPEAKING_THRESHOLD) {
+            next.add(uid);
+          }
+        }
+      });
+
+      // Remove analysers for users who left (no longer in the audio elements map)
+      remoteAnalysersRef.current.forEach(({ source }, uid) => {
+        if (!voiceAudioElementsRef.current.has(uid)) {
+          try { source.disconnect(); } catch {}
+          remoteAnalysersRef.current.delete(uid);
         }
       });
 
@@ -80,29 +118,11 @@ export function useSpeakingDetection(
       remoteAnalysersRef.current.forEach(({ source }) => { try { source.disconnect(); } catch {} });
       remoteAnalysersRef.current.clear();
       localAnalyserRef.current = null;
+      localStreamIdRef.current = null;
       ctx.close().catch(() => {});
       audioContextRef.current = null;
     };
   }, [inVoiceChannel, userId]);
-
-  // Attach analysers to remote audio streams when they arrive
-  useEffect(() => {
-    if (!inVoiceChannel || !audioContextRef.current) return;
-
-    voiceAudioElementsRef.current.forEach((audioEl, uid) => {
-      if (remoteAnalysersRef.current.has(uid)) return;
-      const stream = audioEl.srcObject as MediaStream | null;
-      if (!stream) return;
-      try {
-        const ctx = audioContextRef.current!;
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        const source = ctx.createMediaStreamSource(stream);
-        source.connect(analyser);
-        remoteAnalysersRef.current.set(uid, { analyser, source });
-      } catch {}
-    });
-  });
 
   return speakingUsers;
 }
