@@ -377,7 +377,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current = null;
     }
 
-    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null } });
+    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null, voiceChannelName: null } });
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };

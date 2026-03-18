@@ -33,6 +33,7 @@ export interface AppState {
   isDeafened: boolean;
   voiceInputMode: "open" | "ptt";
   voiceRoomId: string | null;
+  voiceChannelName: string | null;
   voiceMembers: string[];
   voiceMemberStates: Record<
     string,
@@ -99,7 +100,7 @@ export type Action =
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
-  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "voiceChannelId">> }
+  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "voiceChannelId" | "voiceChannelName">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
@@ -188,6 +189,7 @@ export const initialState: AppState = {
   isDeafened: false,
   voiceInputMode: "open",
   voiceRoomId: null,
+  voiceChannelName: null,
   voiceMembers: [],
   voiceMemberStates: {},
   isScreenSharing: false,

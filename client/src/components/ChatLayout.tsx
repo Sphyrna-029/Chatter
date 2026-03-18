@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { WifiOff, ChevronRight, Menu, Users } from "lucide-react";
+import { WifiOff, ChevronRight, Menu, Users, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { AdminDashboard } from "./AdminDashboard";
@@ -406,9 +406,11 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {hasChannels && !isForumRoom && !isWhiteboardRoom && (
+              {hasChannels && !isForumRoom && !isWhiteboardRoom && !isTugOfWarRoom && !isWatchPartyRoom && (
                 <ChannelList
                   onJoinVoiceChannel={(channelId) => {
+                    const ch = state.channels.find((c) => c.channel_id === channelId);
+                    if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
                     joinVoiceRef.current?.(channelId);
                   }}
                   onLeaveVoice={() => leaveVoiceRef.current?.()}
@@ -515,7 +517,121 @@ export function ChatLayout() {
 
       <CreateRoomDialog open={createOpen} onOpenChange={setCreateOpen} />
       <JoinRoomDialog open={joinOpen} onOpenChange={setJoinOpen} />
+
+      {/* Floating voice bar when user is in voice but viewing a different room */}
+      {state.inVoiceChannel && !isOnVoiceRoom && (
+        <VoiceBar
+          channelName={state.voiceChannelName || "Voice"}
+          roomName={voiceRoomName}
+          occupiedSince={state.voiceChannelId ? state.voiceChannelOccupiedSince[state.voiceChannelId] : undefined}
+          isMuted={state.isMuted}
+          isDeafened={state.isDeafened}
+          isScreenSharing={state.isScreenSharing}
+          onNavigate={() => { if (state.voiceRoomId) selectRoom(state.voiceRoomId); }}
+          onToggleMute={() => toggleMuteRef.current?.()}
+          onToggleDeafen={() => toggleDeafenRef.current?.()}
+          onToggleScreenShare={() => {
+            if (state.isScreenSharing) stopScreenShareRef.current?.();
+            else startScreenShareRef.current?.();
+          }}
+          onHangUp={() => leaveVoiceRef.current?.()}
+        />
+      )}
+
       <Toaster />
     </>
+  );
+}
+
+/* ── Floating voice bar ──────────────────────────────────────────────────── */
+
+function VoiceBarTimer({ since }: { since: number }) {
+  const [elapsed, setElapsed] = useState(() => Date.now() - since);
+  useEffect(() => {
+    const id = setInterval(() => setElapsed(Date.now() - since), 1000);
+    return () => clearInterval(id);
+  }, [since]);
+  const totalSecs = Math.max(0, Math.floor(elapsed / 1000));
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = totalSecs % 60;
+  const str = h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
+    : `${m}:${String(s).padStart(2, "0")}`;
+  return <span className="text-green-400 text-xs font-mono">{str}</span>;
+}
+
+interface VoiceBarProps {
+  channelName: string;
+  roomName: string;
+  occupiedSince?: number;
+  isMuted: boolean;
+  isDeafened: boolean;
+  isScreenSharing: boolean;
+  onNavigate: () => void;
+  onToggleMute: () => void;
+  onToggleDeafen: () => void;
+  onToggleScreenShare: () => void;
+  onHangUp: () => void;
+}
+
+function VoiceBar({
+  channelName, roomName, occupiedSince,
+  isMuted, isDeafened, isScreenSharing,
+  onNavigate, onToggleMute, onToggleDeafen, onToggleScreenShare, onHangUp,
+}: VoiceBarProps) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center gap-3 bg-zinc-900/95 backdrop-blur border-t border-zinc-700 px-4 py-2">
+      {/* Channel name link + timer */}
+      <button
+        onClick={onNavigate}
+        className="flex items-center gap-2 min-w-0 hover:underline text-green-400 font-medium text-sm truncate"
+      >
+        <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+          <line x1="12" x2="12" y1="19" y2="23" />
+          <line x1="8" x2="16" y1="23" y2="23" />
+        </svg>
+        <span className="truncate">{channelName}</span>
+        <span className="text-zinc-500 text-xs truncate">in {roomName}</span>
+      </button>
+
+      {occupiedSince && <VoiceBarTimer since={occupiedSince} />}
+
+      <div className="flex-1" />
+
+      {/* Controls */}
+      <div className="flex items-center gap-1">
+        <button
+          onClick={onToggleMute}
+          className={`p-1.5 rounded-md transition-colors ${isMuted ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          title={isMuted ? "Unmute" : "Mute"}
+        >
+          {isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={onToggleDeafen}
+          className={`p-1.5 rounded-md transition-colors ${isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          title={isDeafened ? "Undeafen" : "Deafen"}
+        >
+          {isDeafened ? <HeadphoneOff className="w-4 h-4" /> : <Headphones className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={onToggleScreenShare}
+          className={`p-1.5 rounded-md transition-colors ${isScreenSharing ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          title={isScreenSharing ? "Stop sharing" : "Share screen"}
+        >
+          <MonitorUp className="w-4 h-4" />
+        </button>
+        <button
+          onClick={onHangUp}
+          className="p-1.5 rounded-md text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+          title="Leave voice"
+        >
+          <PhoneOff className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
   );
 }
