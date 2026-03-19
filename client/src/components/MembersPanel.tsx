@@ -32,6 +32,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     const owners: typeof state.roomMembers = [];
     const moderators: typeof state.roomMembers = [];
     const members: typeof state.roomMembers = [];
+    const offline: typeof state.roomMembers = [];
 
     for (const m of state.roomMembers) {
       // If channel has view_roles, filter: owners/mods always pass, others need a matching role
@@ -40,12 +41,15 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
         if (!channelViewRoles.some((r) => userRoles.includes(r))) continue;
       }
 
-      if (m.role === "owner") owners.push(m);
+      const status = state.userPresence[m.userId]?.status || "offline";
+      if (status === "offline") {
+        offline.push(m);
+      } else if (m.role === "owner") owners.push(m);
       else if (m.role === "moderator") moderators.push(m);
       else members.push(m);
     }
-    return { owners, moderators, members };
-  }, [state.roomMembers, state.channels, state.currentChannelId, state.memberCustomRoles]);
+    return { owners, moderators, members, offline };
+  }, [state.roomMembers, state.channels, state.currentChannelId, state.memberCustomRoles, state.userPresence]);
 
   if (!state.currentRoomId) return null;
 
@@ -202,7 +206,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           Members
         </h3>
         <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">
-          {grouped.owners.length + grouped.moderators.length + grouped.members.length}
+          {grouped.owners.length + grouped.moderators.length + grouped.members.length + grouped.offline.length}
         </span>
         <button
           onClick={onToggle}
@@ -218,6 +222,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           {renderSection("Owner", grouped.owners)}
           {renderSection("Moderators", grouped.moderators)}
           {renderSection("Members", grouped.members)}
+          {renderSection("Offline", grouped.offline)}
         </div>
       </ScrollArea>
 
