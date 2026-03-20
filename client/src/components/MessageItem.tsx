@@ -361,15 +361,24 @@ interface MessageItemProps {
   message: MatrixMessage;
   grouped?: boolean;
   inThread?: boolean;
+  triggerEdit?: boolean;
+  onEditDone?: () => void;
 }
 
-export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
+export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction, openThread } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const editRef = useRef<HTMLDivElement>(null);
+
+  // Enter edit mode when triggered externally (e.g. ArrowUp from chat input)
+  useEffect(() => {
+    if (triggerEdit && !isEditing) {
+      setIsEditing(true);
+    }
+  }, [triggerEdit]);
 
   const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
   const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
@@ -637,9 +646,11 @@ export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
                       editMessage(message.event_id, trimmed);
                     }
                     setIsEditing(false);
+                    onEditDone?.();
                   }
                   if (e.key === "Escape") {
                     setIsEditing(false);
+                    onEditDone?.();
                   }
                 }}
               />

@@ -98,6 +98,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [exifDialogOpen, setExifDialogOpen] = useState(false);
   const exifPendingFilesRef = useRef<File[]>([]);
   const [displayLength, setDisplayLength] = useState(0);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
 
   // Unread "New" divider state
   const [showNewDivider, setShowNewDivider] = useState(false);
@@ -492,6 +493,20 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           e.preventDefault();
           imgToRemove.parentNode?.removeChild(imgToRemove);
           syncFromDiv();
+          return;
+        }
+      }
+    }
+    // ArrowUp on empty input: edit most recent own message
+    if (e.key === "ArrowUp" && !emojiAutocompleteOpen && !mentionOpen) {
+      const content = getDivContent().trim();
+      if (content === "") {
+        const lastOwnMsg = [...state.messages].reverse().find(
+          (m) => m.sender === state.userId && m.content.msgtype !== "m.system" && !m.redacted
+        );
+        if (lastOwnMsg) {
+          e.preventDefault();
+          setEditingEventId(lastOwnMsg.event_id);
           return;
         }
       }
@@ -1265,7 +1280,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                           <div className="h-px flex-1 bg-border" />
                         </div>
                       )}
-                      <MessageItem message={msg} grouped={grouped} />
+                      <MessageItem
+                        message={msg}
+                        grouped={grouped}
+                        triggerEdit={editingEventId === msg.event_id}
+                        onEditDone={() => setEditingEventId(null)}
+                      />
                     </div>
                   );
                 })}
