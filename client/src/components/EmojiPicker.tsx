@@ -47,6 +47,33 @@ for (const [name, emoji] of Object.entries(STANDARD_SHORTCODES)) {
   emojiToNames[emoji].push(name);
 }
 
+// --- Frequently Used emoji tracking via localStorage ---
+const FREQ_STORAGE_KEY = "emoji_freq";
+const FREQ_TOP_N = 20;
+
+function getEmojiFrequencies(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(FREQ_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function recordEmojiUsage(emoji: string) {
+  const freq = getEmojiFrequencies();
+  freq[emoji] = (freq[emoji] || 0) + 1;
+  localStorage.setItem(FREQ_STORAGE_KEY, JSON.stringify(freq));
+}
+
+function getFrequentEmojis(): string[] {
+  const freq = getEmojiFrequencies();
+  return Object.entries(freq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, FREQ_TOP_N)
+    .map(([emoji]) => emoji);
+}
+
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   roomCustomEmojis?: string[];
@@ -57,6 +84,13 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
   const [search, setSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const query = search.toLowerCase().replace(/[_\s]/g, "");
+  const [frequentEmojis, setFrequentEmojis] = useState<string[]>(getFrequentEmojis);
+
+  const handleSelect = (emoji: string) => {
+    recordEmojiUsage(emoji);
+    setFrequentEmojis(getFrequentEmojis());
+    onSelect(emoji);
+  };
 
   useEffect(() => {
     // Auto-focus the search input when the picker opens
@@ -113,6 +147,28 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
           className="w-full px-2 py-1 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </div>
+      {!query && frequentEmojis.length > 0 && (
+        <div className="mb-3">
+          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+            Frequently Used
+          </p>
+          <div className="grid grid-cols-8 gap-0.5">
+            {frequentEmojis.map((e) => (
+              <button
+                key={e}
+                className="p-1 rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110 flex items-center justify-center"
+                onClick={() => handleSelect(e)}
+              >
+                {isCustomEmojiUrl(e) ? (
+                  <img src={e} alt="emoji" className="w-6 h-6 object-contain" />
+                ) : (
+                  <span className="text-lg">{e}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {filteredCustomEmojis.length > 0 && (
         <div className="mb-3">
           <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
@@ -123,9 +179,9 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
               <button
                 key={e}
                 className="p-1 rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110 flex items-center justify-center"
-                onClick={() => onSelect(e)}
+                onClick={() => handleSelect(e)}
               >
-                {e.startsWith("/") || e.startsWith("http") ? (
+                {isCustomEmojiUrl(e) ? (
                   <img src={e} alt="emoji" className="w-6 h-6 object-contain" />
                 ) : (
                   <span className="text-lg">{e}</span>
@@ -145,7 +201,7 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
               <button
                 key={e}
                 className="p-1 text-lg rounded hover:bg-accent transition-colors cursor-pointer hover:scale-110"
-                onClick={() => onSelect(e)}
+                onClick={() => handleSelect(e)}
               >
                 {e}
               </button>
