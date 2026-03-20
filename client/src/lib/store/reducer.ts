@@ -469,10 +469,6 @@ export function reducer(state: AppState, action: Action): AppState {
         hasMoreMessages: false,
         oldestMessageIndex: null,
         loadingOlderMessages: false,
-        ...(action.payload ? {
-          channelUnreadCounts: { ...state.channelUnreadCounts, [action.payload]: 0 },
-          channelMentions: { ...state.channelMentions, [action.payload]: 0 },
-        } : {}),
       };
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;

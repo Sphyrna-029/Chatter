@@ -99,6 +99,16 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const exifPendingFilesRef = useRef<File[]>([]);
   const [displayLength, setDisplayLength] = useState(0);
 
+  // Unread "New" divider state
+  const [showNewDivider, setShowNewDivider] = useState(false);
+  const showNewDividerRef = useRef(false);
+  const [firstUnreadEventId, setFirstUnreadEventId] = useState<string | null>(null);
+  const newDividerRef = useRef<HTMLDivElement>(null);
+  const unreadCountRef = useRef(0);
+  const pendingDividerRef = useRef(false);
+  const prevChannelIdRef = useRef<string | null>(state.currentChannelId);
+  const currentChannelIdRef = useRef<string | null>(state.currentChannelId);
+
   // Merge standard shortcodes + room emoji aliases (room overrides standard)
   const mergedShortcodes = useMemo(() => {
     const roomAliases = state.currentRoomId
@@ -258,6 +268,29 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     ) ?? null;
   }, []);
 
+  // Detect channel change and capture unread count for "New" divider
+  useEffect(() => {
+    const channelId = state.currentChannelId;
+    if (channelId !== prevChannelIdRef.current) {
+      currentChannelIdRef.current = channelId;
+      const count = state.channelUnreadCounts[channelId ?? ""] || 0;
+      unreadCountRef.current = count;
+      if (count > 0) {
+        pendingDividerRef.current = true;
+        showNewDividerRef.current = true;
+        setShowNewDivider(true);
+        isNearBottomRef.current = false;
+      } else {
+        pendingDividerRef.current = false;
+        showNewDividerRef.current = false;
+        setShowNewDivider(false);
+        setFirstUnreadEventId(null);
+      }
+      prevChannelIdRef.current = channelId;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentChannelId]);
+
   // Track whether user is near bottom + trigger older message loading on scroll up
   useEffect(() => {
     const viewport = getViewport();
@@ -270,10 +303,20 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       if (scrollTop < 100) {
         loadOlderMessages();
       }
+      // Clear unread divider when user scrolls to bottom
+      if (nearBottom && showNewDividerRef.current) {
+        showNewDividerRef.current = false;
+        setShowNewDivider(false);
+        setFirstUnreadEventId(null);
+        const channelId = currentChannelIdRef.current;
+        if (channelId) {
+          dispatch({ type: "CLEAR_CHANNEL_UNREAD", payload: channelId });
+        }
+      }
     };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [getViewport, loadOlderMessages, state.currentRoomId]);
+  }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch]);
 
   // Auto-scroll to bottom on new messages only when already near bottom
   useEffect(() => {
@@ -281,6 +324,23 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [state.messages]);
+
+  // When messages load for a channel with unreads, compute the first unread event ID
+  useLayoutEffect(() => {
+    if (pendingDividerRef.current && state.messages.length > 0) {
+      const count = unreadCountRef.current;
+      const idx = Math.max(0, state.messages.length - count);
+      setFirstUnreadEventId(state.messages[idx]?.event_id ?? null);
+      pendingDividerRef.current = false;
+    }
+  }, [state.messages]);
+
+  // Scroll to the "New" divider after it renders
+  useLayoutEffect(() => {
+    if (firstUnreadEventId && newDividerRef.current) {
+      newDividerRef.current.scrollIntoView({ block: "start" });
+    }
+  }, [firstUnreadEventId]);
 
   // Preserve scroll position after prepending older messages
   useLayoutEffect(() => {
@@ -1184,8 +1244,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                         ? "numeric"
                         : undefined,
                   });
+                  const showUnreadDivider = showNewDivider && msg.event_id === firstUnreadEventId;
                   return (
                     <div key={msg.event_id}>
+                      {showUnreadDivider && (
+                        <div ref={newDividerRef} className="flex items-center gap-2 py-1.5 px-2">
+                          <div className="h-px flex-1 bg-red-500" />
+                          <span className="text-xs font-semibold text-red-500 whitespace-nowrap">
+                            New
+                          </span>
+                          <div className="h-px flex-1 bg-red-500" />
+                        </div>
+                      )}
                       {showDateDivider && (
                         <div className="flex items-center justify-center gap-2 py-1.5 px-2">
                           <div className="h-px flex-1 bg-border" />

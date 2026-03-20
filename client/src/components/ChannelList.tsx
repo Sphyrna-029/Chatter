@@ -417,6 +417,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             isSelected={isVoice ? state.voiceChannelId === ch.channel_id : state.currentChannelId === ch.channel_id}
             canManage={canManage}
             hasUnread={!isVoice && (state.channelUnreadCounts[ch.channel_id] || 0) > 0}
+            unreadCount={!isVoice ? (state.channelUnreadCounts[ch.channel_id] || 0) : 0}
             mentionCount={!isVoice ? (state.channelMentions[ch.channel_id] || 0) : 0}
             onSelect={() => {
               if (isVoice) {
@@ -1063,6 +1064,7 @@ function ChannelItem({
   isSelected,
   canManage,
   hasUnread,
+  unreadCount,
   mentionCount,
   onSelect,
   onEdit,
@@ -1075,6 +1077,7 @@ function ChannelItem({
   isSelected: boolean;
   canManage: boolean;
   hasUnread?: boolean;
+  unreadCount?: number;
   mentionCount?: number;
   onSelect: () => void;
   onEdit: () => void;
@@ -1098,6 +1101,9 @@ function ChannelItem({
     >
       {showGrip && (
         <GripVertical className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-50 cursor-grab" />
+      )}
+      {unreadHighlight && (unreadCount ?? 0) > 0 && (
+        <span className="text-xs font-bold text-foreground shrink-0">[{unreadCount! > 99 ? "99+" : unreadCount}]</span>
       )}
       {icon}
       <span className="truncate text-sm">{channel.name}</span>
