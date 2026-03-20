@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiSync, apiGetAllRooms, type RoomSummary } from "@/lib/api";
+import { apiSync, apiGetAllRooms, apiListUploads, type RoomSummary } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash, HardDrive } from "lucide-react";
 
 interface RoomActivity {
   roomId: string;
@@ -37,6 +37,13 @@ function relativeTime(ts: number): string {
   return `${days}d ago`;
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
 function statusColor(status: string) {
   if (status === "active" || status === "online") return "bg-green-500";
   if (status === "idle" || status === "away") return "bg-yellow-500";
@@ -52,15 +59,17 @@ export function ActivityPage() {
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [topPeople, setTopPeople] = useState<PersonStat[]>([]);
   const [topRooms, setTopRooms] = useState<RoomStat[]>([]);
+  const [storageUsed, setStorageUsed] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetchActivity() {
       try {
-        const [syncData, summaryData] = await Promise.all([
+        const [syncData, summaryData, uploads] = await Promise.all([
           apiSync(),
           apiGetAllRooms(),
+          apiListUploads().catch(() => []),
         ]);
 
         const summaryMap: Record<string, RoomSummary> = {};
@@ -137,6 +146,7 @@ export function ActivityPage() {
           setActivities(result);
           setTopPeople(sortedPeople);
           setTopRooms(sortedRooms);
+          setStorageUsed(uploads.reduce((sum, f) => sum + (f.size || 0), 0));
           setLoading(false);
         }
       } catch {
@@ -171,6 +181,36 @@ export function ActivityPage() {
             Your rooms and recent conversations
           </p>
         </div>
+
+        {/* Storage Usage */}
+        {!loading && state.uploadLimitBytes > 0 && (
+          <section className="rounded-lg border border-border p-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+                <HardDrive className="h-4 w-4" />
+                Storage
+              </h2>
+              <span className="text-xs text-muted-foreground">
+                {formatFileSize(storageUsed)} / {formatFileSize(state.uploadLimitBytes)}
+              </span>
+            </div>
+            <div className="bg-muted rounded-full h-3 overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  storageUsed / state.uploadLimitBytes > 0.9
+                    ? "bg-destructive"
+                    : storageUsed / state.uploadLimitBytes > 0.7
+                      ? "bg-orange-500"
+                      : "bg-primary"
+                }`}
+                style={{ width: `${Math.min(100, (storageUsed / state.uploadLimitBytes) * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {Math.round((storageUsed / state.uploadLimitBytes) * 100)}% used
+            </p>
+          </section>
+        )}
 
         {/* Stats — Top People & Top Rooms */}
         {!loading && (topPeople.length > 0 || topRooms.length > 0) && (
