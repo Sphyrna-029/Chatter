@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff } from "lucide-react";
+import { EyeOff, Star } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
+import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { UserProfileDialog } from "./UserProfileDialog";
@@ -242,9 +243,12 @@ function LinkPreviewCard({ url }: { url: string }) {
 }
 
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
+const gifUrlPattern = /\.gif(\?.*)?$/i;
+
 const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onReveal }: { body: string; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
   const { images, videos, audios, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
+  const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
 
   const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || links.length > 0 || youtubeIds.length > 0;
   if (!hasMedia) return null;
@@ -275,15 +279,43 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
           />
         </div>
       ))}
-      {images.map((url) => (
-        <AuthImage
-          key={url}
-          src={url}
-          alt="Image"
-          className="max-w-full max-h-80 rounded-md cursor-pointer"
-          onClick={() => setLightbox({ url, type: "image" })}
-        />
-      ))}
+      {images.map((url) => {
+        const isGif = gifUrlPattern.test(url);
+        const fav = isGif && isFavorite(url);
+        return isGif ? (
+          <div key={url} className="relative group w-fit">
+            <AuthImage
+              src={url}
+              alt="Image"
+              className="max-w-full max-h-80 rounded-md cursor-pointer"
+              onClick={() => setLightbox({ url, type: "image" })}
+            />
+            <button
+              className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                fav ? removeFavorite(url) : addFavorite(url);
+              }}
+              title={fav ? "Remove from favorites" : "Add to favorites"}
+            >
+              <Star
+                className={cn(
+                  "h-4 w-4",
+                  fav ? "fill-yellow-400 text-yellow-400" : "text-white"
+                )}
+              />
+            </button>
+          </div>
+        ) : (
+          <AuthImage
+            key={url}
+            src={url}
+            alt="Image"
+            className="max-w-full max-h-80 rounded-md cursor-pointer"
+            onClick={() => setLightbox({ url, type: "image" })}
+          />
+        );
+      })}
       {videos.map((url) => (
         <video
           key={url}
