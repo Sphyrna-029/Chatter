@@ -539,9 +539,10 @@ fn validate_url_for_ssrf(url: &str) -> Result<Vec<SocketAddr>, &'static str> {
     Ok(addrs)
 }
 
-/// Decode common HTML entities in a string.
+/// Decode common HTML entities in a string, including numeric entities.
 fn decode_html_entities(s: &str) -> String {
-    s.replace("&amp;", "&")
+    let mut result = s
+        .replace("&amp;", "&")
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
@@ -550,44 +551,77 @@ fn decode_html_entities(s: &str) -> String {
         .replace("&#x27;", "'")
         .replace("&#x2F;", "/")
         .replace("&nbsp;", " ")
+        .replace("&mdash;", "\u{2014}")
+        .replace("&ndash;", "\u{2013}")
+        .replace("&laquo;", "\u{00AB}")
+        .replace("&raquo;", "\u{00BB}")
+        .replace("&hellip;", "\u{2026}")
+        .replace("&rsquo;", "\u{2019}")
+        .replace("&lsquo;", "\u{2018}")
+        .replace("&rdquo;", "\u{201D}")
+        .replace("&ldquo;", "\u{201C}");
+
+    // Decode numeric entities: &#1234; and &#xABCD;
+    let numeric_re = regex::Regex::new(r"&#(x?)([0-9a-fA-F]+);").unwrap();
+    result = numeric_re.replace_all(&result, |caps: &regex::Captures| {
+        let is_hex = !caps[1].is_empty();
+        let num_str = &caps[2];
+        let code = if is_hex {
+            u32::from_str_radix(num_str, 16).ok()
+        } else {
+            num_str.parse::<u32>().ok()
+        };
+        code.and_then(char::from_u32)
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| caps[0].to_string())
+    }).to_string();
+
+    result
 }
 
-/// Extract content from a <meta> tag attribute value, handling both single and double quotes.
-fn extract_meta_content(tag: &str) -> Option<String> {
-    // Try content="..." or content='...'
-    let lower = tag.to_lowercase();
-    let content_pos = lower.find("content")?;
-    let rest = &tag[content_pos..];
-    // Skip past "content", optional whitespace, "="
-    let eq_pos = rest.find('=')?;
-    let after_eq = rest[eq_pos + 1..].trim_start();
-    let (quote, after_quote) = if after_eq.starts_with('"') {
-        ('"', &after_eq[1..])
-    } else if after_eq.starts_with('\'') {
-        ('\'', &after_eq[1..])
-    } else {
-        // Unquoted — take until whitespace or >
-        let end = after_eq.find(|c: char| c.is_whitespace() || c == '>' || c == '/').unwrap_or(after_eq.len());
-        let val = after_eq[..end].trim().to_string();
-        if val.is_empty() { return None; }
-        return Some(decode_html_entities(&val));
-    };
-    let end = after_quote.find(quote)?;
-    let val = after_quote[..end].trim().to_string();
+/// Extract the <head> section from HTML to limit meta tag search scope.
+fn extract_head_section(html: &str) -> &str {
+    let lower = html.to_lowercase();
+    let start = lower.find("<head").unwrap_or(0);
+    let end = lower.find("</head>").map(|i| i + 7).unwrap_or(html.len());
+    // Clamp end to 128KB to avoid scanning massive bodies
+    let end = end.min(128 * 1024);
+    &html[start..end.min(html.len())]
+}
+
+/// Extract an attribute value from a tag string, handling quotes and whitespace.
+fn extract_attr_value(tag: &str, attr_name: &str) -> Option<String> {
+    let target = attr_name.to_lowercase();
+
+    // Use regex to flexibly match: attr_name\s*=\s*("val"|'val'|val)
+    let pattern = format!(
+        r#"(?i){}\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))"#,
+        regex::escape(&target)
+    );
+    let re = regex::Regex::new(&pattern).ok()?;
+    let caps = re.captures(tag)?;
+
+    let val = caps.get(1)
+        .or_else(|| caps.get(2))
+        .or_else(|| caps.get(3))
+        .map(|m| m.as_str().to_string())?;
+
     if val.is_empty() { return None; }
     Some(decode_html_entities(&val))
 }
 
-/// Find all <meta ...> tags in the HTML (case-insensitive).
+/// Find all <meta ...> tags in the HTML head section (case-insensitive).
+/// Handles tags spanning multiple lines and self-closing tags.
 fn find_meta_tags(html: &str) -> Vec<String> {
+    let head = extract_head_section(html);
     let mut tags = Vec::new();
-    let lower = html.to_lowercase();
+    let lower = head.to_lowercase();
     let mut search_from = 0;
     while let Some(start) = lower[search_from..].find("<meta") {
         let abs_start = search_from + start;
-        // Find the end of this tag
-        if let Some(end) = html[abs_start..].find('>') {
-            tags.push(html[abs_start..abs_start + end + 1].to_string());
+        // Find the end of this tag — handle both > and />
+        if let Some(end) = head[abs_start..].find('>') {
+            tags.push(head[abs_start..abs_start + end + 1].to_string());
             search_from = abs_start + end + 1;
         } else {
             break;
@@ -598,18 +632,10 @@ fn find_meta_tags(html: &str) -> Vec<String> {
 
 /// Check if a meta tag has a matching property or name attribute.
 fn meta_tag_matches(tag: &str, attr_value: &str) -> bool {
-    let lower = tag.to_lowercase();
     let target = attr_value.to_lowercase();
-    // Check property="value" or name="value" with either quote style
     for attr in &["property", "name"] {
-        for quote in &['"', '\''] {
-            let pattern = format!("{}={}{}{}", attr, quote, target, quote);
-            if lower.contains(&pattern) {
-                return true;
-            }
-            // Also handle spaces around =
-            let pattern_spaced = format!("{} = {}{}{}", attr, quote, target, quote);
-            if lower.contains(&pattern_spaced) {
+        if let Some(val) = extract_attr_value(tag, attr) {
+            if val.to_lowercase() == target {
                 return true;
             }
         }
@@ -621,9 +647,7 @@ pub(crate) fn extract_og_tag(html: &str, property: &str) -> Option<String> {
     let meta_tags = find_meta_tags(html);
     for tag in &meta_tags {
         if meta_tag_matches(tag, property) {
-            if let Some(content) = extract_meta_content(tag) {
-                return Some(content);
-            }
+            return extract_attr_value(tag, "content");
         }
     }
     None
@@ -634,18 +658,17 @@ fn extract_meta_name(html: &str, name: &str) -> Option<String> {
     let meta_tags = find_meta_tags(html);
     for tag in &meta_tags {
         if meta_tag_matches(tag, name) {
-            if let Some(content) = extract_meta_content(tag) {
-                return Some(content);
-            }
+            return extract_attr_value(tag, "content");
         }
     }
     None
 }
 
 pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
-    let lower = html.to_lowercase();
+    let head = extract_head_section(html);
+    let lower = head.to_lowercase();
     let start = lower.find("<title")?;
-    let rest = &html[start + 6..];
+    let rest = &head[start + 6..];
     let after_open = rest.find('>')? + 1;
     let end_lower = rest[after_open..].to_lowercase();
     let end = end_lower.find("</title>")?;
@@ -656,6 +679,25 @@ pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
     Some(title)
 }
 
+/// Resolve a potentially relative URL against a base URL.
+fn resolve_url(base: &str, href: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("//") {
+        if href.starts_with("//") {
+            // Protocol-relative URL
+            let scheme = if base.starts_with("https") { "https:" } else { "http:" };
+            return format!("{}{}", scheme, href);
+        }
+        return href.to_string();
+    }
+    // Relative URL — resolve against base
+    if let Ok(base_url) = url::Url::parse(base) {
+        if let Ok(resolved) = base_url.join(href) {
+            return resolved.to_string();
+        }
+    }
+    href.to_string()
+}
+
 /// Build a reqwest client with DNS pinned to the validated addresses, preventing
 /// DNS rebinding attacks (the client will connect to the exact IPs we already checked).
 fn build_pinned_client(url: &str, validated_addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
@@ -663,8 +705,11 @@ fn build_pinned_client(url: &str, validated_addrs: &[SocketAddr]) -> Result<reqw
     let host = parsed.host_str().ok_or("URL has no host")?;
 
     let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::none());
+        .timeout(std::time::Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::none())
+        .gzip(true)
+        .brotli(true)
+        .deflate(true);
 
     for addr in validated_addrs {
         builder = builder.resolve(host, *addr);
@@ -805,10 +850,32 @@ pub(crate) async fn link_preview(
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
         };
 
-        let body = match response.bytes().await {
-            Ok(b) if b.len() <= 256 * 1024 => String::from_utf8_lossy(&b).to_string(),
-            Ok(b) => String::from_utf8_lossy(&b[..256 * 1024]).to_string(),
+        // Detect charset from Content-Type header for proper decoding
+        let content_type = response
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let body_bytes = match response.bytes().await {
+            Ok(b) => b,
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
+        };
+
+        // Limit to 512KB for parsing
+        let bytes_to_parse = if body_bytes.len() > 512 * 1024 {
+            &body_bytes[..512 * 1024]
+        } else {
+            &body_bytes[..]
+        };
+
+        // Try to detect encoding from Content-Type header or meta charset tag
+        let body = if content_type.contains("iso-8859-1") || content_type.contains("latin1") || content_type.contains("windows-1252") {
+            // Decode as Latin-1 (each byte maps directly to a Unicode code point)
+            bytes_to_parse.iter().map(|&b| b as char).collect::<String>()
+        } else {
+            String::from_utf8_lossy(bytes_to_parse).to_string()
         };
 
         // Try OG tags first, then twitter: card tags, then plain meta tags, then <title>
@@ -821,9 +888,11 @@ pub(crate) async fn link_preview(
             .or_else(|| extract_meta_name(&body, "twitter:description"))
             .or_else(|| extract_meta_name(&body, "description"));
 
+        // Resolve relative image URLs to absolute
         let image = extract_og_tag(&body, "og:image")
             .or_else(|| extract_meta_name(&body, "twitter:image"))
-            .or_else(|| extract_meta_name(&body, "twitter:image:src"));
+            .or_else(|| extract_meta_name(&body, "twitter:image:src"))
+            .map(|img| resolve_url(&url, &img));
 
         let site_name = extract_og_tag(&body, "og:site_name")
             .or_else(|| extract_meta_name(&body, "twitter:site"))
@@ -837,8 +906,12 @@ pub(crate) async fn link_preview(
         }
     };
 
-    // Cache it
-    {
+    // Only cache if there's actual content — don't cache empty results forever
+    let has_content = preview.title.is_some()
+        || preview.description.is_some()
+        || preview.image.is_some();
+
+    if has_content {
         let mut cache = state.link_previews.write().await;
         cache.insert(url, preview.clone());
     }
