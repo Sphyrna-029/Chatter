@@ -1068,7 +1068,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
-        <ScrollArea className="h-full px-2 py-2">
+        <ScrollArea className={`h-full py-2 ${isMobile ? "px-1" : "px-2"}`}>
           <div>
             {searchOpen ? (
               <>
@@ -1285,7 +1285,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           );
         }
         return (
-        <div className="border-t p-3">
+        <div className={`border-t ${isMobile ? "p-2" : "p-3"}`}>
           {/* Spoiler mode banner */}
           {isSpoiler && (
             <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-xs font-medium">

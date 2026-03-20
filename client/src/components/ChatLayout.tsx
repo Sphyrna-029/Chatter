@@ -554,12 +554,14 @@ export function ChatLayout() {
       {/* Mobile members drawer */}
       {isMobile && (
         <Sheet open={mobileMembersOpen} onOpenChange={setMobileMembersOpen}>
-          <SheetContent side="right" className="w-72 p-0">
+          <SheetContent side="right" className="w-72 p-0 flex flex-col overflow-hidden">
             <SheetHeader className="sr-only">
               <SheetTitle>Members</SheetTitle>
               <SheetDescription>Room members list</SheetDescription>
             </SheetHeader>
-            <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
+            </div>
           </SheetContent>
         </Sheet>
       )}

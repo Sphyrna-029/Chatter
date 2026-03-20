@@ -20,6 +20,7 @@ import {
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { UserProfileDialog } from "./UserProfileDialog";
@@ -364,6 +365,7 @@ interface MessageItemProps {
 
 export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction, openThread } = useAppContext();
+  const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
@@ -536,14 +538,14 @@ export function MessageItem({ message, grouped, inThread }: MessageItemProps) {
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-1 -mt-0.5" : "pt-4 pb-2")} data-event-id={message.event_id}>
-      <div className="flex items-start gap-3">
+    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-1 -mt-0.5" : isMobile ? "pt-2 pb-1" : "pt-4 pb-2")} data-event-id={message.event_id}>
+      <div className={cn("flex items-start", isMobile ? "gap-2" : "gap-3")}>
         {grouped ? (
-          <span className="w-10 flex-shrink-0" />
+          <span className={cn("flex-shrink-0", isMobile ? "w-7" : "w-10")} />
         ) : (
-          <Avatar className={cn("h-10 w-10 mt-0.5 flex-shrink-0", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
+          <Avatar className={cn("mt-0.5 flex-shrink-0", isMobile ? "h-7 w-7" : "h-10 w-10", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
             <AuthAvatarImage src={avatarUrl} />
-            <AvatarFallback className="text-xs font-semibold bg-secondary">
+            <AvatarFallback className={cn("font-semibold bg-secondary", isMobile ? "text-[10px]" : "text-xs")}>
               {initial}
             </AvatarFallback>
           </Avatar>
