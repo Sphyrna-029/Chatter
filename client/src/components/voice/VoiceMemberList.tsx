@@ -111,12 +111,12 @@ export function VoiceMemberList({
                     <Slider
                       value={[vol * 100]}
                       onValueChange={([v]) => onSetUserVolume(memberId, v / 100)}
-                      max={100}
+                      max={150}
                       step={1}
                       className="flex-1"
                     />
-                    <span className="text-[10px] text-muted-foreground w-6 text-right">
-                      {Math.round(vol * 100)}
+                    <span className="text-[10px] text-muted-foreground w-8 text-right">
+                      {Math.round(vol * 100)}%
                     </span>
                   </div>
                   {isSharing && (

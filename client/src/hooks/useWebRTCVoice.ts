@@ -18,6 +18,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voicePublisherPcRef = useRef<RTCPeerConnection | null>(null);
   const voiceSubscriberPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const voiceAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
+  const voiceGainNodesRef = useRef<Map<string, { ctx: AudioContext; gain: GainNode }>>(new Map());
   const voiceUserVolumesRef = useRef<Record<string, number>>({});
   const pendingVoiceSubsRef = useRef<Set<string>>(new Set());
   const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -137,8 +138,22 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         audioEl.autoplay = true;
         voiceAudioElementsRef.current.set(speakerUserId, audioEl);
       }
-      audioEl.srcObject = ev.streams[0] || new MediaStream([ev.track]);
-      audioEl.volume = voiceUserVolumesRef.current[speakerUserId] ?? 1.0;
+      const stream = ev.streams[0] || new MediaStream([ev.track]);
+      audioEl.srcObject = stream;
+
+      // Route through a GainNode so per-user volume can exceed 100%
+      if (!voiceGainNodesRef.current.has(speakerUserId)) {
+        const ctx = new AudioContext();
+        const source = ctx.createMediaStreamSource(stream);
+        const gain = ctx.createGain();
+        gain.gain.value = voiceUserVolumesRef.current[speakerUserId] ?? 1.0;
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        voiceGainNodesRef.current.set(speakerUserId, { ctx, gain });
+        // Mute the HTML element since GainNode handles playback
+        audioEl.volume = 0;
+      }
+
       audioEl.play().catch(() => {});
     };
 
@@ -286,6 +301,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
           voiceRetryCountsRef.current.delete(leftId);
           const audioEl = voiceAudioElementsRef.current.get(leftId);
           if (audioEl) { audioEl.pause(); audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
+          const gainEntry = voiceGainNodesRef.current.get(leftId);
+          if (gainEntry) { gainEntry.ctx.close().catch(() => {}); voiceGainNodesRef.current.delete(leftId); }
         }
       } else if (msg.type === "voice_webrtc_publisher_ready") {
         if (state.inVoiceChannel && msg.user_id !== state.userId) {
@@ -346,6 +363,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voiceSubscriberPcsRef.current.clear();
       voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
       voiceAudioElementsRef.current.clear();
+      voiceGainNodesRef.current.forEach((entry) => entry.ctx.close().catch(() => {}));
+      voiceGainNodesRef.current.clear();
       voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
       voiceRetryTimersRef.current.clear();
       voiceRetryCountsRef.current.clear();
@@ -409,6 +428,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceSubscriberPcsRef.current.clear();
     voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
     voiceAudioElementsRef.current.clear();
+    voiceGainNodesRef.current.forEach((entry) => entry.ctx.close().catch(() => {}));
+    voiceGainNodesRef.current.clear();
     voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
     voiceRetryTimersRef.current.clear();
     voicePublishRetryCountRef.current = 0;
@@ -499,15 +520,21 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Volume control ───────────────────────────────────────────────────────
   const setUserVolume = useCallback((userId: string, vol: number) => {
     voiceUserVolumesRef.current[userId] = vol;
-    const audioEl = voiceAudioElementsRef.current.get(userId);
-    if (audioEl) audioEl.volume = vol;
+    const gainEntry = voiceGainNodesRef.current.get(userId);
+    if (gainEntry) {
+      gainEntry.gain.gain.value = vol;
+    } else {
+      // Fallback if GainNode not yet created (clamped to 1.0 by browser)
+      const audioEl = voiceAudioElementsRef.current.get(userId);
+      if (audioEl) audioEl.volume = Math.min(vol, 1);
+    }
   }, []);
 
   // ─── Deafen ───────────────────────────────────────────────────────────────
   const toggleDeafen = useCallback(() => {
     const newDeafened = !state.isDeafened;
-    voiceAudioElementsRef.current.forEach((el) => {
-      el.muted = newDeafened;
+    voiceGainNodesRef.current.forEach((entry, userId) => {
+      entry.gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
     });
     dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
