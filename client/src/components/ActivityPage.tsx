@@ -183,7 +183,7 @@ export function ActivityPage() {
         </div>
 
         {/* Storage Usage */}
-        {!loading && state.uploadLimitBytes > 0 && (
+        {!loading && state.storageLimitBytes > 0 && (
           <section className="rounded-lg border border-border p-4 space-y-2">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
@@ -191,23 +191,23 @@ export function ActivityPage() {
                 Storage
               </h2>
               <span className="text-xs text-muted-foreground">
-                {formatFileSize(storageUsed)} / {formatFileSize(state.uploadLimitBytes)}
+                {formatFileSize(storageUsed)} / {formatFileSize(state.storageLimitBytes)}
               </span>
             </div>
             <div className="bg-muted rounded-full h-3 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
-                  storageUsed / state.uploadLimitBytes > 0.9
+                  storageUsed / state.storageLimitBytes > 0.9
                     ? "bg-destructive"
-                    : storageUsed / state.uploadLimitBytes > 0.7
+                    : storageUsed / state.storageLimitBytes > 0.7
                       ? "bg-orange-500"
                       : "bg-primary"
                 }`}
-                style={{ width: `${Math.min(100, (storageUsed / state.uploadLimitBytes) * 100)}%` }}
+                style={{ width: `${Math.min(100, (storageUsed / state.storageLimitBytes) * 100)}%` }}
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {Math.round((storageUsed / state.uploadLimitBytes) * 100)}% used
+              {Math.round((storageUsed / state.storageLimitBytes) * 100)}% used
             </p>
           </section>
         )}

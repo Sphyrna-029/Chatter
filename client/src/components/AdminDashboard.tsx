@@ -43,6 +43,7 @@ export function AdminDashboard() {
   const [inviteCode, setInviteCode] = useState("");
   const [inviteCopied, setInviteCopied] = useState(false);
   const [storageLimitMb, setStorageLimitMb] = useState(0);
+  const [uploadLimitMb, setUploadLimitMb] = useState(0);
   const [roomCreationLimit, setRoomCreationLimit] = useState(0);
   const [requireAuthForUploads, setRequireAuthForUploads] = useState(false);
   const [roomCreationDisabled, setRoomCreationDisabled] = useState(false);
@@ -65,6 +66,7 @@ export function AdminDashboard() {
         setInviteOnly(s.invite_only);
         setInviteCode(s.invite_code);
         setStorageLimitMb(Math.round(s.storage_limit_bytes / (1024 * 1024)));
+        setUploadLimitMb(Math.round((s.upload_limit_bytes ?? 0) / (1024 * 1024)));
         setRoomCreationLimit(s.room_creation_limit);
         setRequireAuthForUploads(s.require_auth_for_uploads);
         setRoomCreationDisabled(s.room_creation_disabled ?? false);
@@ -195,6 +197,7 @@ export function AdminDashboard() {
               inviteCode={inviteCode}
               inviteCopied={inviteCopied}
               storageLimitMb={storageLimitMb}
+              uploadLimitMb={uploadLimitMb}
               roomCreationLimit={roomCreationLimit}
               requireAuthForUploads={requireAuthForUploads}
               roomCreationDisabled={roomCreationDisabled}
@@ -223,6 +226,14 @@ export function AdminDashboard() {
                 try {
                   await apiAdminUpdateSettings({ storage_limit_bytes: mb * 1024 * 1024 });
                   setStorageLimitMb(mb);
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }}
+              onSaveUploadLimit={async (mb) => {
+                try {
+                  await apiAdminUpdateSettings({ upload_limit_bytes: mb * 1024 * 1024 });
+                  setUploadLimitMb(mb);
                 } catch (e: any) {
                   alert(e.message);
                 }
@@ -433,6 +444,7 @@ function SettingsTab({
   inviteCode,
   inviteCopied,
   storageLimitMb,
+  uploadLimitMb,
   roomCreationLimit,
   requireAuthForUploads,
   roomCreationDisabled,
@@ -440,6 +452,7 @@ function SettingsTab({
   onRefreshInvite,
   onCopyInvite,
   onSaveStorageLimit,
+  onSaveUploadLimit,
   onSaveRoomCreationLimit,
   onToggleRequireAuthForUploads,
   onToggleRoomCreationDisabled,
@@ -448,6 +461,7 @@ function SettingsTab({
   inviteCode: string;
   inviteCopied: boolean;
   storageLimitMb: number;
+  uploadLimitMb: number;
   roomCreationLimit: number;
   requireAuthForUploads: boolean;
   roomCreationDisabled: boolean;
@@ -455,18 +469,25 @@ function SettingsTab({
   onRefreshInvite: () => void;
   onCopyInvite: () => void;
   onSaveStorageLimit: (mb: number) => void;
+  onSaveUploadLimit: (mb: number) => void;
   onSaveRoomCreationLimit: (val: number) => void;
   onToggleRequireAuthForUploads: (val: boolean) => void;
   onToggleRoomCreationDisabled: (val: boolean) => void;
 }) {
   const [localLimit, setLocalLimit] = useState(storageLimitMb);
   const limitChanged = localLimit !== storageLimitMb;
+  const [localUploadLimit, setLocalUploadLimit] = useState(uploadLimitMb);
+  const uploadLimitChanged = localUploadLimit !== uploadLimitMb;
   const [localRoomLimit, setLocalRoomLimit] = useState(roomCreationLimit);
   const roomLimitChanged = localRoomLimit !== roomCreationLimit;
 
   useEffect(() => {
     setLocalLimit(storageLimitMb);
   }, [storageLimitMb]);
+
+  useEffect(() => {
+    setLocalUploadLimit(uploadLimitMb);
+  }, [uploadLimitMb]);
 
   useEffect(() => {
     setLocalRoomLimit(roomCreationLimit);
@@ -548,7 +569,37 @@ function SettingsTab({
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB.`}
+          {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB total.`}
+        </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Max File Upload Size</h3>
+          <p className="text-xs text-muted-foreground">
+            Maximum size for a single file upload. Set to 0 for unlimited.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            value={localUploadLimit}
+            onChange={(e) => setLocalUploadLimit(Math.max(0, parseInt(e.target.value) || 0))}
+            className="w-28 rounded-md border bg-background px-3 py-1.5 text-sm"
+          />
+          <span className="text-sm text-muted-foreground">MB</span>
+          <Button
+            size="sm"
+            className="text-xs h-7 ml-2"
+            disabled={!uploadLimitChanged}
+            onClick={() => onSaveUploadLimit(localUploadLimit)}
+          >
+            Save
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {localUploadLimit === 0 ? "Currently unlimited." : `Individual files cannot exceed ${localUploadLimit} MB.`}
         </p>
       </div>
 

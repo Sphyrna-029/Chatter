@@ -399,6 +399,7 @@ pub(crate) async fn admin_get_settings(
         "invite_only": settings.invite_only,
         "invite_code": settings.invite_code,
         "storage_limit_bytes": settings.storage_limit_bytes,
+        "upload_limit_bytes": settings.upload_limit_bytes,
         "room_creation_limit": settings.room_creation_limit,
         "require_auth_for_uploads": settings.require_auth_for_uploads,
         "room_creation_disabled": settings.room_creation_disabled
@@ -421,6 +422,9 @@ pub(crate) async fn admin_update_settings(
     }
     if let Some(storage_limit) = body.get("storage_limit_bytes").and_then(|v| v.as_u64()) {
         set_doc.insert("storage_limit_bytes", storage_limit as i64);
+    }
+    if let Some(upload_limit) = body.get("upload_limit_bytes").and_then(|v| v.as_u64()) {
+        set_doc.insert("upload_limit_bytes", upload_limit as i64);
     }
     if let Some(room_limit) = body.get("room_creation_limit").and_then(|v| v.as_u64()) {
         set_doc.insert("room_creation_limit", room_limit as i64);
@@ -453,6 +457,9 @@ pub(crate) async fn admin_update_settings(
         }
         if let Ok(val) = set_doc.get_i64("storage_limit_bytes") {
             settings.storage_limit_bytes = val as u64;
+        }
+        if let Ok(val) = set_doc.get_i64("upload_limit_bytes") {
+            settings.upload_limit_bytes = val as u64;
         }
         if let Ok(val) = set_doc.get_i64("room_creation_limit") {
             settings.room_creation_limit = val as u64;

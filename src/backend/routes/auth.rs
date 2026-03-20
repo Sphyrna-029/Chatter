@@ -118,7 +118,7 @@ pub(crate) async fn server_info(
     State(state): State<Arc<AppState>>,
 ) -> Json<Value> {
     let settings = state.server_settings.read().await;
-    Json(json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads, "storage_limit_bytes": settings.storage_limit_bytes }))
+    Json(json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads, "storage_limit_bytes": settings.storage_limit_bytes, "upload_limit_bytes": settings.upload_limit_bytes }))
 }
 
 /// GET /api/ice-servers — returns ICE server config (STUN + TURN) for client WebRTC

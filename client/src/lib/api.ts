@@ -1359,13 +1359,13 @@ export interface AdminRoom {
   message_count: number;
 }
 
-export async function apiGetServerInfo(): Promise<{ invite_only: boolean; require_auth_for_uploads: boolean; storage_limit_bytes: number }> {
+export async function apiGetServerInfo(): Promise<{ invite_only: boolean; require_auth_for_uploads: boolean; storage_limit_bytes: number; upload_limit_bytes: number }> {
   const res = await fetch("/api/server/info");
   if (!res.ok) throw new Error("Failed to get server info");
   return res.json();
 }
 
-export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string; storage_limit_bytes: number; room_creation_limit: number; require_auth_for_uploads: boolean; room_creation_disabled: boolean }> {
+export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; invite_code: string; storage_limit_bytes: number; upload_limit_bytes: number; room_creation_limit: number; require_auth_for_uploads: boolean; room_creation_disabled: boolean }> {
   const res = await authenticatedFetch("/api/admin/settings");
   if (!res.ok) {
     const body = await res.json().catch(() => null);
@@ -1374,7 +1374,7 @@ export async function apiAdminGetSettings(): Promise<{ invite_only: boolean; inv
   return res.json();
 }
 
-export async function apiAdminUpdateSettings(settings: { invite_only?: boolean; storage_limit_bytes?: number; room_creation_limit?: number; require_auth_for_uploads?: boolean; room_creation_disabled?: boolean }): Promise<void> {
+export async function apiAdminUpdateSettings(settings: { invite_only?: boolean; storage_limit_bytes?: number; upload_limit_bytes?: number; room_creation_limit?: number; require_auth_for_uploads?: boolean; room_creation_disabled?: boolean }): Promise<void> {
   const res = await authenticatedFetch("/api/admin/settings", {
     method: "PUT",
     body: JSON.stringify(settings),

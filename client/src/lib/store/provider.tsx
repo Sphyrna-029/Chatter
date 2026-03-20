@@ -108,7 +108,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Fetch public server settings and ICE config on mount
   useEffect(() => {
     apiGetServerInfo().then((info) => {
-      dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.storage_limit_bytes ?? 0 } });
+      dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.upload_limit_bytes ?? 0, storageLimitBytes: info.storage_limit_bytes ?? 0 } });
     }).catch(() => {});
     fetchIceServers();
   }, []);

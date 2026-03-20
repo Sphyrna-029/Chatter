@@ -114,7 +114,7 @@ pub(crate) async fn upload_file(
         }
     }
 
-    let upload_limit = state.server_settings.read().await.storage_limit_bytes;
+    let upload_limit = state.server_settings.read().await.upload_limit_bytes;
     if upload_limit > 0 && data.len() as u64 > upload_limit {
         return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
     }
@@ -216,7 +216,7 @@ pub(crate) async fn upload_init(
     if body.file_size == 0 {
         return error_response(StatusCode::BAD_REQUEST, "Invalid file size");
     }
-    let upload_limit = state.server_settings.read().await.storage_limit_bytes;
+    let upload_limit = state.server_settings.read().await.upload_limit_bytes;
     if upload_limit > 0 && body.file_size > upload_limit {
         return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
     }
