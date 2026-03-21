@@ -197,24 +197,49 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         }
     });
 
-    // Main receive loop
+    // Spawn periodic ping sender (every 15s) to detect dead connections
+    let ping_tx = state.active_websockets.read().await.get(&user_id).cloned();
+    let ping_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
+        interval.tick().await; // skip immediate first tick
+        loop {
+            interval.tick().await;
+            if let Some(ref tx) = ping_tx {
+                if tx.send(Message::Ping(Vec::from(b"ping" as &[u8]).into())).is_err() {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    });
+
+    // Main receive loop — timeout if no data (including pong) for 45s
     let recv_state = state.clone();
     let recv_user_id = user_id.clone();
+    let recv_timeout = std::time::Duration::from_secs(45);
 
-    while let Some(Ok(msg)) = ws_stream.next().await {
-        match msg {
-            Message::Text(text) => {
-                handle_ws_text(recv_state.clone(), &recv_user_id, &text).await;
-            }
-            Message::Binary(data) => {
-                handle_ws_binary(&recv_state, &recv_user_id, &data).await;
-            }
-            Message::Close(_) => break,
-            _ => {}
+    loop {
+        match tokio::time::timeout(recv_timeout, ws_stream.next()).await {
+            Ok(Some(Ok(msg))) => match msg {
+                Message::Text(text) => {
+                    handle_ws_text(recv_state.clone(), &recv_user_id, &text).await;
+                }
+                Message::Binary(data) => {
+                    handle_ws_binary(&recv_state, &recv_user_id, &data).await;
+                }
+                Message::Pong(_) => {} // connection alive, reset timeout
+                Message::Close(_) => break,
+                _ => {}
+            },
+            Ok(Some(Err(_))) => break, // WebSocket error
+            Ok(None) => break,         // stream ended
+            Err(_) => break,           // timeout — connection dead
         }
     }
 
     // Disconnect cleanup
+    ping_task.abort();
     cleanup_disconnect(&state, &user_id).await;
     sink_task.abort();
 }
