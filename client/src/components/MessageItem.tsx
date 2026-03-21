@@ -47,7 +47,7 @@ function escapeHtml(text: string) {
 }
 
 /** Returns HTML with URLs as links and @mentions styled, but NO embedded media tags */
-function processMessageBody(body: string, currentUserId: string | null, urlToAlias?: Record<string, string>) {
+function processMessageBody(body: string, currentUserId: string | null, urlToAlias?: Record<string, string>, roleNames?: Map<string, string>) {
   // Extract custom emoji markers before escaping HTML — replace with placeholders
   const emojiUrls: string[] = [];
   let processed = body.replace(/:emoji\{([^}]+)\}:/g, (_match, url) => {
@@ -58,9 +58,21 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
 
   let escaped = escapeHtml(processed);
 
-  // Process @mentions
-  escaped = escaped.replace(/@(\w+)/g, (match, username) => {
-    const mentionedUserId = `@${username}:localhost`;
+  // Process @mentions (users and roles)
+  escaped = escaped.replace(/@(\w+)/g, (match, name) => {
+    // Check if it's a role mention
+    const roleColor = roleNames?.get(name.toLowerCase());
+    if (roleColor !== undefined) {
+      const colorStyle = roleColor
+        ? `background-color:${roleColor}33;color:${roleColor}`
+        : "";
+      return `<span class="${cn(
+        "rounded px-1 py-0.5 font-semibold text-xs",
+        !roleColor && "bg-primary/20 text-primary"
+      )}"${colorStyle ? ` style="${colorStyle}"` : ""}>${match}</span>`;
+    }
+    // User mention
+    const mentionedUserId = `@${name}:localhost`;
     const isSelf = mentionedUserId === currentUserId;
     return `<span class="${cn(
       "rounded px-1 py-0.5 font-semibold text-xs",
@@ -498,6 +510,15 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         ? roomInfo.mod_name_color
         : senderTopRoleColor;
 
+  // Map of lowercase role name -> color (or "") for role mention rendering
+  const roleNamesMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const role of state.customRoles) {
+      map.set(role.name.toLowerCase(), role.color || "");
+    }
+    return map;
+  }, [state.customRoles]);
+
   const nameFontUrl = !isWebhook ? state.userPresence[message.sender]?.nameFontUrl : undefined;
   if (nameFontUrl) {
     ensureFontFace(message.sender, nameFontUrl);
@@ -692,7 +713,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                   <span
                     key={i}
                     dangerouslySetInnerHTML={{
-                      __html: processMessageBody(segment.content, state.userId, urlToAlias),
+                      __html: processMessageBody(segment.content, state.userId, urlToAlias, roleNamesMap),
                     }}
                   />
                 )

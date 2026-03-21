@@ -451,12 +451,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       }
     }
     if (mentionOpen) {
-      const matches = state.roomMembers.filter((m) =>
-        m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
-      );
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedMentionIdx((i) => Math.min(i + 1, matches.length - 1));
+        setSelectedMentionIdx((i) => Math.min(i + 1, mentionMatches.length - 1));
         return;
       }
       if (e.key === "ArrowUp") {
@@ -464,9 +461,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         setSelectedMentionIdx((i) => Math.max(i - 1, 0));
         return;
       }
-      if ((e.key === "Enter" || e.key === "Tab") && matches.length > 0) {
+      if ((e.key === "Enter" || e.key === "Tab") && mentionMatches.length > 0) {
         e.preventDefault();
-        completeMention(matches[selectedMentionIdx]?.displayName);
+        completeMention(mentionMatches[selectedMentionIdx]?.name);
         return;
       }
       if (e.key === "Escape") {
@@ -963,11 +960,20 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   }, [scrollToEventId, searchOpen, state.messages]);
 
   const mentionMatches = mentionOpen
-    ? state.roomMembers
-        .filter((m) =>
-          m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
-        )
-        .slice(0, 5)
+    ? [
+        ...state.roomMembers
+          .filter((m) =>
+            m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
+          )
+          .slice(0, 5)
+          .map((m) => ({ kind: "user" as const, id: m.userId, name: m.displayName, color: undefined as string | undefined })),
+        ...state.customRoles
+          .filter((r) =>
+            r.name.toLowerCase().startsWith(mentionSearch.toLowerCase())
+          )
+          .slice(0, 5)
+          .map((r) => ({ kind: "role" as const, id: r.role_id, name: r.name, color: r.color || undefined })),
+      ].slice(0, 8)
     : [];
 
   const emojiMatches = emojiAutocompleteOpen
@@ -1459,19 +1465,31 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover p-1 shadow-lg z-50">
                 {mentionMatches.map((m, i) => (
                   <button
-                    key={m.userId}
+                    key={`${m.kind}-${m.id}`}
                     className={`flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm cursor-pointer transition-colors ${
                       i === selectedMentionIdx ? "bg-accent" : "hover:bg-accent/50"
                     }`}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      completeMention(m.displayName);
+                      completeMention(m.name);
                     }}
                   >
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-                      {m.displayName[0]?.toUpperCase()}
-                    </span>
-                    <span>{m.displayName}</span>
+                    {m.kind === "role" ? (
+                      <span
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold"
+                        style={{ backgroundColor: m.color ? `${m.color}33` : undefined, color: m.color || undefined }}
+                      >
+                        @
+                      </span>
+                    ) : (
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
+                        {m.name[0]?.toUpperCase()}
+                      </span>
+                    )}
+                    <span style={m.kind === "role" && m.color ? { color: m.color } : undefined}>{m.name}</span>
+                    {m.kind === "role" && (
+                      <span className="ml-auto text-xs text-muted-foreground">Role</span>
+                    )}
                   </button>
                 ))}
               </div>

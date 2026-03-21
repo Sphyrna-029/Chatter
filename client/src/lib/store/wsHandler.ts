@@ -45,6 +45,21 @@ function playLeaveSound() {
   } catch {}
 }
 
+function hasRoleMention(body: string, stateRef: MutableRefObject<AppState>): boolean {
+  const userId = stateRef.current.userId;
+  if (!userId) return false;
+  const myRoleIds = stateRef.current.memberCustomRoles[userId] || [];
+  if (myRoleIds.length === 0) return false;
+  const myRoleNames = myRoleIds
+    .map((rid) => stateRef.current.customRoles.find((r) => r.role_id === rid))
+    .filter(Boolean)
+    .map((r) => r!.name.toLowerCase());
+  if (myRoleNames.length === 0) return false;
+  const mentions = body.match(/@(\w+)/g);
+  if (!mentions) return false;
+  return mentions.some((m) => myRoleNames.includes(m.slice(1).toLowerCase()));
+}
+
 export function createWsMessageHandler(
   dispatch: Dispatch<Action>,
   stateRef: MutableRefObject<AppState>,
@@ -66,7 +81,9 @@ export function createWsMessageHandler(
           // Track per-channel unreads/mentions for messages in a different channel
           dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
           const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
-          if (myUsername && msg.content?.body?.includes(`@${myUsername}`)) {
+          const bodyText = msg.content?.body || "";
+          const hasUserMention = myUsername !== "" && bodyText.includes(`@${myUsername}`);
+          if (hasUserMention || hasRoleMention(bodyText, stateRef)) {
             dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
             dispatch({ type: "SET_MENTION", payload: { roomId: msg.room_id, hasMention: true } });
             const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
@@ -76,7 +93,8 @@ export function createWsMessageHandler(
       } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
         const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
         const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
-        const hasMention = myUsername !== "" && msg.content?.body?.includes(`@${myUsername}`) === true;
+        const bodyText = msg.content?.body || "";
+        const hasMention = (myUsername !== "" && bodyText.includes(`@${myUsername}`)) || hasRoleMention(bodyText, stateRef);
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
         if (isDm || hasMention) {
           if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
