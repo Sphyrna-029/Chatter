@@ -106,11 +106,25 @@ pub(crate) async fn upload_file(
         return error_response(StatusCode::BAD_REQUEST, "No filename provided");
     }
 
-    // Enforce 2 MB limit for font files
+    // Validate and enforce limits for font files
     let ext_lower = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    if ext_lower == "ttf" || ext_lower == "otf" {
+    if ext_lower == "ttf" || ext_lower == "otf" || ext_lower == "woff" || ext_lower == "woff2" {
         if data.len() > 2 * 1024 * 1024 {
             return error_response(StatusCode::BAD_REQUEST, "Font file too large (max 2MB)");
+        }
+        if data.len() < 4 {
+            return error_response(StatusCode::BAD_REQUEST, "File too small to be a valid font");
+        }
+        let magic = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+        let valid = matches!(
+            magic,
+            0x00010000  // TrueType
+            | 0x4F54544F // OpenType (OTTO)
+            | 0x774F4646 // WOFF
+            | 0x774F4632 // WOFF2 (wOF2)
+        );
+        if !valid {
+            return error_response(StatusCode::BAD_REQUEST, "File does not appear to be a valid font");
         }
     }
 

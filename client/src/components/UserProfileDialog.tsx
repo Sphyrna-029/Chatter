@@ -617,17 +617,34 @@ export function UserProfileDialog({
             <input
               ref={fontInputRef}
               type="file"
-              accept=".ttf,.otf"
+              accept=".ttf,.otf,.woff,.woff2"
               className="hidden"
-              onChange={(e) => {
+              onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
+                e.target.value = "";
+                const ext = file.name.split(".").pop()?.toLowerCase();
+                if (!ext || !["ttf", "otf", "woff", "woff2"].includes(ext)) {
+                  alert("Only .ttf, .otf, .woff, and .woff2 font files are allowed");
+                  return;
+                }
                 if (file.size > 2 * 1024 * 1024) {
                   alert("Font file must be under 2 MB");
                   return;
                 }
+                // Validate magic bytes
+                const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+                const magic32 = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
+                const isValidFont =
+                  magic32 === 0x00010000 || // TrueType
+                  magic32 === 0x4F54544F || // OpenType (OTTO)
+                  magic32 === 0x774F4646 || // WOFF
+                  magic32 === 0x774F4632;   // WOFF2 (wOF2)
+                if (!isValidFont) {
+                  alert("File does not appear to be a valid font");
+                  return;
+                }
                 setPendingFontFile(file);
-                e.target.value = "";
               }}
             />
             {(pendingFontFile || nameFontUrl) && (
