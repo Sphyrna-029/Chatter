@@ -112,15 +112,23 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     }
   }, []);
 
-  // Listen for YouTube player postMessages: duration detection and onReady volume restore.
+  // Listen for YouTube player postMessages: duration detection and onReady sync.
   // Each client has their own iframe so these fire independently — no broadcasting needed.
   useEffect(() => {
     const handleYtMsg = (e: MessageEvent) => {
       if (!isYoutubeRef.current) return;
       try {
         const data = typeof e.data === "string" ? JSON.parse(e.data) : e.data;
-        // Restore volume as soon as the player signals it's ready to accept commands
+        // When the player is ready, apply full sync (seek + play/pause + volume).
+        // This is the reliable signal that it can accept commands — the iframe
+        // onLoad fires too early for the JS API to be initialised, which causes
+        // late joiners to see a black screen.
         if (data?.event === "onReady") {
+          const ws = watchStateRef.current;
+          const compensated = ws.playing
+            ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
+            : ws.positionSecs;
+          applySync(compensated, ws.playing);
           applyVolume(volumeRef.current, isMutedRef.current);
         }
         // Duration detection
@@ -133,7 +141,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     };
     window.addEventListener("message", handleYtMsg);
     return () => window.removeEventListener("message", handleYtMsg);
-  }, [applyVolume]);
+  }, [applyVolume, applySync]);
 
   const applySync = useCallback((positionSecs: number, playing: boolean) => {
     isApplyingSync.current = true;

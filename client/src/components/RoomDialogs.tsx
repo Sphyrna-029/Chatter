@@ -334,7 +334,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Join a Room</DialogTitle>
           <DialogDescription>
@@ -360,7 +360,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
             <ArrowUpDown className="h-4 w-4" />
           </Button>
         </div>
-        <div className="max-h-[280px] overflow-y-auto border rounded-md">
+        <div className="max-h-[480px] overflow-y-auto border rounded-md">
           <div className="space-y-1 p-2">
             {filteredRooms.length === 0 && (
               <p className="text-sm text-muted-foreground px-2 py-4 text-center">
