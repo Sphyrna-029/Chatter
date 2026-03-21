@@ -53,7 +53,7 @@ export function VoiceMemberList({
 
           return (
             <div key={memberId} className={cn(
-              "flex flex-col rounded-md px-2 py-1.5 transition-shadow duration-150",
+              "flex flex-col rounded-md px-2 py-1.5 transition-shadow duration-150 min-w-0 overflow-hidden",
               isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
             )}>
               {/* Name row: mute icon, latency dot, name */}
