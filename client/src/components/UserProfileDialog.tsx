@@ -1550,7 +1550,7 @@ export function UserProfileDialog({
             </div>
           </Tabs>
         ) : (
-          profileContent
+          <div className="overflow-y-auto">{profileContent}</div>
         )}
       </DialogContent>
     </Dialog>
