@@ -431,6 +431,21 @@ export function ChatLayout() {
               </div>
             )}
 
+            {/* VoiceControls: always mounted (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
+            <div className={!state.currentRoomId || state.adminDashboardOpen || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
+              <VoiceControls
+                joinVoiceRef={joinVoiceRef}
+                leaveVoiceRef={leaveVoiceRef}
+                toggleMuteRef={toggleMuteRef}
+                toggleDeafenRef={toggleDeafenRef}
+                startScreenShareRef={startScreenShareRef}
+                stopScreenShareRef={stopScreenShareRef}
+                connQualityRef={connQualityRef}
+                setUserVolumeRef={setUserVolumeRef}
+                speakingUsersRef={speakingUsersRef}
+              />
+            </div>
+
             {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
             {state.adminDashboardOpen ? (
               <AdminDashboard />
@@ -461,20 +476,6 @@ export function ChatLayout() {
                   speakingUsersRef={speakingUsersRef}
                 />
               )}
-              {/* VoiceControls: always mounted (sr-only when not needed) so WebRTC/stats stay alive */}
-              <div className={hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
-                <VoiceControls
-                  joinVoiceRef={joinVoiceRef}
-                  leaveVoiceRef={leaveVoiceRef}
-                  toggleMuteRef={toggleMuteRef}
-                  toggleDeafenRef={toggleDeafenRef}
-                  startScreenShareRef={startScreenShareRef}
-                  stopScreenShareRef={stopScreenShareRef}
-                  connQualityRef={connQualityRef}
-                  setUserVolumeRef={setUserVolumeRef}
-                  speakingUsersRef={speakingUsersRef}
-                />
-              </div>
               {isTankWarRoom ? (
                 <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isTugOfWarRoom ? (

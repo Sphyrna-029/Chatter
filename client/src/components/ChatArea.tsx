@@ -687,7 +687,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const insertEmoji = (emoji: string) => {
     const div = inputRef.current;
     if (!div) return;
+    // Check if cursor is already inside the div before focusing
+    const sel = window.getSelection();
+    const hadCursorInDiv = sel && sel.rangeCount > 0 && div.contains(sel.getRangeAt(0).commonAncestorContainer);
     div.focus();
+    // If cursor wasn't in the div (e.g. emoji picker had focus), move cursor to end
+    if (!hadCursorInDiv && sel) {
+      const range = document.createRange();
+      range.selectNodeContents(div);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
     const isImageUrl = emoji.startsWith("/") || emoji.startsWith("http");
     if (isImageUrl) {
       const img = document.createElement("img");
