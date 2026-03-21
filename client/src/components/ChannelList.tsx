@@ -421,6 +421,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             mentionCount={!isVoice ? (state.channelMentions[ch.channel_id] || 0) : 0}
             onSelect={() => {
               if (isVoice) {
+                if (state.voiceChannelId === ch.channel_id) return;
                 onJoinVoiceChannel(ch.channel_id);
               } else {
                 selectChannel(ch.channel_id);
