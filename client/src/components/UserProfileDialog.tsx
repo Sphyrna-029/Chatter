@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetMutualFriends, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
@@ -211,6 +211,21 @@ export function UserProfileDialog({
   const [steamLoading, setSteamLoading] = useState(false);
   const [steamError, setSteamError] = useState<string | null>(null);
 
+  // Mutual friends state
+  const [mutualFriends, setMutualFriends] = useState<string[]>([]);
+  const [showMutualsList, setShowMutualsList] = useState(false);
+
+  useEffect(() => {
+    if (open && !isSelf) {
+      apiGetMutualFriends(userId).then((data) => {
+        setMutualFriends(data.mutuals);
+      }).catch(() => setMutualFriends([]));
+    }
+    if (!open) {
+      setMutualFriends([]);
+      setShowMutualsList(false);
+    }
+  }, [open, userId, isSelf]);
 
   useEffect(() => {
     if (open) {
@@ -485,10 +500,60 @@ export function UserProfileDialog({
         </div>
         </>
       ) : (
+        <>
         <div className="flex items-center justify-center gap-2">
           <span className={cn("h-2.5 w-2.5 rounded-full", statusColor(status))} />
           <span className="text-sm">{statusLabel(status)}</span>
         </div>
+        {mutualFriends.length > 0 && (
+          <div className="w-full">
+            <button
+              onClick={() => setShowMutualsList((v) => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 rounded-md border border-border/40 bg-muted/20 hover:bg-muted/40 transition-colors cursor-pointer"
+            >
+              <span className="text-xs font-medium text-muted-foreground">
+                {mutualFriends.length} Mutual Friend{mutualFriends.length !== 1 ? "s" : ""}
+              </span>
+              <svg
+                className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", showMutualsList && "rotate-180")}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showMutualsList && (
+              <div className="mt-1.5 max-h-36 overflow-y-auto rounded-md border border-border/40 bg-muted/10">
+                {mutualFriends.map((fid) => {
+                  const fPresence = state.userPresence[fid];
+                  const fDisplay = fPresence?.displayName || displayUserId(fid) || fid;
+                  const fStatus = fPresence?.status || "offline";
+                  const fAvatar = fPresence?.avatarUrl;
+                  return (
+                    <div
+                      key={fid}
+                      className="flex items-center gap-2 px-3 py-1.5 hover:bg-muted/30 transition-colors"
+                    >
+                      <div className="relative shrink-0">
+                        <Avatar className="h-6 w-6">
+                          <AuthAvatarImage src={fAvatar} />
+                          <AvatarFallback className="text-[10px] bg-secondary">
+                            {fDisplay[0]?.toUpperCase() || "?"}
+                          </AvatarFallback>
+                        </Avatar>
+                        <span className={cn("absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full border border-background", statusColor(fStatus))} />
+                      </div>
+                      <span className="text-xs font-medium truncate">{fDisplay}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       {isSelf ? (

@@ -1623,6 +1623,12 @@ export async function apiGetFriendStatus(userId: string) {
   return res.json() as Promise<{ status: string }>;
 }
 
+export async function apiGetMutualFriends(userId: string) {
+  const res = await authenticatedFetch(`/api/friends/mutuals/${userId}`);
+  if (!res.ok) throw new Error("Failed to get mutual friends");
+  return res.json() as Promise<{ mutuals: string[] }>;
+}
+
 export async function apiSendFriendRequest(userId: string) {
   const res = await authenticatedFetch("/api/friends/request", {
     method: "POST",

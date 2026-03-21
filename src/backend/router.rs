@@ -5,7 +5,7 @@ use super::{
         auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, ice_servers, login, logout, recovery_login, refresh, register, server_info, totp_setup, totp_verify},
         channels::{list_channels, create_channel, update_channel, delete_channel, create_category, update_category, delete_category},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
-        friends::{get_friends, get_friend_status, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
+        friends::{get_friends, get_friend_status, get_mutual_friends, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
         room_groups::{get_room_groups, create_room_group, update_room_group, delete_room_group, set_group_rooms, set_group_collapsed},
         roles::{list_roles, create_role, update_role, delete_role, get_member_roles, assign_member_roles, list_all_member_roles},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
@@ -185,6 +185,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Friends
            .route("/api/friends", get(get_friends))
            .route("/api/friends/status/{user_id}", get(get_friend_status))
+           .route("/api/friends/mutuals/{user_id}", get(get_mutual_friends))
            .route("/api/friends/request", post(send_friend_request))
            .route("/api/friends/accept", post(accept_friend_request))
            .route("/api/friends/reject", post(reject_friend_request))

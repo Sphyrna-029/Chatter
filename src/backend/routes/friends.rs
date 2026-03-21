@@ -445,6 +445,49 @@ pub(crate) async fn block_user(
     Ok(Json(json!({ "status": "blocked" })))
 }
 
+/// GET /api/friends/mutuals/:user_id — returns list of mutual friend user_ids
+pub(crate) async fn get_mutual_friends(
+    State(state): State<Arc<AppState>>,
+    Path(target_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let friendships_coll = state.db.collection::<FriendshipRecord>("friendships");
+
+    // Get my friends
+    let mut my_friends = std::collections::HashSet::new();
+    if let Ok(mut cursor) = friendships_coll
+        .find(doc! { "$or": [{ "user_a": &user_id }, { "user_b": &user_id }] })
+        .await
+    {
+        while let Ok(Some(f)) = cursor.try_next().await {
+            let fid = if f.user_a == user_id { f.user_b } else { f.user_a };
+            my_friends.insert(fid);
+        }
+    }
+
+    // Get target's friends
+    let mut target_friends = std::collections::HashSet::new();
+    if let Ok(mut cursor) = friendships_coll
+        .find(doc! { "$or": [{ "user_a": &target_id }, { "user_b": &target_id }] })
+        .await
+    {
+        while let Ok(Some(f)) = cursor.try_next().await {
+            let fid = if f.user_a == target_id { f.user_b.clone() } else { f.user_a.clone() };
+            target_friends.insert(fid);
+        }
+    }
+
+    // Intersection
+    let mutuals: Vec<&String> = my_friends.intersection(&target_friends).collect();
+
+    Ok(Json(json!({ "mutuals": mutuals })))
+}
+
 /// POST /api/friends/unblock
 pub(crate) async fn unblock_user(
     State(state): State<Arc<AppState>>,
