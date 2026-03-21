@@ -461,7 +461,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     {m.deafened && (
                       <HeadphoneOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Deafened" />
                     )}
-                    <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{displayUserId(m.userId)}</span>
+                    <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
                       {m.screen_sharing && (
                         <button
@@ -471,7 +471,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                             dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
                           }}
                           className="shrink-0 p-0.5 rounded hover:bg-purple-500/20 transition-colors"
-                          title={`Watch ${displayUserId(m.userId)}'s screen`}
+                          title={`Watch ${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))}'s screen`}
                         >
                           <Monitor className="h-3 w-3 text-purple-400" />
                         </button>

@@ -16,6 +16,7 @@ interface VoiceMemberListProps {
   connStats: Record<string, PeerStats>;
   speakingUsers: Set<string>;
   volumes: Record<string, number>;
+  userPresence: Record<string, { displayName?: string; [key: string]: unknown }>;
   onSetUserVolume: (userId: string, vol: number) => void;
   onWatchUser: (sharerId: string) => void;
 }
@@ -33,6 +34,7 @@ export function VoiceMemberList({
   connStats,
   speakingUsers,
   volumes,
+  userPresence,
   onSetUserVolume,
   onWatchUser,
 }: VoiceMemberListProps) {
@@ -42,7 +44,7 @@ export function VoiceMemberList({
     <div className="flex-1 overflow-y-auto px-2 py-2">
       <div className="flex flex-col gap-1">
         {voiceMembers.map((memberId) => {
-          const name = displayUserId(memberId);
+          const name = userPresence[memberId]?.displayName || displayUserId(memberId);
           const isSelf = memberId === userId;
           const memberState = voiceMemberStates[memberId];
           const isMutedMember = memberState?.muted || (isSelf && isMuted);

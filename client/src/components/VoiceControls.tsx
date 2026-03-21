@@ -172,6 +172,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         connStats={connStats}
         speakingUsers={speakingUsers}
         volumes={volumes}
+        userPresence={state.userPresence}
         onSetUserVolume={setUserVolume}
         onWatchUser={watchUser}
       />

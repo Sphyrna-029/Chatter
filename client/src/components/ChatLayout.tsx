@@ -314,7 +314,7 @@ export function ChatLayout() {
   const sharerName = state.selectedScreenSharer
     ? state.selectedScreenSharer === state.userId
       ? "Your screen"
-      : displayUserId(state.selectedScreenSharer) + "'s screen"
+      : (state.userPresence[state.selectedScreenSharer]?.displayName || displayUserId(state.selectedScreenSharer)) + "'s screen"
     : "Screen share";
   const voiceRoomName = state.voiceRoomId
     ? state.roomInfoMap[state.voiceRoomId]?.name || "voice channel"
