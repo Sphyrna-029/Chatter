@@ -760,6 +760,9 @@ async fn safe_fetch(
             .get(&current_url)
             .header("User-Agent", ua)
             .header("Accept", accept)
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept-Encoding", "gzip, deflate, br")
+            .header("Cache-Control", "no-cache")
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -812,7 +815,9 @@ pub(crate) async fn link_preview(
         Err(msg) => return error_response(StatusCode::BAD_REQUEST, msg),
     };
 
-    let browser_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    // Use a well-known link-preview bot UA — sites whitelist these for OG tag serving
+    // (Twitterbot and Discordbot are universally allowed, unlike Googlebot which gets 403'd)
+    let browser_ua = "Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)";
 
     let is_twitter = url.contains("twitter.com/") || url.contains("x.com/");
     let preview = if is_twitter {
@@ -862,16 +867,23 @@ pub(crate) async fn link_preview(
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
         }
     } else {
-        let response = match safe_fetch(
-            &url,
-            &validated_addrs,
-            browser_ua,
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to fetch URL"),
+        // Try with primary UA; if it fails (e.g. 403), retry with fallback UA
+        let accept_html = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+        let fallback_ua = "Twitterbot/1.0";
+
+        let response = match safe_fetch(&url, &validated_addrs, browser_ua, accept_html).await {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                // Retry with fallback UA
+                match safe_fetch(&url, &validated_addrs, fallback_ua, accept_html).await {
+                    Ok(r) if r.status().is_success() => r,
+                    _ => {
+                        return (StatusCode::OK, Json(serde_json::to_value(&CachedPreview {
+                            title: None, description: None, image: None, site_name: None,
+                        }).unwrap()));
+                    }
+                }
+            }
         };
 
         // Detect charset from Content-Type header for proper decoding
