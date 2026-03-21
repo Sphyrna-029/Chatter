@@ -112,6 +112,33 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     }
   }, []);
 
+  const applySync = useCallback((positionSecs: number, playing: boolean) => {
+    isApplyingSync.current = true;
+    if (isYoutubeRef.current && iframeRef.current) {
+      const win = iframeRef.current.contentWindow;
+      win?.postMessage(
+        JSON.stringify({ event: "command", func: "seekTo", args: [positionSecs, true] }),
+        "*"
+      );
+      win?.postMessage(
+        JSON.stringify({ event: "command", func: playing ? "playVideo" : "pauseVideo", args: "" }),
+        "*"
+      );
+    } else if (videoRef.current) {
+      videoRef.current.currentTime = positionSecs;
+      if (playing && videoRef.current.paused) {
+        videoRef.current.play().catch(() => {});
+      } else if (!playing && !videoRef.current.paused) {
+        videoRef.current.pause();
+      }
+    }
+    setDisplayPosition(positionSecs);
+    displayPositionRef.current = positionSecs;
+    setTimeout(() => {
+      isApplyingSync.current = false;
+    }, 400);
+  }, []);
+
   // Listen for YouTube player postMessages: duration detection and onReady sync.
   // Each client has their own iframe so these fire independently — no broadcasting needed.
   useEffect(() => {
@@ -142,33 +169,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     window.addEventListener("message", handleYtMsg);
     return () => window.removeEventListener("message", handleYtMsg);
   }, [applyVolume, applySync]);
-
-  const applySync = useCallback((positionSecs: number, playing: boolean) => {
-    isApplyingSync.current = true;
-    if (isYoutubeRef.current && iframeRef.current) {
-      const win = iframeRef.current.contentWindow;
-      win?.postMessage(
-        JSON.stringify({ event: "command", func: "seekTo", args: [positionSecs, true] }),
-        "*"
-      );
-      win?.postMessage(
-        JSON.stringify({ event: "command", func: playing ? "playVideo" : "pauseVideo", args: "" }),
-        "*"
-      );
-    } else if (videoRef.current) {
-      videoRef.current.currentTime = positionSecs;
-      if (playing && videoRef.current.paused) {
-        videoRef.current.play().catch(() => {});
-      } else if (!playing && !videoRef.current.paused) {
-        videoRef.current.pause();
-      }
-    }
-    setDisplayPosition(positionSecs);
-    displayPositionRef.current = positionSecs;
-    setTimeout(() => {
-      isApplyingSync.current = false;
-    }, 400);
-  }, []);
 
   // Fetch state on mount and request sync
   useEffect(() => {
