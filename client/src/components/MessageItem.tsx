@@ -223,7 +223,7 @@ function LinkPreviewCard({ url }: { url: string }) {
     return () => { cancelled = true; };
   }, [url]);
 
-  if (failed || !preview || (!preview.title && !preview.description)) return null;
+  if (failed || !preview || (!preview.title && !preview.description && !preview.image)) return null;
 
   return (
     <a

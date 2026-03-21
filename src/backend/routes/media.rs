@@ -594,22 +594,25 @@ fn decode_html_entities(s: &str) -> String {
 }
 
 /// Extract the <head> section from HTML to limit meta tag search scope.
+/// Uses a regex to avoid byte-offset mismatches from case-folding multi-byte chars.
 fn extract_head_section(html: &str) -> &str {
-    let lower = html.to_lowercase();
-    let start = lower.find("<head").unwrap_or(0);
-    let end = lower.find("</head>").map(|i| i + 7).unwrap_or(html.len());
-    // Clamp end to 128KB to avoid scanning massive bodies
-    let end = end.min(128 * 1024);
-    &html[start..end.min(html.len())]
+    // Clamp scan to 128KB
+    let haystack = if html.len() > 128 * 1024 { &html[..128 * 1024] } else { html };
+    let head_re = regex::Regex::new(r"(?is)<head[\s>].*?</head>").unwrap();
+    if let Some(m) = head_re.find(haystack) {
+        return m.as_str();
+    }
+    // No explicit <head> — scan the whole clamped region (common on minimal pages)
+    haystack
 }
 
-/// Extract an attribute value from a tag string, handling quotes and whitespace.
+/// Extract an attribute value from a tag string, handling quotes, whitespace, and newlines.
 fn extract_attr_value(tag: &str, attr_name: &str) -> Option<String> {
     let target = attr_name.to_lowercase();
 
-    // Use regex to flexibly match: attr_name\s*=\s*("val"|'val'|val)
+    // Use regex with (?s) to handle newlines inside tags
     let pattern = format!(
-        r#"(?i){}\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))"#,
+        r#"(?is){}\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#,
         regex::escape(&target)
     );
     let re = regex::Regex::new(&pattern).ok()?;
@@ -618,36 +621,24 @@ fn extract_attr_value(tag: &str, attr_name: &str) -> Option<String> {
     let val = caps.get(1)
         .or_else(|| caps.get(2))
         .or_else(|| caps.get(3))
-        .map(|m| m.as_str().to_string())?;
+        .map(|m| m.as_str().trim().to_string())?;
 
     if val.is_empty() { return None; }
     Some(decode_html_entities(&val))
 }
 
 /// Find all <meta ...> tags in the HTML head section (case-insensitive).
-/// Handles tags spanning multiple lines and self-closing tags.
+/// Uses regex to properly handle multi-line tags and multi-byte chars.
 fn find_meta_tags(html: &str) -> Vec<String> {
     let head = extract_head_section(html);
-    let mut tags = Vec::new();
-    let lower = head.to_lowercase();
-    let mut search_from = 0;
-    while let Some(start) = lower[search_from..].find("<meta") {
-        let abs_start = search_from + start;
-        // Find the end of this tag — handle both > and />
-        if let Some(end) = head[abs_start..].find('>') {
-            tags.push(head[abs_start..abs_start + end + 1].to_string());
-            search_from = abs_start + end + 1;
-        } else {
-            break;
-        }
-    }
-    tags
+    let meta_re = regex::Regex::new(r"(?is)<meta\s[^>]*>").unwrap();
+    meta_re.find_iter(head).map(|m| m.as_str().to_string()).collect()
 }
 
-/// Check if a meta tag has a matching property or name attribute.
+/// Check if a meta tag has a matching property, name, or itemprop attribute.
 fn meta_tag_matches(tag: &str, attr_value: &str) -> bool {
     let target = attr_value.to_lowercase();
-    for attr in &["property", "name"] {
+    for attr in &["property", "name", "itemprop"] {
         if let Some(val) = extract_attr_value(tag, attr) {
             if val.to_lowercase() == target {
                 return true;
@@ -680,17 +671,36 @@ fn extract_meta_name(html: &str, name: &str) -> Option<String> {
 
 pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
     let head = extract_head_section(html);
-    let lower = head.to_lowercase();
-    let start = lower.find("<title")?;
-    let rest = &head[start + 6..];
-    let after_open = rest.find('>')? + 1;
-    let end_lower = rest[after_open..].to_lowercase();
-    let end = end_lower.find("</title>")?;
-    let title = decode_html_entities(rest[after_open..after_open + end].trim());
-    if title.is_empty() {
-        return None;
-    }
+    let title_re = regex::Regex::new(r"(?is)<title[^>]*>(.*?)</title>").unwrap();
+    let caps = title_re.captures(head)?;
+    let title = decode_html_entities(caps[1].trim());
+    if title.is_empty() { return None; }
     Some(title)
+}
+
+/// Detect charset declared in HTML meta tags (e.g. <meta charset="..."> or
+/// <meta http-equiv="Content-Type" content="...; charset=...">) .
+fn detect_html_charset(html: &str) -> Option<String> {
+    let meta_tags = find_meta_tags(html);
+    for tag in &meta_tags {
+        // <meta charset="...">
+        if let Some(cs) = extract_attr_value(tag, "charset") {
+            return Some(cs.to_lowercase());
+        }
+        // <meta http-equiv="Content-Type" content="text/html; charset=...">
+        if let Some(equiv) = extract_attr_value(tag, "http-equiv") {
+            if equiv.eq_ignore_ascii_case("content-type") {
+                if let Some(content) = extract_attr_value(tag, "content") {
+                    let lower = content.to_lowercase();
+                    if let Some(pos) = lower.find("charset=") {
+                        let cs = lower[pos + 8..].split(';').next().unwrap_or("").trim().to_string();
+                        if !cs.is_empty() { return Some(cs); }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Resolve a potentially relative URL against a base URL.
@@ -872,6 +882,16 @@ pub(crate) async fn link_preview(
             .unwrap_or("")
             .to_lowercase();
 
+        // Bail early for non-HTML content types (e.g. JSON APIs, PDFs, binaries)
+        let is_html = content_type.is_empty()
+            || content_type.contains("text/html")
+            || content_type.contains("application/xhtml");
+        if !is_html {
+            return (StatusCode::OK, Json(serde_json::to_value(&CachedPreview {
+                title: None, description: None, image: None, site_name: None,
+            }).unwrap()));
+        }
+
         let body_bytes = match response.bytes().await {
             Ok(b) => b,
             Err(_) => return error_response(StatusCode::BAD_GATEWAY, "Failed to read response"),
@@ -884,33 +904,57 @@ pub(crate) async fn link_preview(
             &body_bytes[..]
         };
 
-        // Try to detect encoding from Content-Type header or meta charset tag
-        let body = if content_type.contains("iso-8859-1") || content_type.contains("latin1") || content_type.contains("windows-1252") {
+        // Try to detect encoding from Content-Type header or HTML meta charset tag
+        // First do a lossy UTF-8 pass to find charset in meta tags
+        let lossy = String::from_utf8_lossy(bytes_to_parse);
+        let html_charset = detect_html_charset(&lossy);
+
+        let is_latin = content_type.contains("iso-8859-1")
+            || content_type.contains("latin1")
+            || content_type.contains("windows-1252")
+            || matches!(html_charset.as_deref(), Some("iso-8859-1" | "latin1" | "latin-1" | "windows-1252"));
+
+        let body = if is_latin {
             // Decode as Latin-1 (each byte maps directly to a Unicode code point)
             bytes_to_parse.iter().map(|&b| b as char).collect::<String>()
         } else {
-            String::from_utf8_lossy(bytes_to_parse).to_string()
+            lossy.into_owned()
         };
 
         // Try OG tags first, then twitter: card tags, then plain meta tags, then <title>
         let title = extract_og_tag(&body, "og:title")
             .or_else(|| extract_meta_name(&body, "twitter:title"))
             .or_else(|| extract_meta_name(&body, "title"))
+            .or_else(|| extract_meta_name(&body, "dc.title"))
             .or_else(|| extract_title_tag(&body));
 
         let description = extract_og_tag(&body, "og:description")
             .or_else(|| extract_meta_name(&body, "twitter:description"))
-            .or_else(|| extract_meta_name(&body, "description"));
+            .or_else(|| extract_meta_name(&body, "description"))
+            .or_else(|| extract_meta_name(&body, "dc.description"));
 
         // Resolve relative image URLs to absolute
         let image = extract_og_tag(&body, "og:image")
+            .or_else(|| extract_og_tag(&body, "og:image:url"))
+            .or_else(|| extract_og_tag(&body, "og:image:secure_url"))
             .or_else(|| extract_meta_name(&body, "twitter:image"))
             .or_else(|| extract_meta_name(&body, "twitter:image:src"))
+            .or_else(|| extract_meta_name(&body, "thumbnail"))
             .map(|img| resolve_url(&url, &img));
 
         let site_name = extract_og_tag(&body, "og:site_name")
             .or_else(|| extract_meta_name(&body, "twitter:site"))
-            .or_else(|| extract_meta_name(&body, "application-name"));
+            .or_else(|| extract_meta_name(&body, "application-name"))
+            .or_else(|| extract_meta_name(&body, "al:android:app_name"))
+            .or_else(|| extract_meta_name(&body, "al:ios:app_name"))
+            .or_else(|| {
+                // Fall back to extracting domain name from URL
+                url::Url::parse(&url).ok()
+                    .and_then(|u| u.host_str().map(|h| {
+                        // Strip www. prefix
+                        h.strip_prefix("www.").unwrap_or(h).to_string()
+                    }))
+            });
 
         CachedPreview {
             title,
