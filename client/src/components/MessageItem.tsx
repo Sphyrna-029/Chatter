@@ -513,11 +513,13 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
   // Map of lowercase role name -> color (or "") for role mention rendering
   const roleNamesMap = useMemo(() => {
     const map = new Map<string, string>();
+    map.set("owner", roomInfo?.owner_name_color || "");
+    map.set("moderator", roomInfo?.mod_name_color || "");
     for (const role of state.customRoles) {
       map.set(role.name.toLowerCase(), role.color || "");
     }
     return map;
-  }, [state.customRoles]);
+  }, [state.customRoles, roomInfo?.owner_name_color, roomInfo?.mod_name_color]);
 
   const nameFontUrl = !isWebhook ? state.userPresence[message.sender]?.nameFontUrl : undefined;
   if (nameFontUrl) {

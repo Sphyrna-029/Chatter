@@ -48,16 +48,27 @@ function playLeaveSound() {
 function hasRoleMention(body: string, stateRef: MutableRefObject<AppState>): boolean {
   const userId = stateRef.current.userId;
   if (!userId) return false;
-  const myRoleIds = stateRef.current.memberCustomRoles[userId] || [];
-  if (myRoleIds.length === 0) return false;
-  const myRoleNames = myRoleIds
-    .map((rid) => stateRef.current.customRoles.find((r) => r.role_id === rid))
-    .filter(Boolean)
-    .map((r) => r!.name.toLowerCase());
-  if (myRoleNames.length === 0) return false;
   const mentions = body.match(/@(\w+)/g);
   if (!mentions) return false;
-  return mentions.some((m) => myRoleNames.includes(m.slice(1).toLowerCase()));
+  const mentionedNames = mentions.map((m) => m.slice(1).toLowerCase());
+
+  // Check built-in role (owner/moderator) from room members list
+  const myMember = stateRef.current.roomMembers.find((m) => m.userId === userId);
+  if (myMember && (myMember.role === "owner" || myMember.role === "moderator")) {
+    if (mentionedNames.includes(myMember.role)) return true;
+  }
+
+  // Check custom roles
+  const myRoleIds = stateRef.current.memberCustomRoles[userId] || [];
+  if (myRoleIds.length > 0) {
+    const myRoleNames = myRoleIds
+      .map((rid) => stateRef.current.customRoles.find((r) => r.role_id === rid))
+      .filter(Boolean)
+      .map((r) => r!.name.toLowerCase());
+    if (myRoleNames.some((name) => mentionedNames.includes(name))) return true;
+  }
+
+  return false;
 }
 
 export function createWsMessageHandler(

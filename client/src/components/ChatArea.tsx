@@ -959,22 +959,31 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return () => cancelAnimationFrame(raf);
   }, [scrollToEventId, searchOpen, state.messages]);
 
-  const mentionMatches = mentionOpen
-    ? [
-        ...state.roomMembers
-          .filter((m) =>
-            m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
-          )
-          .slice(0, 5)
-          .map((m) => ({ kind: "user" as const, id: m.userId, name: m.displayName, color: undefined as string | undefined })),
-        ...state.customRoles
-          .filter((r) =>
-            r.name.toLowerCase().startsWith(mentionSearch.toLowerCase())
-          )
-          .slice(0, 5)
-          .map((r) => ({ kind: "role" as const, id: r.role_id, name: r.name, color: r.color || undefined })),
-      ].slice(0, 8)
-    : [];
+  const mentionMatches = useMemo(() => {
+    if (!mentionOpen) return [];
+    const roomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
+    const builtInRoles: { kind: "role"; id: string; name: string; color: string | undefined }[] = [];
+    for (const r of [{ name: "owner", color: roomInfo?.owner_name_color }, { name: "moderator", color: roomInfo?.mod_name_color }]) {
+      if (r.name.toLowerCase().startsWith(mentionSearch.toLowerCase())) {
+        builtInRoles.push({ kind: "role", id: `builtin-${r.name}`, name: r.name, color: r.color || undefined });
+      }
+    }
+    return [
+      ...state.roomMembers
+        .filter((m) =>
+          m.displayName.toLowerCase().startsWith(mentionSearch.toLowerCase())
+        )
+        .slice(0, 5)
+        .map((m) => ({ kind: "user" as const, id: m.userId, name: m.displayName, color: undefined as string | undefined })),
+      ...builtInRoles,
+      ...state.customRoles
+        .filter((r) =>
+          r.name.toLowerCase().startsWith(mentionSearch.toLowerCase())
+        )
+        .slice(0, 5)
+        .map((r) => ({ kind: "role" as const, id: r.role_id, name: r.name, color: r.color || undefined })),
+    ].slice(0, 8);
+  }, [mentionOpen, mentionSearch, state.roomMembers, state.customRoles, state.currentRoomId, state.roomInfoMap]);
 
   const emojiMatches = emojiAutocompleteOpen
     ? Object.entries(mergedShortcodes)
