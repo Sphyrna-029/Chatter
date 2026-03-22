@@ -44,7 +44,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
     // ServeDir serves static files with streaming, Range requests, etc.
     // upload_guard middleware handles auth, dangerous extensions, and MKV conversion.
     let external_router = Router::new()
-        .nest_service("/", ServeDir::new("external"))
+        .fallback_service(ServeDir::new("external"))
         .layer(middleware::from_fn(upload_guard));
 
        Router::new()
