@@ -181,6 +181,19 @@ export function createWsMessageHandler(
           type: "UPDATE_THREAD_REPLY_COUNT",
           payload: { eventId: msg.thread_id, count: msg.thread_reply_count },
         });
+        // Merge newly added thread participants into the root message
+        if (msg.added_participants && msg.added_participants.length > 0) {
+          dispatch({
+            type: "ADD_THREAD_PARTICIPANTS",
+            payload: { eventId: msg.thread_id, participants: [msg.sender, ...msg.added_participants] },
+          });
+        } else {
+          // Sender always becomes a participant
+          dispatch({
+            type: "ADD_THREAD_PARTICIPANTS",
+            payload: { eventId: msg.thread_id, participants: [msg.sender] },
+          });
+        }
         // If the thread panel is open for this thread, add the message
         if (stateRef.current.activeThreadEventId === msg.thread_id) {
           dispatch({

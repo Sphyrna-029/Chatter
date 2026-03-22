@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Pencil, Check, X } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X, Paperclip } from "lucide-react";
 import { useAppContext } from "@/lib/store";
+import { apiUploadFile } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MessageItem } from "./MessageItem";
 import { displayUserId } from "@/lib/utils";
@@ -19,8 +20,11 @@ export function ThreadPanel() {
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { threadRootMessage, threadMessages, userPresence, currentRoomId, roomInfoMap } = state;
@@ -53,6 +57,44 @@ export function ThreadPanel() {
     setEmojiOpen(false);
     inputRef.current?.focus();
   }, []);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
+      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+      return;
+    }
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
+      const msg = body.trim() ? `${body.trim()} ${url}` : url;
+      setBody("");
+      await sendThreadMessage(msg);
+    } catch (err: any) {
+      alert(err.message || "Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }, [body, sendThreadMessage, state.uploadLimitBytes]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) handleFileUpload(file);
+  }, [handleFileUpload]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.kind === "file") {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) handleFileUpload(file);
+        return;
+      }
+    }
+  }, [handleFileUpload]);
 
   const startEditingName = useCallback(() => {
     setNameDraft(threadRootMessage?.thread_name ?? "");
@@ -140,6 +182,32 @@ export function ThreadPanel() {
         </div>
       </div>
 
+      {/* Thread participants */}
+      {threadRootMessage.thread_participants && threadRootMessage.thread_participants.length > 0 && (
+        <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/50 shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider shrink-0">
+            Members
+          </span>
+          <div className="flex items-center -space-x-1.5 flex-wrap">
+            {threadRootMessage.thread_participants.map((pid) => {
+              const pName = userPresence[pid]?.displayName || displayUserId(pid);
+              const pAvatar = userPresence[pid]?.avatarUrl;
+              return (
+                <Avatar key={pid} className="h-5 w-5 border-2 border-background" title={pName}>
+                  <AuthAvatarImage src={pAvatar} />
+                  <AvatarFallback className="text-[8px] font-semibold bg-secondary">
+                    {pName.substring(0, 1).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              );
+            })}
+          </div>
+          <span className="text-[10px] text-muted-foreground">
+            {threadRootMessage.thread_participants.length}
+          </span>
+        </div>
+      )}
+
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto min-h-0">
         {/* Root message */}
@@ -191,7 +259,32 @@ export function ThreadPanel() {
 
       {/* Input area */}
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-border">
+        {uploading && (
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full bg-primary rounded-full transition-all duration-200"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-muted-foreground shrink-0">{uploadProgress}%</span>
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+          <button
+            className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            title="Upload file"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
           <textarea
             ref={inputRef}
             className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground max-h-24 min-h-[1.25rem] self-center"
@@ -204,6 +297,7 @@ export function ThreadPanel() {
               e.target.style.height = `${Math.min(e.target.scrollHeight, 96)}px`;
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
           />
           <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
             <PopoverTrigger asChild>
@@ -225,7 +319,7 @@ export function ThreadPanel() {
           <Button
             size="sm"
             className="h-7 px-2 shrink-0"
-            disabled={!body.trim()}
+            disabled={(!body.trim() && !uploading) || uploading}
             onClick={handleSend}
           >
             Send

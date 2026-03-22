@@ -242,6 +242,25 @@ export function reducer(state: AppState, action: Action): AppState {
             : m
         ),
       };
+    case "ADD_THREAD_PARTICIPANTS": {
+      const mergeParticipants = (existing: string[] | undefined, added: string[]) => {
+        const set = new Set(existing ?? []);
+        added.forEach((p) => set.add(p));
+        return Array.from(set);
+      };
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, thread_participants: mergeParticipants(m.thread_participants, action.payload.participants) }
+            : m
+        ),
+        threadRootMessage:
+          state.threadRootMessage?.event_id === action.payload.eventId
+            ? { ...state.threadRootMessage, thread_participants: mergeParticipants(state.threadRootMessage.thread_participants, action.payload.participants) }
+            : state.threadRootMessage,
+      };
+    }
     case "SET_THREAD_NAME":
       return {
         ...state,

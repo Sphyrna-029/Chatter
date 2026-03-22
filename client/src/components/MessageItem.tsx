@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star } from "lucide-react";
+import { EyeOff, Star, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -188,10 +188,11 @@ function getYouTubeVideoId(url: string): string | null {
 }
 
 /** Extract media URLs from body for rendering as React elements */
-function extractMediaUrls(body: string): { images: string[]; videos: string[]; audios: string[]; links: string[]; youtubeIds: string[] } {
+function extractMediaUrls(body: string): { images: string[]; videos: string[]; audios: string[]; files: string[]; links: string[]; youtubeIds: string[] } {
   const images: string[] = [];
   const videos: string[] = [];
   const audios: string[] = [];
+  const files: string[] = [];
   const links: string[] = [];
   const youtubeIds: string[] = [];
   // Strip custom emoji markers so they're not treated as full-size media
@@ -204,10 +205,11 @@ function extractMediaUrls(body: string): { images: string[]; videos: string[]; a
       else if (imageExtensions.test(url)) images.push(url);
       else if (audioExtensions.test(url)) audios.push(url);
       else if (videoExtensions.test(url)) videos.push(url);
+      else if (/\/external\//.test(url)) files.push(url);
       else links.push(url);
     }
   }
-  return { images, videos, audios, links, youtubeIds };
+  return { images, videos, audios, files, links, youtubeIds };
 }
 
 /** Link preview card — fetches OG metadata on mount */
@@ -255,15 +257,49 @@ function LinkPreviewCard({ url }: { url: string }) {
   );
 }
 
+/** File attachment card for uploaded non-media files */
+function FileAttachmentCard({ url }: { url: string }) {
+  // Extract filename from URL: /external/{folder}/{encoded_filename}
+  const segments = url.split("/");
+  const rawName = decodeURIComponent(segments[segments.length - 1] || "file");
+  // Strip query params
+  const fileName = rawName.split("?")[0];
+  const dotIdx = fileName.lastIndexOf(".");
+  const ext = dotIdx > 0 ? fileName.slice(dotIdx + 1).toUpperCase() : "";
+  const baseName = dotIdx > 0 ? fileName.slice(0, dotIdx) : fileName;
+
+  const IconComponent = /^(zip|rar|7z|tar|gz|bz2)$/i.test(ext) ? FileArchive
+    : /^(js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|html|css|json|xml|yml|yaml|sh|sql|rb|php)$/i.test(ext) ? FileCode
+    : /^(csv|xls|xlsx)$/i.test(ext) ? FileSpreadsheet
+    : /^(txt|md|log|pdf|doc|docx|rtf)$/i.test(ext) ? FileText
+    : FileIcon;
+
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      download={fileName}
+      className="mt-1 flex items-center gap-3 rounded-md border border-border bg-secondary/30 hover:bg-secondary/50 transition-colors px-3 py-2.5 max-w-sm group"
+    >
+      <IconComponent className="h-8 w-8 text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
+      <div className="flex flex-col min-w-0">
+        <span className="text-sm font-medium truncate">{baseName}</span>
+        <span className="text-xs text-muted-foreground">{ext ? `${ext} file` : "File"}</span>
+      </div>
+    </a>
+  );
+}
+
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
 const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onReveal }: { body: string; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
-  const { images, videos, audios, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
+  const { images, videos, audios, files, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
 
-  const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || links.length > 0 || youtubeIds.length > 0;
+  const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || files.length > 0 || links.length > 0 || youtubeIds.length > 0;
   if (!hasMedia) return null;
 
   if (hiddenBySpoiler) {
@@ -351,6 +387,9 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
           preload="metadata"
           className="max-w-full"
         />
+      ))}
+      {files.map((url) => (
+        <FileAttachmentCard key={url} url={url} />
       ))}
       {links.length > 0 && <LinkPreviewCard url={links[0]} />}
 

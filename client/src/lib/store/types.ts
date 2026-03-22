@@ -118,6 +118,7 @@ export type Action =
   | { type: "CLOSE_THREAD" }
   | { type: "ADD_THREAD_MESSAGE"; payload: MatrixMessage }
   | { type: "UPDATE_THREAD_REPLY_COUNT"; payload: { eventId: string; count: number } }
+  | { type: "ADD_THREAD_PARTICIPANTS"; payload: { eventId: string; participants: string[] } }
   | { type: "SET_THREAD_NAME"; payload: { eventId: string; name: string } }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }

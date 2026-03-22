@@ -14,6 +14,7 @@ use axum::{
 };
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
+use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -571,6 +572,25 @@ pub(crate) async fn get_thread_messages(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread root message not found"))?;
 
+    // Check channel-level view permissions on the root message
+    if let Some(ch_id) = root_doc.get_str("channel_id").ok().filter(|s| !s.is_empty()) {
+        let role = get_user_role(&state, &room_id, &user_id).await;
+        if role != "owner" && role != "moderator" {
+            let channels_coll = state.db.collection::<ChannelRecord>("channels");
+            if let Ok(Some(ch)) = channels_coll.find_one(doc! { "_id": ch_id }).await {
+                if !ch.view_roles.is_empty() {
+                    let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                    if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
+                        return Err(error_response(
+                            StatusCode::FORBIDDEN,
+                            "You do not have access to this channel",
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     let mut root_doc = root_doc;
     root_doc.remove("_id");
     let root_msg = serde_json::to_value(&root_doc).unwrap_or(serde_json::Value::Null);
@@ -660,6 +680,43 @@ pub(crate) async fn send_thread_message(
         }
     }
 
+    // Check channel-level view/write permissions on the thread's root message
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    if let Ok(Some(root_doc)) = msg_coll
+        .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
+        .await
+    {
+        if let Ok(ch_id) = root_doc.get_str("channel_id") {
+            if !ch_id.is_empty() {
+                let channels_coll = state.db.collection::<ChannelRecord>("channels");
+                if let Ok(Some(ch)) = channels_coll.find_one(doc! { "_id": ch_id }).await {
+                    let role = get_user_role(&state, &room_id, &user_id).await;
+                    let is_privileged = role == "owner" || role == "moderator";
+                    if !is_privileged {
+                        if !ch.view_roles.is_empty() {
+                            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                            if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
+                                return Err(error_response(
+                                    StatusCode::FORBIDDEN,
+                                    "You do not have access to this channel",
+                                ));
+                            }
+                        }
+                        if !ch.write_roles.is_empty() {
+                            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                            if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
+                                return Err(error_response(
+                                    StatusCode::FORBIDDEN,
+                                    "You do not have permission to send messages in this channel",
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     const MAX_MESSAGE_LENGTH: usize = 4000;
     let emoji_marker = regex::Regex::new(r":emoji\{[^}]+\}:").unwrap();
     let display_body = emoji_marker.replace_all(&req.body, "X");
@@ -688,7 +745,6 @@ pub(crate) async fn send_thread_message(
         "origin_server_ts": timestamp
     });
 
-    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&event) {
         let _ = msg_coll.insert_one(doc).await;
     }
@@ -699,6 +755,60 @@ pub(crate) async fn send_thread_message(
         .await
         .unwrap_or(0);
 
+    // Extract @mentions from message body and auto-add mentioned users to thread
+    let mention_re = Regex::new(r"@(\w+)").unwrap();
+    let mentioned_names: Vec<String> = mention_re
+        .captures_iter(&req.body)
+        .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+        .collect();
+
+    let mut added_participants: Vec<String> = Vec::new();
+    if !mentioned_names.is_empty() {
+        // Look up room members and match by username portion of user_id
+        let rm = state.room_members.read().await;
+        let room_member_list = rm.get(&room_id).cloned().unwrap_or_default();
+        drop(rm);
+
+        let mut new_participant_ids: Vec<String> = Vec::new();
+        for name in &mentioned_names {
+            let lower = name.to_lowercase();
+            for member_id in &room_member_list {
+                // user_id format: @username:localhost
+                let username = member_id
+                    .split(':')
+                    .next()
+                    .unwrap_or("")
+                    .trim_start_matches('@')
+                    .to_lowercase();
+                if username == lower && member_id != &user_id {
+                    new_participant_ids.push(member_id.clone());
+                }
+            }
+        }
+
+        if !new_participant_ids.is_empty() {
+            // Add to thread_participants array on the root message (deduplicated)
+            // Also ensure the sender is a participant
+            let all_to_add: Vec<&str> = new_participant_ids.iter().map(|s| s.as_str()).collect();
+            let _ = msg_coll
+                .update_one(
+                    doc! { "event_id": &thread_event_id, "room_id": &room_id },
+                    doc! { "$addToSet": { "thread_participants": { "$each": &all_to_add } } },
+                )
+                .await;
+
+            added_participants = new_participant_ids;
+        }
+    }
+
+    // Always ensure the sender is a thread participant
+    let _ = msg_coll
+        .update_one(
+            doc! { "event_id": &thread_event_id, "room_id": &room_id },
+            doc! { "$addToSet": { "thread_participants": &user_id } },
+        )
+        .await;
+
     // Broadcast to all room members so they can update thread reply counts
     let broadcast_event = json!({
         "type": "m.thread.message",
@@ -708,7 +818,8 @@ pub(crate) async fn send_thread_message(
         "thread_id": thread_event_id,
         "content": content,
         "thread_reply_count": reply_count,
-        "origin_server_ts": timestamp
+        "origin_server_ts": timestamp,
+        "added_participants": added_participants
     });
 
     broadcast_to_room(&state, &room_id, &broadcast_event).await;
@@ -837,6 +948,46 @@ pub(crate) async fn get_room_threads(
         doc.remove("_id");
         if let Ok(val) = serde_json::to_value(&doc) {
             root_msgs.push(val);
+        }
+    }
+
+    // Filter out threads from channels the user cannot view
+    let role = get_user_role(&state, &room_id, &user_id).await;
+    let is_privileged = role == "owner" || role == "moderator";
+    if !is_privileged {
+        let channels_coll = state.db.collection::<ChannelRecord>("channels");
+        // Collect channel_ids referenced by root messages
+        let channel_ids: Vec<String> = root_msgs
+            .iter()
+            .filter_map(|m| m.get("channel_id").and_then(|v| v.as_str()).map(String::from))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        // Fetch channels with view_roles restrictions
+        let mut restricted_channels: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        if !channel_ids.is_empty() {
+            let mut ch_cursor = channels_coll
+                .find(doc! { "_id": { "$in": &channel_ids }, "view_roles": { "$ne": [] } })
+                .await
+                .ok();
+            if let Some(ref mut cursor) = ch_cursor {
+                while let Ok(Some(ch)) = cursor.try_next().await {
+                    if !ch.view_roles.is_empty() {
+                        restricted_channels.insert(ch.channel_id.clone(), ch.view_roles.clone());
+                    }
+                }
+            }
+        }
+        if !restricted_channels.is_empty() {
+            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+            root_msgs.retain(|msg| {
+                let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
+                if let Some(view_roles) = restricted_channels.get(ch_id) {
+                    view_roles.iter().any(|r| user_roles.contains(r))
+                } else {
+                    true // no restriction or no channel_id
+                }
+            });
         }
     }
 

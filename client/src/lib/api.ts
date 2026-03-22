@@ -581,6 +581,7 @@ export interface MatrixMessage {
   edited?: boolean;
   edited_at?: number;
   reactions?: Record<string, string[]>;
+  thread_participants?: string[];
 }
 
 export interface VoiceMember {
