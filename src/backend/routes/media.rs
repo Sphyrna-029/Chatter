@@ -62,6 +62,34 @@ fn format_bytes_short(bytes: u64) -> String {
     }
 }
 
+/// For MP4/MOV files, run ffmpeg to move the moov atom to the front of the file
+/// so browsers can start playback immediately without downloading the entire file.
+async fn apply_faststart(path: &str) {
+    let ext = path
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "m4a") {
+        return;
+    }
+    let tmp = format!("{}.faststart.tmp", path);
+    let result = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-i", path, "-c", "copy", "-movflags", "+faststart", &tmp])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    if let Ok(status) = result {
+        if status.success() {
+            let _ = tokio::fs::rename(&tmp, path).await;
+            return;
+        }
+    }
+    // Clean up temp file on failure
+    let _ = tokio::fs::remove_file(&tmp).await;
+}
+
 pub(crate) async fn upload_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -154,6 +182,9 @@ pub(crate) async fn upload_file(
     if tokio::fs::write(&path, &data).await.is_err() {
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
+
+    // Move moov atom to front for instant video playback
+    apply_faststart(&path).await;
 
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
     const ENCODE_SET: &AsciiSet = &CONTROLS
@@ -443,6 +474,12 @@ pub(crate) async fn upload_complete(
 
     // Clean up chunk dir
     let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+
+    // Flush the file handle before post-processing
+    drop(file);
+
+    // Move moov atom to front for instant video playback
+    apply_faststart(&path).await;
 
     // Build URL
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
