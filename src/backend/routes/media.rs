@@ -62,32 +62,67 @@ fn format_bytes_short(bytes: u64) -> String {
     }
 }
 
-/// For MP4/MOV files, run ffmpeg to move the moov atom to the front of the file
-/// so browsers can start playback immediately without downloading the entire file.
-async fn apply_faststart(path: &str) {
-    let ext = path
+/// Post-process uploaded video files for browser compatibility:
+/// - MKV/AVI/WMV → remux to MP4 (copies video, transcodes audio to AAC)
+/// - MP4/MOV → apply faststart (move moov atom to front for instant playback)
+/// Returns the (possibly new) file path and filename if the file was converted.
+async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
+    let ext = filename
         .rsplit('.')
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    if !matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "m4a") {
-        return;
-    }
-    let tmp = format!("{}.faststart.tmp", path);
-    let result = tokio::process::Command::new("ffmpeg")
-        .args(["-y", "-i", path, "-c", "copy", "-movflags", "+faststart", &tmp])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    if let Ok(status) = result {
-        if status.success() {
-            let _ = tokio::fs::rename(&tmp, path).await;
-            return;
+
+    // Convert non-browser formats to MP4
+    if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
+        let new_filename = format!(
+            "{}.mp4",
+            filename.rsplit_once('.').map(|(base, _)| base).unwrap_or(filename)
+        );
+        let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
+        let new_path = format!("{}/{}", dir, new_filename);
+        let result = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-i", path,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-movflags", "+faststart",
+                &new_path,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        if let Ok(status) = result {
+            if status.success() {
+                let _ = tokio::fs::remove_file(path).await;
+                return (new_path, new_filename);
+            }
         }
+        // Conversion failed — clean up and keep original
+        let _ = tokio::fs::remove_file(&new_path).await;
+        return (path.to_string(), filename.to_string());
     }
-    // Clean up temp file on failure
-    let _ = tokio::fs::remove_file(&tmp).await;
+
+    // For MP4/MOV, just apply faststart
+    if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "m4a") {
+        let tmp = format!("{}.faststart.tmp", path);
+        let result = tokio::process::Command::new("ffmpeg")
+            .args(["-y", "-i", path, "-c", "copy", "-movflags", "+faststart", &tmp])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await;
+        if let Ok(status) = result {
+            if status.success() {
+                let _ = tokio::fs::rename(&tmp, path).await;
+                return (path.to_string(), filename.to_string());
+            }
+        }
+        let _ = tokio::fs::remove_file(&tmp).await;
+    }
+
+    (path.to_string(), filename.to_string())
 }
 
 pub(crate) async fn upload_file(
@@ -183,8 +218,14 @@ pub(crate) async fn upload_file(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
 
-    // Move moov atom to front for instant video playback
-    apply_faststart(&path).await;
+    // Convert to browser-compatible format / apply faststart
+    let (path, filename) = postprocess_video(&path, &filename).await;
+
+    // Recalculate file size after potential conversion
+    let final_size = tokio::fs::metadata(&path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(data.len() as u64);
 
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
     const ENCODE_SET: &AsciiSet = &CONTROLS
@@ -216,7 +257,7 @@ pub(crate) async fn upload_file(
         filename: filename.clone(),
         url: url.clone(),
         disk_path: path,
-        size: data.len() as u64,
+        size: final_size,
         uploaded_at: chrono::Utc::now().timestamp(),
     };
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");
@@ -478,8 +519,14 @@ pub(crate) async fn upload_complete(
     // Flush the file handle before post-processing
     drop(file);
 
-    // Move moov atom to front for instant video playback
-    apply_faststart(&path).await;
+    // Convert to browser-compatible format / apply faststart
+    let (path, filename) = postprocess_video(&path, filename).await;
+
+    // Recalculate file size after potential conversion
+    let final_size = tokio::fs::metadata(&path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(total_size);
 
     // Build URL
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
@@ -493,7 +540,7 @@ pub(crate) async fn upload_complete(
         .add(b'?')
         .add(b'{')
         .add(b'}');
-    let encoded_filename = utf8_percent_encode(filename, ENCODE_SET).to_string();
+    let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
 
     let host = headers
         .get("host")
@@ -512,7 +559,7 @@ pub(crate) async fn upload_complete(
         filename: filename.clone(),
         url: url.clone(),
         disk_path: path,
-        size: total_size,
+        size: final_size,
         uploaded_at: chrono::Utc::now().timestamp(),
     };
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");
