@@ -381,7 +381,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
           key={url}
           src={url}
           controls
-          preload="metadata"
+          preload="auto"
           className="max-w-full max-h-80 rounded-md cursor-pointer"
           onClick={(e) => {
             const video = e.currentTarget;
@@ -395,7 +395,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
           key={url}
           src={url}
           controls
-          preload="metadata"
+          preload="auto"
           className="max-w-full"
         />
       ))}
