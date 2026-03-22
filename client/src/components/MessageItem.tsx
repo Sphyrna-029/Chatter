@@ -1,4 +1,4 @@
-import { memo, useMemo, useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
@@ -302,22 +302,28 @@ function FileAttachmentCard({ url }: { url: string }) {
   );
 }
 
-/** Lazy video — shows a poster thumbnail with a play button; only loads the video when clicked */
+/** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
 function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
   const [activated, setActivated] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const thumbUrl = `${url}.thumb.jpg`;
 
   if (!activated) {
     return (
       <div
-        className="relative max-w-full max-h-80 rounded-md cursor-pointer bg-zinc-900 flex items-center justify-center overflow-hidden group"
-        style={{ minWidth: 200, minHeight: 120 } as CSSProperties}
+        className="relative max-w-full rounded-md cursor-pointer bg-zinc-900 flex items-center justify-center overflow-hidden group"
         onClick={() => setActivated(true)}
       >
-        <video
-          src={url}
-          preload="none"
-          className="max-w-full max-h-80 rounded-md pointer-events-none"
+        <img
+          src={thumbUrl}
+          alt=""
+          className="max-w-full max-h-80 rounded-md object-contain"
+          onError={(e) => {
+            // If no thumbnail exists, show a minimal placeholder
+            const el = e.currentTarget;
+            el.style.display = "none";
+            el.parentElement!.style.minWidth = "200px";
+            el.parentElement!.style.minHeight = "120px";
+          }}
         />
         <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
           <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
@@ -330,7 +336,6 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
 
   return (
     <video
-      ref={videoRef}
       src={url}
       controls
       autoPlay

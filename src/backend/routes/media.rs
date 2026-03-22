@@ -125,6 +125,27 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
     (path.to_string(), filename.to_string())
 }
 
+/// Extract the first frame of a video as a JPEG thumbnail.
+/// Saves to `{path}.thumb.jpg` next to the video file.
+async fn generate_thumbnail(path: &str) {
+    let thumb_path = format!("{}.thumb.jpg", path);
+    if tokio::fs::metadata(&thumb_path).await.is_ok() {
+        return; // already exists
+    }
+    let _ = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-y", "-i", path,
+            "-vframes", "1",
+            "-vf", "scale=320:-1",
+            "-q:v", "6",
+            &thumb_path,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+}
+
 pub(crate) async fn upload_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -220,6 +241,12 @@ pub(crate) async fn upload_file(
 
     // Convert to browser-compatible format / apply faststart
     let (path, filename) = postprocess_video(&path, &filename).await;
+
+    // Generate first-frame thumbnail for video files
+    let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
+        generate_thumbnail(&path).await;
+    }
 
     // Recalculate file size after potential conversion
     let final_size = tokio::fs::metadata(&path)
@@ -521,6 +548,12 @@ pub(crate) async fn upload_complete(
 
     // Convert to browser-compatible format / apply faststart
     let (path, filename) = postprocess_video(&path, filename).await;
+
+    // Generate first-frame thumbnail for video files
+    let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
+        generate_thumbnail(&path).await;
+    }
 
     // Recalculate file size after potential conversion
     let final_size = tokio::fs::metadata(&path)
@@ -1274,30 +1307,35 @@ pub(crate) async fn upload_guard(
 
     // For MP4/MOV files, apply faststart on first access so the moov atom
     // is at the front of the file — required for instant seeking in browsers.
-    if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
+    // Also generate a thumbnail if one doesn't exist yet.
+    if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         let relative = uri_path.trim_start_matches('/');
         let disk_path = format!("external/{}", relative);
-        let marker = format!("{}.faststarted", disk_path);
 
-        if tokio::fs::metadata(&marker).await.is_err() {
-            if tokio::fs::metadata(&disk_path).await.is_ok() {
-                let tmp = format!("{}.faststart.tmp", disk_path);
-                let result = tokio::process::Command::new("ffmpeg")
-                    .args(["-y", "-i", &disk_path, "-c", "copy", "-movflags", "+faststart", &tmp])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .await;
-                if let Ok(status) = result {
-                    if status.success() {
-                        let _ = tokio::fs::rename(&tmp, &disk_path).await;
+        if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
+            let marker = format!("{}.faststarted", disk_path);
+            if tokio::fs::metadata(&marker).await.is_err() {
+                if tokio::fs::metadata(&disk_path).await.is_ok() {
+                    let tmp = format!("{}.faststart.tmp", disk_path);
+                    let result = tokio::process::Command::new("ffmpeg")
+                        .args(["-y", "-i", &disk_path, "-c", "copy", "-movflags", "+faststart", &tmp])
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                        .await;
+                    if let Ok(status) = result {
+                        if status.success() {
+                            let _ = tokio::fs::rename(&tmp, &disk_path).await;
+                        }
                     }
+                    let _ = tokio::fs::remove_file(&tmp).await;
+                    let _ = tokio::fs::write(&marker, b"").await;
                 }
-                let _ = tokio::fs::remove_file(&tmp).await;
-                // Create marker regardless so we don't retry on every request
-                let _ = tokio::fs::write(&marker, b"").await;
             }
         }
+
+        // Lazily generate thumbnail for existing videos
+        generate_thumbnail(&disk_path).await;
     }
 
     // For non-browser video formats, convert to MP4 on first access
