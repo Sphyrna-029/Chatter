@@ -1250,9 +1250,50 @@ pub(crate) async fn serve_upload(
         }
     }
 
-    let path = format!("external/{}/{}", folder, filename);
+    let mut path = format!("external/{}/{}", folder, filename);
 
     let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    // For non-browser video formats, transparently convert to MP4 on first access
+    if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
+        let mp4_filename = format!(
+            "{}.mp4",
+            filename.rsplit_once('.').map(|(base, _)| base).unwrap_or(&filename)
+        );
+        let mp4_path = format!("external/{}/{}", folder, mp4_filename);
+
+        // Check if cached MP4 already exists
+        if tokio::fs::metadata(&mp4_path).await.is_ok() {
+            // Serve the cached MP4
+            path = mp4_path;
+        } else if tokio::fs::metadata(&path).await.is_ok() {
+            // Convert on first access
+            let result = tokio::process::Command::new("ffmpeg")
+                .args([
+                    "-y", "-i", &path,
+                    "-c:v", "copy",
+                    "-c:a", "aac",
+                    "-movflags", "+faststart",
+                    &mp4_path,
+                ])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .await;
+            if let Ok(status) = result {
+                if status.success() {
+                    path = mp4_path;
+                }
+            }
+        }
+    }
+
+    // Re-derive ext from the (possibly updated) path
+    let ext = path
         .rsplit('.')
         .next()
         .unwrap_or("")
