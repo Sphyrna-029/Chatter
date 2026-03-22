@@ -46,6 +46,10 @@ function escapeHtml(text: string) {
   return div.innerHTML;
 }
 
+function escapeAttr(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 /** Returns HTML with URLs as links and @mentions styled, but NO embedded media tags */
 function processMessageBody(body: string, currentUserId: string | null, urlToAlias?: Record<string, string>, roleNames?: Map<string, string>) {
   // Extract custom emoji markers before escaping HTML — replace with placeholders
@@ -63,12 +67,14 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     // Check if it's a role mention
     const roleColor = roleNames?.get(name.toLowerCase());
     if (roleColor !== undefined) {
-      const colorStyle = roleColor
-        ? `background-color:${roleColor}33;color:${roleColor}`
+      // Sanitize role color to prevent CSS injection — only allow valid hex/named colors
+      const safeColor = roleColor && /^#?[a-zA-Z0-9]+$/.test(roleColor) ? roleColor : "";
+      const colorStyle = safeColor
+        ? `background-color:${safeColor}33;color:${safeColor}`
         : "";
       return `<span class="${cn(
         "rounded px-1 py-0.5 font-semibold text-xs",
-        !roleColor && "bg-primary/20 text-primary"
+        !safeColor && "bg-primary/20 text-primary"
       )}"${colorStyle ? ` style="${colorStyle}"` : ""}>${match}</span>`;
     }
     // User mention
@@ -87,16 +93,21 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     if (imageExtensions.test(url) || videoExtensions.test(url) || getYouTubeVideoId(url)) {
       return "";
     }
+    // Also suppress uploaded file URLs since FileAttachmentCard renders those
+    if (/\/external\//.test(url)) {
+      return "";
+    }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
-    return `<a href="${url}" target="_blank" class="text-primary hover:underline break-all">${displayUrl}</a>`;
+    return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
 
   // Restore custom emoji placeholders as inline images with data attribute for tooltip
   escaped = escaped.replace(/\x00EMOJI(\d+)\x00/g, (_match, idx) => {
     const url = emojiUrls[parseInt(idx)];
+    const safeUrl = escapeAttr(url);
     const alias = urlToAlias?.[url];
-    const nameAttr = alias ? ` data-emoji-name=":${alias}:"` : "";
-    return `<img src="${url}" alt=":emoji{${url}}:"${nameAttr} class="inline-block h-5 w-5 object-contain align-middle mx-0.5 cursor-default" />`;
+    const nameAttr = alias ? ` data-emoji-name=":${escapeAttr(alias)}:"` : "";
+    return `<img src="${safeUrl}" alt=":emoji{${safeUrl}}:"${nameAttr} class="inline-block h-5 w-5 object-contain align-middle mx-0.5 cursor-default" />`;
   });
 
   // Wrap standard Unicode emoji characters with data attribute for tooltip
@@ -449,7 +460,8 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
     return escaped.replace(/:emoji\{([^}]+)\}:/g, (_match, url) => {
-      return `<img src="${url}" data-emoji-url="${url}" alt=":emoji{${url}}:" class="inline-block h-5 w-5 object-contain align-middle mx-0.5" />`;
+      const safeUrl = escapeAttr(url);
+      return `<img src="${safeUrl}" data-emoji-url="${safeUrl}" alt=":emoji{${safeUrl}}:" class="inline-block h-5 w-5 object-contain align-middle mx-0.5" />`;
     });
   }, []);
 
