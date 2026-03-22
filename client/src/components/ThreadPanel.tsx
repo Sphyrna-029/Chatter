@@ -96,6 +96,44 @@ export function ThreadPanel() {
     }
   }, [handleFileUpload]);
 
+  // Drag-and-drop file upload
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) {
+      setDragging(true);
+    }
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) {
+      setDragging(false);
+    }
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    dragCounter.current = 0;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length > 0) {
+      handleFileUpload(files[0]);
+    }
+  }, [handleFileUpload]);
+
   const startEditingName = useCallback(() => {
     setNameDraft(threadRootMessage?.thread_name ?? "");
     setEditingName(true);
@@ -130,7 +168,22 @@ export function ThreadPanel() {
   const replyCount = threadMessages.length;
 
   return (
-    <div className="flex flex-col border-border bg-background flex-1 min-h-0 min-w-0">
+    <div
+      className="relative flex flex-col border-border bg-background flex-1 min-h-0 min-w-0"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
+      {/* Drag overlay */}
+      {dragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary rounded-md pointer-events-none">
+          <div className="flex flex-col items-center gap-2">
+            <Paperclip className="h-8 w-8 text-primary" />
+            <span className="text-sm font-medium text-primary">Drop file to upload</span>
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div className="group flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0">
         <Button
