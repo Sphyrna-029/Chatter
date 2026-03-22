@@ -1165,8 +1165,10 @@ pub(crate) async fn serve_upload(
     }
 
     let path = format!("external/{}/{}", folder, filename);
-    let data = match tokio::fs::read(&path).await {
-        Ok(d) => d,
+
+    // Get file metadata for Content-Length and range support
+    let metadata = match tokio::fs::metadata(&path).await {
+        Ok(m) => m,
         Err(_) => {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -1174,6 +1176,7 @@ pub(crate) async fn serve_upload(
                 .unwrap();
         }
     };
+    let file_size = metadata.len();
 
     let ext = filename
         .rsplit('.')
@@ -1189,13 +1192,136 @@ pub(crate) async fn serve_upload(
             .to_string()
     };
 
+    // Parse Range header for partial content support (video seeking, large files)
+    let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+
+    if let Some(range_str) = range_header {
+        // Parse "bytes=START-END" or "bytes=START-"
+        if let Some(range) = parse_range(range_str, file_size) {
+            let (start, end) = range;
+            let length = end - start + 1;
+
+            let mut file = match tokio::fs::File::open(&path).await {
+                Ok(f) => f,
+                Err(_) => {
+                    return Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Body::from("Not found"))
+                        .unwrap();
+                }
+            };
+
+            use tokio::io::AsyncSeekExt;
+            use tokio::io::AsyncReadExt;
+            if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                return Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("Seek failed"))
+                    .unwrap();
+            }
+
+            let mut buf = vec![0u8; length as usize];
+            if file.read_exact(&mut buf).await.is_err() {
+                // Read what we can if exact read fails (e.g. near EOF rounding)
+                let mut file2 = match tokio::fs::File::open(&path).await {
+                    Ok(f) => f,
+                    Err(_) => {
+                        return Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(Body::from("Read failed"))
+                            .unwrap();
+                    }
+                };
+                let _ = file2.seek(std::io::SeekFrom::Start(start)).await;
+                let mut partial = Vec::with_capacity(length as usize);
+                let _ = file2.take(length).read_to_end(&mut partial).await;
+                buf = partial;
+            }
+
+            let actual_length = buf.len() as u64;
+            let actual_end = start + actual_length - 1;
+
+            return Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, &content_type)
+                .header(header::CONTENT_LENGTH, actual_length.to_string())
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {}-{}/{}", start, actual_end, file_size),
+                )
+                .header(
+                    header::CONTENT_DISPOSITION,
+                    format!("inline; filename=\"{}\"", filename),
+                )
+                .body(Body::from(buf))
+                .unwrap();
+        }
+    }
+
+    // No Range header — serve the full file
+    let data = match tokio::fs::read(&path).await {
+        Ok(d) => d,
+        Err(_) => {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap();
+        }
+    };
+
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, file_size.to_string())
+        .header(header::ACCEPT_RANGES, "bytes")
         .header(
             header::CONTENT_DISPOSITION,
             format!("inline; filename=\"{}\"", filename),
         )
         .body(Body::from(data))
         .unwrap()
+}
+
+/// Parse an HTTP Range header value like "bytes=0-1023" or "bytes=500-".
+/// Returns (start, end) inclusive, clamped to file_size.
+fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
+    let range_str = range_str.trim();
+    if !range_str.starts_with("bytes=") {
+        return None;
+    }
+    let spec = &range_str[6..];
+    // Only support a single range (not multi-range)
+    if spec.contains(',') {
+        return None;
+    }
+    let parts: Vec<&str> = spec.splitn(2, '-').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    if parts[0].is_empty() {
+        // Suffix range: "bytes=-500" means last 500 bytes
+        let suffix_len: u64 = parts[1].parse().ok()?;
+        if suffix_len == 0 {
+            return None;
+        }
+        let start = file_size.saturating_sub(suffix_len);
+        Some((start, file_size - 1))
+    } else {
+        let start: u64 = parts[0].parse().ok()?;
+        if start >= file_size {
+            return None;
+        }
+        let end = if parts[1].is_empty() {
+            file_size - 1
+        } else {
+            let e: u64 = parts[1].parse().ok()?;
+            e.min(file_size - 1)
+        };
+        if end < start {
+            return None;
+        }
+        Some((start, end))
+    }
 }
