@@ -31,7 +31,6 @@ totp-rs = { version = "5", features = ["qr", "otpauth"] }
 sha2 = "0.10"
 hex = "0.4"
 dotenvy = "0.15"
-tokio-util = { version = "0.7", features = ["io"] }
 mlua = { version = "0.10", features = ["lua54", "send", "serialize", "vendored"] }
 
 [dev-dependencies]

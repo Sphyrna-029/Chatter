@@ -1197,7 +1197,13 @@ pub(crate) async fn serve_upload(
 
     if let Some(range_str) = range_header {
         if let Some(range) = parse_range(range_str, file_size) {
-            let (start, end) = range;
+            let (start, mut end) = range;
+
+            // Cap open-ended ranges to 4 MB chunks so we don't buffer the whole file
+            const MAX_RANGE_CHUNK: u64 = 4 * 1024 * 1024;
+            if end - start + 1 > MAX_RANGE_CHUNK {
+                end = (start + MAX_RANGE_CHUNK - 1).min(file_size - 1);
+            }
             let length = end - start + 1;
 
             let mut file = match tokio::fs::File::open(&path).await {
@@ -1218,32 +1224,41 @@ pub(crate) async fn serve_upload(
                     .unwrap();
             }
 
-            // Stream the range using a length-limited reader
-            let limited = file.take(length);
-            let stream = tokio_util::io::ReaderStream::with_capacity(limited, 64 * 1024);
-            let body = Body::from_stream(stream);
+            let mut buf = vec![0u8; length as usize];
+            let bytes_read = match file.read(&mut buf).await {
+                Ok(n) => n,
+                Err(_) => {
+                    return Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Read failed"))
+                        .unwrap();
+                }
+            };
+            buf.truncate(bytes_read);
+
+            let actual_end = start + bytes_read as u64 - 1;
 
             return Response::builder()
                 .status(StatusCode::PARTIAL_CONTENT)
                 .header(header::CONTENT_TYPE, &content_type)
-                .header(header::CONTENT_LENGTH, length.to_string())
+                .header(header::CONTENT_LENGTH, bytes_read.to_string())
                 .header(header::ACCEPT_RANGES, "bytes")
                 .header(
                     header::CONTENT_RANGE,
-                    format!("bytes {}-{}/{}", start, end, file_size),
+                    format!("bytes {}-{}/{}", start, actual_end, file_size),
                 )
                 .header(
                     header::CONTENT_DISPOSITION,
                     format!("inline; filename=\"{}\"", filename),
                 )
-                .body(body)
+                .body(Body::from(buf))
                 .unwrap();
         }
     }
 
-    // No Range header — stream the full file
-    let file = match tokio::fs::File::open(&path).await {
-        Ok(f) => f,
+    // No Range header — serve the full file
+    let data = match tokio::fs::read(&path).await {
+        Ok(d) => d,
         Err(_) => {
             return Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -1251,9 +1266,6 @@ pub(crate) async fn serve_upload(
                 .unwrap();
         }
     };
-
-    let stream = tokio_util::io::ReaderStream::with_capacity(file, 64 * 1024);
-    let body = Body::from_stream(stream);
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1264,7 +1276,7 @@ pub(crate) async fn serve_upload(
             header::CONTENT_DISPOSITION,
             format!("inline; filename=\"{}\"", filename),
         )
-        .body(body)
+        .body(Body::from(data))
         .unwrap()
 }
 
