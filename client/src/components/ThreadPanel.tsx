@@ -58,43 +58,61 @@ export function ThreadPanel() {
     inputRef.current?.focus();
   }, []);
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
-      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
-      return;
-    }
+  const [uploadFileName, setUploadFileName] = useState("");
+
+  const handleFilesUpload = useCallback(async (files: File[]) => {
+    const valid = files.filter((f) => {
+      if (state.uploadLimitBytes > 0 && f.size > state.uploadLimitBytes) {
+        alert(`File "${f.name}" too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+        return false;
+      }
+      return true;
+    });
+    if (valid.length === 0) return;
+
     setUploading(true);
-    setUploadProgress(0);
+    const textBody = body.trim();
+    setBody("");
+
     try {
-      const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
-      const msg = body.trim() ? `${body.trim()} ${url}` : url;
-      setBody("");
-      await sendThreadMessage(msg);
+      for (let i = 0; i < valid.length; i++) {
+        const file = valid[i];
+        setUploadFileName(file.name);
+        setUploadProgress(0);
+        const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
+        // Attach typed text to the first file only
+        const msg = i === 0 && textBody ? `${textBody} ${url}` : url;
+        await sendThreadMessage(msg);
+      }
     } catch (err: any) {
       alert(err.message || "Upload failed");
     } finally {
       setUploading(false);
+      setUploadFileName("");
     }
   }, [body, sendThreadMessage, state.uploadLimitBytes]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const filesList = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (file) handleFileUpload(file);
-  }, [handleFileUpload]);
+    if (filesList.length > 0) handleFilesUpload(filesList);
+  }, [handleFilesUpload]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
+    const files: File[] = [];
     for (const item of items) {
       if (item.kind === "file") {
-        e.preventDefault();
         const file = item.getAsFile();
-        if (file) handleFileUpload(file);
-        return;
+        if (file) files.push(file);
       }
     }
-  }, [handleFileUpload]);
+    if (files.length > 0) {
+      e.preventDefault();
+      handleFilesUpload(files);
+    }
+  }, [handleFilesUpload]);
 
   // Drag-and-drop file upload
   const [dragging, setDragging] = useState(false);
@@ -130,9 +148,9 @@ export function ThreadPanel() {
     dragCounter.current = 0;
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      handleFileUpload(files[0]);
+      handleFilesUpload(files);
     }
-  }, [handleFileUpload]);
+  }, [handleFilesUpload]);
 
   const startEditingName = useCallback(() => {
     setNameDraft(threadRootMessage?.thread_name ?? "");
@@ -314,11 +332,16 @@ export function ThreadPanel() {
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-border">
         {uploading && (
           <div className="flex items-center gap-2 mb-2">
-            <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className="h-full bg-primary rounded-full transition-all duration-200"
-                style={{ width: `${uploadProgress}%` }}
-              />
+            <div className="flex-1 min-w-0">
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+              {uploadFileName && (
+                <p className="text-[10px] text-muted-foreground truncate mt-0.5">{uploadFileName}</p>
+              )}
             </div>
             <span className="text-[10px] text-muted-foreground shrink-0">{uploadProgress}%</span>
           </div>
@@ -328,6 +351,7 @@ export function ThreadPanel() {
             ref={fileInputRef}
             type="file"
             className="hidden"
+            multiple
             onChange={handleFileSelect}
           />
           <button
