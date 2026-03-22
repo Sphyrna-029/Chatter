@@ -127,7 +127,13 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     } else if (videoRef.current) {
       videoRef.current.currentTime = positionSecs;
       if (playing && videoRef.current.paused) {
-        videoRef.current.play().catch(() => {});
+        videoRef.current.play().catch(() => {
+          // Autoplay blocked — mute and retry (browsers allow muted autoplay)
+          if (videoRef.current) {
+            videoRef.current.muted = true;
+            videoRef.current.play().catch(() => {});
+          }
+        });
       } else if (!playing && !videoRef.current.paused) {
         videoRef.current.pause();
       }
@@ -420,6 +426,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   className="w-full h-full object-contain"
                   src={watchState.videoUrl}
                   controls={false}
+                  autoPlay
+                  muted
+                  playsInline
                   onPlay={handleVideoPlay}
                   onPause={handleVideoPause}
                   onSeeked={handleVideoSeeked}
