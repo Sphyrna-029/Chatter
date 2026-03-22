@@ -5,7 +5,7 @@ use super::super::{
     state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
-    extract::{Multipart, Path, Query, State},
+    extract::{Multipart, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json, Response},
     body::Body,
@@ -1219,81 +1219,33 @@ pub(crate) async fn gif_search(
     }
 }
 
-pub(crate) async fn serve_upload(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Path((folder, filename)): Path<(String, String)>,
+/// Middleware for uploaded file requests: auth check, dangerous extension
+/// blocking, and MKV→MP4 conversion. Safe files pass through to ServeDir.
+pub(crate) async fn upload_guard(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
 ) -> Response<Body> {
-    use tokio::io::{AsyncReadExt, AsyncSeekExt};
-
-    if folder.contains("..") || filename.contains("..") {
-        return Response::builder()
-            .status(StatusCode::BAD_REQUEST)
-            .body(Body::from("Invalid path"))
-            .unwrap();
-    }
-
-    // Check if authentication is required for uploads
-    let require_auth = state.server_settings.read().await.require_auth_for_uploads;
-    if require_auth {
-        let token = extract_token(&headers);
-        let authed = match token {
-            Some(t) => get_user_from_token(&state, &t).is_some(),
-            None => false,
-        };
-        if !authed {
-            return Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header(header::CONTENT_TYPE, "text/plain")
-                .body(Body::from("Unauthorized"))
-                .unwrap();
-        }
-    }
-
-    let mut path = format!("external/{}/{}", folder, filename);
-
-    let ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    // For non-browser video formats, transparently convert to MP4 on first access
-    if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
-        let mp4_filename = format!(
-            "{}.mp4",
-            filename.rsplit_once('.').map(|(base, _)| base).unwrap_or(&filename)
-        );
-        let mp4_path = format!("external/{}/{}", folder, mp4_filename);
-
-        // Check if cached MP4 already exists
-        if tokio::fs::metadata(&mp4_path).await.is_ok() {
-            // Serve the cached MP4
-            path = mp4_path;
-        } else if tokio::fs::metadata(&path).await.is_ok() {
-            // Convert on first access
-            let result = tokio::process::Command::new("ffmpeg")
-                .args([
-                    "-y", "-i", &path,
-                    "-c:v", "copy",
-                    "-c:a", "aac",
-                    "-movflags", "+faststart",
-                    &mp4_path,
-                ])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .await;
-            if let Ok(status) = result {
-                if status.success() {
-                    path = mp4_path;
-                }
+    // Auth check — extract state from request extensions
+    if let Some(state) = req.extensions().get::<Arc<AppState>>() {
+        let require_auth = state.server_settings.read().await.require_auth_for_uploads;
+        if require_auth {
+            let token = extract_token(req.headers());
+            let authed = match token {
+                Some(t) => get_user_from_token(state, &t).is_some(),
+                None => false,
+            };
+            if !authed {
+                return Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from("Unauthorized"))
+                    .unwrap();
             }
         }
     }
 
-    // Re-derive ext from the (possibly updated) path
-    let ext = path
+    let uri_path = req.uri().path().to_string();
+    let ext = uri_path
         .rsplit('.')
         .next()
         .unwrap_or("")
@@ -1301,7 +1253,10 @@ pub(crate) async fn serve_upload(
 
     // Block dangerous file extensions by serving as plain text
     if is_dangerous_extension(&ext) {
-        let data = match tokio::fs::read(&path).await {
+        // Construct disk path: the URI under /external nest is /{folder}/{filename}
+        let relative = uri_path.trim_start_matches('/');
+        let disk_path = format!("external/{}", relative);
+        let data = match tokio::fs::read(&disk_path).await {
             Ok(d) => d,
             Err(_) => {
                 return Response::builder()
@@ -1313,170 +1268,45 @@ pub(crate) async fn serve_upload(
         return Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "text/plain")
-            .header(
-                header::CONTENT_DISPOSITION,
-                format!("inline; filename=\"{}\"", filename),
-            )
             .body(Body::from(data))
             .unwrap();
     }
 
-    // Get file size
-    let metadata = match tokio::fs::metadata(&path).await {
-        Ok(m) => m,
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not found"))
-                .unwrap();
-        }
-    };
-    let file_size = metadata.len();
+    // For non-browser video formats, convert to MP4 on first access
+    // then rewrite the request URI so ServeDir serves the MP4
+    if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
+        let relative = uri_path.trim_start_matches('/');
+        let disk_path = format!("external/{}", relative);
+        let base = uri_path.rsplit_once('.').map(|(b, _)| b).unwrap_or(&uri_path);
+        let mp4_uri = format!("{}.mp4", base);
+        let mp4_disk = format!("external{}.mp4", base);
 
-    let content_type = mime_guess::from_ext(&ext)
-        .first_or_octet_stream()
-        .to_string();
-
-    // Parse Range header
-    let range = headers
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| parse_range(s, file_size));
-
-    let (status, start, length) = match range {
-        Some((s, e)) => (StatusCode::PARTIAL_CONTENT, s, e - s + 1),
-        None => (StatusCode::OK, 0, file_size),
-    };
-
-    let mut file = match tokio::fs::File::open(&path).await {
-        Ok(f) => f,
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not found"))
-                .unwrap();
-        }
-    };
-
-    if start > 0 {
-        if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-            return Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("Seek failed"))
-                .unwrap();
-        }
-    }
-
-    // Stream file in chunks with a known Content-Length so hyper uses
-    // content-length framing (not chunked encoding), which lets browsers
-    // seek and start playback immediately.
-    let reader = file.take(length);
-    let body = Body::new(SizedFileBody {
-        reader,
-        remaining: length,
-    });
-
-    let mut builder = Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, &content_type)
-        .header(header::CONTENT_LENGTH, length)
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("inline; filename=\"{}\"", filename),
-        );
-
-    if let Some((s, e)) = range {
-        builder = builder.header(
-            header::CONTENT_RANGE,
-            format!("bytes {}-{}/{}", s, e, file_size),
-        );
-    }
-
-    builder.body(body).unwrap()
-}
-
-/// A streaming file body that reports an exact size via `size_hint()`.
-/// This ensures hyper uses Content-Length framing instead of chunked
-/// transfer encoding, which is required for browsers to seek and
-/// progressively play video files.
-struct SizedFileBody {
-    reader: tokio::io::Take<tokio::fs::File>,
-    remaining: u64,
-}
-
-impl http_body::Body for SizedFileBody {
-    type Data = bytes::Bytes;
-    type Error = axum::Error;
-
-    fn poll_frame(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        use tokio::io::AsyncRead;
-
-        if self.remaining == 0 {
-            return std::task::Poll::Ready(None);
-        }
-
-        let chunk_size = (self.remaining as usize).min(256 * 1024);
-        let mut buf = vec![0u8; chunk_size];
-        let mut read_buf = tokio::io::ReadBuf::new(&mut buf);
-
-        match std::pin::Pin::new(&mut self.reader).poll_read(cx, &mut read_buf) {
-            std::task::Poll::Ready(Ok(())) => {
-                let n = read_buf.filled().len();
-                if n == 0 {
-                    return std::task::Poll::Ready(None);
-                }
-                self.remaining -= n as u64;
-                buf.truncate(n);
-                std::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes::Bytes::from(buf)))))
+        // Convert if cached MP4 doesn't exist yet
+        if tokio::fs::metadata(&mp4_disk).await.is_err() {
+            if tokio::fs::metadata(&disk_path).await.is_ok() {
+                let _ = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-y", "-i", &disk_path,
+                        "-c:v", "copy", "-c:a", "aac",
+                        "-movflags", "+faststart",
+                        &mp4_disk,
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
             }
-            std::task::Poll::Ready(Err(e)) => {
-                std::task::Poll::Ready(Some(Err(axum::Error::new(e))))
-            }
-            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+
+        // If MP4 exists, rewrite request to serve it
+        if tokio::fs::metadata(&mp4_disk).await.is_ok() {
+            let (mut parts, body) = req.into_parts();
+            parts.uri = mp4_uri.parse().unwrap_or(parts.uri);
+            let req = axum::http::Request::from_parts(parts, body);
+            return next.run(req).await.into_response();
         }
     }
 
-    fn size_hint(&self) -> http_body::SizeHint {
-        http_body::SizeHint::with_exact(self.remaining)
-    }
-}
-
-/// Parse an HTTP Range header value like "bytes=0-1023" or "bytes=500-".
-/// Returns (start, end) inclusive, clamped to file_size.
-fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
-    let range_str = range_str.trim();
-    let spec = range_str.strip_prefix("bytes=")?;
-    // Only support a single range
-    if spec.contains(',') {
-        return None;
-    }
-    let (start_str, end_str) = spec.split_once('-')?;
-
-    if start_str.is_empty() {
-        // Suffix range: "bytes=-500" means last 500 bytes
-        let suffix_len: u64 = end_str.parse().ok()?;
-        if suffix_len == 0 || file_size == 0 {
-            return None;
-        }
-        let start = file_size.saturating_sub(suffix_len);
-        Some((start, file_size - 1))
-    } else {
-        let start: u64 = start_str.parse().ok()?;
-        if start >= file_size {
-            return None;
-        }
-        let end = if end_str.is_empty() {
-            file_size - 1
-        } else {
-            end_str.parse::<u64>().ok()?.min(file_size - 1)
-        };
-        if end < start {
-            return None;
-        }
-        Some((start, end))
-    }
+    // Pass through to ServeDir
+    next.run(req).await.into_response()
 }

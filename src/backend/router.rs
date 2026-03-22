@@ -10,7 +10,7 @@ use super::{
         roles::{list_roles, create_role, update_role, delete_role, get_member_roles, assign_member_roles, list_all_member_roles},
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
-        media::{delete_upload, gif_search, link_preview, list_uploads, serve_upload, upload_chunk, upload_complete, upload_file, upload_init},
+        media::{delete_upload, gif_search, link_preview, list_uploads, upload_guard, upload_chunk, upload_complete, upload_file, upload_init},
         messages::{edit_message, get_room_messages, get_room_threads, get_thread_messages, redact_message, search_messages, send_message, send_thread_message, set_thread_name},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
@@ -33,6 +33,7 @@ use super::{
 };
 use axum::{
     extract::DefaultBodyLimit,
+    middleware,
     routing::{delete, get, post, put},
     Router,
 };
@@ -40,10 +41,11 @@ use std::sync::Arc;
 use tower_http::services::ServeDir;
 
 pub(crate) fn build_router() -> Router<Arc<AppState>> {
-    // serve_upload streams files with Range request support.
+    // ServeDir serves static files with streaming, Range requests, etc.
+    // upload_guard middleware handles auth, dangerous extensions, and MKV conversion.
     let external_router = Router::new()
-        .route("/{folder}/{filename}", get(serve_upload))
-        .fallback_service(ServeDir::new("external"));
+        .nest_service("/", ServeDir::new("external"))
+        .layer(middleware::from_fn(upload_guard));
 
        Router::new()
            // Static / client
