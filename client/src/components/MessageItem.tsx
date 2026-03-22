@@ -311,7 +311,7 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
   if (!activated) {
     return (
       <div
-        className="relative max-w-full rounded-md cursor-pointer bg-zinc-900 flex items-center justify-center overflow-hidden group"
+        className="relative w-fit max-w-full rounded-md cursor-pointer bg-zinc-900 overflow-hidden group"
         onClick={() => setActivated(true)}
       >
         {isLocal ? (
