@@ -344,9 +344,9 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
 
   return (
     <video
+      ref={(el) => { if (el) el.play().catch(() => {}); }}
       src={url}
       controls
-      autoPlay
       preload="auto"
       className="max-w-full max-h-80 rounded-md cursor-pointer"
       onClick={(e) => {
