@@ -1272,6 +1272,34 @@ pub(crate) async fn upload_guard(
             .unwrap();
     }
 
+    // For MP4/MOV files, apply faststart on first access so the moov atom
+    // is at the front of the file — required for instant seeking in browsers.
+    if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
+        let relative = uri_path.trim_start_matches('/');
+        let disk_path = format!("external/{}", relative);
+        let marker = format!("{}.faststarted", disk_path);
+
+        if tokio::fs::metadata(&marker).await.is_err() {
+            if tokio::fs::metadata(&disk_path).await.is_ok() {
+                let tmp = format!("{}.faststart.tmp", disk_path);
+                let result = tokio::process::Command::new("ffmpeg")
+                    .args(["-y", "-i", &disk_path, "-c", "copy", "-movflags", "+faststart", &tmp])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+                if let Ok(status) = result {
+                    if status.success() {
+                        let _ = tokio::fs::rename(&tmp, &disk_path).await;
+                    }
+                }
+                let _ = tokio::fs::remove_file(&tmp).await;
+                // Create marker regardless so we don't retry on every request
+                let _ = tokio::fs::write(&marker, b"").await;
+            }
+        }
+    }
+
     // For non-browser video formats, convert to MP4 on first access
     // then rewrite the request URI so ServeDir serves the MP4
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
