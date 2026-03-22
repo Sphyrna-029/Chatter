@@ -315,12 +315,12 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
         onClick={() => setActivated(true)}
       >
         {isLocal ? (
-          <img
+          <AuthImage
             src={thumbUrl}
             alt=""
             className="max-w-full max-h-80 rounded-md object-contain"
             onError={(e) => {
-              const el = e.currentTarget;
+              const el = e.currentTarget as HTMLImageElement;
               el.style.display = "none";
               el.parentElement!.style.minWidth = "200px";
               el.parentElement!.style.minHeight = "120px";
