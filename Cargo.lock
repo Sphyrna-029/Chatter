@@ -522,6 +522,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite 0.24.0",
  "totp-rs",
+ "tower",
  "tower-http",
  "url",
  "urlencoding",

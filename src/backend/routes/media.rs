@@ -1139,6 +1139,7 @@ pub(crate) async fn serve_upload(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path((folder, filename)): Path<(String, String)>,
+    req: axum::extract::Request,
 ) -> Response<Body> {
     if folder.contains("..") || filename.contains("..") {
         return Response::builder()
@@ -1164,105 +1165,54 @@ pub(crate) async fn serve_upload(
         }
     }
 
-    let path = format!("external/{}/{}", folder, filename);
-    let data = match tokio::fs::read(&path).await {
-        Ok(d) => d,
-        Err(_) => {
-            return Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("Not found"))
-                .unwrap();
-        }
-    };
-
     let ext = filename
         .rsplit('.')
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    let content_type = if is_dangerous_extension(&ext) {
-        "text/plain".to_string()
-    } else {
-        mime_guess::from_ext(&ext)
-            .first_or_octet_stream()
-            .to_string()
-    };
-
-    let file_size = data.len() as u64;
-
-    // Handle Range requests for video seeking / large file streaming
-    if let Some(range_val) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
-        if let Some((start, end)) = parse_range(range_val, file_size) {
-            let slice = &data[start as usize..=end as usize];
-            return Response::builder()
-                .status(StatusCode::PARTIAL_CONTENT)
-                .header(header::CONTENT_TYPE, &content_type)
-                .header(header::CONTENT_LENGTH, slice.len().to_string())
-                .header(header::ACCEPT_RANGES, "bytes")
-                .header(
-                    header::CONTENT_RANGE,
-                    format!("bytes {}-{}/{}", start, end, file_size),
-                )
-                .header(
-                    header::CONTENT_DISPOSITION,
-                    format!("inline; filename=\"{}\"", filename),
-                )
-                .body(Body::from(slice.to_vec()))
-                .unwrap();
-        }
-    }
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, file_size.to_string())
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("inline; filename=\"{}\"", filename),
-        )
-        .body(Body::from(data))
-        .unwrap()
-}
-
-/// Parse an HTTP Range header value like "bytes=0-1023" or "bytes=500-".
-/// Returns (start, end) inclusive, clamped to file_size.
-fn parse_range(range_str: &str, file_size: u64) -> Option<(u64, u64)> {
-    let range_str = range_str.trim();
-    if !range_str.starts_with("bytes=") {
-        return None;
-    }
-    let spec = &range_str[6..];
-    if spec.contains(',') {
-        return None;
-    }
-    let parts: Vec<&str> = spec.splitn(2, '-').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    if parts[0].is_empty() {
-        let suffix_len: u64 = parts[1].parse().ok()?;
-        if suffix_len == 0 {
-            return None;
-        }
-        let start = file_size.saturating_sub(suffix_len);
-        Some((start, file_size - 1))
-    } else {
-        let start: u64 = parts[0].parse().ok()?;
-        if start >= file_size {
-            return None;
-        }
-        let end = if parts[1].is_empty() {
-            file_size - 1
-        } else {
-            let e: u64 = parts[1].parse().ok()?;
-            e.min(file_size - 1)
+    // Block dangerous file extensions by serving as plain text
+    if is_dangerous_extension(&ext) {
+        let path = format!("external/{}/{}", folder, filename);
+        let data = match tokio::fs::read(&path).await {
+            Ok(d) => d,
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from("Not found"))
+                    .unwrap();
+            }
         };
-        if end < start {
-            return None;
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/plain")
+            .header(
+                header::CONTENT_DISPOSITION,
+                format!("inline; filename=\"{}\"", filename),
+            )
+            .body(Body::from(data))
+            .unwrap();
+    }
+
+    // Delegate to ServeDir for streaming, range requests, and proper headers.
+    // Reconstruct the request with the path ServeDir expects.
+    let mut svc = tower_http::services::ServeDir::new("external");
+    let serve_req = {
+        let (mut parts, body) = req.into_parts();
+        parts.uri = format!("/{}/{}", folder, filename)
+            .parse()
+            .unwrap_or(parts.uri);
+        axum::http::Request::from_parts(parts, body)
+    };
+    use tower::Service;
+    match svc.call(serve_req).await {
+        Ok(resp) => {
+            let (parts, body) = resp.into_parts();
+            Response::from_parts(parts, Body::new(body))
         }
-        Some((start, end))
+        Err(_) => Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from("Internal error"))
+            .unwrap(),
     }
 }

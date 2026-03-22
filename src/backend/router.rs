@@ -40,16 +40,17 @@ use std::sync::Arc;
 use tower_http::services::ServeDir;
 
 pub(crate) fn build_router() -> Router<Arc<AppState>> {
-    // Create a nested router for /external to avoid route conflicts
-       let external_router = Router::new()
-           .route("/{folder}/{filename}", get(serve_upload))
-           .fallback_service(ServeDir::new("external"));
+    // ServeDir handles file streaming, range requests, and proper headers.
+    // serve_upload does auth/extension checks, then delegates to ServeDir.
+    let external_router = Router::new()
+        .route("/{folder}/{filename}", get(serve_upload))
+        .fallback_service(ServeDir::new("external"));
 
        Router::new()
            // Static / client
            .route("/", get(serve_client))
            .nest_service("/assets", ServeDir::new("client/dist/assets"))
-           .nest("/external", external_router)  // Use nest with the new router
+           .nest("/external", external_router)
            // Matrix versions
            .route("/_matrix/client/versions", get(versions))
            .route("/api/version", get(build_version))
