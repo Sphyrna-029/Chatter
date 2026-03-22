@@ -112,6 +112,12 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     }
   }, []);
 
+  // Track whether the <video> element is ready to accept commands.
+  // Reset when the video URL changes; set when onCanPlay fires.
+  const videoReadyRef = useRef(false);
+  // Store pending sync so onCanPlay can apply it when the video is actually ready.
+  const pendingSyncRef = useRef<{ position: number; playing: boolean } | null>(null);
+
   const applySync = useCallback((positionSecs: number, playing: boolean) => {
     isApplyingSync.current = true;
     if (isYoutubeRef.current && iframeRef.current) {
@@ -125,15 +131,18 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         "*"
       );
     } else if (videoRef.current) {
+      // If video isn't ready yet, queue the sync for onCanPlay
+      if (!videoReadyRef.current) {
+        pendingSyncRef.current = { position: positionSecs, playing };
+        setTimeout(() => { isApplyingSync.current = false; }, 400);
+        setDisplayPosition(positionSecs);
+        displayPositionRef.current = positionSecs;
+        return;
+      }
       videoRef.current.currentTime = positionSecs;
       if (playing && videoRef.current.paused) {
-        videoRef.current.play().catch(() => {
-          // Autoplay blocked — mute and retry (browsers allow muted autoplay)
-          if (videoRef.current) {
-            videoRef.current.muted = true;
-            videoRef.current.play().catch(() => {});
-          }
-        });
+        videoRef.current.muted = true; // ensure muted so autoplay is allowed
+        videoRef.current.play().catch(() => {});
       } else if (!playing && !videoRef.current.paused) {
         videoRef.current.pause();
       }
@@ -144,6 +153,12 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       isApplyingSync.current = false;
     }, 400);
   }, []);
+
+  // Reset video readiness when URL changes so applySync queues until onCanPlay fires
+  useEffect(() => {
+    videoReadyRef.current = false;
+    pendingSyncRef.current = null;
+  }, [watchState.videoUrl]);
 
   // Listen for YouTube player postMessages: duration detection and onReady sync.
   // Each client has their own iframe so these fire independently — no broadcasting needed.
@@ -234,10 +249,16 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       // Heartbeat syncs (same play state, no video change) just update the
       // progress bar via state — they must not seek or they cause stuttering.
       const iAmHost = state.userId === msg.host_user_id;
-      if (!iAmHost || msg.type === "watchparty_video_changed") {
-        const isVideoChanged = msg.type === "watchparty_video_changed";
+      const isVideoChanged = msg.type === "watchparty_video_changed";
+
+      if (isVideoChanged) {
+        // Video URL changed — don't call applySync now. The <video> element
+        // will remount (key={videoUrl}) and onCanPlay will handle initial sync.
+        // Just store the desired state so onCanPlay can pick it up.
+        pendingSyncRef.current = { position: compensated, playing: msg.playing };
+      } else if (!iAmHost) {
         const playStateChanged = msg.playing !== watchStateRef.current.playing;
-        if (isVideoChanged || playStateChanged) {
+        if (playStateChanged) {
           applySync(compensated, msg.playing);
         }
       }
@@ -423,26 +444,37 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
               ) : (
                 <video
                   ref={videoRef}
+                  key={watchState.videoUrl}
                   className="w-full h-full object-contain"
                   src={watchState.videoUrl}
                   controls={false}
                   autoPlay
                   muted
                   playsInline
+                  preload="auto"
                   onPlay={handleVideoPlay}
                   onPause={handleVideoPause}
                   onSeeked={handleVideoSeeked}
                   onLoadedMetadata={() => {
                     const dur = videoRef.current?.duration;
-                    // Both host and viewer receive this independently from their own <video> element
                     if (dur && isFinite(dur)) {
                       setVideoDuration(dur);
                     }
-                    const ws = watchStateRef.current;
-                    const compensated = ws.playing
-                      ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
-                      : ws.positionSecs;
-                    applySync(compensated, ws.playing);
+                  }}
+                  onCanPlay={() => {
+                    videoReadyRef.current = true;
+                    const pending = pendingSyncRef.current;
+                    if (pending) {
+                      pendingSyncRef.current = null;
+                      applySync(pending.position, pending.playing);
+                    } else {
+                      // First load — sync to current watch state
+                      const ws = watchStateRef.current;
+                      const compensated = ws.playing
+                        ? ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt)
+                        : ws.positionSecs;
+                      applySync(compensated, ws.playing);
+                    }
                     applyVolume(volumeRef.current, isMutedRef.current);
                   }}
                 />
