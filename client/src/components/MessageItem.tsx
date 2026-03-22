@@ -1,5 +1,5 @@
-import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon } from "lucide-react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -302,6 +302,49 @@ function FileAttachmentCard({ url }: { url: string }) {
   );
 }
 
+/** Lazy video — shows a poster thumbnail with a play button; only loads the video when clicked */
+function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
+  const [activated, setActivated] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  if (!activated) {
+    return (
+      <div
+        className="relative max-w-full max-h-80 rounded-md cursor-pointer bg-zinc-900 flex items-center justify-center overflow-hidden group"
+        style={{ minWidth: 200, minHeight: 120 } as CSSProperties}
+        onClick={() => setActivated(true)}
+      >
+        <video
+          src={url}
+          preload="none"
+          className="max-w-full max-h-80 rounded-md pointer-events-none"
+        />
+        <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
+          <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
+            <Play className="w-6 h-6 text-white ml-0.5" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <video
+      ref={videoRef}
+      src={url}
+      controls
+      autoPlay
+      preload="auto"
+      className="max-w-full max-h-80 rounded-md cursor-pointer"
+      onClick={(e) => {
+        const video = e.currentTarget;
+        video.pause();
+        onExpand();
+      }}
+    />
+  );
+}
+
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
@@ -377,18 +420,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
         );
       })}
       {videos.map((url) => (
-        <video
-          key={url}
-          src={url}
-          controls
-          preload="auto"
-          className="max-w-full max-h-80 rounded-md cursor-pointer"
-          onClick={(e) => {
-            const video = e.currentTarget;
-            video.pause();
-            setLightbox({ url, type: "video" });
-          }}
-        />
+        <LazyVideo key={url} url={url} onExpand={() => setLightbox({ url, type: "video" })} />
       ))}
       {audios.map((url) => (
         <audio
