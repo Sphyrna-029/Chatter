@@ -1367,10 +1367,14 @@ pub(crate) async fn serve_upload(
         }
     }
 
-    // Stream the file in chunks using ReaderStream
+    // Stream file in chunks with a known Content-Length so hyper uses
+    // content-length framing (not chunked encoding), which lets browsers
+    // seek and start playback immediately.
     let reader = file.take(length);
-    let stream = tokio_util::io::ReaderStream::with_capacity(reader, 256 * 1024);
-    let body = Body::from_stream(stream);
+    let body = Body::new(SizedFileBody {
+        reader,
+        remaining: length,
+    });
 
     let mut builder = Response::builder()
         .status(status)
@@ -1390,6 +1394,55 @@ pub(crate) async fn serve_upload(
     }
 
     builder.body(body).unwrap()
+}
+
+/// A streaming file body that reports an exact size via `size_hint()`.
+/// This ensures hyper uses Content-Length framing instead of chunked
+/// transfer encoding, which is required for browsers to seek and
+/// progressively play video files.
+struct SizedFileBody {
+    reader: tokio::io::Take<tokio::fs::File>,
+    remaining: u64,
+}
+
+impl http_body::Body for SizedFileBody {
+    type Data = bytes::Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        use tokio::io::AsyncRead;
+
+        if self.remaining == 0 {
+            return std::task::Poll::Ready(None);
+        }
+
+        let chunk_size = (self.remaining as usize).min(256 * 1024);
+        let mut buf = vec![0u8; chunk_size];
+        let mut read_buf = tokio::io::ReadBuf::new(&mut buf);
+
+        match std::pin::Pin::new(&mut self.reader).poll_read(cx, &mut read_buf) {
+            std::task::Poll::Ready(Ok(())) => {
+                let n = read_buf.filled().len();
+                if n == 0 {
+                    return std::task::Poll::Ready(None);
+                }
+                self.remaining -= n as u64;
+                buf.truncate(n);
+                std::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes::Bytes::from(buf)))))
+            }
+            std::task::Poll::Ready(Err(e)) => {
+                std::task::Poll::Ready(Some(Err(axum::Error::new(e))))
+            }
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        http_body::SizeHint::with_exact(self.remaining)
+    }
 }
 
 /// Parse an HTTP Range header value like "bytes=0-1023" or "bytes=500-".

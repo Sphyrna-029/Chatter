@@ -8,6 +8,8 @@ license = "GPL-3.0-or-later"
 [dependencies]
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tokio = { version = "1", features = ["full"] }
+bytes = "1"
+http-body = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rand = "0.8"
@@ -30,7 +32,6 @@ argon2 = "0.5"
 totp-rs = { version = "5", features = ["qr", "otpauth"] }
 sha2 = "0.10"
 hex = "0.4"
-tokio-util = { version = "0.7", features = ["io"] }
 dotenvy = "0.15"
 mlua = { version = "0.10", features = ["lua54", "send", "serialize", "vendored"] }
 
