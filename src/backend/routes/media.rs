@@ -1305,6 +1305,17 @@ pub(crate) async fn upload_guard(
             .unwrap();
     }
 
+    // Generate thumbnail on demand when the .thumb.jpg is requested
+    if uri_path.ends_with(".thumb.jpg") {
+        let relative = uri_path.trim_start_matches('/');
+        let thumb_disk = format!("external/{}", relative);
+        if tokio::fs::metadata(&thumb_disk).await.is_err() {
+            // Derive video path by stripping ".thumb.jpg"
+            let video_disk = thumb_disk.strip_suffix(".thumb.jpg").unwrap_or(&thumb_disk);
+            generate_thumbnail(video_disk).await;
+        }
+    }
+
     // For MP4/MOV files, apply faststart on first access so the moov atom
     // is at the front of the file — required for instant seeking in browsers.
     // Also generate a thumbnail if one doesn't exist yet.
