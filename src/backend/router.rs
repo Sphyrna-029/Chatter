@@ -40,8 +40,7 @@ use std::sync::Arc;
 use tower_http::services::ServeDir;
 
 pub(crate) fn build_router() -> Router<Arc<AppState>> {
-    // ServeDir handles file streaming, range requests, and proper headers.
-    // serve_upload does auth/extension checks, then delegates to ServeDir.
+    // serve_upload streams files with Range request support.
     let external_router = Router::new()
         .route("/{folder}/{filename}", get(serve_upload))
         .fallback_service(ServeDir::new("external"));
