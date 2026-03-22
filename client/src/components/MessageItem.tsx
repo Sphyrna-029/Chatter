@@ -305,6 +305,7 @@ function FileAttachmentCard({ url }: { url: string }) {
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
 function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
   const [activated, setActivated] = useState(false);
+  const isLocal = url.includes("/external/");
   const thumbUrl = `${url}.thumb.jpg`;
 
   if (!activated) {
@@ -313,18 +314,25 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
         className="relative max-w-full rounded-md cursor-pointer bg-zinc-900 flex items-center justify-center overflow-hidden group"
         onClick={() => setActivated(true)}
       >
-        <img
-          src={thumbUrl}
-          alt=""
-          className="max-w-full max-h-80 rounded-md object-contain"
-          onError={(e) => {
-            // If no thumbnail exists, show a minimal placeholder
-            const el = e.currentTarget;
-            el.style.display = "none";
-            el.parentElement!.style.minWidth = "200px";
-            el.parentElement!.style.minHeight = "120px";
-          }}
-        />
+        {isLocal ? (
+          <img
+            src={thumbUrl}
+            alt=""
+            className="max-w-full max-h-80 rounded-md object-contain"
+            onError={(e) => {
+              const el = e.currentTarget;
+              el.style.display = "none";
+              el.parentElement!.style.minWidth = "200px";
+              el.parentElement!.style.minHeight = "120px";
+            }}
+          />
+        ) : (
+          <video
+            src={url}
+            preload="metadata"
+            className="max-w-full max-h-80 rounded-md pointer-events-none"
+          />
+        )}
         <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
           <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
             <Play className="w-6 h-6 text-white ml-0.5" />
