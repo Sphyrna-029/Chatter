@@ -71,9 +71,15 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     watchStateRef.current = watchState;
   }, [watchState]);
 
+  // Can use UI controls (everyone when no host, or the specific host)
   const isHost =
     state.userId !== null &&
     (watchState.hostUserId === "" || watchState.hostUserId === state.userId);
+  // Is the specifically assigned host — video element events + heartbeats only fire for this user
+  const isDesignatedHost =
+    state.userId !== null &&
+    watchState.hostUserId !== "" &&
+    watchState.hostUserId === state.userId;
   const ytId = extractYouTubeId(watchState.videoUrl);
   const isYoutube = ytId !== null;
 
@@ -299,9 +305,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     return () => clearInterval(interval);
   }, [watchState.playing, watchState.positionSecs, watchState.positionUpdatedAt]);
 
-  // Host heartbeat — broadcast position every 5s while playing
+  // Host heartbeat — broadcast position every 5s while playing (designated host only)
   useEffect(() => {
-    if (!isHost || !watchState.playing) return;
+    if (!isDesignatedHost || !watchState.playing) return;
     const interval = setInterval(() => {
       send({
         type: "watchparty_control",
@@ -311,7 +317,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       });
     }, 5000);
     return () => clearInterval(interval);
-  }, [isHost, watchState.playing, send, videoDuration]);
+  }, [isDesignatedHost, watchState.playing, send, videoDuration]);
 
   // Host controls
   const handleTransferHost = (newHostId: string) => {
@@ -358,9 +364,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     applySync(pos, playing);
   };
 
-  // Direct video event handlers (host only)
+  // Direct video event handlers — only the designated host auto-broadcasts
+  // element events. When there's no host, only explicit UI actions (button
+  // clicks / seekbar) send controls, preventing cross-user feedback loops.
   const handleVideoPlay = useCallback(() => {
-    if (!isHost || isApplyingSync.current) return;
+    if (!isDesignatedHost || isApplyingSync.current) return;
     const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
     send({ type: "watchparty_control", playing: true, position_secs: pos });
     setWatchState((prev) => ({
@@ -369,17 +377,17 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       positionSecs: pos,
       positionUpdatedAt: Date.now() / 1000,
     }));
-  }, [isHost, send]);
+  }, [isDesignatedHost, send]);
 
   const handleVideoPause = useCallback(() => {
-    if (!isHost || isApplyingSync.current) return;
+    if (!isDesignatedHost || isApplyingSync.current) return;
     const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
     send({ type: "watchparty_control", playing: false, position_secs: pos });
     setWatchState((prev) => ({ ...prev, playing: false, positionSecs: pos }));
-  }, [isHost, send]);
+  }, [isDesignatedHost, send]);
 
   const handleVideoSeeked = useCallback(() => {
-    if (!isHost || isApplyingSync.current) return;
+    if (!isDesignatedHost || isApplyingSync.current) return;
     const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
     displayPositionRef.current = pos;
     setDisplayPosition(pos);
@@ -388,7 +396,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       playing: watchStateRef.current.playing,
       position_secs: pos,
     });
-  }, [isHost, send]);
+  }, [isDesignatedHost, send]);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value);
