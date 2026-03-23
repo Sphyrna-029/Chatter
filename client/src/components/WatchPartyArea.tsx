@@ -484,6 +484,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     }
                   }}
                   onCanPlay={() => {
+                    // Only sync on the first canplay after a video loads.
+                    // canplay fires again after every buffering stall recovery;
+                    // re-seeking each time causes visible jitter.
+                    if (videoReadyRef.current) return;
                     videoReadyRef.current = true;
                     const pending = pendingSyncRef.current;
                     if (pending) {
