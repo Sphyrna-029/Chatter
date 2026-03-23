@@ -1262,7 +1262,16 @@ pub(crate) async fn upload_guard(
     if let Some(state) = req.extensions().get::<Arc<AppState>>() {
         let require_auth = state.server_settings.read().await.require_auth_for_uploads;
         if require_auth {
-            let token = extract_token(req.headers());
+            // Try Authorization header first, then access_token query parameter
+            // (video/audio elements cannot send custom headers)
+            let token = extract_token(req.headers()).or_else(|| {
+                req.uri().query().and_then(|q| {
+                    q.split('&').find_map(|pair| {
+                        let (key, value) = pair.split_once('=')?;
+                        if key == "access_token" { Some(value.to_string()) } else { None }
+                    })
+                })
+            });
             let authed = match token {
                 Some(t) => get_user_from_token(state, &t).is_some(),
                 None => false,

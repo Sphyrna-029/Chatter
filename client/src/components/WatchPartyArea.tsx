@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiGetWatchPartyState } from "@/lib/api";
 import { ChatArea } from "./ChatArea";
@@ -76,6 +76,20 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     (watchState.hostUserId === "" || watchState.hostUserId === state.userId);
   const ytId = extractYouTubeId(watchState.videoUrl);
   const isYoutube = ytId !== null;
+
+  // Build auth-aware src for local uploads (video elements can't send auth headers)
+  const videoSrc = useMemo(() => {
+    const url = watchState.videoUrl;
+    if (!url || isYoutube) return url;
+    if (url.includes("/external/") && state.requireAuthForUploads) {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        const sep = url.includes("?") ? "&" : "?";
+        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
+      }
+    }
+    return url;
+  }, [watchState.videoUrl, isYoutube, state.requireAuthForUploads]);
 
   useEffect(() => {
     isYoutubeRef.current = isYoutube;
@@ -446,7 +460,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   ref={videoRef}
                   key={watchState.videoUrl}
                   className="w-full h-full object-contain"
-                  src={watchState.videoUrl}
+                  src={videoSrc}
                   controls={false}
                   autoPlay
                   muted
