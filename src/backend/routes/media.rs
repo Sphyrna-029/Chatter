@@ -84,8 +84,11 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
         let result = tokio::process::Command::new("ffmpeg")
             .args([
                 "-y", "-i", path,
+                "-map", "0:v:0",
+                "-map", "0:a:0",
                 "-c:v", "copy",
                 "-c:a", "aac",
+                "-ac", "2",
                 "-movflags", "+faststart",
                 &new_path,
             ])
@@ -1373,7 +1376,10 @@ pub(crate) async fn upload_guard(
                 let _ = tokio::process::Command::new("ffmpeg")
                     .args([
                         "-y", "-i", &disk_path,
+                        "-map", "0:v:0",
+                        "-map", "0:a:0",
                         "-c:v", "copy", "-c:a", "aac",
+                        "-ac", "2",
                         "-movflags", "+faststart",
                         &mp4_disk,
                     ])
