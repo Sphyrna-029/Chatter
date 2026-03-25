@@ -810,6 +810,9 @@ export async function apiUpdateTopic(roomId: string, topic: string) {
 
 const CLIENT_CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
 
+// 5 minutes for single-file upload (covers both upload + server-side ffmpeg processing)
+const SINGLE_UPLOAD_TIMEOUT_MS = 300_000;
+
 function uploadSingleFile(
   file: File,
   onProgress?: (pct: number) => void
@@ -821,6 +824,7 @@ function uploadSingleFile(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload");
+    xhr.timeout = SINGLE_UPLOAD_TIMEOUT_MS;
     if (_accessToken) {
       xhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
     }
@@ -851,6 +855,7 @@ function uploadSingleFile(
           }
           const retryXhr = new XMLHttpRequest();
           retryXhr.open("POST", "/api/upload");
+          retryXhr.timeout = SINGLE_UPLOAD_TIMEOUT_MS;
           if (_accessToken) {
             retryXhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
           }
@@ -862,6 +867,7 @@ function uploadSingleFile(
             }
           };
           retryXhr.onerror = () => reject(new Error("Upload failed"));
+          retryXhr.ontimeout = () => reject(new Error("Upload timed out — the file may be too large for the server to process"));
           retryXhr.send(formData);
         });
       } else {
@@ -874,11 +880,15 @@ function uploadSingleFile(
       }
     };
     xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.ontimeout = () => reject(new Error("Upload timed out — the file may be too large for the server to process"));
     xhr.send(formData);
   });
 }
 
-function uploadChunkXhr(
+const CHUNK_UPLOAD_TIMEOUT_MS = 120_000; // 2 minutes per chunk
+const CHUNK_MAX_RETRIES = 3;
+
+function uploadChunkXhrOnce(
   uploadId: string,
   chunkIndex: number,
   blob: Blob,
@@ -891,6 +901,7 @@ function uploadChunkXhr(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/upload/chunk");
+    xhr.timeout = CHUNK_UPLOAD_TIMEOUT_MS;
     if (_accessToken) {
       xhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
     }
@@ -905,9 +916,11 @@ function uploadChunkXhr(
           if (!refreshed) { reject(new Error("Auth expired")); return; }
           const retry = new XMLHttpRequest();
           retry.open("POST", "/api/upload/chunk");
+          retry.timeout = CHUNK_UPLOAD_TIMEOUT_MS;
           if (_accessToken) retry.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
           retry.onload = () => retry.status >= 200 && retry.status < 300 ? resolve() : reject(new Error("Chunk upload failed"));
           retry.onerror = () => reject(new Error("Chunk upload failed"));
+          retry.ontimeout = () => reject(new Error("Chunk upload timed out"));
           retry.send(fd);
         });
       } else {
@@ -915,8 +928,25 @@ function uploadChunkXhr(
       }
     };
     xhr.onerror = () => reject(new Error("Chunk upload failed"));
+    xhr.ontimeout = () => reject(new Error("Chunk upload timed out"));
     xhr.send(fd);
   });
+}
+
+async function uploadChunkXhr(
+  uploadId: string,
+  chunkIndex: number,
+  blob: Blob,
+): Promise<void> {
+  for (let attempt = 1; attempt <= CHUNK_MAX_RETRIES; attempt++) {
+    try {
+      return await uploadChunkXhrOnce(uploadId, chunkIndex, blob);
+    } catch (err) {
+      if (attempt === CHUNK_MAX_RETRIES) throw err;
+      // Brief backoff before retry
+      await new Promise((r) => setTimeout(r, 1000 * attempt));
+    }
+  }
 }
 
 async function uploadChunkedFile(
@@ -947,12 +977,25 @@ async function uploadChunkedFile(
     }
   }
 
-  // 3. Complete
-  const completeRes = await authenticatedFetch("/api/upload/complete", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uploadId }),
-  });
+  // 3. Complete — server runs ffmpeg postprocessing so allow up to 5 minutes
+  const completeCtrl = new AbortController();
+  const completeTimeout = setTimeout(() => completeCtrl.abort(), 300_000);
+  let completeRes: Response;
+  try {
+    completeRes = await authenticatedFetch("/api/upload/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uploadId }),
+      signal: completeCtrl.signal,
+    });
+  } catch (err: any) {
+    clearTimeout(completeTimeout);
+    if (err.name === "AbortError") {
+      throw new Error("Upload processing timed out — the server may still be converting your video. Try refreshing in a minute.");
+    }
+    throw err;
+  }
+  clearTimeout(completeTimeout);
   if (!completeRes.ok) {
     const err = await completeRes.json().catch(() => ({}));
     throw new Error(err.error || "Failed to complete chunked upload");

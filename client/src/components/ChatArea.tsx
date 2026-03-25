@@ -94,6 +94,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadProcessing, setUploadProcessing] = useState(false);
   const [cliMode, setCliMode] = useState(false);
   const [exifDialogOpen, setExifDialogOpen] = useState(false);
   const exifPendingFilesRef = useRef<File[]>([]);
@@ -724,15 +725,22 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
     setUploading(true);
     setUploadProgress(0);
+    setUploadProcessing(false);
     setUploadFileName(file.name);
     try {
-      const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
+      const { url } = await apiUploadFile(file, (pct) => {
+        setUploadProgress(pct);
+        // When upload data reaches 100%, the server processes the file
+        // (ffmpeg conversion/faststart). Show processing state.
+        if (pct >= 100) setUploadProcessing(true);
+      });
       return url;
     } catch (err: any) {
       alert(err.message || "Upload failed");
       return null;
     } finally {
       setUploading(false);
+      setUploadProcessing(false);
     }
   };
 
@@ -1706,17 +1714,32 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           showCloseButton={false}
         >
           <DialogHeader>
-            <DialogTitle className="text-sm">Uploading file</DialogTitle>
+            <DialogTitle className="text-sm">
+              {uploadProcessing ? "Processing file" : "Uploading file"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-2 min-w-0 overflow-hidden">
             <p className="text-xs text-muted-foreground truncate">{uploadFileName}</p>
-            <div className="bg-muted rounded-full h-2">
-              <div
-                className="bg-primary rounded-full h-2 transition-all"
-                style={{ width: `${uploadProgress}%` }}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground text-center">{uploadProgress}%</p>
+            {uploadProcessing ? (
+              <div className="flex flex-col items-center gap-2 py-1">
+                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-primary rounded-full animate-pulse w-full" />
+                </div>
+                <p className="text-xs text-muted-foreground text-center">
+                  Server is processing your video, please wait...
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-muted rounded-full h-2">
+                  <div
+                    className="bg-primary rounded-full h-2 transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground text-center">{uploadProgress}%</p>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

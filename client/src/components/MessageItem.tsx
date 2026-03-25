@@ -302,11 +302,27 @@ function FileAttachmentCard({ url }: { url: string }) {
   );
 }
 
+/** Build auth-aware src for local uploads (video/audio elements can't send auth headers) */
+function useAuthSrc(url: string): string {
+  const { state } = useAppContext();
+  return useMemo(() => {
+    if (url.includes("/external/") && state.requireAuthForUploads) {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        const sep = url.includes("?") ? "&" : "?";
+        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
+      }
+    }
+    return url;
+  }, [url, state.requireAuthForUploads]);
+}
+
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
 function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
   const [activated, setActivated] = useState(false);
   const isLocal = url.includes("/external/");
   const thumbUrl = `${url}.thumb.jpg`;
+  const authSrc = useAuthSrc(url);
 
   if (!activated) {
     return (
@@ -344,8 +360,15 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
 
   return (
     <video
-      ref={(el) => { if (el) el.play().catch(() => {}); }}
-      src={url}
+      ref={(el) => {
+        if (el) {
+          // Must start muted for autoplay to work per browser policy,
+          // then unmute so user hears audio and can toggle via controls
+          el.muted = true;
+          el.play().then(() => { el.muted = false; }).catch(() => {});
+        }
+      }}
+      src={authSrc}
       controls
       preload="auto"
       className="max-w-full max-h-80 rounded-md cursor-pointer"
@@ -362,9 +385,22 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
 const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onReveal }: { body: string; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
+  const { state } = useAppContext();
   const { images, videos, audios, files, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
+
+  /** Append auth token to local upload URLs for media elements that can't send headers */
+  const withAuth = useCallback((url: string) => {
+    if (url.includes("/external/") && state.requireAuthForUploads) {
+      const token = localStorage.getItem("access_token");
+      if (token) {
+        const sep = url.includes("?") ? "&" : "?";
+        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
+      }
+    }
+    return url;
+  }, [state.requireAuthForUploads]);
 
   const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || files.length > 0 || links.length > 0 || youtubeIds.length > 0;
   if (!hasMedia) return null;
@@ -438,7 +474,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
       {audios.map((url) => (
         <audio
           key={url}
-          src={url}
+          src={withAuth(url)}
           controls
           preload="auto"
           className="max-w-full"
@@ -456,7 +492,17 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             <AuthImage src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
           )}
           {lightbox?.type === "video" && (
-            <video src={lightbox.url} autoPlay controls className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
+            <video
+              ref={(el) => {
+                if (el) {
+                  el.muted = true;
+                  el.play().then(() => { el.muted = false; }).catch(() => {});
+                }
+              }}
+              src={withAuth(lightbox.url)}
+              controls
+              className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
+            />
           )}
         </DialogContent>
       </Dialog>
