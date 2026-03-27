@@ -1128,11 +1128,17 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "watchparty_control" => {
             if !room_id.is_empty() {
-                let (can_control, stored_host) = {
+                let (can_control, stored_host, prev_playing, prev_pos, prev_updated_at) = {
                     let wp = state.watch_party_rooms.read().await;
                     wp.get(room_id)
-                        .map(|s| (s.host_user_id == user_id || s.host_user_id.is_empty(), s.host_user_id.clone()))
-                        .unwrap_or((false, String::new()))
+                        .map(|s| (
+                            s.host_user_id == user_id || s.host_user_id.is_empty(),
+                            s.host_user_id.clone(),
+                            s.playing,
+                            s.position_secs,
+                            s.position_updated_at,
+                        ))
+                        .unwrap_or((false, String::new(), false, 0.0, 0.0))
                 };
                 if can_control {
                     let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1164,6 +1170,47 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "duration_secs": stored_duration,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
+
+                    // Determine action type to send a chat notification
+                    let play_state_changed = playing != prev_playing;
+                    let expected_pos = if prev_playing { prev_pos + (now - prev_updated_at) } else { prev_pos };
+                    let pos_jumped = (position_secs - expected_pos).abs() > 3.0;
+                    let is_seek = !play_state_changed && pos_jumped;
+                    let is_heartbeat = !play_state_changed && !pos_jumped;
+
+                    if !is_heartbeat {
+                        let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
+                        let fmt_time = |secs: f64| -> String {
+                            let total = secs as u64;
+                            let h = total / 3600;
+                            let m = (total % 3600) / 60;
+                            let s = total % 60;
+                            if h > 0 { format!("{}:{:02}:{:02}", h, m, s) } else { format!("{}:{:02}", m, s) }
+                        };
+                        let body = if is_seek {
+                            format!("{} skipped to {}", display, fmt_time(position_secs))
+                        } else if playing {
+                            format!("{} resumed the video", display)
+                        } else {
+                            format!("{} paused the video at {}", display, fmt_time(position_secs))
+                        };
+                        let sys_event = json!({
+                            "type": "m.room.message",
+                            "room_id": room_id,
+                            "sender": user_id,
+                            "content": {
+                                "msgtype": "m.system",
+                                "body": body
+                            },
+                            "event_id": generate_id("$"),
+                            "origin_server_ts": now_millis()
+                        });
+                        let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
+                        if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+                            let _ = msg_col.insert_one(doc).await;
+                        }
+                        broadcast_to_room(&state, room_id, &sys_event).await;
+                    }
                 }
             }
         }
