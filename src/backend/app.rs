@@ -47,6 +47,7 @@ pub async fn build_state() -> Arc<AppState> {
         room_members: RwLock::new(room_members),
         room_roles: RwLock::new(room_roles),
         banned_users: RwLock::new(banned_users),
+        babbled_users: RwLock::new(HashMap::new()),
         active_websockets: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
         voice_channel_occupied_since: RwLock::new(HashMap::new()),

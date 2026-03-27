@@ -558,6 +558,29 @@ export function reducer(state: AppState, action: Action): AppState {
         channelUnreadCounts: { ...state.channelUnreadCounts, [action.payload]: 0 },
         channelMentions: { ...state.channelMentions, [action.payload]: 0 },
       };
+    case "SET_BABBLED_USERS":
+      return {
+        ...state,
+        babbledUsers: { ...state.babbledUsers, [action.payload.roomId]: action.payload.userIds },
+      };
+    case "ADD_BABBLED_USER": {
+      const cur = state.babbledUsers[action.payload.roomId] || [];
+      if (cur.includes(action.payload.userId)) return state;
+      return {
+        ...state,
+        babbledUsers: { ...state.babbledUsers, [action.payload.roomId]: [...cur, action.payload.userId] },
+      };
+    }
+    case "REMOVE_BABBLED_USER":
+      return {
+        ...state,
+        babbledUsers: {
+          ...state.babbledUsers,
+          [action.payload.roomId]: (state.babbledUsers[action.payload.roomId] || []).filter(
+            (id) => id !== action.payload.userId
+          ),
+        },
+      };
     default:
       return state;
   }

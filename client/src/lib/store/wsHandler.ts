@@ -365,6 +365,13 @@ export function createWsMessageHandler(
         });
       }
     }
+    else if (msg.type === "m.room.babble") {
+      if (msg.babbled) {
+        dispatch({ type: "ADD_BABBLED_USER", payload: { roomId: msg.room_id, userId: msg.user_id } });
+      } else {
+        dispatch({ type: "REMOVE_BABBLED_USER", payload: { roomId: msg.room_id, userId: msg.user_id } });
+      }
+    }
     else if (msg.type === "presence_update") {
       if (msg.user_id && msg.status) {
         const existing = stateRef.current.userPresence[msg.user_id];

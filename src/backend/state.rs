@@ -1,7 +1,7 @@
 use axum::extract::ws::Message;
 use mongodb::Database;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     task::JoinHandle,
@@ -47,6 +47,8 @@ pub struct AppState {
     pub(crate) banned_users: RwLock<HashMap<String, Vec<String>>>,
 
     // Ephemeral in-memory state (not persisted)
+    // Babble mode: room_id -> set of babbled user_ids (resets on server restart)
+    pub(crate) babbled_users: RwLock<HashMap<String, HashSet<String>>>,
     pub(crate) active_websockets: RwLock<HashMap<String, WsSender>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied

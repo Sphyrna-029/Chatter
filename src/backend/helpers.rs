@@ -245,6 +245,99 @@ pub(crate) async fn get_user_custom_role_ids(state: &AppState, room_id: &str, us
     role_ids
 }
 
+// ─── Babble ──────────────────────────────────────────────────────────────────
+
+/// Derive a deterministic u64 seed from an event ID string.
+fn event_seed(event_id: &str) -> u64 {
+    event_id
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+}
+
+/// Generate a deterministic string of random CJK characters that mirrors the
+/// word structure of `original`. The same `event_id` always produces the same
+/// output, so history loads are consistent.
+pub(crate) fn babble_text_for_event(original: &str, event_id: &str) -> String {
+    use rand::{Rng, SeedableRng};
+    use rand::rngs::StdRng;
+    let mut rng = StdRng::seed_from_u64(event_seed(event_id));
+    let words: Vec<&str> = original.split_whitespace().collect();
+    let word_count = words.len().max(1);
+    let mut result = String::new();
+    for i in 0..word_count {
+        let len = words[i].chars().count();
+        // Map word character length to CJK count (CJK chars are visually wider)
+        let char_count = ((len as f32 / 2.5).ceil() as usize).max(1).min(5);
+        for _ in 0..char_count {
+            let cp: u32 = rng.gen_range(0x4E00u32..=0x9FFFu32);
+            if let Some(c) = char::from_u32(cp) {
+                result.push(c);
+            }
+        }
+        if i + 1 < word_count {
+            result.push(' ');
+        }
+    }
+    result
+}
+
+/// Broadcast a message from a babbled user. Owners, moderators, and the sender
+/// receive the real content (with `"babble": true` flag). Everyone else receives
+/// a version with the body replaced by deterministic CJK gibberish.
+pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, event: &Value) {
+    use std::collections::HashSet;
+
+    let members = {
+        let rm = state.room_members.read().await;
+        match rm.get(room_id) {
+            Some(m) => m.clone(),
+            None => return,
+        }
+    };
+
+    let sender_id = event["sender"].as_str().unwrap_or("").to_string();
+    let event_id = event["event_id"].as_str().unwrap_or("");
+    let original_body = event["content"]["body"].as_str().unwrap_or("");
+    let scrambled_body = babble_text_for_event(original_body, event_id);
+
+    // Build the scrambled version: strip babble flag, replace body
+    let mut scrambled = event.clone();
+    if let Some(obj) = scrambled.as_object_mut() {
+        obj.remove("babble");
+    }
+    if let Some(content) = scrambled.get_mut("content") {
+        if let Some(obj) = content.as_object_mut() {
+            obj.insert("body".to_string(), json!(scrambled_body));
+        }
+    }
+
+    let real_text = event.to_string();
+    let scrambled_text = scrambled.to_string();
+
+    // Collect privileged user IDs (owner/moderator) — they see the real message
+    let privileged: HashSet<String> = {
+        let roles = state.room_roles.read().await;
+        let mut set = HashSet::new();
+        set.insert(sender_id.clone());
+        if let Some(room_roles) = roles.get(room_id) {
+            for (uid, role) in room_roles.iter() {
+                if role == "owner" || role == "moderator" {
+                    set.insert(uid.clone());
+                }
+            }
+        }
+        set
+    };
+
+    let ws_map = state.active_websockets.read().await;
+    for uid in &members {
+        if let Some(tx) = ws_map.get(uid) {
+            let text = if privileged.contains(uid) { &real_text } else { &scrambled_text };
+            let _ = tx.send(Message::Text(text.clone().into()));
+        }
+    }
+}
+
 /// Broadcast a JSON value to all WebSocket-connected members of a room.
 /// Uses the write-through room_members cache (no DB call).
 pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: &Value) {

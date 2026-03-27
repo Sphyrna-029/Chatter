@@ -580,6 +580,7 @@ export interface MatrixMessage {
   redacted?: boolean;
   edited?: boolean;
   edited_at?: number;
+  babble?: boolean;
   reactions?: Record<string, string[]>;
   thread_participants?: string[];
 }
@@ -1194,6 +1195,33 @@ export async function apiUnbanMember(roomId: string, userId: string) {
     throw new Error(body?.error || "Failed to unban member");
   }
   return res.json();
+}
+
+export async function apiBabbleUser(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/babble/${userId}`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to enable babble mode");
+  }
+  return res.json();
+}
+
+export async function apiUnbabbleUser(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/babble/${userId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to remove babble mode");
+  }
+  return res.json();
+}
+
+export async function apiGetBabbledUsers(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/babbled`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get babbled users");
+  }
+  return res.json() as Promise<{ babbled_users: string[] }>;
 }
 
 export async function apiSetMemberRole(roomId: string, userId: string, role: string) {

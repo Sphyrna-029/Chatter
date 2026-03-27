@@ -76,6 +76,9 @@ import {
   apiDeleteRole,
   apiGetAllMemberRoles,
   apiAssignMemberRoles,
+  apiBabbleUser,
+  apiUnbabbleUser,
+  apiGetBabbledUsers,
   type RoomInfo,
 } from "../api";
 import { fetchIceServers } from "../webrtc";
@@ -440,6 +443,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch {
           dispatch({ type: "SET_CUSTOM_ROLES", payload: [] });
           dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: {} });
+        }
+
+        // Load babbled users for this room
+        try {
+          const babbledData = await apiGetBabbledUsers(roomId);
+          dispatch({ type: "SET_BABBLED_USERS", payload: { roomId, userIds: babbledData.babbled_users || [] } });
+        } catch {
+          dispatch({ type: "SET_BABBLED_USERS", payload: { roomId, userIds: [] } });
         }
       }
 
@@ -896,6 +907,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiSetNameColors(roomId, ownerColor, modColor);
   }, []);
 
+  const babbleUser = useCallback(async (roomId: string, userId: string) => {
+    await apiBabbleUser(roomId, userId);
+  }, []);
+
+  const unbabbleUser = useCallback(async (roomId: string, userId: string) => {
+    await apiUnbabbleUser(roomId, userId);
+  }, []);
+
   const loadRoomGroups = useCallback(async () => {
     try {
       const groups = await apiGetRoomGroups();
@@ -1056,6 +1075,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         removeFriend,
         blockUser,
         unblockUser,
+        babbleUser,
+        unbabbleUser,
       }}
     >
       {children}

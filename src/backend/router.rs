@@ -2,6 +2,7 @@ use super::{
     constants::CHUNK_SIZE,
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
+        babble::{add_babble, remove_babble, get_babbled_users},
         auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, ice_servers, login, logout, recovery_login, refresh, register, server_info, totp_setup, totp_verify},
         channels::{list_channels, create_channel, update_channel, delete_channel, create_category, update_category, delete_category},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
@@ -129,6 +130,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/rooms/{room_id}/bans", get(list_banned_users))
            .route("/api/rooms/{room_id}/ban/{user_id}", post(ban_member))
            .route("/api/rooms/{room_id}/ban/{user_id}", delete(unban_member))
+           .route("/api/rooms/{room_id}/babble/{user_id}", post(add_babble).delete(remove_babble))
+           .route("/api/rooms/{room_id}/babbled", get(get_babbled_users))
            .route("/api/rooms/{room_id}/members/{user_id}/role", put(set_member_role))
            .route("/api/rooms/{room_id}/name-colors", put(set_name_colors))
            // Channels

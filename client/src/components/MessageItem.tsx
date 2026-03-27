@@ -756,6 +756,9 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
               {isWebhook && (
                 <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">BOT</span>
               )}
+              {message.babble && (
+                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 leading-none" title="This message was sent while the user was in babble mode">BABBLE</span>
+              )}
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>
           )}
