@@ -349,6 +349,8 @@ pub(crate) async fn get_room_messages(
 
     // For non-privileged users, replace the body of babbled messages with
     // deterministic CJK gibberish (same seed → same text across page loads).
+    // The sender sees their own messages scrambled (same as regular members) but
+    // retains the babble flag so the BABBLE badge is shown to them.
     let role = get_user_role(&state, &room_id, &user_id).await;
     let is_privileged = role == "owner" || role == "moderator";
     if !is_privileged {
@@ -359,6 +361,7 @@ pub(crate) async fn get_room_messages(
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                let is_own = msg.get("sender").and_then(|v| v.as_str()) == Some(user_id.as_str());
                 if let Some(body) = msg
                     .get("content")
                     .and_then(|c| c.get("body"))
@@ -371,9 +374,12 @@ pub(crate) async fn get_room_messages(
                         }
                     }
                 }
-                // Remove the babble flag so non-privileged clients don't see it
-                if let Some(obj) = msg.as_object_mut() {
-                    obj.remove("babble");
+                // Keep the babble flag for the sender so they see the BABBLE badge;
+                // remove it for everyone else so it's invisible to regular members.
+                if !is_own {
+                    if let Some(obj) = msg.as_object_mut() {
+                        obj.remove("babble");
+                    }
                 }
             }
         }

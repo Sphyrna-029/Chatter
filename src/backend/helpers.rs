@@ -282,8 +282,9 @@ pub(crate) fn babble_text_for_event(original: &str, event_id: &str) -> String {
 }
 
 /// Broadcast a message from a babbled user. Owners, moderators, and the sender
-/// receive the real content (with `"babble": true` flag). Everyone else receives
-/// a version with the body replaced by deterministic CJK gibberish.
+/// receive the real content (with `"babble": true` flag). The sender sees the
+/// scrambled body with the babble flag retained (so they see what others see, but
+/// still get the BABBLE badge). Everyone else receives scrambled body without the flag.
 pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, event: &Value) {
     use std::collections::HashSet;
 
@@ -300,7 +301,7 @@ pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, ev
     let original_body = event["content"]["body"].as_str().unwrap_or("");
     let scrambled_body = babble_text_for_event(original_body, event_id);
 
-    // Build the scrambled version: strip babble flag, replace body
+    // Build the scrambled version for regular members: strip babble flag, replace body
     let mut scrambled = event.clone();
     if let Some(obj) = scrambled.as_object_mut() {
         obj.remove("babble");
@@ -311,14 +312,19 @@ pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, ev
         }
     }
 
+    // Build a version for the sender: scrambled body but babble flag kept so the
+    // BABBLE badge still appears, and they see what regular members see.
+    let mut scrambled_with_badge = scrambled.clone();
+    scrambled_with_badge["babble"] = json!(true);
+
     let real_text = event.to_string();
     let scrambled_text = scrambled.to_string();
+    let scrambled_with_badge_text = scrambled_with_badge.to_string();
 
     // Collect privileged user IDs (owner/moderator) — they see the real message
     let privileged: HashSet<String> = {
         let roles = state.room_roles.read().await;
         let mut set = HashSet::new();
-        set.insert(sender_id.clone());
         if let Some(room_roles) = roles.get(room_id) {
             for (uid, role) in room_roles.iter() {
                 if role == "owner" || role == "moderator" {
@@ -332,7 +338,16 @@ pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, ev
     let ws_map = state.active_websockets.read().await;
     for uid in &members {
         if let Some(tx) = ws_map.get(uid) {
-            let text = if privileged.contains(uid) { &real_text } else { &scrambled_text };
+            let text = if uid == &sender_id {
+                // Sender sees Chinese characters (same as everyone else) + BABBLE badge
+                &scrambled_with_badge_text
+            } else if privileged.contains(uid) {
+                // Mods/owners see the original text + BABBLE badge
+                &real_text
+            } else {
+                // Regular members see Chinese characters, no badge
+                &scrambled_text
+            };
             let _ = tx.send(Message::Text(text.clone().into()));
         }
     }
