@@ -68,7 +68,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround, openThread } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround, openThread, selectChannel } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -1360,9 +1360,17 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                       key={msg.event_id}
                       className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
                       onClick={async () => {
-                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
-                        if (!alreadyLoaded && state.currentRoomId) {
+                        if (!state.currentRoomId) return;
+                        const msgChannelId = msg.channel_id;
+                        if (msgChannelId && msgChannelId !== state.currentChannelId) {
+                          // Switch to the mention's channel, then load messages around the timestamp
+                          await selectChannel(msgChannelId);
                           await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                        } else {
+                          const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
+                          if (!alreadyLoaded) {
+                            await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                          }
                         }
                         closeMentions();
                         setScrollToEventId(msg.event_id);

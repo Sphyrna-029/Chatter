@@ -560,6 +560,7 @@ export interface MatrixMessage {
   event_id: string;
   sender: string;
   room_id: string;
+  channel_id?: string;
   origin_server_ts: number;
   type: string;
   thread_id?: string;
