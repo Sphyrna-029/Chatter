@@ -329,7 +329,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (autoScrollRef.current || isNearBottomRef.current) {
+    if (autoScrollRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [state.messages]);
