@@ -1131,7 +1131,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             <Button
               variant="ghost"
               size="icon"
-              className={`shrink-0 ${autoScroll ? "text-primary" : ""}`}
+              className={`shrink-0 ${autoScroll ? "bg-accent text-primary" : ""}`}
               onClick={() => {
                 const next = !autoScroll;
                 setAutoScroll(next);
