@@ -178,10 +178,14 @@ pub(crate) async fn send_message(
     // Check if sender is currently in babble mode for this room
     let is_babbled = {
         let babbled = state.babbled_users.read().await;
-        babbled
-            .get(&room_id)
-            .map(|s| s.contains(&user_id))
-            .unwrap_or(false)
+        let room_set = babbled.get(&room_id);
+        let result = room_set.map(|s| s.contains(&user_id)).unwrap_or(false);
+        eprintln!("[BABBLE DEBUG] send_message: room_id={:?} user_id={:?} room_set_exists={} is_babbled={}",
+            room_id, user_id, room_set.is_some(), result);
+        if let Some(set) = room_set {
+            eprintln!("[BABBLE DEBUG] room set contents: {:?}", set);
+        }
+        result
     };
     if is_babbled {
         event["babble"] = json!(true);
@@ -1115,6 +1119,12 @@ pub(crate) async fn search_messages(
     let q = &query.q;
 
     let mongo_filter = match filter {
+        "mention" => {
+            doc! {
+                "room_id": &room_id,
+                "content.body": { "$regex": format!("@{}\\b", q), "$options": "i" }
+            }
+        }
         "user" => {
             doc! {
                 "room_id": &room_id,

@@ -19,13 +19,16 @@ pub(crate) async fn add_babble(
     Path((room_id, target_user_id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    eprintln!("[BABBLE DEBUG] add_babble called: room_id={:?} target_user_id={:?}", room_id, target_user_id);
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    eprintln!("[BABBLE DEBUG] add_babble caller: user_id={:?}", user_id);
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
+    eprintln!("[BABBLE DEBUG] add_babble roles: caller_role={:?} target_role={:?}", caller_role, target_role);
 
     if caller_role == "member" {
         return Err(error_response(StatusCode::FORBIDDEN, "No permission to use babble mode"));
@@ -46,6 +49,8 @@ pub(crate) async fn add_babble(
             .entry(room_id.clone())
             .or_default()
             .insert(target_user_id.clone());
+        eprintln!("[BABBLE DEBUG] add_babble: stored room_id={:?} target_user_id={:?}", room_id, target_user_id);
+        eprintln!("[BABBLE DEBUG] room set is now: {:?}", babbled.get(&room_id));
     }
 
     let event = json!({

@@ -335,20 +335,25 @@ pub(crate) async fn broadcast_babble_message(state: &AppState, room_id: &str, ev
         set
     };
 
+    eprintln!("[BABBLE DEBUG] broadcast_babble_message: sender_id={:?} members={:?} privileged={:?}", sender_id, members, privileged);
+    eprintln!("[BABBLE DEBUG] scrambled_body={:?}", scrambled_body);
     let ws_map = state.active_websockets.read().await;
     for uid in &members {
         if let Some(tx) = ws_map.get(uid) {
-            let text = if uid == &sender_id {
+            let (label, text) = if uid == &sender_id {
                 // Sender sees Chinese characters (same as everyone else) + BABBLE badge
-                &scrambled_with_badge_text
+                ("sender", &scrambled_with_badge_text)
             } else if privileged.contains(uid) {
                 // Mods/owners see the original text + BABBLE badge
-                &real_text
+                ("privileged", &real_text)
             } else {
                 // Regular members see Chinese characters, no badge
-                &scrambled_text
+                ("regular", &scrambled_text)
             };
+            eprintln!("[BABBLE DEBUG] sending {} text to uid={:?}", label, uid);
             let _ = tx.send(Message::Text(text.clone().into()));
+        } else {
+            eprintln!("[BABBLE DEBUG] uid={:?} has no active websocket", uid);
         }
     }
 }

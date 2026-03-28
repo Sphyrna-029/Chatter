@@ -4,7 +4,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -88,6 +88,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const autoScrollRef = useRef(true);
+  const [autoScroll, setAutoScroll] = useState(true);
   const prevScrollHeightRef = useRef<number>(0);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -248,6 +250,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return walk(div) ? range : null;
   };
 
+  // Mentions state
+  const [mentionsOpen, setMentionsOpen] = useState(false);
+  const [mentionResults, setMentionResults] = useState<MatrixMessage[]>([]);
+  const [mentionsLoading, setMentionsLoading] = useState(false);
+
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -320,12 +327,19 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return () => viewport.removeEventListener("scroll", handleScroll);
   }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch]);
 
-  // Auto-scroll to bottom on new messages only when already near bottom
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (isNearBottomRef.current) {
+    if (autoScrollRef.current || isNearBottomRef.current) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [state.messages]);
+
+  // Scroll to bottom on channel switch when auto-scroll is enabled
+  useEffect(() => {
+    if (state.currentChannelId && autoScrollRef.current) {
+      messagesEndRef.current?.scrollIntoView();
+    }
+  }, [state.currentChannelId]);
 
   // When messages load for a channel with unreads, compute the first unread event ID
   useLayoutEffect(() => {
@@ -951,6 +965,25 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setFileTypeFilter("all");
   };
 
+  const closeMentions = () => {
+    setMentionsOpen(false);
+    setMentionResults([]);
+  };
+
+  const openMentions = async () => {
+    if (!state.currentRoomId || !state.userId) return;
+    closeSearch();
+    setMentionsOpen(true);
+    setMentionsLoading(true);
+    const username = state.userId.replace(/^@/, "").replace(/:.*$/, "");
+    try {
+      const results = await apiSearchMessages(state.currentRoomId, username, "mention");
+      setMentionResults(results);
+    } finally {
+      setMentionsLoading(false);
+    }
+  };
+
   // Format relative time for thread list
   const formatThreadTime = (ts: number) => {
     const date = new Date(ts);
@@ -962,9 +995,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
-  // Scroll to a message after search closes and messages are rendered
+  // Scroll to a message after search/mentions closes and messages are rendered
   useEffect(() => {
-    if (!scrollToEventId || searchOpen) return;
+    if (!scrollToEventId || searchOpen || mentionsOpen) return;
     // Use requestAnimationFrame to wait for DOM to render
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
@@ -976,7 +1009,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       setScrollToEventId(null);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollToEventId, searchOpen, state.messages]);
+  }, [scrollToEventId, searchOpen, mentionsOpen, state.messages]);
 
   const mentionMatches = useMemo(() => {
     if (!mentionOpen) return [];
@@ -1093,16 +1126,61 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             );
           })()}
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="shrink-0"
-          onClick={() => searchOpen ? closeSearch() : setSearchOpen(true)}
-          title="Search messages"
-        >
-          <Search className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          {roomInfo?.room_type === "text" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className={`shrink-0 ${autoScroll ? "text-primary" : ""}`}
+              onClick={() => {
+                const next = !autoScroll;
+                setAutoScroll(next);
+                autoScrollRef.current = next;
+                if (next) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+              }}
+              title={autoScroll ? "Auto-scroll enabled (click to disable)" : "Auto-scroll disabled (click to enable)"}
+            >
+              <Magnet className="h-4 w-4" />
+            </Button>
+          )}
+          {roomInfo?.room_type === "text" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={() => mentionsOpen ? closeMentions() : openMentions()}
+              title="Your mentions"
+            >
+              <AtSign className="h-4 w-4" />
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            onClick={() => searchOpen ? closeSearch() : (closeMentions(), setSearchOpen(true))}
+            title="Search messages"
+          >
+            <Search className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
+
+      {/* Mentions bar */}
+      {mentionsOpen && (
+        <div className="border-b px-4 py-2 flex items-center justify-between">
+          <span className="text-sm font-medium flex items-center gap-1.5">
+            <AtSign className="h-3.5 w-3.5 text-muted-foreground" />
+            Your mentions
+          </span>
+          <button
+            onClick={closeMentions}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Search bar */}
       {searchOpen && (
@@ -1257,6 +1335,44 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                       );
                     })}
               </>
+            ) : mentionsOpen ? (
+              <>
+                {mentionsLoading && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    Loading mentions...
+                  </div>
+                )}
+                {!mentionsLoading && mentionResults.length === 0 && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    No mentions found in this room
+                  </div>
+                )}
+                {mentionResults.map((msg, i) => {
+                  const prev = mentionResults[i - 1];
+                  const grouped =
+                    !!prev &&
+                    prev.content.msgtype !== "m.system" &&
+                    msg.content.msgtype !== "m.system" &&
+                    prev.sender === msg.sender &&
+                    msg.origin_server_ts - prev.origin_server_ts < 60000;
+                  return (
+                    <div
+                      key={msg.event_id}
+                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                      onClick={async () => {
+                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
+                        if (!alreadyLoaded && state.currentRoomId) {
+                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                        }
+                        closeMentions();
+                        setScrollToEventId(msg.event_id);
+                      }}
+                    >
+                      <MessageItem message={msg} grouped={grouped} />
+                    </div>
+                  );
+                })}
+              </>
             ) : (
               <>
                 {state.loadingOlderMessages && (
@@ -1364,33 +1480,35 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         </div>
       )}
 
-      {/* Typing indicator */}
-      {state.typingUsers.length > 0 && (() => {
-        const names = state.typingUsers.map((uid) => {
-          const member = state.roomMembers.find((m) => m.userId === uid);
-          return member?.displayName || displayUserId(uid);
-        });
-        let text: string;
-        if (names.length === 1) {
-          text = `${names[0]} is typing...`;
-        } else if (names.length === 2) {
-          text = `${names[0]} and ${names[1]} are typing...`;
-        } else if (names.length === 3) {
-          text = `${names[0]}, ${names[1]}, and ${names[2]} are typing...`;
-        } else {
-          text = "Multiple users are yapping....";
-        }
-        return (
-          <div className="px-4 pb-1 flex items-center gap-1.5">
-            <span className="flex gap-0.5">
-              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
-              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
-              <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
-            </span>
-            <span className="text-xs text-muted-foreground italic">{text}</span>
-          </div>
-        );
-      })()}
+      {/* Typing indicator — always rendered to reserve space and prevent layout shift over reactions */}
+      <div className="px-4 pb-1 flex items-center gap-1.5 h-5">
+        {state.typingUsers.length > 0 && (() => {
+          const names = state.typingUsers.map((uid) => {
+            const member = state.roomMembers.find((m) => m.userId === uid);
+            return member?.displayName || displayUserId(uid);
+          });
+          let text: string;
+          if (names.length === 1) {
+            text = `${names[0]} is typing...`;
+          } else if (names.length === 2) {
+            text = `${names[0]} and ${names[1]} are typing...`;
+          } else if (names.length === 3) {
+            text = `${names[0]}, ${names[1]}, and ${names[2]} are typing...`;
+          } else {
+            text = "Multiple users are yapping....";
+          }
+          return (
+            <>
+              <span className="flex gap-0.5">
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+              </span>
+              <span className="text-xs text-muted-foreground italic">{text}</span>
+            </>
+          );
+        })()}
+      </div>
 
       {/* Input */}
       {cliMode ? (
