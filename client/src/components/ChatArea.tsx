@@ -1559,6 +1559,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     <div className="h-16 w-28 flex flex-col items-center justify-center rounded-md border border-border bg-muted px-2 gap-1">
                       <span className="text-lg">📄</span>
                       <span className="text-xs text-muted-foreground truncate max-w-full">{pf.file.name}</span>
+                      <span className="text-[10px] text-muted-foreground/70">{pf.file.size < 1024 * 1024 ? `${(pf.file.size / 1024).toFixed(1)} KB` : `${(pf.file.size / (1024 * 1024)).toFixed(1)} MB`}</span>
                     </div>
                   )}
                   <button

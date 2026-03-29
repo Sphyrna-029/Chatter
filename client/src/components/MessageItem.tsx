@@ -268,8 +268,15 @@ function LinkPreviewCard({ url }: { url: string }) {
   );
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /** File attachment card for uploaded non-media files */
 function FileAttachmentCard({ url }: { url: string }) {
+  const { state } = useAppContext();
   // Extract filename from URL: /external/{folder}/{encoded_filename}
   const segments = url.split("/");
   const rawName = decodeURIComponent(segments[segments.length - 1] || "file");
@@ -278,6 +285,22 @@ function FileAttachmentCard({ url }: { url: string }) {
   const dotIdx = fileName.lastIndexOf(".");
   const ext = dotIdx > 0 ? fileName.slice(dotIdx + 1).toUpperCase() : "";
   const baseName = dotIdx > 0 ? fileName.slice(0, dotIdx) : fileName;
+
+  const [fileSize, setFileSize] = useState<number | null>(null);
+
+  useEffect(() => {
+    const headers: Record<string, string> = {};
+    if (url.includes("/external/") && state.requireAuthForUploads) {
+      const token = localStorage.getItem("access_token");
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+    }
+    fetch(url, { method: "HEAD", headers })
+      .then((res) => {
+        const len = res.headers.get("content-length");
+        if (len) setFileSize(parseInt(len, 10));
+      })
+      .catch(() => {});
+  }, [url, state.requireAuthForUploads]);
 
   const IconComponent = /^(zip|rar|7z|tar|gz|bz2)$/i.test(ext) ? FileArchive
     : /^(js|ts|tsx|jsx|py|rs|go|java|c|cpp|h|html|css|json|xml|yml|yaml|sh|sql|rb|php)$/i.test(ext) ? FileCode
@@ -296,7 +319,9 @@ function FileAttachmentCard({ url }: { url: string }) {
       <IconComponent className="h-8 w-8 text-muted-foreground shrink-0 group-hover:text-foreground transition-colors" />
       <div className="flex flex-col min-w-0">
         <span className="text-sm font-medium truncate">{baseName}</span>
-        <span className="text-xs text-muted-foreground">{ext ? `${ext} file` : "File"}</span>
+        <span className="text-xs text-muted-foreground">
+          {ext ? `${ext} file` : "File"}{fileSize !== null ? ` · ${formatFileSize(fileSize)}` : ""}
+        </span>
       </div>
     </a>
   );
