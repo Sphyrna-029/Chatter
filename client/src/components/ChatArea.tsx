@@ -334,6 +334,15 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
   }, [state.messages]);
 
+  // Scroll to show reactions added to the last message
+  useEffect(() => {
+    const lastMessage = state.messages[state.messages.length - 1];
+    if (!lastMessage) return;
+    if (state.messageReactions[lastMessage.event_id] && isNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [state.messageReactions, state.messages]);
+
   // Scroll to bottom on channel switch when auto-scroll is enabled
   useEffect(() => {
     if (state.currentChannelId && autoScrollRef.current) {
