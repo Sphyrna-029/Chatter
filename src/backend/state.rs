@@ -235,6 +235,15 @@ pub(crate) struct DmRoomRecord {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct DmStreakRecord {
+    #[serde(rename = "_id")]
+    pub(crate) user_pair: String, // sorted "user1|user2"
+    pub(crate) streak_count: u32,
+    pub(crate) last_message_ts: i64, // ms since epoch of last streak-relevant message
+    pub(crate) last_streak_date: String, // "YYYY-MM-DD" UTC date of last counted message
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct InviteRecord {
     #[serde(rename = "_id")]
     pub(crate) code: String,

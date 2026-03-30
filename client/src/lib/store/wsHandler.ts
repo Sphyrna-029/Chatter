@@ -372,6 +372,12 @@ export function createWsMessageHandler(
         dispatch({ type: "REMOVE_BABBLED_USER", payload: { roomId: msg.room_id, userId: msg.user_id } });
       }
     }
+    else if (msg.type === "m.room.dm_streak") {
+      dispatch({
+        type: "UPDATE_DM_STREAK",
+        payload: { roomId: msg.room_id, streakCount: msg.streak_count, lastMessageTs: msg.last_message_ts },
+      });
+    }
     else if (msg.type === "presence_update") {
       if (msg.user_id && msg.status) {
         const existing = stateRef.current.userPresence[msg.user_id];

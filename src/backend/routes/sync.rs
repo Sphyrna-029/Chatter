@@ -1,7 +1,7 @@
 use super::super::{
     dto::SyncQuery,
     helpers::{error_response, extract_token, get_reactions_for_events, get_user_from_token},
-    state::{AppState, ChannelRecord, RoomMemberRecord, RoomRecord, UserRecord},
+    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -243,6 +243,23 @@ pub(crate) async fn sync(
                 "content": {"is_direct": true},
                 "sender": room_data.creator
             }));
+
+            // Include streak data for DM rooms
+            let dm_rooms_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
+            if let Ok(Some(dm_record)) = dm_rooms_coll.find_one(doc! { "room_id": room_id }).await {
+                let streak_coll = state.db.collection::<DmStreakRecord>("dm_streaks");
+                if let Ok(Some(streak)) = streak_coll.find_one(doc! { "_id": &dm_record.user_pair }).await {
+                    state_events.push(json!({
+                        "type": "m.room.dm_streak",
+                        "state_key": "",
+                        "content": {
+                            "streak_count": streak.streak_count,
+                            "last_message_ts": streak.last_message_ts,
+                        },
+                        "sender": room_data.creator
+                    }));
+                }
+            }
         }
 
         // Fetch channels for non-DM rooms

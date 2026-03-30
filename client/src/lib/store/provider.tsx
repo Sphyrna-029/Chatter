@@ -377,6 +377,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const bannerEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.banner"
         );
+        const streakEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.dm_streak"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -394,6 +397,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           room_type: roomTypeEvent?.content?.room_type || "text",
           read_only: readOnlyEvent?.content?.read_only || false,
           banner_url: bannerEvent?.content?.banner_url || "",
+          dm_streak_count: streakEvent?.content?.streak_count || 0,
+          dm_streak_last_ts: streakEvent?.content?.last_message_ts || 0,
         };
       } else {
         roomInfoMap[roomId] = {

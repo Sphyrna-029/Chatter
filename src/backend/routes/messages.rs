@@ -6,7 +6,7 @@ use super::super::{
         get_user_from_token, get_user_role, get_user_custom_role_ids, is_moderator_or_owner,
         now_millis, send_to_user,
     },
-    state::{AppState, ChannelRecord, RoomRecord},
+    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, Query, State},
@@ -214,6 +214,72 @@ pub(crate) async fn send_message(
                 "reply_to_event_id": req.in_reply_to,
             });
             send_to_user(&state, replied_user, &notification).await;
+        }
+    }
+
+    // Update DM streak on every message sent in a DM room
+    if room.is_dm {
+        let dm_rooms_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
+        if let Ok(Some(dm_record)) = dm_rooms_coll.find_one(doc! { "room_id": &room_id }).await {
+            let streak_coll = state.db.collection::<DmStreakRecord>("dm_streaks");
+            let today_naive = chrono::Utc::now().date_naive();
+            let today_str = today_naive.format("%Y-%m-%d").to_string();
+
+            let new_count: u32;
+            if let Ok(Some(existing)) = streak_coll.find_one(doc! { "_id": &dm_record.user_pair }).await {
+                let last_naive = chrono::NaiveDate::parse_from_str(&existing.last_streak_date, "%Y-%m-%d")
+                    .unwrap_or(today_naive);
+                let diff = today_naive.signed_duration_since(last_naive).num_days();
+                if diff == 0 {
+                    // Same day: just update last_message_ts, streak count unchanged
+                    new_count = existing.streak_count;
+                    streak_coll.update_one(
+                        doc! { "_id": &dm_record.user_pair },
+                        doc! { "$set": { "last_message_ts": timestamp } },
+                    ).await.ok();
+                } else if diff == 1 {
+                    // Next consecutive day: increment streak
+                    new_count = existing.streak_count + 1;
+                    streak_coll.update_one(
+                        doc! { "_id": &dm_record.user_pair },
+                        doc! { "$set": {
+                            "streak_count": new_count,
+                            "last_message_ts": timestamp,
+                            "last_streak_date": &today_str
+                        }},
+                    ).await.ok();
+                } else {
+                    // Streak broken: reset to 1
+                    new_count = 1;
+                    streak_coll.update_one(
+                        doc! { "_id": &dm_record.user_pair },
+                        doc! { "$set": {
+                            "streak_count": 1u32,
+                            "last_message_ts": timestamp,
+                            "last_streak_date": &today_str
+                        }},
+                    ).await.ok();
+                }
+            } else {
+                // No existing streak: start at 1
+                new_count = 1;
+                let new_record = DmStreakRecord {
+                    user_pair: dm_record.user_pair.clone(),
+                    streak_count: 1,
+                    last_message_ts: timestamp,
+                    last_streak_date: today_str,
+                };
+                streak_coll.insert_one(new_record).await.ok();
+            }
+
+            // Broadcast streak update to both DM members
+            let streak_event = json!({
+                "type": "m.room.dm_streak",
+                "room_id": room_id,
+                "streak_count": new_count,
+                "last_message_ts": timestamp,
+            });
+            broadcast_to_room(&state, &room_id, &streak_event).await;
         }
     }
 

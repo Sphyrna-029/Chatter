@@ -171,7 +171,8 @@ export type Action =
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
   | { type: "SET_BABBLED_USERS"; payload: { roomId: string; userIds: string[] } }
   | { type: "ADD_BABBLED_USER"; payload: { roomId: string; userId: string } }
-  | { type: "REMOVE_BABBLED_USER"; payload: { roomId: string; userId: string } };
+  | { type: "REMOVE_BABBLED_USER"; payload: { roomId: string; userId: string } }
+  | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } };
 
 export const initialState: AppState = {
   accessToken: null,

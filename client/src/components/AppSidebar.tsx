@@ -105,6 +105,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     }
     const roomInitial = roomName.substring(0, 1).toUpperCase();
 
+    // Streak display calculations
+    const streakCount = isDm ? (info?.dm_streak_count ?? 0) : 0;
+    const lastTs = isDm ? (info?.dm_streak_last_ts ?? 0) : 0;
+    const now = Date.now();
+    const lastDay = lastTs > 0 ? Math.floor(lastTs / 86400000) : 0;
+    const streakDeadline = lastTs > 0 ? (lastDay + 2) * 86400000 : 0;
+    const isStreakAlive = lastTs > 0 && now < streakDeadline;
+    const isStreakExpiring = isStreakAlive && (streakDeadline - now) < 4 * 3600 * 1000;
+    const showStreak = isDm && streakCount >= 2 && isStreakAlive;
+
     return (
       <button
         key={roomId}
@@ -216,9 +226,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             }}
           >
             {isDm ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
-              </svg>
+              showStreak ? (
+                <span className="flex flex-col items-center leading-none gap-0.5">
+                  <span className="text-base leading-none">{isStreakExpiring ? "⏳" : "🔥"}</span>
+                  <span className="text-[9px] font-bold leading-none">{streakCount}</span>
+                </span>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
+                </svg>
+              )
             ) : (
               roomInitial
             )}

@@ -581,6 +581,21 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         },
       };
+    case "UPDATE_DM_STREAK": {
+      const existing = state.roomInfoMap[action.payload.roomId];
+      if (!existing) return state;
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: {
+            ...existing,
+            dm_streak_count: action.payload.streakCount,
+            dm_streak_last_ts: action.payload.lastMessageTs,
+          },
+        },
+      };
+    }
     default:
       return state;
   }

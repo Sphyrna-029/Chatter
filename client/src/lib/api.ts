@@ -610,6 +610,8 @@ export interface RoomInfo {
   room_type?: string;
   read_only?: boolean;
   banner_url?: string;
+  dm_streak_count?: number;
+  dm_streak_last_ts?: number;
 }
 
 // ─── Channels ───────────────────────────────────────────────────────────────
