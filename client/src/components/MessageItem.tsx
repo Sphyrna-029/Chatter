@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -406,6 +406,38 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
   );
 }
 
+function YouTubeEmbed({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false);
+  const url = `https://www.youtube.com/watch?v=${id}`;
+
+  function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard.writeText(url).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="relative w-full max-w-lg aspect-video rounded-md overflow-hidden group">
+      <iframe
+        src={`https://www.youtube.com/embed/${id}`}
+        title="YouTube video"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+        className="absolute inset-0 w-full h-full"
+      />
+      <button
+        className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        onClick={handleCopy}
+        title="Copy video URL"
+      >
+        {copied ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4 text-white" />}
+      </button>
+    </div>
+  );
+}
+
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
@@ -446,15 +478,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
   return (
     <div className="mt-2 space-y-2">
       {youtubeIds.map((id) => (
-        <div key={id} className="relative w-full max-w-lg aspect-video rounded-md overflow-hidden">
-          <iframe
-            src={`https://www.youtube.com/embed/${id}`}
-            title="YouTube video"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-            className="absolute inset-0 w-full h-full"
-          />
-        </div>
+        <YouTubeEmbed key={id} id={id} />
       ))}
       {images.map((url) => {
         const isGif = gifUrlPattern.test(url);
