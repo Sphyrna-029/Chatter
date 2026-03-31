@@ -953,7 +953,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         <button
           key={emoji}
           className={cn(
-            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors cursor-pointer hover:bg-accent",
+            "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm transition-colors cursor-pointer hover:bg-accent",
             userIds.includes(state.userId || "")
               ? "border-primary/50 bg-primary/10"
               : "border-border"
@@ -964,7 +964,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         >
           <span>
             {isCustomEmojiUrl(emoji) ? (
-              <img src={emoji} alt="emoji" className="inline-block h-4 w-4 object-contain" />
+              <img src={emoji} alt="emoji" className="inline-block h-5 w-5 object-contain" />
             ) : (
               emoji
             )}
