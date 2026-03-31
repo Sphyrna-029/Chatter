@@ -533,6 +533,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Deafen ───────────────────────────────────────────────────────────────
   const toggleDeafen = useCallback(() => {
     const newDeafened = !state.isDeafened;
+    // Disable the outgoing mic track when deafening so others can't hear the user.
+    // When undeafening, only re-enable it if the user isn't separately muted.
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach((t) => {
+        t.enabled = newDeafened ? false : !state.isMuted;
+      });
+    }
     voiceGainNodesRef.current.forEach((entry, userId) => {
       entry.gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
     });
@@ -545,7 +552,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         deafened: newDeafened,
       }));
     }
-  }, [state.isDeafened, dispatch]);
+  }, [state.isDeafened, state.isMuted, dispatch]);
 
   return {
     localStreamRef,
