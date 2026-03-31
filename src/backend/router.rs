@@ -23,7 +23,7 @@ use super::{
         tankwar::{get_tankwar_state, new_tankwar_game},
         tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
-        steam::{steam_callback, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
+        steam::{steam_callback, steam_exchange, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
         spotify::{spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink},
         static_content::{build_version, serve_client, serve_invite_page, versions},
         sync::sync,
@@ -200,6 +200,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Steam
            .route("/api/auth/steam/login", get(steam_login))
            .route("/api/auth/steam/callback", get(steam_callback))
+           .route("/api/auth/steam/exchange", post(steam_exchange))
            .route("/api/steam/link-url", get(steam_link_url))
            .route("/api/steam/status", get(steam_status))
            .route("/api/steam/hide-game", put(steam_set_hide_game))

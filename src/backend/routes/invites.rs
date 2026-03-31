@@ -1,4 +1,5 @@
 use super::super::{
+    dto::CreateInviteRequest,
     helpers::{do_join_room, error_response, extract_token, get_user_from_token, now_millis},
     state::{AppState, InviteRecord, RoomRecord},
 };
@@ -25,6 +26,7 @@ pub(crate) async fn create_invite(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
     headers: HeaderMap,
+    body: Option<Json<CreateInviteRequest>>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
@@ -52,6 +54,10 @@ pub(crate) async fn create_invite(
         ));
     }
 
+    let expires_at = body
+        .and_then(|b| b.expires_in_days)
+        .map(|days| now_millis() + days as i64 * 24 * 60 * 60 * 1000);
+
     let code = generate_invite_code();
     let record = InviteRecord {
         code: code.clone(),
@@ -59,12 +65,13 @@ pub(crate) async fn create_invite(
         creator: user_id,
         click_count: 0,
         created_at: now_millis(),
+        expires_at,
     };
 
     let inv_coll = state.db.collection::<InviteRecord>("invites");
     let _ = inv_coll.insert_one(record).await;
 
-    Ok(Json(json!({ "code": code })))
+    Ok(Json(json!({ "code": code, "expires_at": expires_at })))
 }
 
 pub(crate) async fn list_invites(
@@ -101,6 +108,7 @@ pub(crate) async fn list_invites(
                 "code": inv.code,
                 "click_count": inv.click_count,
                 "created_at": inv.created_at,
+                "expires_at": inv.expires_at,
             }));
         }
     }
@@ -163,6 +171,12 @@ pub(crate) async fn get_invite_info(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
 
+    if let Some(expires_at) = invite.expires_at {
+        if now_millis() > expires_at {
+            return Err(error_response(StatusCode::GONE, "Invite has expired"));
+        }
+    }
+
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let room = rooms_coll
         .find_one(doc! { "_id": &invite.room_id })
@@ -198,6 +212,12 @@ pub(crate) async fn accept_invite(
         .ok()
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invite not found"))?;
+
+    if let Some(expires_at) = invite.expires_at {
+        if now_millis() > expires_at {
+            return Err(error_response(StatusCode::GONE, "Invite has expired"));
+        }
+    }
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     if rooms_coll

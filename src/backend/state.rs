@@ -74,6 +74,18 @@ pub struct AppState {
     pub(crate) spotify_client_secret: String,
     // Cache: user_id -> (access_token, expires_at_unix_secs)
     pub(crate) spotify_tokens: RwLock<HashMap<String, (String, f64)>>,
+    // One-time login codes for Steam OAuth — nonce -> payload, expires in 60s
+    pub(crate) steam_login_codes: RwLock<HashMap<String, SteamLoginCode>>,
+}
+
+#[derive(Clone)]
+pub(crate) struct SteamLoginCode {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+    pub(crate) user_id: String,
+    pub(crate) is_admin: bool,
+    pub(crate) totp_verified: bool,
+    pub(crate) expires_at: f64, // unix seconds
 }
 
 #[derive(Clone)]
@@ -251,6 +263,8 @@ pub(crate) struct InviteRecord {
     pub(crate) creator: String,
     pub(crate) click_count: u64,
     pub(crate) created_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) expires_at: Option<i64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -320,6 +334,9 @@ pub(crate) struct WebhookRecord {
     pub(crate) avatar_url: String,
     #[serde(default)]
     pub(crate) channel_id: String,
+    /// HMAC-SHA256 secret for verifying incoming payloads. Empty string = no verification (legacy).
+    #[serde(default)]
+    pub(crate) secret: String,
     pub(crate) created_at: i64,
 }
 

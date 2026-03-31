@@ -6,7 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiCheckUsername, apiVerifyTotp, apiRecoveryLogin, apiForceResetPassword, apiGetServerInfo, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiCheckUsername, apiVerifyTotp, apiRecoveryLogin, apiForceResetPassword, apiGetServerInfo, apiSteamExchangeCode, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -368,10 +368,29 @@ export function LoginScreen() {
   // Handle OAuth redirect params on initial load (Steam account linking, Spotify linking)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const steamCode = params.get("steam_code");
     const steamLinked = params.get("steam_linked");
     const steamError = params.get("steam_error");
     const spotifyLinked = params.get("spotify_linked");
     const spotifyError = params.get("spotify_error");
+
+    if (steamCode) {
+      window.history.replaceState({}, "", "/");
+      apiSteamExchangeCode(steamCode)
+        .then((data) => {
+          setAccessToken(data.access_token);
+          setRefreshToken(data.refresh_token);
+          setIsAdmin(!!data.is_admin);
+          setTotpVerified(!!data.totp_verified);
+          dispatch({ type: "LOGIN", payload: { accessToken: data.access_token, userId: data.user_id } });
+          dispatch({ type: "SET_IS_ADMIN", payload: !!data.is_admin });
+          dispatch({ type: "SET_TOTP_VERIFIED", payload: !!data.totp_verified });
+        })
+        .catch((err: any) => {
+          setError(err.message || "Steam login failed. Please try again.");
+        });
+      return;
+    }
 
     if (steamLinked === "true" || spotifyLinked === "true") {
       window.history.replaceState({}, "", "/");
@@ -383,8 +402,10 @@ export function LoginScreen() {
       const messages: Record<string, string> = {
         already_linked: "This Steam account is already linked to another user.",
         invalid_state: "Invalid state token. Please try again.",
+        no_account: "No Chatter account is linked to that Steam profile.",
+        account_disabled: "This account has been disabled.",
       };
-      setError(messages[steamError] || `Steam linking failed: ${steamError}`);
+      setError(messages[steamError] || `Steam login failed: ${steamError}`);
     }
 
     if (spotifyError) {

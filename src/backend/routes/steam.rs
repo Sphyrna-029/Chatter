@@ -1,6 +1,6 @@
 use super::super::{
-    helpers::{create_access_token, create_refresh_token, decode_token, error_response, extract_token, get_user_from_token},
-    state::{AppState, RefreshTokenRecord, UserRecord},
+    helpers::{create_access_token, create_refresh_token, decode_token, error_response, extract_token, get_user_from_token, now_secs},
+    state::{AppState, RefreshTokenRecord, SteamLoginCode, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -8,6 +8,7 @@ use axum::{
     response::{IntoResponse, Json, Redirect},
 };
 use mongodb::bson::doc;
+use rand::Rng;
 use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Arc};
 
@@ -210,22 +211,57 @@ pub(crate) async fn steam_callback(
             let refresh_token = create_refresh_token(user_id, &state.jwt_secret);
             store_refresh_token(&state, &refresh_token, user_id).await;
 
-            let redirect = format!(
-                "{}/?steam_access={}&steam_refresh={}&steam_user_id={}&steam_is_admin={}&steam_totp={}",
-                base_url,
-                urlencoding::encode(&access_token),
-                urlencoding::encode(&refresh_token),
-                urlencoding::encode(user_id),
-                user.is_admin,
-                user.totp_verified,
-            );
-            Redirect::temporary(&redirect).into_response()
+            // Issue a short-lived one-time code instead of putting tokens in the URL.
+            // The client exchanges this code via POST /api/auth/steam/exchange.
+            let code = hex::encode(rand::thread_rng().gen::<[u8; 32]>());
+            {
+                let mut codes = state.steam_login_codes.write().await;
+                codes.insert(code.clone(), SteamLoginCode {
+                    access_token,
+                    refresh_token,
+                    user_id: user_id.clone(),
+                    is_admin: user.is_admin,
+                    totp_verified: user.totp_verified,
+                    expires_at: now_secs() + 60.0,
+                });
+            }
+
+            Redirect::temporary(&format!("{}/?steam_code={}", base_url, code)).into_response()
         }
 
         _ => {
             Redirect::temporary(&format!("{}/?steam_error=invalid_mode", base_url)).into_response()
         }
     }
+}
+
+/// POST /api/auth/steam/exchange
+/// Exchanges a one-time `steam_code` (from the OAuth callback redirect) for session tokens.
+/// The code is consumed on first use and expires after 60 seconds.
+pub(crate) async fn steam_exchange(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let code = body
+        .get("code")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| error_response(StatusCode::BAD_REQUEST, "Missing code"))?;
+
+    // Remove atomically — prevents replay even under concurrent requests.
+    let record = state.steam_login_codes.write().await.remove(code);
+    let record = record.ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invalid or expired code"))?;
+
+    if now_secs() > record.expires_at {
+        return Err(error_response(StatusCode::GONE, "Code has expired"));
+    }
+
+    Ok(Json(json!({
+        "access_token":  record.access_token,
+        "refresh_token": record.refresh_token,
+        "user_id":       record.user_id,
+        "is_admin":      record.is_admin,
+        "totp_verified": record.totp_verified,
+    })))
 }
 
 /// GET /api/steam/status (auth required)

@@ -1825,6 +1825,26 @@ export async function apiNewTugOfWarGame(roomId: string) {
 
 // ─── Steam ────────────────────────────────────────────────────────────────────
 
+export async function apiSteamExchangeCode(code: string): Promise<{
+  access_token: string;
+  refresh_token: string;
+  user_id: string;
+  is_admin: boolean;
+  totp_verified: boolean;
+}> {
+  // Unauthenticated — user is not logged in yet when this is called.
+  const res = await fetch("/api/auth/steam/exchange", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || "Steam login failed");
+  }
+  return res.json();
+}
+
 export async function apiGetSteamLinkUrl(): Promise<{ url: string }> {
   const res = await authenticatedFetch("/api/steam/link-url");
   if (!res.ok) {

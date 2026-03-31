@@ -9,9 +9,41 @@ use axum::{
     response::Json,
 };
 use futures_util::TryStreamExt;
+use hmac::{Hmac, Mac};
 use mongodb::bson::doc;
+use rand::Rng;
 use serde_json::{json, Value};
+use sha2::Sha256;
 use std::sync::Arc;
+
+fn generate_webhook_secret() -> String {
+    let bytes: [u8; 32] = rand::thread_rng().gen();
+    hex::encode(bytes)
+}
+
+/// Verify a GitHub-style HMAC-SHA256 signature: `sha256=<hex>`.
+fn verify_webhook_signature(secret: &str, body: &[u8], signature_hex: &str) -> bool {
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(secret.as_bytes()) else {
+        return false;
+    };
+    mac.update(body);
+    let Ok(sig_bytes) = hex::decode(signature_hex) else {
+        return false;
+    };
+    mac.verify_slice(&sig_bytes).is_ok()
+}
+
+/// Constant-time byte slice comparison.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut eq = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        eq |= x ^ y;
+    }
+    std::hint::black_box(eq) == 0
+}
 
 pub(crate) async fn create_webhook(
     State(state): State<Arc<AppState>>,
@@ -48,6 +80,11 @@ pub(crate) async fn create_webhook(
     }
 
     let webhook_id = generate_id("whk");
+    let secret = if body.require_secret.unwrap_or(false) {
+        generate_webhook_secret()
+    } else {
+        String::new()
+    };
     let record = WebhookRecord {
         webhook_id: webhook_id.clone(),
         room_id: room_id.clone(),
@@ -55,16 +92,22 @@ pub(crate) async fn create_webhook(
         name,
         avatar_url: body.avatar_url.unwrap_or_default(),
         channel_id: body.channel_id.unwrap_or_default(),
+        secret: secret.clone(),
         created_at: now_millis(),
     };
 
     let coll = state.db.collection::<WebhookRecord>("webhooks");
     let _ = coll.insert_one(record).await;
 
-    Ok(Json(json!({
+    let mut resp = json!({
         "webhook_id": webhook_id,
         "url": format!("/api/webhooks/{}", webhook_id),
-    })))
+    });
+    if !secret.is_empty() {
+        // Secret is returned only on creation. Store it securely — it cannot be retrieved again.
+        resp["secret"] = json!(secret);
+    }
+    Ok(Json(resp))
 }
 
 pub(crate) async fn list_webhooks(
@@ -281,6 +324,29 @@ pub(crate) async fn execute_webhook(
         .ok()
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Webhook not found"))?;
+
+    // Verify payload authenticity when a secret is configured.
+    if !webhook.secret.is_empty() {
+        if let Some(sig_header) = headers.get("X-Hub-Signature-256") {
+            // GitHub-style: X-Hub-Signature-256: sha256=<hex>
+            let sig = sig_header.to_str().unwrap_or("").strip_prefix("sha256=").unwrap_or("");
+            if !verify_webhook_signature(&webhook.secret, body.as_bytes(), sig) {
+                return Err(error_response(StatusCode::UNAUTHORIZED, "Invalid signature"));
+            }
+        } else {
+            // Generic webhook: require X-Webhook-Secret header
+            let provided = headers
+                .get("X-Webhook-Secret")
+                .and_then(|h| h.to_str().ok())
+                .unwrap_or("");
+            if !constant_time_eq(provided.as_bytes(), webhook.secret.as_bytes()) {
+                return Err(error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Missing or invalid webhook secret",
+                ));
+            }
+        }
+    }
 
     let event_id = generate_id("$");
     let ts = now_millis();

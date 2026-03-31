@@ -122,7 +122,15 @@ pub(crate) async fn server_info(
 }
 
 /// GET /api/ice-servers — returns ICE server config (STUN + TURN) for client WebRTC
-pub(crate) async fn ice_servers() -> Json<Value> {
+pub(crate) async fn ice_servers(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
     let mut servers = vec![json!({ "urls": ["stun:stun.l.google.com:19302"] })];
 
     // TURN_PUBLIC_URL is the client-facing TURN address (e.g. turn:yourdomain.com:3478).
@@ -142,7 +150,7 @@ pub(crate) async fn ice_servers() -> Json<Value> {
         }));
     }
 
-    Json(json!({ "iceServers": servers }))
+    Ok(Json(json!({ "iceServers": servers })))
 }
 
 pub(crate) async fn register(
@@ -420,6 +428,36 @@ pub(crate) async fn login(
     }
 
     let user_id = format_user_id(username);
+
+    // Rate limit: max 10 attempts per 5-minute window per user_id
+    {
+        use super::super::helpers::now_secs;
+        use super::super::state::TotpAttemptRecord;
+        let now = now_secs();
+        let window = 300.0; // 5 minutes
+        let max_attempts = 10u32;
+        let key = format!("login:{}", user_id);
+
+        let mut attempts = state.totp_attempts.write().await;
+        let entry = attempts.entry(key).or_insert(TotpAttemptRecord {
+            count: 0,
+            window_start: now,
+        });
+
+        if now - entry.window_start > window {
+            entry.count = 0;
+            entry.window_start = now;
+        }
+
+        if entry.count >= max_attempts {
+            return Err(error_response(
+                StatusCode::TOO_MANY_REQUESTS,
+                "Too many login attempts. Try again in a few minutes.",
+            ));
+        }
+
+        entry.count += 1;
+    }
 
     let users = state.db.collection::<UserRecord>("users");
     let user = users

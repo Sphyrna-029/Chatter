@@ -69,6 +69,7 @@ pub async fn build_state() -> Arc<AppState> {
         spotify_client_id,
         spotify_client_secret,
         spotify_tokens: RwLock::new(HashMap::new()),
+        steam_login_codes: RwLock::new(HashMap::new()),
     })
 }
 

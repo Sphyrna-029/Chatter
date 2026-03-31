@@ -29,6 +29,7 @@ jsonwebtoken = "9"
 argon2 = "0.5"
 totp-rs = { version = "5", features = ["qr", "otpauth"] }
 sha2 = "0.10"
+hmac = "0.12"
 hex = "0.4"
 dotenvy = "0.15"
 mlua = { version = "0.10", features = ["lua54", "send", "serialize", "vendored"] }

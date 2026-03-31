@@ -506,6 +506,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hex",
+ "hmac",
  "jsonwebtoken",
  "mime_guess",
  "mlua",

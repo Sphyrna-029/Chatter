@@ -195,11 +195,17 @@ pub(crate) struct FriendActionRequest {
     pub(crate) user_id: String,
 }
 
+#[derive(Deserialize, Default)]
+pub(crate) struct CreateInviteRequest {
+    pub(crate) expires_in_days: Option<u64>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct CreateWebhookRequest {
     pub(crate) name: String,
     pub(crate) avatar_url: Option<String>,
     pub(crate) channel_id: Option<String>,
+    pub(crate) require_secret: Option<bool>,
 }
 
 #[derive(Deserialize)]
