@@ -432,7 +432,7 @@ export function ChatLayout() {
             )}
 
             {/* VoiceControls: always mounted (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
-            <div className={!state.currentRoomId || state.adminDashboardOpen || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
+            <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
               <VoiceControls
                 joinVoiceRef={joinVoiceRef}
                 leaveVoiceRef={leaveVoiceRef}
