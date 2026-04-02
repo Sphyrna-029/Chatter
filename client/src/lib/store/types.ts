@@ -172,7 +172,9 @@ export type Action =
   | { type: "SET_BABBLED_USERS"; payload: { roomId: string; userIds: string[] } }
   | { type: "ADD_BABBLED_USER"; payload: { roomId: string; userId: string } }
   | { type: "REMOVE_BABBLED_USER"; payload: { roomId: string; userId: string } }
-  | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } };
+  | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
+  | { type: "INCREMENT_ROOM_UNREAD"; payload: string }
+  | { type: "CLEAR_ROOM_UNREAD"; payload: string };
 
 export const initialState: AppState = {
   accessToken: null,

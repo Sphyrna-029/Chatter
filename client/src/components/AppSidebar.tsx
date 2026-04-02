@@ -89,6 +89,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const summary = roomSummaries[roomId];
     const isActive = roomId === state.currentRoomId;
     const hasMention = !!state.roomMentions[roomId] && !isActive;
+    const unreadCount = (!isActive && state.roomUnreadCounts[roomId]) || 0;
     const isForumRoom = info?.room_type === "forum";
     const isWhiteboardRoom = info?.room_type === "whiteboard";
     const isWatchPartyRoom = info?.room_type === "watchparty";
@@ -199,10 +200,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           animation: screenShareActive ? "pulse-border 2s ease-in-out infinite" : undefined,
         }}
       >
-        {/* Mention count badge */}
+        {/* Mention count badge (red, highest priority) */}
         {hasMention && (
           <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
             {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
+          </span>
+        )}
+        {/* Unread count badge (purple, shown when no mention badge) */}
+        {!hasMention && unreadCount > 0 && (
+          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-purple-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+            {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
 

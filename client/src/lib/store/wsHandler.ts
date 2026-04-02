@@ -107,6 +107,7 @@ export function createWsMessageHandler(
         const bodyText = msg.content?.body || "";
         const hasMention = (myUsername !== "" && bodyText.includes(`@${myUsername}`)) || hasRoleMention(bodyText, stateRef);
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
+        dispatch({ type: "INCREMENT_ROOM_UNREAD", payload: msg.room_id });
         if (isDm || hasMention) {
           if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
           dispatch({

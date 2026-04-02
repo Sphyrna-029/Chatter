@@ -113,6 +113,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const prevChannelIdRef = useRef<string | null>(state.currentChannelId);
   const currentChannelIdRef = useRef<string | null>(state.currentChannelId);
 
+  // Room-level unread banner state
+  const [roomUnreadBannerCount, setRoomUnreadBannerCount] = useState(0);
+  const roomUnreadBannerRef = useRef(0);
+  const prevRoomIdRef = useRef<string | null>(null);
+
   // Merge standard shortcodes + room emoji aliases (room overrides standard)
   const mergedShortcodes = useMemo(() => {
     const roomAliases = state.currentRoomId
@@ -277,6 +282,25 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     ) ?? null;
   }, []);
 
+  // Capture room-level unread count on room change and show banner
+  useEffect(() => {
+    if (state.currentRoomId !== prevRoomIdRef.current) {
+      prevRoomIdRef.current = state.currentRoomId;
+      if (state.currentRoomId) {
+        const count = state.roomUnreadCounts[state.currentRoomId] || 0;
+        roomUnreadBannerRef.current = count;
+        setRoomUnreadBannerCount(count);
+        if (count > 0) {
+          dispatch({ type: "CLEAR_ROOM_UNREAD", payload: state.currentRoomId });
+        }
+      } else {
+        roomUnreadBannerRef.current = 0;
+        setRoomUnreadBannerCount(0);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.currentRoomId]);
+
   // Detect channel change and capture unread count for "New" divider
   useEffect(() => {
     const channelId = state.currentChannelId;
@@ -321,6 +345,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         if (channelId) {
           dispatch({ type: "CLEAR_CHANNEL_UNREAD", payload: channelId });
         }
+      }
+      // Clear room unread banner when user scrolls to bottom
+      if (nearBottom && roomUnreadBannerRef.current > 0) {
+        roomUnreadBannerRef.current = 0;
+        setRoomUnreadBannerCount(0);
       }
     };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
@@ -1259,6 +1288,22 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Unread messages banner */}
+      {roomUnreadBannerCount > 0 && (
+        <div className="flex items-center justify-between px-4 py-2 bg-purple-600 text-white text-sm font-medium shrink-0">
+          <span>{roomUnreadBannerCount} unread message{roomUnreadBannerCount !== 1 ? "s" : ""} since your last visit</span>
+          <button
+            onClick={() => {
+              roomUnreadBannerRef.current = 0;
+              setRoomUnreadBannerCount(0);
+            }}
+            className="ml-4 rounded px-2 py-0.5 text-xs text-white/90 hover:text-white border border-white/30 hover:border-white/60 transition-colors cursor-pointer"
+          >
+            Read
+          </button>
         </div>
       )}
 

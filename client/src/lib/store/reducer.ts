@@ -581,6 +581,19 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         },
       };
+    case "INCREMENT_ROOM_UNREAD":
+      return {
+        ...state,
+        roomUnreadCounts: {
+          ...state.roomUnreadCounts,
+          [action.payload]: (state.roomUnreadCounts[action.payload] || 0) + 1,
+        },
+      };
+    case "CLEAR_ROOM_UNREAD":
+      return {
+        ...state,
+        roomUnreadCounts: { ...state.roomUnreadCounts, [action.payload]: 0 },
+      };
     case "UPDATE_DM_STREAK": {
       const existing = state.roomInfoMap[action.payload.roomId];
       if (!existing) return state;
