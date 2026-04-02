@@ -108,17 +108,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   }, [state]);
 
-  // Fetch public server settings and ICE config on mount
+  // Fetch public server settings on mount
   useEffect(() => {
     apiGetServerInfo().then((info) => {
       dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.upload_limit_bytes ?? 0, storageLimitBytes: info.storage_limit_bytes ?? 0 } });
     }).catch(() => {});
-    fetchIceServers();
   }, []);
 
   // Restore tokens from localStorage on mount
   useEffect(() => {
     restoreTokens();
+    // Fetch ICE servers now that the token is available
+    fetchIceServers();
     const token = getAccessToken();
 
     const loginWithToken = (accessToken: string) => {

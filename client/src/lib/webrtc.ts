@@ -8,7 +8,11 @@ let _cachedConfig: RTCConfiguration | null = null;
 
 export async function fetchIceServers(): Promise<void> {
   try {
-    const res = await fetch("/api/ice-servers");
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    const res = await fetch("/api/ice-servers", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (res.ok) {
       _cachedConfig = await res.json();
     }
