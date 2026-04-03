@@ -115,6 +115,12 @@ export function createWsMessageHandler(
             payload: { roomId: msg.room_id, hasMention: true },
           });
         }
+        if (hasMention) {
+          const msgChannelId = msg.channel_id || msg.content?.channel_id;
+          if (msgChannelId) {
+            dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
+          }
+        }
       }
     } else if (msg.type === "m.room.member") {
       // Re-fetch members and presence for the current room
