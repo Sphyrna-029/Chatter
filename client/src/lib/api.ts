@@ -1393,6 +1393,7 @@ export async function apiEditForumComment(roomId: string, postId: string, commen
 export interface WhiteboardStroke {
   stroke_id: string;
   room_id?: string;
+  channel_id?: string;
   user_id: string;
   tool: string;
   color: string;
@@ -1402,8 +1403,8 @@ export interface WhiteboardStroke {
   timestamp: number;
 }
 
-export async function apiGetWhiteboardStrokes(roomId: string) {
-  const res = await authenticatedFetch(`/api/whiteboard/${roomId}/strokes`);
+export async function apiGetWhiteboardStrokes(roomId: string, channelId: string) {
+  const res = await authenticatedFetch(`/api/whiteboard/${roomId}/${channelId}/strokes`);
   if (!res.ok) throw new Error("Failed to load whiteboard strokes");
   return res.json() as Promise<{ strokes: WhiteboardStroke[] }>;
 }

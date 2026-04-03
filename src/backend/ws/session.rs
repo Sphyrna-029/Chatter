@@ -818,6 +818,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_stroke" => {
             if !room_id.is_empty() {
+                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let tool = msg.get("tool").and_then(|v| v.as_str()).unwrap_or("pen").to_string();
                 let color = msg.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
                 let width = msg.get("width").and_then(|v| v.as_f64()).unwrap_or(2.0);
@@ -832,6 +833,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let stroke = WhiteboardStrokeRecord {
                     stroke_id: stroke_id.clone(),
                     room_id: room_id.to_string(),
+                    channel_id: channel_id.clone(),
                     user_id: user_id.to_string(),
                     tool: tool.clone(),
                     color: color.clone(),
@@ -849,6 +851,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     "room_id": room_id,
                     "stroke": {
                         "stroke_id": stroke_id,
+                        "channel_id": channel_id,
                         "user_id": user_id,
                         "tool": tool,
                         "color": color,
@@ -863,11 +866,13 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_cursor" => {
             if !room_id.is_empty() {
+                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let x = msg.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = msg.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let event = json!({
                     "type": "whiteboard_cursor",
                     "room_id": room_id,
+                    "channel_id": channel_id,
                     "user_id": user_id,
                     "x": x,
                     "y": y,
@@ -877,13 +882,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_clear" => {
             if !room_id.is_empty() {
+                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 // Only owner/moderator can clear
                 if is_moderator_or_owner(&state, room_id, user_id).await {
                     let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
-                    let _ = coll.delete_many(doc! { "room_id": room_id }).await;
+                    let _ = coll.delete_many(doc! { "room_id": room_id, "channel_id": &channel_id }).await;
                     let event = json!({
                         "type": "whiteboard_clear",
                         "room_id": room_id,
+                        "channel_id": channel_id,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
                 }
@@ -891,10 +898,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_undo" => {
             if !room_id.is_empty() {
+                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
-                // Find the user's most recent stroke in this room
+                // Find the user's most recent stroke in this channel
                 if let Ok(Some(stroke)) = coll
-                    .find_one(doc! { "room_id": room_id, "user_id": user_id })
+                    .find_one(doc! { "room_id": room_id, "channel_id": &channel_id, "user_id": user_id })
                     .sort(doc! { "timestamp": -1 })
                     .await
                 {
@@ -903,6 +911,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     let event = json!({
                         "type": "whiteboard_undo",
                         "room_id": room_id,
+                        "channel_id": channel_id,
                         "user_id": user_id,
                         "stroke_id": stroke_id,
                     });

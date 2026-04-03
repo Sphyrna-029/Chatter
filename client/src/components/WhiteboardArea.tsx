@@ -170,6 +170,7 @@ function renderAllStrokes(ctx: Ctx2D, strokes: WhiteboardStroke[]) {
 export function WhiteboardArea() {
   const { state, wsRef } = useAppContext();
   const roomId = state.currentRoomId;
+  const channelId = state.currentChannelId;
   const userId = state.userId;
 
   const [tool, setTool] = useState<Tool>("pen");
@@ -265,15 +266,15 @@ export function WhiteboardArea() {
   }, []);
 
   useEffect(() => {
-    if (!roomId) return;
+    if (!roomId || !channelId) return;
     let cancelled = false;
-    // Reset buffer for new room
+    // Reset buffer for new channel
     bufferRef.current = null;
     strokesRef.current = [];
     renderedCountRef.current = 0;
     setLoading(true);
 
-    apiGetWhiteboardStrokes(roomId).then((res) => {
+    apiGetWhiteboardStrokes(roomId, channelId).then((res) => {
       if (cancelled || !mountedRef.current) return;
       strokesRef.current = res.strokes;
       fullRebuild(res.strokes);
@@ -281,7 +282,7 @@ export function WhiteboardArea() {
       if (!cancelled && mountedRef.current) setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [roomId, fullRebuild]);
+  }, [roomId, channelId, fullRebuild]);
 
   // ─── WS event listeners ─────────────────────────────────────────────────────
 
@@ -291,6 +292,7 @@ export function WhiteboardArea() {
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId) return;
       const stroke = detail.stroke as WhiteboardStroke;
+      if (stroke.channel_id !== channelId) return;
       if (stroke.user_id === userId) return;
       strokesRef.current = [...strokesRef.current, stroke];
       drawIncremental(strokesRef.current);
@@ -299,7 +301,7 @@ export function WhiteboardArea() {
     const onCursor = (e: Event) => {
       if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
-      if (detail.room_id !== roomId || detail.user_id === userId) return;
+      if (detail.room_id !== roomId || detail.channel_id !== channelId || detail.user_id === userId) return;
       setCursors((prev) => {
         const next = new Map(prev);
         next.set(detail.user_id, {
@@ -315,7 +317,7 @@ export function WhiteboardArea() {
     const onClear = (e: Event) => {
       if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
-      if (detail.room_id !== roomId) return;
+      if (detail.room_id !== roomId || detail.channel_id !== channelId) return;
       strokesRef.current = [];
       fullRebuild([]);
     };
@@ -323,7 +325,7 @@ export function WhiteboardArea() {
     const onUndo = (e: Event) => {
       if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
-      if (detail.room_id !== roomId) return;
+      if (detail.room_id !== roomId || detail.channel_id !== channelId) return;
       if (detail.user_id === userId) return;
       strokesRef.current = strokesRef.current.filter((s) => s.stroke_id !== detail.stroke_id);
       fullRebuild(strokesRef.current);
@@ -339,7 +341,7 @@ export function WhiteboardArea() {
       window.removeEventListener("whiteboard_clear", onClear);
       window.removeEventListener("whiteboard_undo", onUndo);
     };
-  }, [roomId, userId, drawIncremental, fullRebuild]);
+  }, [roomId, channelId, userId, drawIncremental, fullRebuild]);
 
   // Fade out old cursors
   useEffect(() => {
@@ -394,6 +396,7 @@ export function WhiteboardArea() {
       sendWs({
         type: "whiteboard_stroke",
         room_id: roomId,
+        channel_id: channelId,
         tool: "fill",
         color,
         width: 0,
@@ -420,7 +423,7 @@ export function WhiteboardArea() {
     const now = Date.now();
     if (now - lastCursorSend.current > CURSOR_THROTTLE_MS) {
       lastCursorSend.current = now;
-      sendWs({ type: "whiteboard_cursor", room_id: roomId, x, y });
+      sendWs({ type: "whiteboard_cursor", room_id: roomId, channel_id: channelId, x, y });
     }
 
     if (!isDrawing.current) return;
@@ -459,6 +462,7 @@ export function WhiteboardArea() {
     sendWs({
       type: "whiteboard_stroke",
       room_id: roomId,
+      channel_id: channelId,
       tool, color, width, points,
       fill: false,
     });
@@ -500,12 +504,12 @@ export function WhiteboardArea() {
       ...strokesRef.current.slice(actualIdx + 1),
     ];
     fullRebuild(strokesRef.current);
-    sendWs({ type: "whiteboard_undo", room_id: roomId });
+    sendWs({ type: "whiteboard_undo", room_id: roomId, channel_id: channelId });
   }, [roomId, userId, sendWs, fullRebuild]);
 
   const handleClear = useCallback(() => {
     if (!roomId) return;
-    sendWs({ type: "whiteboard_clear", room_id: roomId });
+    sendWs({ type: "whiteboard_clear", room_id: roomId, channel_id: channelId });
     strokesRef.current = [];
     fullRebuild([]);
   }, [roomId, sendWs, fullRebuild]);

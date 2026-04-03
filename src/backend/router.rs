@@ -175,7 +175,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Watch Party
            .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
            // Whiteboard
-           .route("/api/whiteboard/{room_id}/strokes", get(get_strokes))
+           .route("/api/whiteboard/{room_id}/{channel_id}/strokes", get(get_strokes))
            // Forum
            .route("/api/forum/{room_id}/posts", post(create_post).get(list_posts))
            .route("/api/forum/{room_id}/posts/search", get(search_posts))

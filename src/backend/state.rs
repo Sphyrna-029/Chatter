@@ -289,6 +289,8 @@ pub(crate) struct WhiteboardStrokeRecord {
     #[serde(rename = "_id")]
     pub(crate) stroke_id: String,
     pub(crate) room_id: String,
+    #[serde(default)]
+    pub(crate) channel_id: String,
     pub(crate) user_id: String,
     pub(crate) tool: String,
     pub(crate) color: String,
