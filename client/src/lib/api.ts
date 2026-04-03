@@ -1404,7 +1404,7 @@ export interface WhiteboardStroke {
 }
 
 export async function apiGetWhiteboardStrokes(roomId: string, channelId: string) {
-  const res = await authenticatedFetch(`/api/whiteboard/${roomId}/${channelId}/strokes`);
+  const res = await authenticatedFetch(`/api/whiteboard/${encodeURIComponent(roomId)}/${encodeURIComponent(channelId)}/strokes`);
   if (!res.ok) throw new Error("Failed to load whiteboard strokes");
   return res.json() as Promise<{ strokes: WhiteboardStroke[] }>;
 }
