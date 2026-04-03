@@ -64,6 +64,7 @@ pub(crate) async fn list_channels(
             "read_only": ch.read_only,
             "view_roles": ch.view_roles,
             "write_roles": ch.write_roles,
+            "showcase_write_roles": ch.showcase_write_roles,
             "system_channel": ch.system_channel,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
@@ -124,7 +125,7 @@ pub(crate) async fn create_channel(
     if name.is_empty() {
         return Err(error_response(StatusCode::BAD_REQUEST, "Channel name cannot be empty"));
     }
-    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard"];
+    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard", "showcase"];
     if !valid_channel_types.contains(&req.channel_type.as_str()) {
         return Err(error_response(StatusCode::BAD_REQUEST, "Invalid channel type"));
     }
@@ -148,6 +149,7 @@ pub(crate) async fn create_channel(
         read_only: false,
         view_roles: vec![],
         write_roles: vec![],
+        showcase_write_roles: vec![],
         system_channel: false,
         created_by: user_id.clone(),
         created_at: now_millis(),
@@ -170,6 +172,7 @@ pub(crate) async fn create_channel(
             "read_only": channel.read_only,
             "view_roles": channel.view_roles,
             "write_roles": channel.write_roles,
+            "showcase_write_roles": channel.showcase_write_roles,
             "system_channel": channel.system_channel,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
@@ -241,6 +244,11 @@ pub(crate) async fn update_channel(
         let bson_arr: Vec<mongodb::bson::Bson> = write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
         set_doc.insert("write_roles", bson_arr);
         content.insert("write_roles".to_string(), json!(write_roles));
+    }
+    if let Some(ref showcase_write_roles) = req.showcase_write_roles {
+        let bson_arr: Vec<mongodb::bson::Bson> = showcase_write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        set_doc.insert("showcase_write_roles", bson_arr);
+        content.insert("showcase_write_roles".to_string(), json!(showcase_write_roles));
     }
     if let Some(system_channel) = req.system_channel {
         // If enabling, clear any other system channel in this room first
@@ -361,6 +369,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             read_only: false,
             view_roles: vec![],
             write_roles: vec![],
+            showcase_write_roles: vec![],
             system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
@@ -381,6 +390,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             read_only: false,
             view_roles: vec![],
             write_roles: vec![],
+            showcase_write_roles: vec![],
             system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),

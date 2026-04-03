@@ -6,6 +6,7 @@ import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
+import { ShowcaseArea } from "./ShowcaseArea";
 import { TankWarArea } from "./TankWarArea";
 import { TugOfWarArea } from "./TugOfWarArea";
 import { WatchPartyArea } from "./WatchPartyArea";
@@ -184,6 +185,7 @@ export function ChatLayout() {
   const isWatchPartyRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "watchparty"
     : false) || currentChannelType === "theater";
+  const isShowcaseChannel = currentChannelType === "showcase";
   const isTugOfWarRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "tugofwar"
     : false;
@@ -436,7 +438,7 @@ export function ChatLayout() {
             )}
 
             {/* VoiceControls: always mounted (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
-            <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom ? "sr-only" : "contents"}>
+            <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "contents"}>
               <VoiceControls
                 joinVoiceRef={joinVoiceRef}
                 leaveVoiceRef={leaveVoiceRef}
@@ -486,6 +488,8 @@ export function ChatLayout() {
                 <TugOfWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
               ) : isWatchPartyRoom ? (
                 <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
+              ) : isShowcaseChannel ? (
+                <ShowcaseArea />
               ) : isWhiteboardRoom ? (
                 <WhiteboardArea />
               ) : isForumRoom ? (

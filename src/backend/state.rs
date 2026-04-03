@@ -466,6 +466,8 @@ pub(crate) struct ChannelRecord {
     #[serde(default)]
     pub(crate) write_roles: Vec<String>,  // role_ids that can send messages (empty = normal rules)
     #[serde(default)]
+    pub(crate) showcase_write_roles: Vec<String>, // role_ids that can post in the featured (left) pane of showcase channels
+    #[serde(default)]
     pub(crate) system_channel: bool,      // if true, join/leave/kick/ban messages go here
     pub(crate) created_by: String,
     pub(crate) created_at: i64,

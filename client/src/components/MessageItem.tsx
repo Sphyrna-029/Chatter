@@ -565,9 +565,10 @@ interface MessageItemProps {
   inThread?: boolean;
   triggerEdit?: boolean;
   onEditDone?: () => void;
+  disableReactions?: boolean;
 }
 
-export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone }: MessageItemProps) {
+export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions }: MessageItemProps) {
   const { state, dispatch, deleteMessage, editMessage, addReaction, openThread } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
@@ -943,7 +944,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           {!isDeleted && <MediaPreview body={message.content.body} hiddenBySpoiler={showSpoilerMask} onReveal={() => setSpoilerRevealed(true)} />}
 
           {/* Reactions */}
-          {Object.keys(reactions).length > 0 && (
+          {!disableReactions && Object.keys(reactions).length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
               {Object.entries(reactions).map(
                 ([emoji, userIds]) =>
@@ -1053,7 +1054,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 <span className="text-xs">⋮</span>
               </Button>
             )}
-            <Popover>
+            {!disableReactions && <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-6 w-6">
                   <span className="text-xs">😊</span>
@@ -1078,7 +1079,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                   }
                 />
               </PopoverContent>
-            </Popover>
+            </Popover>}
 
             {isOwn && (
               <Button

@@ -74,6 +74,7 @@ pub(crate) struct SendMessageRequest {
     pub(crate) in_reply_to: Option<String>,
     pub(crate) spoiler: Option<bool>,
     pub(crate) channel_id: Option<String>,
+    pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
 }
 
 #[derive(Deserialize)]
@@ -88,6 +89,7 @@ pub(crate) struct MessagesQuery {
     pub(crate) before: Option<usize>,
     pub(crate) around_ts: Option<i64>,
     pub(crate) channel_id: Option<String>,
+    pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
 }
 
 #[derive(Deserialize)]
@@ -263,6 +265,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) read_only: Option<bool>,
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
+    pub(crate) showcase_write_roles: Option<Vec<String>>,
     pub(crate) system_channel: Option<bool>,
 }
 

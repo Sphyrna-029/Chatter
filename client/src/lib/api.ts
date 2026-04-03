@@ -399,11 +399,12 @@ export async function apiGetAllRooms() {
 
 // ─── Messages ───────────────────────────────────────────────────────────────
 
-export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number, channelId?: string) {
+export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number, channelId?: string, showcasePane?: string) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
   if (before !== undefined) url += `&before=${before}`;
   if (aroundTs !== undefined) url += `&around_ts=${aroundTs}`;
   if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
+  if (showcasePane) url += `&showcase_pane=${encodeURIComponent(showcasePane)}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json() as Promise<{
@@ -414,7 +415,7 @@ export async function apiGetMessages(roomId: string, limit = 50, before?: number
   }>;
 }
 
-export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string, spoiler?: boolean, channelId?: string) {
+export async function apiSendMessage(roomId: string, body: string, inReplyTo?: string, spoiler?: boolean, channelId?: string, showcasePane?: string) {
   const txnId = Date.now();
   const payload: Record<string, string | boolean> = { msgtype: "m.text", body };
   if (inReplyTo) {
@@ -425,6 +426,9 @@ export async function apiSendMessage(roomId: string, body: string, inReplyTo?: s
   }
   if (channelId) {
     payload.channel_id = channelId;
+  }
+  if (showcasePane) {
+    payload.showcase_pane = showcasePane;
   }
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/send/m.room.message/${txnId}`,
@@ -577,6 +581,7 @@ export interface MatrixMessage {
     webhook?: boolean;
     webhook_name?: string;
     webhook_avatar_url?: string;
+    showcase_pane?: string;
   };
   redacted?: boolean;
   edited?: boolean;
@@ -626,13 +631,14 @@ export interface Channel {
   channel_id: string;
   room_id?: string;
   name: string;
-  channel_type: "text" | "voice" | "theater" | "forum" | "whiteboard";
+  channel_type: "text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase";
   topic: string;
   position: number;
   category_id?: string;
   read_only?: boolean;
   view_roles?: string[];
   write_roles?: string[];
+  showcase_write_roles?: string[];
   system_channel?: boolean;
   created_by?: string;
   created_at?: number;
@@ -738,7 +744,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; system_channel?: boolean }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; system_channel?: boolean }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

@@ -4,7 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
-  Film, LayoutList, PenTool,
+  Film, LayoutList, PenTool, Sparkles,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -83,9 +83,11 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [editReadOnly, setEditReadOnly] = useState(false);
   const [editViewRoles, setEditViewRoles] = useState<string[]>([]);
   const [editWriteRoles, setEditWriteRoles] = useState<string[]>([]);
+  const [editShowcaseWriteRoles, setEditShowcaseWriteRoles] = useState<string[]>([]);
+  const [editChannelType, setEditChannelType] = useState<string>("");
   const [editSystemChannel, setEditSystemChannel] = useState(false);
   const [name, setName] = useState("");
-  const [channelType, setChannelType] = useState<"text" | "voice" | "theater" | "forum" | "whiteboard">("text");
+  const [channelType, setChannelType] = useState<"text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase">("text");
   const [topic, setTopic] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("");
 
@@ -205,9 +207,10 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         read_only: editReadOnly,
         view_roles: editViewRoles,
         write_roles: editWriteRoles,
+        showcase_write_roles: editChannelType === "showcase" ? editShowcaseWriteRoles : undefined,
         system_channel: editSystemChannel,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, system_channel: editSystemChannel } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -234,6 +237,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     setEditReadOnly(ch.read_only ?? false);
     setEditViewRoles(ch.view_roles ?? []);
     setEditWriteRoles(ch.write_roles ?? []);
+    setEditShowcaseWriteRoles(ch.showcase_write_roles ?? []);
+    setEditChannelType(ch.channel_type);
     setEditSystemChannel(ch.system_channel ?? false);
     setEditOpen(true);
   };
@@ -440,7 +445,9 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     ? <LayoutList className="h-4 w-4 shrink-0 text-muted-foreground" />
                     : ch.channel_type === "whiteboard"
                       ? <PenTool className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      : ch.channel_type === "showcase"
+                        ? <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
             }
             showGrip={canManage}
             badge={occupiedSince ? <VoiceTimer since={occupiedSince} /> : undefined}
@@ -891,6 +898,13 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                 >
                   <PenTool className="h-3.5 w-3.5 mr-1" /> Whiteboard
                 </Button>
+                <Button
+                  variant={channelType === "showcase" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setChannelType("showcase")}
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1" /> Showcase
+                </Button>
               </div>
             </div>
             <div>
@@ -1016,6 +1030,28 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     ))}
                   </div>
                 </div>
+                {editChannelType === "showcase" && (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Approved roles for featured pane</Label>
+                    <p className="text-[10px] text-muted-foreground/70 mb-1">Roles that can post in the left (featured) pane. If none selected, only owners/moderators can post.</p>
+                    <div className="space-y-1 max-h-28 overflow-y-auto">
+                      {state.customRoles.map((r) => (
+                        <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={editShowcaseWriteRoles.includes(r.role_id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setEditShowcaseWriteRoles((prev) => [...prev, r.role_id]);
+                              else setEditShowcaseWriteRoles((prev) => prev.filter((id) => id !== r.role_id));
+                            }}
+                            className="rounded border-input"
+                          />
+                          <span className="text-sm" style={{ color: r.color || undefined }}>{r.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

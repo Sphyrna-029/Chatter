@@ -121,6 +121,25 @@ pub(crate) async fn send_message(
                     ));
                 }
             }
+
+            // For showcase channels, enforce featured pane write restrictions
+            if ch.channel_type == "showcase" {
+                if req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
+                    if ch.showcase_write_roles.is_empty() {
+                        return Err(error_response(
+                            StatusCode::FORBIDDEN,
+                            "Only owners and moderators can post in the featured pane",
+                        ));
+                    }
+                    let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                    if !ch.showcase_write_roles.iter().any(|r| user_roles.contains(r)) {
+                        return Err(error_response(
+                            StatusCode::FORBIDDEN,
+                            "You do not have permission to post in the featured pane",
+                        ));
+                    }
+                }
+            }
         }
     }
 
@@ -134,6 +153,10 @@ pub(crate) async fn send_message(
 
     if req.spoiler == Some(true) {
         content["spoiler"] = json!(true);
+    }
+
+    if let Some(ref pane) = req.showcase_pane {
+        content["showcase_pane"] = json!(pane);
     }
 
     // If replying to a message, look up parent and embed reply metadata
@@ -327,11 +350,16 @@ pub(crate) async fn get_room_messages(
 
     // Exclude thread messages (those with a thread_id field) from room message feed
     // If channel_id is provided, filter by it; otherwise show messages without channel_id (backward compat)
+    // For showcase channels, also filter by showcase_pane if provided
     let base_filter = if let Some(ref cid) = query.channel_id {
-        doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
-            { "channel_id": cid },
-            { "channel_id": { "$exists": false } }
-        ] }
+        if let Some(ref pane) = query.showcase_pane {
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "channel_id": cid, "content.showcase_pane": pane }
+        } else {
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
+                { "channel_id": cid },
+                { "channel_id": { "$exists": false } }
+            ] }
+        }
     } else {
         doc! { "room_id": &room_id, "thread_id": { "$exists": false } }
     };
@@ -345,10 +373,14 @@ pub(crate) async fn get_room_messages(
     let (start, end, has_more) = if let Some(around_ts) = query.around_ts {
         // Count messages with timestamp <= around_ts to find the position
         let around_filter = if let Some(ref cid) = query.channel_id {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
-                { "channel_id": cid },
-                { "channel_id": { "$exists": false } }
-            ] }
+            if let Some(ref pane) = query.showcase_pane {
+                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid, "content.showcase_pane": pane }
+            } else {
+                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
+                    { "channel_id": cid },
+                    { "channel_id": { "$exists": false } }
+                ] }
+            }
         } else {
             doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } }
         };
