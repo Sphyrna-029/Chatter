@@ -648,6 +648,8 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     : state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
+  const myUsername = state.userId ? displayUserId(state.userId) : null;
+  const isMentioned = !isDeleted && myUsername != null && message.content.body.includes(`@${myUsername}`);
   const isSpoilerMsg = message.content.spoiler === true && !isDeleted;
   const showSpoilerMask = isSpoilerMsg && !spoilerRevealed;
   // Only show the text spoiler pill if the body has visible text beyond embedded media URLs.
@@ -762,7 +764,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md hover:bg-accent/50 transition-colors", grouped ? "py-1 -mt-0.5" : isMobile ? "pt-2 pb-1" : "pt-4 pb-2")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md transition-colors", isMentioned ? "bg-amber-400/10 hover:bg-amber-400/15" : "hover:bg-accent/50", grouped ? "py-1 -mt-0.5" : isMobile ? "pt-2 pb-1" : "pt-4 pb-2")} data-event-id={message.event_id}>
       <div className={cn("flex items-start", isMobile ? "gap-2" : "gap-3")}>
         {grouped ? (
           <span className={cn("flex-shrink-0", isMobile ? "w-7" : "w-10")} />
