@@ -254,7 +254,7 @@ function ShowcaseChatPane({
   const fileInputId = `showcase-file-${pane}`;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Pane header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0">
         {pane === "featured" && <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
@@ -420,6 +420,34 @@ function ShowcaseChatPane({
 
 export function ShowcaseArea() {
   const { state } = useAppContext();
+  const [splitPct, setSplitPct] = useState(50);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const dragging = useRef(false);
+
+  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      if (!dragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(80, Math.max(20, pct)));
+    };
+
+    const onMouseUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, []);
 
   const currentChannel = state.currentChannelId
     ? state.channels.find((c) => c.channel_id === state.currentChannelId)
@@ -454,30 +482,38 @@ export function ShowcaseArea() {
   const channelName = currentChannel?.name || "showcase";
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      <ShowcaseChatPane
-        title="Featured"
-        subtitle="Only approved users can post here"
-        pane="featured"
-        messages={featuredMessages}
-        canPost={canPostFeatured}
-        showReactions={true}
-        roomId={state.currentRoomId}
-        channelId={state.currentChannelId}
-        uploadLimitBytes={state.uploadLimitBytes}
+    <div ref={containerRef} className="flex flex-1 min-h-0 overflow-hidden">
+      <div style={{ width: `${splitPct}%` }} className="flex flex-col min-h-0 overflow-hidden">
+        <ShowcaseChatPane
+          title="Featured"
+          subtitle="Only approved users can post here"
+          pane="featured"
+          messages={featuredMessages}
+          canPost={canPostFeatured}
+          showReactions={true}
+          roomId={state.currentRoomId}
+          channelId={state.currentChannelId}
+          uploadLimitBytes={state.uploadLimitBytes}
+        />
+      </div>
+      {/* Draggable divider */}
+      <div
+        className="w-1 shrink-0 cursor-col-resize bg-border hover:bg-primary/50 active:bg-primary/70 transition-colors"
+        onMouseDown={onDividerMouseDown}
       />
-      <div className="w-px bg-border shrink-0" />
-      <ShowcaseChatPane
-        title="Community"
-        subtitle={`Everyone in #${channelName} can post here`}
-        pane="community"
-        messages={communityMessages}
-        canPost={true}
-        showReactions={false}
-        roomId={state.currentRoomId}
-        channelId={state.currentChannelId}
-        uploadLimitBytes={state.uploadLimitBytes}
-      />
+      <div style={{ width: `${100 - splitPct}%` }} className="flex flex-col min-h-0 overflow-hidden">
+        <ShowcaseChatPane
+          title="Community"
+          subtitle={`Everyone in #${channelName} can post here`}
+          pane="community"
+          messages={communityMessages}
+          canPost={true}
+          showReactions={false}
+          roomId={state.currentRoomId}
+          channelId={state.currentChannelId}
+          uploadLimitBytes={state.uploadLimitBytes}
+        />
+      </div>
     </div>
   );
 }
