@@ -443,7 +443,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   ref={iframeRef}
                   key={ytId}
                   className="w-full h-full"
-                  src={`https://www.youtube.com/embed/${ytId}?enablejsapi=1&controls=0&disablekb=1&rel=0&autoplay=0&origin=${encodeURIComponent(window.location.origin)}`}
+                  src={`https://www.youtube-nocookie.com/embed/${ytId}?enablejsapi=1&controls=0&disablekb=1&rel=0&autoplay=0&origin=${encodeURIComponent(window.location.origin)}`}
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                   allowFullScreen
                   onLoad={() => {
