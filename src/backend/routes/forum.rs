@@ -4,7 +4,7 @@ use super::super::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         is_moderator_or_owner, now_millis,
     },
-    state::{AppState, ForumCommentRecord, ForumPostRecord, ReactionRecord, RoomRecord},
+    state::{AppState, ChannelRecord, ForumCommentRecord, ForumPostRecord, ReactionRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, Query, State},
@@ -35,11 +35,21 @@ async fn validate_forum_member(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
+    // Accept rooms with room_type "forum" OR rooms that have a forum-type channel
     if room.room_type != "forum" {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "Room is not a forum",
-        ));
+        let channels_coll = state.db.collection::<ChannelRecord>("channels");
+        let has_forum_channel = channels_coll
+            .find_one(doc! { "room_id": room_id, "channel_type": "forum" })
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !has_forum_channel {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Room is not a forum",
+            ));
+        }
     }
 
     {
