@@ -168,18 +168,22 @@ export function ChatLayout() {
     ? state.roomInfoMap[state.currentRoomId]?.is_direct === true
     : false;
   const hasChannels = !isDmRoom && state.channels.length > 0;
-  const isForumRoom = state.currentRoomId
+  const currentChannel = state.currentChannelId
+    ? state.channels.find((c) => c.channel_id === state.currentChannelId)
+    : null;
+  const currentChannelType = currentChannel?.channel_type;
+  const isForumRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "forum"
-    : false;
-  const isWhiteboardRoom = state.currentRoomId
+    : false) || currentChannelType === "forum";
+  const isWhiteboardRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "whiteboard"
-    : false;
+    : false) || currentChannelType === "whiteboard";
   const isTankWarRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "tankwar"
     : false;
-  const isWatchPartyRoom = state.currentRoomId
+  const isWatchPartyRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "watchparty"
-    : false;
+    : false) || currentChannelType === "theater";
   const isTugOfWarRoom = state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "tugofwar"
     : false;
@@ -453,7 +457,7 @@ export function ChatLayout() {
               <ActivityPage />
             ) : (
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {hasChannels && !isForumRoom && !isWhiteboardRoom && !isTankWarRoom && !isTugOfWarRoom && !isWatchPartyRoom && (
+              {hasChannels && !isTankWarRoom && !isTugOfWarRoom && (
                 <ChannelList
                   onJoinVoiceChannel={(channelId) => {
                     const ch = state.channels.find((c) => c.channel_id === channelId);

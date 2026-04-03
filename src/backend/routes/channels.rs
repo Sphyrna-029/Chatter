@@ -124,8 +124,9 @@ pub(crate) async fn create_channel(
     if name.is_empty() {
         return Err(error_response(StatusCode::BAD_REQUEST, "Channel name cannot be empty"));
     }
-    if req.channel_type != "text" && req.channel_type != "voice" {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Channel type must be 'text' or 'voice'"));
+    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard"];
+    if !valid_channel_types.contains(&req.channel_type.as_str()) {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Invalid channel type"));
     }
 
     // Get next position

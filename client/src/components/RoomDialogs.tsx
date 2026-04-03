@@ -14,9 +14,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, MessageSquare, LayoutList, PenTool, Crosshair, Film, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 
@@ -36,7 +35,6 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
   const [unlisted, setUnlisted] = useState(false);
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [roomType, setRoomType] = useState<"text" | "forum" | "whiteboard" | "tankwar" | "watchparty" | "tugofwar">("text");
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,7 +48,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      await createRoom(trimmedName, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined, roomType !== "text" ? roomType : undefined);
+      await createRoom(trimmedName, topic, tags.length > 0 ? tags : undefined, iconUrl, unlisted || undefined, password || undefined);
       setName("");
       setTopic("");
       setTags([]);
@@ -59,7 +57,6 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
       setIconPreview(null);
       setUnlisted(false);
       setPassword("");
-      setRoomType("text");
       onOpenChange(false);
     } catch {
       alert("Failed to create room");
@@ -131,58 +128,6 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               />
               <p className="text-xs text-muted-foreground">{name.length}/22</p>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Room Type</Label>
-            <ToggleGroup
-              type="single"
-              value={roomType}
-              onValueChange={(val) => { if (val) setRoomType(val as "text" | "forum" | "whiteboard" | "tankwar" | "watchparty" | "tugofwar"); }}
-              className="w-full rounded-md border border-border p-0.5 bg-muted !grid grid-cols-3"
-            >
-              <ToggleGroupItem
-                value="text"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                Text Chat
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="forum"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                <LayoutList className="w-3.5 h-3.5" />
-                Forum
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="whiteboard"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                <PenTool className="w-3.5 h-3.5" />
-                Whiteboard
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="tankwar"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                <Crosshair className="w-3.5 h-3.5" />
-                Tank Wars
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="watchparty"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                <Film className="w-3.5 h-3.5" />
-                Watch Party
-              </ToggleGroupItem>
-              <ToggleGroupItem
-                value="tugofwar"
-                className="w-full text-xs h-8 gap-1.5 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-              >
-                🪢
-                Tug of War
-              </ToggleGroupItem>
-            </ToggleGroup>
           </div>
           <div className="space-y-2">
             <Label htmlFor="room-topic">Topic (Optional)</Label>

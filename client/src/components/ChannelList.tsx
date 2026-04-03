@@ -4,6 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
+  Film, LayoutList, PenTool,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -84,7 +85,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [editWriteRoles, setEditWriteRoles] = useState<string[]>([]);
   const [editSystemChannel, setEditSystemChannel] = useState(false);
   const [name, setName] = useState("");
-  const [channelType, setChannelType] = useState<"text" | "voice">("text");
+  const [channelType, setChannelType] = useState<"text" | "voice" | "theater" | "forum" | "whiteboard">("text");
   const [topic, setTopic] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("");
 
@@ -431,9 +432,15 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             onDelete={() => handleDelete(ch.channel_id)}
             icon={(ch.view_roles?.length ?? 0) > 0
               ? <Lock className="h-4 w-4 shrink-0 text-yellow-500" />
-              : isVoice
+              : ch.channel_type === "voice"
                 ? <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
-                : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
+                : ch.channel_type === "theater"
+                  ? <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  : ch.channel_type === "forum"
+                    ? <LayoutList className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    : ch.channel_type === "whiteboard"
+                      ? <PenTool className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
             }
             showGrip={canManage}
             badge={occupiedSince ? <VoiceTimer since={occupiedSince} /> : undefined}
@@ -848,7 +855,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
           <div className="space-y-3">
             <div>
               <Label>Type</Label>
-              <div className="flex gap-2 mt-1">
+              <div className="grid grid-cols-3 gap-2 mt-1">
                 <Button
                   variant={channelType === "text" ? "default" : "outline"}
                   size="sm"
@@ -862,6 +869,27 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                   onClick={() => setChannelType("voice")}
                 >
                   <Volume2 className="h-3.5 w-3.5 mr-1" /> Voice
+                </Button>
+                <Button
+                  variant={channelType === "theater" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setChannelType("theater")}
+                >
+                  <Film className="h-3.5 w-3.5 mr-1" /> Theater
+                </Button>
+                <Button
+                  variant={channelType === "forum" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setChannelType("forum")}
+                >
+                  <LayoutList className="h-3.5 w-3.5 mr-1" /> Forum
+                </Button>
+                <Button
+                  variant={channelType === "whiteboard" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setChannelType("whiteboard")}
+                >
+                  <PenTool className="h-3.5 w-3.5 mr-1" /> Whiteboard
                 </Button>
               </div>
             </div>
