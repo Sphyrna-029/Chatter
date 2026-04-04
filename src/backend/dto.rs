@@ -266,6 +266,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
     pub(crate) showcase_write_roles: Option<Vec<String>>,
+    pub(crate) showcase_posters: Option<Vec<String>>,
     pub(crate) system_channel: Option<bool>,
 }
 

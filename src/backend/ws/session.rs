@@ -1132,6 +1132,25 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "duration_secs": 0.0,
                     });
                     broadcast_to_room(&state, room_id, &event).await;
+
+                    let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
+                    let body = format!("{} changed the video", display);
+                    let sys_event = json!({
+                        "type": "m.room.message",
+                        "room_id": room_id,
+                        "sender": user_id,
+                        "content": {
+                            "msgtype": "m.watchparty",
+                            "body": body
+                        },
+                        "event_id": generate_id("$"),
+                        "origin_server_ts": now_millis()
+                    });
+                    let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
+                    if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+                        let _ = msg_col.insert_one(doc).await;
+                    }
+                    broadcast_to_room(&state, room_id, &sys_event).await;
                 }
             }
         }
@@ -1208,7 +1227,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             "room_id": room_id,
                             "sender": user_id,
                             "content": {
-                                "msgtype": "m.system",
+                                "msgtype": "m.watchparty",
                                 "body": body
                             },
                             "event_id": generate_id("$"),

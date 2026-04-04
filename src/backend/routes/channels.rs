@@ -65,6 +65,7 @@ pub(crate) async fn list_channels(
             "view_roles": ch.view_roles,
             "write_roles": ch.write_roles,
             "showcase_write_roles": ch.showcase_write_roles,
+            "showcase_posters": ch.showcase_posters,
             "system_channel": ch.system_channel,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
@@ -150,6 +151,7 @@ pub(crate) async fn create_channel(
         view_roles: vec![],
         write_roles: vec![],
         showcase_write_roles: vec![],
+        showcase_posters: vec![],
         system_channel: false,
         created_by: user_id.clone(),
         created_at: now_millis(),
@@ -173,6 +175,7 @@ pub(crate) async fn create_channel(
             "view_roles": channel.view_roles,
             "write_roles": channel.write_roles,
             "showcase_write_roles": channel.showcase_write_roles,
+            "showcase_posters": channel.showcase_posters,
             "system_channel": channel.system_channel,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
@@ -249,6 +252,11 @@ pub(crate) async fn update_channel(
         let bson_arr: Vec<mongodb::bson::Bson> = showcase_write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
         set_doc.insert("showcase_write_roles", bson_arr);
         content.insert("showcase_write_roles".to_string(), json!(showcase_write_roles));
+    }
+    if let Some(ref showcase_posters) = req.showcase_posters {
+        let bson_arr: Vec<mongodb::bson::Bson> = showcase_posters.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        set_doc.insert("showcase_posters", bson_arr);
+        content.insert("showcase_posters".to_string(), json!(showcase_posters));
     }
     if let Some(system_channel) = req.system_channel {
         // If enabling, clear any other system channel in this room first
@@ -370,6 +378,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],
+            showcase_posters: vec![],
             system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),
@@ -391,6 +400,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],
+            showcase_posters: vec![],
             system_channel: false,
             created_by: creator.to_string(),
             created_at: now_millis(),

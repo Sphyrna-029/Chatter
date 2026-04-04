@@ -1,7 +1,7 @@
 use axum::extract::ws::Message;
 use mongodb::Database;
 use serde::{Deserialize, Serialize};
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     task::JoinHandle,
@@ -47,8 +47,6 @@ pub struct AppState {
     pub(crate) banned_users: RwLock<HashMap<String, Vec<String>>>,
 
     // Ephemeral in-memory state (not persisted)
-    // Babble mode: room_id -> set of babbled user_ids (resets on server restart)
-    pub(crate) babbled_users: RwLock<HashMap<String, HashSet<String>>>,
     pub(crate) active_websockets: RwLock<HashMap<String, WsSender>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied
@@ -469,6 +467,8 @@ pub(crate) struct ChannelRecord {
     pub(crate) write_roles: Vec<String>,  // role_ids that can send messages (empty = normal rules)
     #[serde(default)]
     pub(crate) showcase_write_roles: Vec<String>, // role_ids that can post in the featured (left) pane of showcase channels
+    #[serde(default)]
+    pub(crate) showcase_posters: Vec<String>,     // user_ids explicitly approved to post in the featured pane
     #[serde(default)]
     pub(crate) system_channel: bool,      // if true, join/leave/kick/ban messages go here
     pub(crate) created_by: String,

@@ -372,13 +372,6 @@ export function createWsMessageHandler(
         });
       }
     }
-    else if (msg.type === "m.room.babble") {
-      if (msg.babbled) {
-        dispatch({ type: "ADD_BABBLED_USER", payload: { roomId: msg.room_id, userId: msg.user_id } });
-      } else {
-        dispatch({ type: "REMOVE_BABBLED_USER", payload: { roomId: msg.room_id, userId: msg.user_id } });
-      }
-    }
     else if (msg.type === "m.room.dm_streak") {
       dispatch({
         type: "UPDATE_DM_STREAK",

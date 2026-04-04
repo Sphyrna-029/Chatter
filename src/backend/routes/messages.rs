@@ -1,7 +1,7 @@
 use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
     helpers::{
-        babble_text_for_event, broadcast_babble_message, broadcast_to_room, error_response,
+        broadcast_to_room, error_response,
         extract_token, generate_id, get_reactions_for_events, get_thread_counts_for_events,
         get_user_from_token, get_user_role, get_user_custom_role_ids, is_moderator_or_owner,
         now_millis, send_to_user,
@@ -198,33 +198,13 @@ pub(crate) async fn send_message(
         event["channel_id"] = json!(channel_id);
     }
 
-    // Check if sender is currently in babble mode for this room
-    let is_babbled = {
-        let babbled = state.babbled_users.read().await;
-        let room_set = babbled.get(&room_id);
-        let result = room_set.map(|s| s.contains(&user_id)).unwrap_or(false);
-        eprintln!("[BABBLE DEBUG] send_message: room_id={:?} user_id={:?} room_set_exists={} is_babbled={}",
-            room_id, user_id, room_set.is_some(), result);
-        if let Some(set) = room_set {
-            eprintln!("[BABBLE DEBUG] room set contents: {:?}", set);
-        }
-        result
-    };
-    if is_babbled {
-        event["babble"] = json!(true);
-    }
-
     // Store in MongoDB
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&event) {
         let _ = msg_coll.insert_one(doc).await;
     }
 
-    if is_babbled {
-        broadcast_babble_message(&state, &room_id, &event).await;
-    } else {
-        broadcast_to_room(&state, &room_id, &event).await;
-    }
+    broadcast_to_room(&state, &room_id, &event).await;
 
     // Send reply notification
     if let Some(ref replied_user) = reply_to_user {
@@ -444,44 +424,6 @@ pub(crate) async fn get_room_messages(
                         "thread_reply_count".to_string(),
                         serde_json::to_value(count).unwrap(),
                     );
-                }
-            }
-        }
-    }
-
-    // For non-privileged users, replace the body of babbled messages with
-    // deterministic CJK gibberish (same seed → same text across page loads).
-    // The sender sees their own messages scrambled (same as regular members) but
-    // retains the babble flag so the BABBLE badge is shown to them.
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    let is_privileged = role == "owner" || role == "moderator";
-    if !is_privileged {
-        for msg in chunk.iter_mut() {
-            if msg.get("babble").and_then(|v| v.as_bool()).unwrap_or(false) {
-                let eid = msg
-                    .get("event_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let is_own = msg.get("sender").and_then(|v| v.as_str()) == Some(user_id.as_str());
-                if let Some(body) = msg
-                    .get("content")
-                    .and_then(|c| c.get("body"))
-                    .and_then(|b| b.as_str())
-                {
-                    let scrambled = babble_text_for_event(body, &eid);
-                    if let Some(content) = msg.get_mut("content") {
-                        if let Some(obj) = content.as_object_mut() {
-                            obj.insert("body".to_string(), json!(scrambled));
-                        }
-                    }
-                }
-                // Keep the babble flag for the sender so they see the BABBLE badge;
-                // remove it for everyone else so it's invisible to regular members.
-                if !is_own {
-                    if let Some(obj) = msg.as_object_mut() {
-                        obj.remove("babble");
-                    }
                 }
             }
         }

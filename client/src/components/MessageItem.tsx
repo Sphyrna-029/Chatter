@@ -720,6 +720,19 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     ensureFontFace(message.sender, nameFontUrl);
   }
 
+  if (message.content.msgtype === "m.watchparty") {
+    return (
+      <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+        <div className="h-px flex-1 bg-border" />
+        <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-blue-400/80 bg-blue-500/10">
+          {message.content.body}
+        </span>
+        <span className="text-xs text-muted-foreground/50">{time}</span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+    );
+  }
+
   if (isSystem) {
     const isLeave = message.content.body.includes("has left");
     return (
@@ -807,9 +820,6 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
               </span>
               {isWebhook && (
                 <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">BOT</span>
-              )}
-              {message.babble && (
-                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-purple-500/20 text-purple-400 leading-none" title="This message was sent while the user was in babble mode">BABBLE</span>
               )}
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>

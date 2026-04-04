@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiSendMessage, apiUploadFile, type MatrixMessage } from "@/lib/api";
+import { apiSendMessage, apiUploadFile, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
@@ -12,7 +12,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
-import { Lock, Smile, Image as ImageIcon } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Lock, Smile, Image as ImageIcon, Settings, X, UserPlus } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -49,6 +50,7 @@ interface ShowcaseChatPaneProps {
   roomId: string;
   channelId: string;
   uploadLimitBytes: number;
+  headerExtra?: React.ReactNode;
 }
 
 function ShowcaseChatPane({
@@ -61,6 +63,7 @@ function ShowcaseChatPane({
   roomId,
   channelId,
   uploadLimitBytes,
+  headerExtra,
 }: ShowcaseChatPaneProps) {
   const { state } = useAppContext();
   const [input, setInput] = useState("");
@@ -258,10 +261,11 @@ function ShowcaseChatPane({
       {/* Pane header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0">
         {pane === "featured" && <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">{title}</h3>
           <p className="text-[11px] text-muted-foreground truncate">{subtitle}</p>
         </div>
+        {headerExtra}
       </div>
 
       {/* Messages */}
@@ -458,9 +462,11 @@ export function ShowcaseArea() {
   const isPrivileged = myRole === "owner" || myRole === "moderator";
   const myCustomRoles = state.memberCustomRoles[state.userId || ""] ?? [];
   const showcaseWriteRoles = currentChannel?.showcase_write_roles ?? [];
+  const showcasePosters = currentChannel?.showcase_posters ?? [];
   const canPostFeatured =
     isPrivileged ||
-    (showcaseWriteRoles.length > 0 && showcaseWriteRoles.some((r) => myCustomRoles.includes(r)));
+    (showcaseWriteRoles.length > 0 && showcaseWriteRoles.some((r) => myCustomRoles.includes(r))) ||
+    (state.userId != null && showcasePosters.includes(state.userId));
 
   const featuredMessages = useMemo(
     () => state.messages.filter((m) => m.content.showcase_pane === "featured"),
@@ -470,6 +476,31 @@ export function ShowcaseArea() {
     () => state.messages.filter((m) => m.content.showcase_pane === "community"),
     [state.messages]
   );
+
+  const [postersOpen, setPostersOpen] = useState(false);
+  const [posterSearch, setPosterSearch] = useState("");
+
+  const handleAddPoster = async (userId: string) => {
+    if (!state.currentRoomId || !state.currentChannelId) return;
+    const next = [...showcasePosters, userId];
+    await apiUpdateChannel(state.currentRoomId, state.currentChannelId, { showcase_posters: next });
+  };
+
+  const handleRemovePoster = async (userId: string) => {
+    if (!state.currentRoomId || !state.currentChannelId) return;
+    const next = showcasePosters.filter((id) => id !== userId);
+    await apiUpdateChannel(state.currentRoomId, state.currentChannelId, { showcase_posters: next });
+  };
+
+  const eligibleToAdd = state.roomMembers.filter(
+    (m) => !showcasePosters.includes(m.userId) && m.userId !== state.userId
+  );
+  const filteredEligible = posterSearch.trim()
+    ? eligibleToAdd.filter((m) => {
+        const name = (state.userPresence[m.userId]?.displayName || displayUserId(m.userId)).toLowerCase();
+        return name.includes(posterSearch.toLowerCase());
+      })
+    : eligibleToAdd;
 
   if (!state.currentRoomId || !state.currentChannelId) {
     return (
@@ -494,6 +525,59 @@ export function ShowcaseArea() {
           roomId={state.currentRoomId}
           channelId={state.currentChannelId}
           uploadLimitBytes={state.uploadLimitBytes}
+          headerExtra={isPrivileged ? (
+            <Popover open={postersOpen} onOpenChange={setPostersOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" title="Manage approved posters">
+                  <Settings className="h-3.5 w-3.5" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-3" align="end">
+                <p className="text-xs font-semibold mb-2">Approved Posters</p>
+                {showcasePosters.length === 0 ? (
+                  <p className="text-xs text-muted-foreground mb-2">No approved posters yet. Owners and moderators can always post.</p>
+                ) : (
+                  <div className="flex flex-col gap-1 mb-2">
+                    {showcasePosters.map((uid) => (
+                      <div key={uid} className="flex items-center justify-between gap-2 px-2 py-1 rounded bg-muted/40">
+                        <span className="text-xs truncate">
+                          {state.userPresence[uid]?.displayName || displayUserId(uid)}
+                        </span>
+                        <button
+                          onClick={() => handleRemovePoster(uid)}
+                          className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                          title="Remove"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs font-semibold mb-1.5">Add member</p>
+                <Input
+                  className="h-7 text-xs mb-1.5"
+                  placeholder="Search members…"
+                  value={posterSearch}
+                  onChange={(e) => setPosterSearch(e.target.value)}
+                />
+                <div className="flex flex-col gap-0.5 max-h-36 overflow-y-auto">
+                  {filteredEligible.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-1">No members to add</p>
+                  ) : filteredEligible.map((m) => (
+                    <button
+                      key={m.userId}
+                      onClick={() => handleAddPoster(m.userId)}
+                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/60 text-left text-xs transition-colors"
+                    >
+                      <UserPlus className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : undefined}
         />
       </div>
       {/* Draggable divider */}

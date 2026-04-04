@@ -586,7 +586,6 @@ export interface MatrixMessage {
   redacted?: boolean;
   edited?: boolean;
   edited_at?: number;
-  babble?: boolean;
   reactions?: Record<string, string[]>;
   thread_participants?: string[];
 }
@@ -639,6 +638,7 @@ export interface Channel {
   view_roles?: string[];
   write_roles?: string[];
   showcase_write_roles?: string[];
+  showcase_posters?: string[];
   system_channel?: boolean;
   created_by?: string;
   created_at?: number;
@@ -744,7 +744,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; system_channel?: boolean }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -1204,33 +1204,6 @@ export async function apiUnbanMember(roomId: string, userId: string) {
     throw new Error(body?.error || "Failed to unban member");
   }
   return res.json();
-}
-
-export async function apiBabbleUser(roomId: string, userId: string) {
-  const res = await authenticatedFetch(`/api/rooms/${roomId}/babble/${userId}`, { method: "POST" });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error || "Failed to enable babble mode");
-  }
-  return res.json();
-}
-
-export async function apiUnbabbleUser(roomId: string, userId: string) {
-  const res = await authenticatedFetch(`/api/rooms/${roomId}/babble/${userId}`, { method: "DELETE" });
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error || "Failed to remove babble mode");
-  }
-  return res.json();
-}
-
-export async function apiGetBabbledUsers(roomId: string) {
-  const res = await authenticatedFetch(`/api/rooms/${roomId}/babbled`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new Error(body?.error || "Failed to get babbled users");
-  }
-  return res.json() as Promise<{ babbled_users: string[] }>;
 }
 
 export async function apiSetMemberRole(roomId: string, userId: string, role: string) {

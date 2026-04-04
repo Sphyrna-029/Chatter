@@ -144,7 +144,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
-  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser, assignMemberRoles, babbleUser, unbabbleUser } = useAppContext();
+  const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser, assignMemberRoles } = useAppContext();
   const isSelf = userId === state.userId;
   const username = displayUserId(userId) || displayName;
   const presence = state.userPresence[userId];
@@ -872,29 +872,6 @@ export function UserProfileDialog({
                     Demote to Member
                   </Button>
                 )}
-                {(() => {
-                  const isBabbled = (state.babbledUsers[state.currentRoomId!] || []).includes(userId);
-                  return (
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full",
-                        isBabbled
-                          ? "text-purple-400 border-purple-400/30 hover:bg-purple-400/10"
-                          : "text-yellow-500 border-yellow-500/30 hover:bg-yellow-500/10"
-                      )}
-                      onClick={async () => {
-                        if (isBabbled) {
-                          await unbabbleUser(state.currentRoomId!, userId);
-                        } else {
-                          await babbleUser(state.currentRoomId!, userId);
-                        }
-                      }}
-                    >
-                      {isBabbled ? "Remove Babble Mode" : "Enable Babble Mode"}
-                    </Button>
-                  );
-                })()}
                 <Button
                   variant="outline"
                   className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"

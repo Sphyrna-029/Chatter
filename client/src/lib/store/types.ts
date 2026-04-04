@@ -81,8 +81,6 @@ export interface AppState {
   incomingFriendRequests: { userId: string; requestId: string }[];
   outgoingFriendRequests: { userId: string; requestId: string }[];
   blockedUsers: string[];
-  // Babble mode: room_id -> list of babbled user_ids (ephemeral, resets on server restart)
-  babbledUsers: Record<string, string[]>;
 }
 
 // Module-level shared map for screen share MediaStreams
@@ -169,9 +167,6 @@ export type Action =
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
-  | { type: "SET_BABBLED_USERS"; payload: { roomId: string; userIds: string[] } }
-  | { type: "ADD_BABBLED_USER"; payload: { roomId: string; userId: string } }
-  | { type: "REMOVE_BABBLED_USER"; payload: { roomId: string; userId: string } }
   | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
   | { type: "INCREMENT_ROOM_UNREAD"; payload: string }
   | { type: "CLEAR_ROOM_UNREAD"; payload: string };
@@ -232,7 +227,6 @@ export const initialState: AppState = {
   incomingFriendRequests: [],
   outgoingFriendRequests: [],
   blockedUsers: [],
-  babbledUsers: {},
 };
 
 export interface AppContextValue {
@@ -299,6 +293,4 @@ export interface AppContextValue {
   removeFriend: (userId: string) => Promise<void>;
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
-  babbleUser: (roomId: string, userId: string) => Promise<void>;
-  unbabbleUser: (roomId: string, userId: string) => Promise<void>;
 }

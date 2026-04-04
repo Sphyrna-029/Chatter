@@ -1,5 +1,4 @@
 pub(crate) mod admin;
-pub(crate) mod babble;
 pub(crate) mod channels;
 pub(crate) mod auth;
 pub(crate) mod forum;
