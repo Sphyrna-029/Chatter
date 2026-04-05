@@ -720,14 +720,25 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     ensureFontFace(message.sender, nameFontUrl);
   }
 
+  const canDeleteNotification = myRole === "owner" || myRole === "moderator";
+
   if (message.content.msgtype === "m.watchparty") {
     return (
-      <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+      <div className="group flex items-center justify-center gap-2 py-1.5 px-2">
         <div className="h-px flex-1 bg-border" />
         <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-blue-400/80 bg-blue-500/10">
           {message.content.body}
         </span>
         <span className="text-xs text-muted-foreground/50">{time}</span>
+        {canDeleteNotification && (
+          <button
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
+            title="Delete notification"
+            onClick={() => { if (confirm("Delete this notification?")) deleteMessage(message.event_id); }}
+          >
+            <span className="text-xs">✕</span>
+          </button>
+        )}
         <div className="h-px flex-1 bg-border" />
       </div>
     );
@@ -738,7 +749,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     const isWatchparty = body.includes("the video") || body.includes("skipped to");
     const isLeave = body.includes("has left");
     return (
-      <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+      <div className="group flex items-center justify-center gap-2 py-1.5 px-2">
         <div className="h-px flex-1 bg-border" />
         <span className={cn(
           "text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap",
@@ -751,6 +762,15 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           {body}
         </span>
         <span className="text-xs text-muted-foreground/50">{time}</span>
+        {canDeleteNotification && (
+          <button
+            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
+            title="Delete notification"
+            onClick={() => { if (confirm("Delete this notification?")) deleteMessage(message.event_id); }}
+          >
+            <span className="text-xs">✕</span>
+          </button>
+        )}
         <div className="h-px flex-1 bg-border" />
       </div>
     );
