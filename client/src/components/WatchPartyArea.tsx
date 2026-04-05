@@ -39,6 +39,7 @@ interface WatchState {
 export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const { state, wsRef } = useAppContext();
   const roomId = state.currentRoomId!;
+  const channelId = state.currentChannelId ?? "";
 
   const [watchState, setWatchState] = useState<WatchState>({
     videoUrl: "",
@@ -111,10 +112,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const send = useCallback(
     (msg: object) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ ...msg, room_id: roomId }));
+        wsRef.current.send(JSON.stringify({ ...msg, room_id: roomId, channel_id: channelId }));
       }
     },
-    [wsRef, roomId]
+    [wsRef, roomId, channelId]
   );
 
   const applyVolume = useCallback((vol: number, muted: boolean) => {

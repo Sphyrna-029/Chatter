@@ -1102,6 +1102,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         "watchparty_set_video" => {
             if !room_id.is_empty() {
                 let video_url = msg.get("video_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let is_host = {
                     let wp = state.watch_party_rooms.read().await;
                     wp.get(room_id)
@@ -1113,6 +1114,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     {
                         let mut wp = state.watch_party_rooms.write().await;
                         wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
+                            channel_id: channel_id.clone(),
                             video_url: video_url.clone(),
                             playing: false,
                             position_secs: 0.0,
@@ -1135,7 +1137,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 
                     let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
                     let body = format!("{} changed the video", display);
-                    let sys_event = json!({
+                    let mut sys_event = json!({
                         "type": "m.room.message",
                         "room_id": room_id,
                         "sender": user_id,
@@ -1146,6 +1148,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "event_id": generate_id("$"),
                         "origin_server_ts": now_millis()
                     });
+                    if !channel_id.is_empty() {
+                        sys_event["channel_id"] = json!(channel_id);
+                    }
                     let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
                     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
                         let _ = msg_col.insert_one(doc).await;
@@ -1156,17 +1161,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "watchparty_control" => {
             if !room_id.is_empty() {
-                let (can_control, stored_host, prev_playing, prev_pos, prev_updated_at) = {
+                let (can_control, stored_host, stored_channel_id, prev_playing, prev_pos, prev_updated_at) = {
                     let wp = state.watch_party_rooms.read().await;
                     wp.get(room_id)
                         .map(|s| (
                             s.host_user_id == user_id || s.host_user_id.is_empty(),
                             s.host_user_id.clone(),
+                            s.channel_id.clone(),
                             s.playing,
                             s.position_secs,
                             s.position_updated_at,
                         ))
-                        .unwrap_or((false, String::new(), false, 0.0, 0.0))
+                        .unwrap_or((false, String::new(), String::new(), false, 0.0, 0.0))
                 };
                 if can_control {
                     let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1222,7 +1228,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         } else {
                             format!("{} paused the video at {}", display, fmt_time(position_secs))
                         };
-                        let sys_event = json!({
+                        let mut sys_event = json!({
                             "type": "m.room.message",
                             "room_id": room_id,
                             "sender": user_id,
@@ -1233,6 +1239,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             "event_id": generate_id("$"),
                             "origin_server_ts": now_millis()
                         });
+                        if !stored_channel_id.is_empty() {
+                            sys_event["channel_id"] = json!(stored_channel_id);
+                        }
                         let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
                         if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
                             let _ = msg_col.insert_one(doc).await;

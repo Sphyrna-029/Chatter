@@ -538,6 +538,7 @@ pub(crate) struct MemberCustomRoleRecord {
 
 #[derive(Clone)]
 pub(crate) struct WatchPartyState {
+    pub(crate) channel_id: String,
     pub(crate) video_url: String,
     pub(crate) playing: bool,
     pub(crate) position_secs: f64,
