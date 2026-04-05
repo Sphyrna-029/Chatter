@@ -734,17 +734,21 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
   }
 
   if (isSystem) {
-    const isLeave = message.content.body.includes("has left");
+    const body = message.content.body;
+    const isWatchparty = body.includes("the video") || body.includes("skipped to");
+    const isLeave = body.includes("has left");
     return (
       <div className="flex items-center justify-center gap-2 py-1.5 px-2">
         <div className="h-px flex-1 bg-border" />
         <span className={cn(
           "text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap",
-          isLeave
-            ? "text-red-400/80 bg-red-500/10"
-            : "text-green-400/80 bg-green-500/10"
+          isWatchparty
+            ? "text-blue-400/80 bg-blue-500/10"
+            : isLeave
+              ? "text-red-400/80 bg-red-500/10"
+              : "text-green-400/80 bg-green-500/10"
         )}>
-          {message.content.body}
+          {body}
         </span>
         <span className="text-xs text-muted-foreground/50">{time}</span>
         <div className="h-px flex-1 bg-border" />
