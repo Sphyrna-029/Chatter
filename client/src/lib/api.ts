@@ -453,6 +453,15 @@ export async function apiDeleteMessage(roomId: string, eventId: string) {
   return res.json();
 }
 
+export async function apiHardDeleteNotification(roomId: string, eventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to delete notification");
+  return res.json();
+}
+
 export async function apiEditMessage(roomId: string, eventId: string, newBody: string) {
   const txnId = Date.now();
   const res = await authenticatedFetch(

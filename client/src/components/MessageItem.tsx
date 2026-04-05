@@ -569,7 +569,7 @@ interface MessageItemProps {
 }
 
 export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions }: MessageItemProps) {
-  const { state, dispatch, deleteMessage, editMessage, addReaction, openThread } = useAppContext();
+  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -734,7 +734,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           <button
             className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
             title="Delete notification"
-            onClick={() => { if (confirm("Delete this notification?")) deleteMessage(message.event_id); }}
+            onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
           >
             <span className="text-xs">✕</span>
           </button>
@@ -766,7 +766,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           <button
             className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
             title="Delete notification"
-            onClick={() => { if (confirm("Delete this notification?")) deleteMessage(message.event_id); }}
+            onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
           >
             <span className="text-xs">✕</span>
           </button>

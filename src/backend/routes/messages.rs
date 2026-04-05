@@ -533,6 +533,52 @@ pub(crate) async fn redact_message(
     Ok(Json(json!({"event_id": redaction_event_id})))
 }
 
+/// DELETE /api/rooms/{room_id}/messages/{event_id}
+/// Hard-deletes a notification message (m.system / m.watchparty) with no trace.
+/// Only owners and moderators may call this.
+pub(crate) async fn delete_notification(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, event_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let role = get_user_role(&state, &room_id, &user_id).await;
+    if role != "owner" && role != "moderator" {
+        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can delete notifications"));
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let msg = msg_coll
+        .find_one(doc! { "event_id": &event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
+
+    let msgtype = msg
+        .get_document("content").ok()
+        .and_then(|c| c.get_str("msgtype").ok())
+        .unwrap_or("");
+    if msgtype != "m.system" && msgtype != "m.watchparty" {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Only notification messages can be hard-deleted"));
+    }
+
+    let _ = msg_coll.delete_one(doc! { "event_id": &event_id, "room_id": &room_id }).await;
+
+    let removal_event = json!({
+        "type": "m.room.message_removed",
+        "room_id": room_id,
+        "event_id": event_id,
+    });
+    broadcast_to_room(&state, &room_id, &removal_event).await;
+
+    Ok(Json(json!({ "deleted": true })))
+}
+
 pub(crate) async fn edit_message(
     State(state): State<Arc<AppState>>,
     Path((room_id, event_id, txn_id)): Path<(String, String, String)>,

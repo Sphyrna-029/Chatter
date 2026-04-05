@@ -167,6 +167,10 @@ export function createWsMessageHandler(
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });
       }
+    } else if (msg.type === "m.room.message_removed") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({ type: "REMOVE_MESSAGE", payload: msg.event_id });
+      }
     } else if (msg.type === "m.room.edit") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({

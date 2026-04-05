@@ -169,7 +169,8 @@ export type Action =
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
   | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
   | { type: "INCREMENT_ROOM_UNREAD"; payload: string }
-  | { type: "CLEAR_ROOM_UNREAD"; payload: string };
+  | { type: "CLEAR_ROOM_UNREAD"; payload: string }
+  | { type: "REMOVE_MESSAGE"; payload: string };
 
 export const initialState: AppState = {
   accessToken: null,
@@ -293,4 +294,5 @@ export interface AppContextValue {
   removeFriend: (userId: string) => Promise<void>;
   blockUser: (userId: string) => Promise<void>;
   unblockUser: (userId: string) => Promise<void>;
+  hardDeleteNotification: (roomId: string, eventId: string) => Promise<void>;
 }

@@ -33,6 +33,7 @@ import {
   apiGetMessages,
   apiSendMessage,
   apiDeleteMessage,
+  apiHardDeleteNotification,
   apiEditMessage,
   apiAddReaction,
   apiGetVoiceMembers,
@@ -621,6 +622,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const hardDeleteNotification = useCallback(
+    async (roomId: string, eventId: string) => {
+      await apiHardDeleteNotification(roomId, eventId);
+      dispatch({ type: "REMOVE_MESSAGE", payload: eventId });
+    },
+    []
+  );
+
   const editMessage = useCallback(
     async (eventId: string, newBody: string) => {
       if (!stateRef.current.currentRoomId) return;
@@ -1022,6 +1031,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sendThreadMessage,
         setThreadName,
         deleteMessage,
+        hardDeleteNotification,
         editMessage,
         addReaction,
         createRoom,

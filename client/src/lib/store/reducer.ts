@@ -78,6 +78,11 @@ export function reducer(state: AppState, action: Action): AppState {
             : m
         ),
       };
+    case "REMOVE_MESSAGE":
+      return {
+        ...state,
+        messages: state.messages.filter((m) => m.event_id !== action.payload),
+      };
     case "EDIT_MESSAGE":
       return {
         ...state,
