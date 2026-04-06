@@ -349,9 +349,9 @@ pub(crate) async fn get_room_messages(
     // For showcase channels, also filter by showcase_pane if provided
     let base_filter = if let Some(ref cid) = query.channel_id {
         if let Some(ref pane) = query.showcase_pane {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "channel_id": cid, "content.showcase_pane": pane }
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "channel_id": cid, "content.showcase_pane": pane }
         } else {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "$or": [
                 { "channel_id": cid },
                 { "channel_id": { "$exists": false } }
             ] }
@@ -364,12 +364,12 @@ pub(crate) async fn get_room_messages(
                 .iter()
                 .map(|s| mongodb::bson::Bson::String(s.clone()))
                 .collect();
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "$or": [
                 { "channel_id": { "$in": bson_ids } },
                 { "channel_id": { "$exists": false } }
             ]}
         } else {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false } }
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true } }
         }
     };
 
@@ -383,9 +383,9 @@ pub(crate) async fn get_room_messages(
         // Count messages with timestamp <= around_ts to find the position
         let around_filter = if let Some(ref cid) = query.channel_id {
             if let Some(ref pane) = query.showcase_pane {
-                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid, "content.showcase_pane": pane }
+                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid, "content.showcase_pane": pane }
             } else {
-                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
+                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "$or": [
                     { "channel_id": cid },
                     { "channel_id": { "$exists": false } }
                 ] }
@@ -395,12 +395,12 @@ pub(crate) async fn get_room_messages(
                 .iter()
                 .map(|s| mongodb::bson::Bson::String(s.clone()))
                 .collect();
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "$or": [
                 { "channel_id": { "$in": bson_ids } },
                 { "channel_id": { "$exists": false } }
             ]}
         } else {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } }
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts } }
         };
         let pos = msg_coll
             .count_documents(around_filter)
@@ -780,7 +780,7 @@ pub(crate) async fn get_thread_messages(
 
     // Fetch thread replies
     let mut cursor = msg_coll
-        .find(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .find(doc! { "room_id": &room_id, "thread_id": &thread_event_id, "redacted": { "$ne": true } })
         .sort(doc! { "origin_server_ts": 1 })
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
@@ -1246,12 +1246,14 @@ pub(crate) async fn search_messages(
         "mention" => {
             doc! {
                 "room_id": &room_id,
+                "redacted": { "$ne": true },
                 "content.body": { "$regex": format!("@{}\\b", q), "$options": "i" }
             }
         }
         "user" => {
             doc! {
                 "room_id": &room_id,
+                "redacted": { "$ne": true },
                 "sender": { "$regex": q, "$options": "i" }
             }
         }
@@ -1267,6 +1269,7 @@ pub(crate) async fn search_messages(
 
             let mut conditions = vec![
                 doc! { "room_id": &room_id },
+                doc! { "redacted": { "$ne": true } },
                 doc! { "content.body": { "$regex": ext_pattern, "$options": "i" } },
             ];
 
@@ -1280,6 +1283,7 @@ pub(crate) async fn search_messages(
             // "all" — search by message body
             doc! {
                 "room_id": &room_id,
+                "redacted": { "$ne": true },
                 "content.body": { "$regex": q, "$options": "i" }
             }
         }

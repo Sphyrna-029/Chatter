@@ -72,11 +72,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "REDACT_MESSAGE":
       return {
         ...state,
-        messages: state.messages.map((m) =>
-          m.event_id === action.payload
-            ? { ...m, redacted: true, content: { ...m.content, body: "[deleted]" } }
-            : m
-        ),
+        messages: state.messages.filter((m) => m.event_id !== action.payload),
       };
     case "REMOVE_MESSAGE":
       return {
