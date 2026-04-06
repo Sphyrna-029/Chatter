@@ -345,16 +345,13 @@ pub(crate) async fn get_room_messages(
     }
 
     // Exclude thread messages (those with a thread_id field) from room message feed
-    // If channel_id is provided, filter by it; otherwise show messages without channel_id (backward compat)
+    // If channel_id is provided, filter strictly by it; otherwise show messages without a channel_id
     // For showcase channels, also filter by showcase_pane if provided
     let base_filter = if let Some(ref cid) = query.channel_id {
         if let Some(ref pane) = query.showcase_pane {
             doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "channel_id": cid, "content.showcase_pane": pane }
         } else {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "$or": [
-                { "channel_id": cid },
-                { "channel_id": { "$exists": false }, "content.webhook": { "$ne": true } }
-            ] }
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "channel_id": cid }
         }
     } else {
         // No specific channel requested — restrict to visible channels so private
@@ -385,10 +382,7 @@ pub(crate) async fn get_room_messages(
             if let Some(ref pane) = query.showcase_pane {
                 doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid, "content.showcase_pane": pane }
             } else {
-                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "$or": [
-                    { "channel_id": cid },
-                    { "channel_id": { "$exists": false }, "content.webhook": { "$ne": true } }
-                ] }
+                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid }
             }
         } else if let Some(ref ids) = allowed_channels {
             let bson_ids: Vec<mongodb::bson::Bson> = ids
