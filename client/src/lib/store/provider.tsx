@@ -12,10 +12,8 @@ import { displayUserId } from "@/lib/utils";
 import {
   setAccessToken,
   setRefreshToken,
-  restoreTokens,
   clearTokens,
   getAccessToken,
-  getRefreshToken,
   apiRefreshToken,
   setIsAdmin,
   getIsAdmin,
@@ -113,13 +111,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, []);
 
-  // Restore tokens from localStorage on mount
+  // Rehydrate session on mount via the HttpOnly refresh-token cookie.
+  // No tokens are read from localStorage — the cookie is sent automatically
+  // by the browser and is not accessible to JavaScript.
   useEffect(() => {
-    restoreTokens();
-    // Fetch ICE servers now that the token is available
-    fetchIceServers();
-    const token = getAccessToken();
-
     const loginWithToken = (accessToken: string) => {
       try {
         const payload = JSON.parse(atob(accessToken.split(".")[1]));
@@ -129,7 +124,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         dispatch({ type: "SET_IS_ADMIN", payload: getIsAdmin() });
         dispatch({ type: "SET_TOTP_VERIFIED", payload: getTotpVerified() });
-        // Fetch actual admin status from server (handles pre-existing users)
+        // Verify admin status with the server
         fetch("/api/admin/stats", {
           headers: { Authorization: `Bearer ${accessToken}` },
         }).then((res) => {
@@ -137,38 +132,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setIsAdmin(isAdmin);
           dispatch({ type: "SET_IS_ADMIN", payload: isAdmin });
         }).catch(() => {});
+        // Fetch ICE servers now that the token is available
+        fetchIceServers();
       } catch {
         clearTokens();
       }
     };
 
-    if (token) {
-      try {
-        const payload = JSON.parse(atob(token.split(".")[1]));
-        if (payload.sub && payload.exp * 1000 > Date.now()) {
-          // Access token still valid — use it directly
-          loginWithToken(token);
-        } else if (getRefreshToken()) {
-          // Access token expired but we have a refresh token — try to refresh
-          apiRefreshToken().then((refreshed) => {
-            if (refreshed) {
-              const newToken = getAccessToken();
-              if (newToken) {
-                loginWithToken(newToken);
-              } else {
-                clearTokens();
-              }
-            } else {
-              clearTokens();
-            }
-          });
-        } else {
-          clearTokens();
-        }
-      } catch {
-        clearTokens();
+    // Always try a cookie-based refresh on page load.
+    // If the user has a valid session, the server will issue a fresh access token.
+    apiRefreshToken().then((refreshed) => {
+      if (refreshed) {
+        const newToken = getAccessToken();
+        if (newToken) loginWithToken(newToken);
       }
-    }
+      // If refresh fails, the user is logged out — no further action needed.
+    });
   }, []);
 
   // Keep a ref to loadRooms so WS handler can call it without stale closure
@@ -283,7 +262,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { requires_totp: true };
     }
     setAccessToken(data.access_token);
-    setRefreshToken(data.refresh_token);
     setIsAdmin(!!data.is_admin);
     dispatch({
       type: "LOGIN",

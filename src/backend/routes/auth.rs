@@ -5,7 +5,8 @@ use super::super::{
         RefreshTokenRequest, RegisterRequest, TotpVerifyRequest,
     },
     helpers::{
-        create_access_token, create_refresh_token, decode_token, error_response, extract_token,
+        auth_cookie_headers, clear_cookie_headers, create_access_token, create_refresh_token,
+        decode_token, error_response, extract_refresh_cookie, extract_token,
         format_user_id, generate_id, get_user_from_token, hash_password, validate_username,
         verify_password,
     },
@@ -14,7 +15,7 @@ use super::super::{
 use axum::{
     extract::State,
     http::{HeaderMap, StatusCode},
-    response::Json,
+    response::{IntoResponse, Json},
 };
 use mongodb::bson::doc;
 use serde_json::{json, Value};
@@ -255,7 +256,7 @@ pub(crate) async fn register(
 pub(crate) async fn totp_verify(
     State(state): State<Arc<AppState>>,
     Json(req): Json<TotpVerifyRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let user_id = req.user_id;
 
     // Rate limit: max 5 attempts per 5-minute window per user_id
@@ -354,15 +355,18 @@ pub(crate) async fn totp_verify(
         let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
         store_refresh_token(&state, &refresh_token, &user_id).await;
 
-        return Ok(Json(json!({
-            "verified": true,
-            "recovery_codes": plaintext_codes,
-            "access_token": access_token,
-            "refresh_token": refresh_token,
-            "user_id": user_id,
-            "is_admin": pending_reg.is_admin,
-            "totp_verified": true
-        })));
+        return Ok((
+            auth_cookie_headers(&access_token, &refresh_token),
+            Json(json!({
+                "verified": true,
+                "recovery_codes": plaintext_codes,
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "user_id": user_id,
+                "is_admin": pending_reg.is_admin,
+                "totp_verified": true
+            })),
+        ).into_response());
     }
 
     // Existing user flow (e.g. TOTP setup for existing accounts)
@@ -407,21 +411,24 @@ pub(crate) async fn totp_verify(
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
     store_refresh_token(&state, &refresh_token, &user_id).await;
 
-    Ok(Json(json!({
-        "verified": true,
-        "recovery_codes": plaintext_codes,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "user_id": user_id,
-        "is_admin": user.is_admin,
-        "totp_verified": true
-    })))
+    Ok((
+        auth_cookie_headers(&access_token, &refresh_token),
+        Json(json!({
+            "verified": true,
+            "recovery_codes": plaintext_codes,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user_id": user_id,
+            "is_admin": user.is_admin,
+            "totp_verified": true
+        })),
+    ).into_response())
 }
 
 pub(crate) async fn login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoginRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let username = req.username.trim();
     if let Err(detail) = validate_username(username) {
         return Err(error_response(StatusCode::BAD_REQUEST, detail));
@@ -495,7 +502,7 @@ pub(crate) async fn login(
     if user.totp_verified && !user.totp_secret.is_empty() {
         match &req.totp_code {
             None => {
-                return Ok(Json(json!({ "requires_totp": true })));
+                return Ok((HeaderMap::new(), Json(json!({ "requires_totp": true }))).into_response());
             }
             Some(code) => {
                 verify_totp_or_recovery(code, &user, username, &state).await?;
@@ -509,20 +516,23 @@ pub(crate) async fn login(
 
     store_refresh_token(&state, &refresh_token, &user_id).await;
 
-    Ok(Json(json!({
-        "user_id": user_id,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "device_id": device_id,
-        "is_admin": is_admin,
-        "totp_verified": user.totp_verified
-    })))
+    Ok((
+        auth_cookie_headers(&access_token, &refresh_token),
+        Json(json!({
+            "user_id": user_id,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "device_id": device_id,
+            "is_admin": is_admin,
+            "totp_verified": user.totp_verified
+        })),
+    ).into_response())
 }
 
 pub(crate) async fn recovery_login(
     State(state): State<Arc<AppState>>,
     Json(req): Json<RecoveryLoginRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let username = req.username.trim();
     if let Err(detail) = validate_username(username) {
         return Err(error_response(StatusCode::BAD_REQUEST, detail));
@@ -601,16 +611,19 @@ pub(crate) async fn recovery_login(
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
     store_refresh_token(&state, &refresh_token, &user_id).await;
 
-    Ok(Json(json!({
-        "user_id": user_id,
-        "access_token": access_token,
-        "refresh_token": refresh_token,
-        "device_id": device_id,
-        "is_admin": user.is_admin,
-        "totp_verified": user.totp_verified,
-        "must_reset_password": true,
-        "recovery_codes_remaining": remaining.len()
-    })))
+    Ok((
+        auth_cookie_headers(&access_token, &refresh_token),
+        Json(json!({
+            "user_id": user_id,
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "device_id": device_id,
+            "is_admin": user.is_admin,
+            "totp_verified": user.totp_verified,
+            "must_reset_password": true,
+            "recovery_codes_remaining": remaining.len()
+        })),
+    ).into_response())
 }
 
 /// Reset password after recovery login. Only works when must_reset_password is true.
@@ -756,31 +769,35 @@ pub(crate) async fn delete_account(
 pub(crate) async fn logout(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let token = extract_token(&headers)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-
-    let user_id = get_user_from_token(&state, &token);
-
-    if let Some(uid) = &user_id {
-        state.active_websockets.write().await.remove(uid);
-
-        // Delete all refresh tokens for this user
-        let refresh_tokens = state
-            .db
-            .collection::<RefreshTokenRecord>("refresh_tokens");
-        let _ = refresh_tokens.delete_many(doc! { "user_id": uid }).await;
+) -> impl IntoResponse {
+    if let Some(token) = extract_token(&headers) {
+        if let Some(uid) = get_user_from_token(&state, &token) {
+            state.active_websockets.write().await.remove(&uid);
+            let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
+            let _ = refresh_tokens.delete_many(doc! { "user_id": &uid }).await;
+        }
+    }
+    // Also revoke the cookie-based refresh token if present
+    if let Some(cookie_rt) = extract_refresh_cookie(&headers) {
+        let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
+        let _ = refresh_tokens.delete_one(doc! { "token": &cookie_rt }).await;
     }
 
-    Ok(Json(json!({})))
+    (clear_cookie_headers(), Json(json!({})))
 }
 
 pub(crate) async fn refresh(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    // Accept refresh token from JSON body (backward compat) or HttpOnly cookie
+    let token_str = req.refresh_token
+        .or_else(|| extract_refresh_cookie(&headers))
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "No refresh token provided"))?;
+
     // Decode the refresh token JWT
-    let claims = decode_token(&req.refresh_token, &state.jwt_secret)
+    let claims = decode_token(&token_str, &state.jwt_secret)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token"))?;
 
     let user_id = claims.sub;
@@ -790,7 +807,7 @@ pub(crate) async fn refresh(
         .db
         .collection::<RefreshTokenRecord>("refresh_tokens");
     let found = refresh_tokens
-        .find_one_and_delete(doc! { "token": &req.refresh_token })
+        .find_one_and_delete(doc! { "token": &token_str })
         .await
         .ok()
         .flatten();
@@ -817,12 +834,15 @@ pub(crate) async fn refresh(
     let new_refresh = create_refresh_token(&user_id, &state.jwt_secret);
     store_refresh_token(&state, &new_refresh, &user_id).await;
 
-    Ok(Json(json!({
-        "access_token": new_access,
-        "refresh_token": new_refresh,
-        "is_admin": is_admin,
-        "totp_verified": totp_verified
-    })))
+    Ok((
+        auth_cookie_headers(&new_access, &new_refresh),
+        Json(json!({
+            "access_token": new_access,
+            "refresh_token": new_refresh,
+            "is_admin": is_admin,
+            "totp_verified": totp_verified
+        })),
+    ).into_response())
 }
 
 pub(crate) async fn get_recovery_codes(

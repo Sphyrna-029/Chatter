@@ -1265,15 +1265,21 @@ pub(crate) async fn upload_guard(
     if let Some(state) = req.extensions().get::<Arc<AppState>>() {
         let require_auth = state.server_settings.read().await.require_auth_for_uploads;
         if require_auth {
-            // Try Authorization header first, then access_token query parameter
-            // (video/audio elements cannot send custom headers)
+            // Auth priority: Authorization header → media_session HttpOnly cookie.
+            // <video>/<audio> elements cannot send custom headers; they rely on the
+            // media_session cookie (Path=/external) that the browser sends automatically.
+            // The old ?access_token= query-param path has been removed to prevent tokens
+            // from leaking into server logs and browser history.
             let token = extract_token(req.headers()).or_else(|| {
-                req.uri().query().and_then(|q| {
-                    q.split('&').find_map(|pair| {
-                        let (key, value) = pair.split_once('=')?;
-                        if key == "access_token" { Some(value.to_string()) } else { None }
+                req.headers()
+                    .get(header::COOKIE)
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| {
+                        s.split(';').find_map(|part| {
+                            let part = part.trim();
+                            part.strip_prefix("media_session=").map(String::from)
+                        })
                     })
-                })
             });
             let authed = match token {
                 Some(t) => get_user_from_token(state, &t).is_some(),

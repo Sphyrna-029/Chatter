@@ -289,12 +289,9 @@ function FileAttachmentCard({ url }: { url: string }) {
   const [fileSize, setFileSize] = useState<number | null>(null);
 
   useEffect(() => {
-    const headers: Record<string, string> = {};
-    if (url.includes("/external/") && state.requireAuthForUploads) {
-      const token = localStorage.getItem("access_token");
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-    }
-    fetch(url, { method: "HEAD", headers })
+    // The Authorization header is not needed here because the media_session
+    // HttpOnly cookie is sent automatically by the browser.
+    fetch(url, { method: "HEAD" })
       .then((res) => {
         const len = res.headers.get("content-length");
         if (len) setFileSize(parseInt(len, 10));
@@ -327,19 +324,10 @@ function FileAttachmentCard({ url }: { url: string }) {
   );
 }
 
-/** Build auth-aware src for local uploads (video/audio elements can't send auth headers) */
+/** Return the URL unchanged — the browser sends the media_session HttpOnly cookie
+ *  automatically for /external/* requests, so no query-param token is needed. */
 function useAuthSrc(url: string): string {
-  const { state } = useAppContext();
-  return useMemo(() => {
-    if (url.includes("/external/") && state.requireAuthForUploads) {
-      const token = localStorage.getItem("access_token");
-      if (token) {
-        const sep = url.includes("?") ? "&" : "?";
-        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
-      }
-    }
-    return url;
-  }, [url, state.requireAuthForUploads]);
+  return url;
 }
 
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
@@ -447,17 +435,8 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
 
-  /** Append auth token to local upload URLs for media elements that can't send headers */
-  const withAuth = useCallback((url: string) => {
-    if (url.includes("/external/") && state.requireAuthForUploads) {
-      const token = localStorage.getItem("access_token");
-      if (token) {
-        const sep = url.includes("?") ? "&" : "?";
-        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
-      }
-    }
-    return url;
-  }, [state.requireAuthForUploads]);
+  /** Return the URL unchanged — the media_session HttpOnly cookie is sent automatically. */
+  const withAuth = useCallback((url: string) => url, []);
 
   const hasMedia = images.length > 0 || videos.length > 0 || audios.length > 0 || files.length > 0 || links.length > 0 || youtubeIds.length > 0;
   if (!hasMedia) return null;

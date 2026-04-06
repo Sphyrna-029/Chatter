@@ -1,47 +1,40 @@
 // HTTP API wrapper for the Matrix-compatible backend
 
+// Access token lives only in memory — never persisted to localStorage.
+// The refresh token is stored exclusively in an HttpOnly cookie managed by the
+// server, so JS cannot read or exfiltrate it even under XSS.
 let _accessToken: string | null = null;
-let _refreshToken: string | null = null;
 let _refreshPromise: Promise<boolean> | null = null;
 
+/** Store the access token in memory only. */
 export function setAccessToken(token: string | null) {
   _accessToken = token;
-  if (token) {
-    localStorage.setItem("access_token", token);
-  } else {
-    localStorage.removeItem("access_token");
-  }
 }
 
-export function setRefreshToken(token: string | null) {
-  _refreshToken = token;
-  if (token) {
-    localStorage.setItem("refresh_token", token);
-  } else {
-    localStorage.removeItem("refresh_token");
-  }
+/** No-op kept for call-site compatibility; the server manages the refresh-token
+ *  cookie via Set-Cookie.  Do not write it to localStorage. */
+export function setRefreshToken(_token: string | null) {
+  // intentionally empty
 }
 
 export function getAccessToken() {
   return _accessToken;
 }
 
-export function getRefreshToken() {
-  return _refreshToken;
-}
-
+/** No-op kept for call-site compatibility; session is restored via the
+ *  HttpOnly refresh-token cookie on first apiRefreshToken() call at mount. */
 export function restoreTokens() {
-  _accessToken = localStorage.getItem("access_token");
-  _refreshToken = localStorage.getItem("refresh_token");
+  // intentionally empty — localStorage no longer holds tokens
 }
 
 export function clearTokens() {
   _accessToken = null;
-  _refreshToken = null;
-  localStorage.removeItem("access_token");
-  localStorage.removeItem("refresh_token");
+  // Non-sensitive UI state that's fine to keep in localStorage:
   localStorage.removeItem("is_admin");
   localStorage.removeItem("totp_verified");
+  // Remove any legacy tokens that may have been stored by a previous version
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
 }
 
 export function setIsAdmin(value: boolean) {
@@ -73,17 +66,17 @@ function authHeaders(): Record<string, string> {
 // ─── Token refresh ──────────────────────────────────────────────────────────
 
 export async function apiRefreshToken(): Promise<boolean> {
-  if (!_refreshToken) return false;
   try {
+    // Send an empty body; the browser attaches the HttpOnly refresh_token cookie
+    // automatically.  The server rotates the cookie and returns a new access token.
     const res = await fetch("/_matrix/client/r0/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: _refreshToken }),
+      body: JSON.stringify({}),
     });
     if (!res.ok) return false;
     const data = await res.json();
     setAccessToken(data.access_token);
-    setRefreshToken(data.refresh_token);
     if (data.is_admin !== undefined) setIsAdmin(data.is_admin);
     if (data.totp_verified !== undefined) setTotpVerified(data.totp_verified);
     return true;
@@ -101,7 +94,9 @@ async function authenticatedFetch(
     headers: { ...authHeaders(), ...init?.headers },
   });
 
-  if (res.status === 401 && _refreshToken) {
+  if (res.status === 401 && _accessToken) {
+    // Only attempt refresh when we have an access token (i.e., we were logged in)
+    // to avoid an extra round-trip for genuinely unauthenticated requests.
     // Deduplicate concurrent refresh attempts
     if (!_refreshPromise) {
       _refreshPromise = apiRefreshToken().finally(() => {
@@ -861,7 +856,7 @@ function uploadSingleFile(
         } catch {
           reject(new Error("Invalid response from server"));
         }
-      } else if (xhr.status === 401 && _refreshToken) {
+      } else if (xhr.status === 401 && _accessToken) {
         if (!_refreshPromise) {
           _refreshPromise = apiRefreshToken().finally(() => {
             _refreshPromise = null;
@@ -927,7 +922,7 @@ function uploadChunkXhrOnce(
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
-      } else if (xhr.status === 401 && _refreshToken) {
+      } else if (xhr.status === 401 && _accessToken) {
         if (!_refreshPromise) {
           _refreshPromise = apiRefreshToken().finally(() => { _refreshPromise = null; });
         }

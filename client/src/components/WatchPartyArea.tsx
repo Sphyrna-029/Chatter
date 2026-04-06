@@ -84,19 +84,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const ytId = extractYouTubeId(watchState.videoUrl);
   const isYoutube = ytId !== null;
 
-  // Build auth-aware src for local uploads (video elements can't send auth headers)
-  const videoSrc = useMemo(() => {
-    const url = watchState.videoUrl;
-    if (!url || isYoutube) return url;
-    if (url.includes("/external/") && state.requireAuthForUploads) {
-      const token = localStorage.getItem("access_token");
-      if (token) {
-        const sep = url.includes("?") ? "&" : "?";
-        return `${url}${sep}access_token=${encodeURIComponent(token)}`;
-      }
-    }
-    return url;
-  }, [watchState.videoUrl, isYoutube, state.requireAuthForUploads]);
+  // The media_session HttpOnly cookie (Path=/external) is sent automatically by the
+  // browser for <video> elements — no ?access_token= query param is needed.
+  const videoSrc = watchState.videoUrl;
 
   useEffect(() => {
     isYoutubeRef.current = isYoutube;

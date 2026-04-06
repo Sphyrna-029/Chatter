@@ -4,7 +4,7 @@ use super::{
 };
 use axum::{
     extract::ws::Message,
-    http::{HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::Json,
 };
 use base64::Engine;
@@ -272,6 +272,69 @@ pub(crate) async fn get_allowed_channel_ids(
         }
     }
     Some(allowed)
+}
+
+// ─── Session cookies ─────────────────────────────────────────────────────────
+
+/// Build `Set-Cookie` response headers that install the two session cookies:
+///
+/// * `refresh_token`  — HttpOnly; SameSite=Strict; Path=/;         7-day lifetime
+/// * `media_session`  — HttpOnly; SameSite=Strict; Path=/external; 15-min lifetime
+///
+/// `media_session` scoped to `/external` is sent automatically by browsers for
+/// `<video>`/`<audio>` elements pointing at `/external/*`, eliminating the need
+/// for `?access_token=…` query parameters.  Add the `Secure` attribute when
+/// serving over HTTPS.
+pub(crate) fn auth_cookie_headers(access_token: &str, refresh_token: &str) -> HeaderMap {
+    let mut m = HeaderMap::new();
+    m.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "refresh_token={}; HttpOnly; SameSite=Strict; Path=/; Max-Age=604800",
+            refresh_token
+        ))
+        .unwrap(),
+    );
+    m.append(
+        header::SET_COOKIE,
+        HeaderValue::from_str(&format!(
+            "media_session={}; HttpOnly; SameSite=Strict; Path=/external; Max-Age=900",
+            access_token
+        ))
+        .unwrap(),
+    );
+    m
+}
+
+/// Build `Set-Cookie` headers that expire both session cookies immediately (logout).
+pub(crate) fn clear_cookie_headers() -> HeaderMap {
+    let mut m = HeaderMap::new();
+    m.append(
+        header::SET_COOKIE,
+        HeaderValue::from_static(
+            "refresh_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
+        ),
+    );
+    m.append(
+        header::SET_COOKIE,
+        HeaderValue::from_static(
+            "media_session=; HttpOnly; SameSite=Strict; Path=/external; Max-Age=0",
+        ),
+    );
+    m
+}
+
+/// Extract the `refresh_token` value from the `Cookie` request header.
+pub(crate) fn extract_refresh_cookie(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            s.split(';').find_map(|part| {
+                let part = part.trim();
+                part.strip_prefix("refresh_token=").map(String::from)
+            })
+        })
 }
 
 /// Broadcast a JSON value to all WebSocket-connected members of a room.

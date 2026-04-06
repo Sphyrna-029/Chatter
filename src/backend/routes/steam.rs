@@ -1,5 +1,5 @@
 use super::super::{
-    helpers::{create_access_token, create_refresh_token, decode_token, error_response, extract_token, get_user_from_token, now_secs},
+    helpers::{auth_cookie_headers, create_access_token, create_refresh_token, decode_token, error_response, extract_token, get_user_from_token, now_secs},
     state::{AppState, RefreshTokenRecord, SteamLoginCode, UserRecord},
 };
 use axum::{
@@ -241,7 +241,7 @@ pub(crate) async fn steam_callback(
 pub(crate) async fn steam_exchange(
     State(state): State<Arc<AppState>>,
     Json(body): Json<Value>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let code = body
         .get("code")
         .and_then(|v| v.as_str())
@@ -255,13 +255,16 @@ pub(crate) async fn steam_exchange(
         return Err(error_response(StatusCode::GONE, "Code has expired"));
     }
 
-    Ok(Json(json!({
-        "access_token":  record.access_token,
-        "refresh_token": record.refresh_token,
-        "user_id":       record.user_id,
-        "is_admin":      record.is_admin,
-        "totp_verified": record.totp_verified,
-    })))
+    Ok((
+        auth_cookie_headers(&record.access_token, &record.refresh_token),
+        Json(json!({
+            "access_token":  record.access_token,
+            "refresh_token": record.refresh_token,
+            "user_id":       record.user_id,
+            "is_admin":      record.is_admin,
+            "totp_verified": record.totp_verified,
+        })),
+    ))
 }
 
 /// GET /api/steam/status (auth required)

@@ -133,7 +133,9 @@ pub(crate) struct JoinRoomRequest {
 
 #[derive(Deserialize)]
 pub(crate) struct RefreshTokenRequest {
-    pub(crate) refresh_token: String,
+    /// Clients may send the refresh token in the JSON body for backward
+    /// compatibility.  New clients omit this and rely on the HttpOnly cookie.
+    pub(crate) refresh_token: Option<String>,
 }
 
 #[derive(Deserialize)]

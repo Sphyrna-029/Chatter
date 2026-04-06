@@ -1,3 +1,5 @@
+import { getAccessToken } from "./api";
+
 // Fallback config used until the server responds
 const DEFAULT_WEBRTC_CONFIG: RTCConfiguration = {
   iceServers: [{ urls: ["stun:stun.l.google.com:19302"] }],
@@ -8,7 +10,7 @@ let _cachedConfig: RTCConfiguration | null = null;
 
 export async function fetchIceServers(): Promise<void> {
   try {
-    const token = localStorage.getItem("access_token");
+    const token = getAccessToken();
     if (!token) return;
     const res = await fetch("/api/ice-servers", {
       headers: { Authorization: `Bearer ${token}` },
