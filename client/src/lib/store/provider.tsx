@@ -62,6 +62,7 @@ import {
   apiGetThreadMessages,
   apiSendThreadMessage,
   apiSetThreadName,
+  apiDeleteThread,
   apiGetChannels,
   apiCreateChannel,
   apiUpdateChannel,
@@ -645,6 +646,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const deleteThread = useCallback(async () => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId || !cur.activeThreadEventId) return;
+    await apiDeleteThread(cur.currentRoomId, cur.activeThreadEventId);
+    dispatch({ type: "DELETE_THREAD", payload: cur.activeThreadEventId });
+  }, []);
+
   const addReaction = useCallback(
     async (eventId: string, emoji: string) => {
       if (!stateRef.current.currentRoomId || !stateRef.current.userId) return;
@@ -1008,6 +1016,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         closeThread,
         sendThreadMessage,
         setThreadName,
+        deleteThread,
         deleteMessage,
         hardDeleteNotification,
         editMessage,

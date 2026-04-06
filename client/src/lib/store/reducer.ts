@@ -262,6 +262,14 @@ export function reducer(state: AppState, action: Action): AppState {
             : state.threadRootMessage,
       };
     }
+    case "DELETE_THREAD":
+      return {
+        ...state,
+        messages: state.messages.filter((m) => m.event_id !== action.payload),
+        activeThreadEventId: state.activeThreadEventId === action.payload ? null : state.activeThreadEventId,
+        threadRootMessage: state.threadRootMessage?.event_id === action.payload ? null : state.threadRootMessage,
+        threadMessages: state.activeThreadEventId === action.payload ? [] : state.threadMessages,
+      };
     case "SET_THREAD_NAME":
       return {
         ...state,

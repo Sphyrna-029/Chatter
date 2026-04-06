@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Pencil, Check, X, Paperclip } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2 } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/popover";
 
 export function ThreadPanel() {
-  const { state, closeThread, sendThreadMessage, setThreadName } = useAppContext();
+  const { state, closeThread, sendThreadMessage, setThreadName, deleteThread } = useAppContext();
   const [body, setBody] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
@@ -183,6 +183,23 @@ export function ThreadPanel() {
     minute: "2-digit",
   });
 
+  const myMember = state.roomMembers.find((m) => m.userId === state.userId);
+  const threadOwnerMember = state.roomMembers.find((m) => m.userId === threadRootMessage.sender);
+  const myRole = myMember?.role ?? "member";
+  const threadOwnerRole = threadOwnerMember?.role ?? "member";
+  const isThreadOwner = threadRootMessage.sender === state.userId;
+  const canDelete =
+    isThreadOwner ||
+    (myRole === "owner" && threadOwnerRole !== "owner") ||
+    (myRole === "moderator" && threadOwnerRole === "member");
+
+  const handleDeleteThread = async () => {
+    if (!confirm("Delete this thread and all its replies?")) return;
+    try {
+      await deleteThread();
+    } catch {}
+  };
+
   const replyCount = threadMessages.length;
 
   return (
@@ -214,6 +231,15 @@ export function ThreadPanel() {
           <ArrowLeft className="h-4 w-4" />
           Back to chat
         </Button>
+        {canDelete && (
+          <button
+            onClick={handleDeleteThread}
+            title="Delete thread"
+            className="text-muted-foreground hover:text-destructive transition-colors shrink-0 opacity-0 group-hover:opacity-100"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
         <div className="flex items-center gap-1 flex-1 min-w-0">
           {editingName ? (
             <>

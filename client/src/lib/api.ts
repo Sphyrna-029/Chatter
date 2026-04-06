@@ -511,6 +511,14 @@ export async function apiSetThreadName(roomId: string, threadEventId: string, na
   if (!res.ok) throw new Error("Failed to set thread name");
 }
 
+export async function apiDeleteThread(roomId: string, threadEventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${roomId}/threads/${threadEventId}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw new Error("Failed to delete thread");
+}
+
 export async function apiSendThreadMessage(roomId: string, threadEventId: string, body: string) {
   const txnId = Date.now();
   const res = await authenticatedFetch(

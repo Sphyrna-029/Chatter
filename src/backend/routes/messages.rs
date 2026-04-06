@@ -1073,6 +1073,76 @@ pub(crate) async fn set_thread_name(
     Ok(Json(json!({ "ok": true })))
 }
 
+pub(crate) async fn delete_thread(
+    State(state): State<Arc<AppState>>,
+    Path((room_id, thread_event_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+    }
+
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    let root_doc = msg_coll
+        .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread not found"))?;
+
+    let sender = root_doc.get_str("sender").unwrap_or("").to_string();
+    let my_role = get_user_role(&state, &room_id, &user_id).await;
+    let sender_role = get_user_role(&state, &room_id, &sender).await;
+
+    let is_thread_owner = sender == user_id;
+    let can_delete_others =
+        (my_role == "owner" && sender_role != "owner") ||
+        (my_role == "moderator" && sender_role == "member");
+
+    if !is_thread_owner && !can_delete_others {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only the thread owner or a moderator/owner can delete this thread",
+        ));
+    }
+
+    // Delete all thread reply messages
+    let _ = msg_coll
+        .delete_many(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .await;
+
+    // Delete the root message
+    let _ = msg_coll
+        .delete_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
+        .await;
+
+    let broadcast = json!({
+        "type": "m.thread.deleted",
+        "room_id": room_id,
+        "thread_id": thread_event_id,
+        "sender": user_id,
+    });
+    broadcast_to_room(&state, &room_id, &broadcast).await;
+
+    Ok(Json(json!({ "ok": true })))
+}
+
 pub(crate) async fn get_room_threads(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,

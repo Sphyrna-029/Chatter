@@ -228,6 +228,10 @@ export function createWsMessageHandler(
           payload: { eventId: msg.thread_id, name: msg.name },
         });
       }
+    } else if (msg.type === "m.thread.deleted") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({ type: "DELETE_THREAD", payload: msg.thread_id });
+      }
     } else if (msg.type === "user_typing") {
       const typingChannelMatches = msg.channel_id
         ? msg.channel_id === stateRef.current.currentChannelId
