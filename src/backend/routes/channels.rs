@@ -336,6 +336,10 @@ pub(crate) async fn delete_channel(
 
     let _ = channels_coll.delete_one(doc! { "_id": &channel_id }).await;
 
+    // Delete all messages belonging to this channel
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let _ = msg_coll.delete_many(doc! { "room_id": &room_id, "channel_id": &channel_id }).await;
+
     // Remove voice channel state for this channel
     {
         let mut vc = state.voice_channels.write().await;
