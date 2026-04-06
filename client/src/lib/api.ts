@@ -1103,6 +1103,7 @@ export async function apiAcceptInvite(code: string) {
 export async function apiCreateInvite(roomId: string) {
   const res = await authenticatedFetch(`/api/rooms/${roomId}/invites`, {
     method: "POST",
+    body: JSON.stringify({}),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => null);
