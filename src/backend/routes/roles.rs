@@ -83,6 +83,14 @@ pub(crate) async fn create_role(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    // Membership gate — must precede role check so ex-members cannot act on the room.
+    {
+        let rm = state.room_members.read().await;
+        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        }
+    }
+
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
         return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can create roles"));

@@ -383,6 +383,92 @@ pub(crate) async fn leave_room(
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
+    // If the leaving user is the owner and other members remain, promote a
+    // successor so the room is never left without an owner.
+    let leaving_role = get_user_role(&state, &room_id, &user_id).await;
+    if leaving_role == "owner" {
+        let other_members: Vec<String> = {
+            let rm = state.room_members.read().await;
+            rm.get(&room_id)
+                .map(|m| m.iter().filter(|id| **id != user_id).cloned().collect())
+                .unwrap_or_default()
+        };
+
+        if !other_members.is_empty() {
+            // Prefer an existing moderator; fall back to alphabetically first member
+            // for determinism.
+            let successor = {
+                let roles = state.room_roles.read().await;
+                let room_roles = roles.get(&room_id);
+                let mod_pick = room_roles.and_then(|rr| {
+                    other_members
+                        .iter()
+                        .find(|id| rr.get(*id).map(|r| r == "moderator").unwrap_or(false))
+                        .cloned()
+                });
+                mod_pick.unwrap_or_else(|| {
+                    let mut sorted = other_members.clone();
+                    sorted.sort();
+                    sorted.into_iter().next().unwrap()
+                })
+            };
+
+            // Promote successor: update rooms.creator, room_members record, and cache
+            let _ = rooms_coll
+                .update_one(
+                    doc! { "_id": &room_id },
+                    doc! { "$set": { "creator": &successor } },
+                )
+                .await;
+            let members_coll_inner = state.db.collection::<RoomMemberRecord>("room_members");
+            let _ = members_coll_inner
+                .update_one(
+                    doc! { "room_id": &room_id, "user_id": &successor },
+                    doc! { "$set": { "role": "owner" } },
+                )
+                .await;
+            {
+                let mut roles_w = state.room_roles.write().await;
+                roles_w
+                    .entry(room_id.clone())
+                    .or_default()
+                    .insert(successor.clone(), "owner".to_string());
+            }
+
+            let successor_display = successor
+                .split(':')
+                .next()
+                .unwrap_or(&successor)
+                .trim_start_matches('@');
+            let transfer_event = json!({
+                "type": "m.room.member_role",
+                "room_id": room_id,
+                "user_id": successor,
+                "role": "owner",
+            });
+            broadcast_to_room(&state, &room_id, &transfer_event).await;
+            let mut sys = json!({
+                "type": "m.room.message",
+                "room_id": room_id,
+                "sender": user_id,
+                "content": {
+                    "msgtype": "m.system",
+                    "body": format!("Ownership transferred to {}", successor_display)
+                },
+                "event_id": generate_id("$"),
+                "origin_server_ts": now_millis()
+            });
+            if let Some(sys_ch) = get_system_channel_id(&state, &room_id).await {
+                sys["channel_id"] = json!(sys_ch);
+            }
+            let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+            if let Ok(bson_doc) = mongodb::bson::to_document(&sys) {
+                let _ = msg_coll.insert_one(bson_doc).await;
+            }
+            broadcast_to_room(&state, &room_id, &sys).await;
+        }
+    }
+
     // Remove from MongoDB
     let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
     let delete_result = members_coll
@@ -680,23 +766,29 @@ pub(crate) async fn update_room_settings(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    let room = rooms_coll
+    if rooms_coll
         .find_one(doc! { "_id": &room_id })
         .await
         .ok()
         .flatten()
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+        .is_none()
+    {
+        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
+    }
 
+    // SECURITY: use get_user_role (which gates on membership) rather than checking
+    // room.creator directly.  An ex-member who created the room must not be able
+    // to update settings after leaving.
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
-    let is_owner = room.creator == user_id;
-    let is_mod = caller_role == "moderator";
-
-    if !is_owner && !is_mod {
+    if caller_role != "owner" && caller_role != "moderator" {
         return Err(error_response(
             StatusCode::FORBIDDEN,
             "Only the room owner or moderators can edit settings",
         ));
     }
+
+    let is_owner = caller_role == "owner";
+    let is_mod = caller_role == "moderator";
 
     // Moderators may only toggle read_only; any other field requires owner
     if is_mod && !is_owner {
@@ -818,6 +910,14 @@ pub(crate) async fn kick_member(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
+    // Require the caller to be an active room member before checking their role.
+    {
+        let rm = state.room_members.read().await;
+        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        }
+    }
+
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
 
@@ -910,6 +1010,14 @@ pub(crate) async fn ban_member(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Require the caller to be an active room member before checking their role.
+    {
+        let rm = state.room_members.read().await;
+        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        }
+    }
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;

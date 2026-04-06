@@ -184,29 +184,48 @@ pub(crate) async fn require_admin(
 // ─── Role helpers ────────────────────────────────────────────────────────────
 
 pub(crate) async fn get_user_role(state: &AppState, room_id: &str, user_id: &str) -> String {
-    let roles = state.room_roles.read().await;
-    let role = roles
-        .get(room_id)
-        .and_then(|m| m.get(user_id))
-        .cloned()
-        .unwrap_or_else(|| "member".to_string());
+    // Release the read lock immediately after reading so we don't hold it while
+    // acquiring other locks (room_members) below — holding two locks in different
+    // orders in different call paths can deadlock.
+    let role = {
+        let roles = state.room_roles.read().await;
+        roles
+            .get(room_id)
+            .and_then(|m| m.get(user_id))
+            .cloned()
+            .unwrap_or_else(|| "member".to_string())
+    };
 
-    // Legacy fallback: if role is "member", check if user is actually the room creator
+    // Legacy fallback: if no explicit role is cached, check whether this user is
+    // the room creator and promote them to owner.
+    //
+    // SECURITY: gate on active membership — a former creator who left or was kicked
+    // must not retain owner-level access just because rooms.creator still names them.
     if role == "member" {
+        let is_member = {
+            let rm = state.room_members.read().await;
+            rm.get(room_id)
+                .map(|m| m.contains(&user_id.to_string()))
+                .unwrap_or(false)
+        };
+        if !is_member {
+            // Not a member → no privileges, return the lowest role.
+            return "member".to_string();
+        }
+
         use super::state::RoomRecord;
         use mongodb::bson::doc;
         let rooms_coll = state.db.collection::<RoomRecord>("rooms");
         if let Ok(Some(room)) = rooms_coll.find_one(doc! { "_id": room_id }).await {
             if room.creator == user_id {
                 // Backfill the cache so we don't hit DB again
-                drop(roles);
                 let mut roles_w = state.room_roles.write().await;
                 roles_w
                     .entry(room_id.to_string())
                     .or_default()
                     .insert(user_id.to_string(), "owner".to_string());
 
-                // Also update MongoDB
+                // Also update MongoDB so the record is consistent
                 let members_coll =
                     state.db.collection::<super::state::RoomMemberRecord>("room_members");
                 let _ = members_coll

@@ -115,6 +115,14 @@ pub(crate) async fn create_channel(
         return Err(error_response(StatusCode::BAD_REQUEST, "Cannot create channels in DMs"));
     }
 
+    // Membership gate — must precede role check so ex-members cannot act on the room.
+    {
+        let rm = state.room_members.read().await;
+        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
+            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        }
+    }
+
     // Permission check: owner or moderator
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
