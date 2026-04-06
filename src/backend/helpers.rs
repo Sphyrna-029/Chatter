@@ -245,6 +245,35 @@ pub(crate) async fn get_user_custom_role_ids(state: &AppState, room_id: &str, us
     role_ids
 }
 
+/// Returns the set of channel IDs the user is allowed to see in a room.
+/// Returns None if the user is an owner or moderator (can see all channels).
+/// Returns Some(ids) for regular members — only channels with empty view_roles
+/// or where the user holds a matching custom role.
+pub(crate) async fn get_allowed_channel_ids(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Option<Vec<String>> {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let role = get_user_role(state, room_id, user_id).await;
+    if role == "owner" || role == "moderator" {
+        return None; // privileged: unrestricted access
+    }
+    let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
+    let channels_coll = state.db.collection::<ChannelRecord>("channels");
+    let mut allowed = Vec::new();
+    if let Ok(mut cursor) = channels_coll.find(doc! { "room_id": room_id }).await {
+        while let Ok(Some(ch)) = cursor.try_next().await {
+            if ch.view_roles.is_empty() || ch.view_roles.iter().any(|r| user_roles.contains(r)) {
+                allowed.push(ch.channel_id.clone());
+            }
+        }
+    }
+    Some(allowed)
+}
+
 /// Broadcast a JSON value to all WebSocket-connected members of a room.
 /// Uses the write-through room_members cache (no DB call).
 pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: &Value) {

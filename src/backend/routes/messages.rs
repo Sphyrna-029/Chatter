@@ -2,7 +2,7 @@ use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
     helpers::{
         broadcast_to_room, error_response,
-        extract_token, generate_id, get_reactions_for_events, get_thread_counts_for_events,
+        extract_token, generate_id, get_allowed_channel_ids, get_reactions_for_events, get_thread_counts_for_events,
         get_user_from_token, get_user_role, get_user_custom_role_ids, is_moderator_or_owner,
         now_millis, send_to_user,
     },
@@ -328,6 +328,22 @@ pub(crate) async fn get_room_messages(
     let limit = query.limit.unwrap_or(50) as i64;
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
 
+    // Enforce channel view_roles access.
+    // Build an allowed-channel set for this user; None means privileged (no restriction).
+    let allowed_channels = get_allowed_channel_ids(&state, &room_id, &user_id).await;
+
+    // If a specific channel_id was requested, verify the user can see it.
+    if let Some(ref cid) = query.channel_id {
+        if let Some(ref ids) = allowed_channels {
+            if !ids.contains(cid) {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "You do not have access to this channel",
+                ));
+            }
+        }
+    }
+
     // Exclude thread messages (those with a thread_id field) from room message feed
     // If channel_id is provided, filter by it; otherwise show messages without channel_id (backward compat)
     // For showcase channels, also filter by showcase_pane if provided
@@ -341,7 +357,20 @@ pub(crate) async fn get_room_messages(
             ] }
         }
     } else {
-        doc! { "room_id": &room_id, "thread_id": { "$exists": false } }
+        // No specific channel requested — restrict to visible channels so private
+        // channel content cannot be read by iterating the room without a channel_id.
+        if let Some(ref ids) = allowed_channels {
+            let bson_ids: Vec<mongodb::bson::Bson> = ids
+                .iter()
+                .map(|s| mongodb::bson::Bson::String(s.clone()))
+                .collect();
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "$or": [
+                { "channel_id": { "$in": bson_ids } },
+                { "channel_id": { "$exists": false } }
+            ]}
+        } else {
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false } }
+        }
     };
 
     // Get total count for this room (excluding thread messages)
@@ -361,6 +390,15 @@ pub(crate) async fn get_room_messages(
                     { "channel_id": { "$exists": false } }
                 ] }
             }
+        } else if let Some(ref ids) = allowed_channels {
+            let bson_ids: Vec<mongodb::bson::Bson> = ids
+                .iter()
+                .map(|s| mongodb::bson::Bson::String(s.clone()))
+                .collect();
+            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts }, "$or": [
+                { "channel_id": { "$in": bson_ids } },
+                { "channel_id": { "$exists": false } }
+            ]}
         } else {
             doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "origin_server_ts": { "$lte": around_ts } }
         };
@@ -1245,6 +1283,23 @@ pub(crate) async fn search_messages(
                 "content.body": { "$regex": q, "$options": "i" }
             }
         }
+    };
+
+    // Restrict search results to channels the user is allowed to see.
+    let mongo_filter = if let Some(allowed) = get_allowed_channel_ids(&state, &room_id, &user_id).await {
+        let bson_ids: Vec<mongodb::bson::Bson> = allowed
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
+        doc! { "$and": [
+            mongo_filter,
+            { "$or": [
+                { "channel_id": { "$in": bson_ids } },
+                { "channel_id": { "$exists": false } }
+            ]}
+        ]}
+    } else {
+        mongo_filter
     };
 
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");

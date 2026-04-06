@@ -1,6 +1,6 @@
 use super::super::{
     dto::SyncQuery,
-    helpers::{error_response, extract_token, get_reactions_for_events, get_user_from_token},
+    helpers::{error_response, extract_token, get_allowed_channel_ids, get_reactions_for_events, get_user_from_token},
     state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
 use axum::{
@@ -41,10 +41,32 @@ pub(crate) async fn sync(
             _ => continue,
         };
 
+        // Compute which channels this user may see (None = privileged, sees all).
+        // For DMs there are no channels so no restriction is needed.
+        let allowed_channel_ids: Option<Vec<String>> = if room_data.is_dm {
+            None
+        } else {
+            get_allowed_channel_ids(&state, room_id, &user_id).await
+        };
+
+        // Build message filter restricted to visible channels
+        let msg_filter = if let Some(ref ids) = allowed_channel_ids {
+            let bson_ids: Vec<mongodb::bson::Bson> = ids
+                .iter()
+                .map(|s| mongodb::bson::Bson::String(s.clone()))
+                .collect();
+            doc! { "room_id": room_id, "$or": [
+                { "channel_id": { "$in": bson_ids } },
+                { "channel_id": { "$exists": false } }
+            ]}
+        } else {
+            doc! { "room_id": room_id }
+        };
+
         // Fetch last 10 messages from MongoDB
         let mut last_msgs: Vec<Value> = Vec::new();
         if let Ok(mut cursor) = msg_coll
-            .find(doc! { "room_id": room_id })
+            .find(msg_filter)
             .sort(doc! { "origin_server_ts": -1 })
             .limit(10)
             .await
@@ -272,6 +294,14 @@ pub(crate) async fn sync(
                 .await
             {
                 while let Ok(Some(ch)) = ch_cursor.try_next().await {
+                    // Only expose channels the user is allowed to see
+                    let visible = match &allowed_channel_ids {
+                        None => true, // privileged: sees all
+                        Some(ids) => ids.contains(&ch.channel_id),
+                    };
+                    if !visible {
+                        continue;
+                    }
                     channels_data.push(json!({
                         "channel_id": ch.channel_id,
                         "name": ch.name,
