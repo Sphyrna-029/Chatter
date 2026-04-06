@@ -353,7 +353,7 @@ pub(crate) async fn get_room_messages(
         } else {
             doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "$or": [
                 { "channel_id": cid },
-                { "channel_id": { "$exists": false } }
+                { "channel_id": { "$exists": false }, "content.webhook": { "$ne": true } }
             ] }
         }
     } else {
@@ -387,7 +387,7 @@ pub(crate) async fn get_room_messages(
             } else {
                 doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "$or": [
                     { "channel_id": cid },
-                    { "channel_id": { "$exists": false } }
+                    { "channel_id": { "$exists": false }, "content.webhook": { "$ne": true } }
                 ] }
             }
         } else if let Some(ref ids) = allowed_channels {
