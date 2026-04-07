@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { WifiOff, ChevronRight, Menu, Users, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff } from "lucide-react";
+import { WifiOff, ChevronRight, Menu, Users, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { AdminDashboard } from "./AdminDashboard";
@@ -118,6 +118,8 @@ export function ChatLayout() {
   const startScreenShareRef = useRef<(() => void) | null>(null);
   const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null, status: "closed" });
   const stopScreenShareRef = useRef<(() => void) | null>(null);
+  const startWebcamRef = useRef<(() => void) | null>(null);
+  const stopWebcamRef = useRef<(() => void) | null>(null);
   const setUserVolumeRef = useRef<((userId: string, vol: number) => void) | null>(null);
   const speakingUsersRef = useRef<Set<string>>(new Set());
   const [isPiP, setIsPiP] = useState(false);
@@ -446,6 +448,8 @@ export function ChatLayout() {
                 toggleDeafenRef={toggleDeafenRef}
                 startScreenShareRef={startScreenShareRef}
                 stopScreenShareRef={stopScreenShareRef}
+                startWebcamRef={startWebcamRef}
+                stopWebcamRef={stopWebcamRef}
                 connQualityRef={connQualityRef}
                 setUserVolumeRef={setUserVolumeRef}
                 speakingUsersRef={speakingUsersRef}
@@ -546,12 +550,17 @@ export function ChatLayout() {
                 isMuted={state.isMuted}
                 isDeafened={state.isDeafened}
                 isScreenSharing={state.isScreenSharing}
+                isWebcamActive={state.isWebcamActive}
                 onNavigate={() => { if (state.voiceRoomId) selectRoom(state.voiceRoomId); }}
                 onToggleMute={() => toggleMuteRef.current?.()}
                 onToggleDeafen={() => toggleDeafenRef.current?.()}
                 onToggleScreenShare={() => {
                   if (state.isScreenSharing) stopScreenShareRef.current?.();
                   else startScreenShareRef.current?.();
+                }}
+                onToggleWebcam={() => {
+                  if (state.isWebcamActive) stopWebcamRef.current?.();
+                  else startWebcamRef.current?.();
                 }}
                 onHangUp={() => leaveVoiceRef.current?.()}
               />
@@ -609,17 +618,19 @@ interface VoiceBarProps {
   isMuted: boolean;
   isDeafened: boolean;
   isScreenSharing: boolean;
+  isWebcamActive: boolean;
   onNavigate: () => void;
   onToggleMute: () => void;
   onToggleDeafen: () => void;
   onToggleScreenShare: () => void;
+  onToggleWebcam: () => void;
   onHangUp: () => void;
 }
 
 function VoiceBar({
   channelName, roomName, occupiedSince,
-  isMuted, isDeafened, isScreenSharing,
-  onNavigate, onToggleMute, onToggleDeafen, onToggleScreenShare, onHangUp,
+  isMuted, isDeafened, isScreenSharing, isWebcamActive,
+  onNavigate, onToggleMute, onToggleDeafen, onToggleScreenShare, onToggleWebcam, onHangUp,
 }: VoiceBarProps) {
   return (
     <div className="flex items-center gap-3 shrink-0 bg-zinc-900 border-t border-zinc-700 px-4 py-2">
@@ -657,6 +668,13 @@ function VoiceBar({
           title={isDeafened ? "Undeafen" : "Deafen"}
         >
           {isDeafened ? <HeadphoneOff className="w-4 h-4" /> : <Headphones className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={onToggleWebcam}
+          className={`p-1.5 rounded-md transition-colors ${isWebcamActive ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          title={isWebcamActive ? "Stop camera" : "Share camera"}
+        >
+          <Camera className="w-4 h-4" />
         </button>
         <button
           onClick={onToggleScreenShare}

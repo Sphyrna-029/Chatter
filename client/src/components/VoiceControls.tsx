@@ -27,6 +27,8 @@ interface VoiceControlsProps {
   toggleDeafenRef?: React.MutableRefObject<(() => void) | null>;
   startScreenShareRef?: React.MutableRefObject<(() => void) | null>;
   stopScreenShareRef?: React.MutableRefObject<(() => void) | null>;
+  startWebcamRef?: React.MutableRefObject<(() => void) | null>;
+  stopWebcamRef?: React.MutableRefObject<(() => void) | null>;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
   setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
   speakingUsersRef?: React.MutableRefObject<Set<string>>;
@@ -48,7 +50,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
   return 1;
 }
 
-export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, startWebcamRef, stopWebcamRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
@@ -91,6 +93,16 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
     if (stopScreenShareRef) stopScreenShareRef.current = screen.stopScreenShare;
     return () => { if (stopScreenShareRef) stopScreenShareRef.current = null; };
   }, [stopScreenShareRef, screen.stopScreenShare]);
+
+  useEffect(() => {
+    if (startWebcamRef) startWebcamRef.current = () => setCameraModalOpen(true);
+    return () => { if (startWebcamRef) startWebcamRef.current = null; };
+  }, [startWebcamRef]);
+
+  useEffect(() => {
+    if (stopWebcamRef) stopWebcamRef.current = webcam.stopWebcam;
+    return () => { if (stopWebcamRef) stopWebcamRef.current = null; };
+  }, [stopWebcamRef, webcam.stopWebcam]);
 
   useEffect(() => {
     if (setUserVolumeRef) setUserVolumeRef.current = voice.setUserVolume;
