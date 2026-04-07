@@ -10,6 +10,12 @@ use super::{
         handle_voice_webrtc_subscribe_candidate, handle_voice_webrtc_subscribe_offer,
         teardown_voice_publisher, teardown_voice_subscriptions_for_listener,
     },
+    webcam_webrtc::{
+        handle_webcam_webrtc_publish_candidate, handle_webcam_webrtc_publish_offer,
+        handle_webcam_webrtc_subscribe_candidate, handle_webcam_webrtc_subscribe_offer,
+        teardown_webcam_publisher, teardown_webcam_subscriber_pair,
+        teardown_webcam_subscriptions_for_viewer,
+    },
 };
 use crate::backend::{
     helpers::{broadcast_to_room, generate_id, get_user_from_token, is_moderator_or_owner, now_millis, now_secs, send_to_user},
@@ -330,6 +336,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let publisher_room = teardown_screen_publisher(&state, user_id).await;
+                teardown_webcam_subscriptions_for_viewer(&state, user_id).await;
+                let webcam_pub_room = teardown_webcam_publisher(&state, user_id).await;
 
                 let leave_event = json!({
                     "type": "voice_user_left",
@@ -354,6 +362,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "user_id": user_id
                     });
                     broadcast_to_room(&state, published_room_id, &event).await;
+                }
+                if let Some(ref webcam_room_id) = webcam_pub_room {
+                    let event = json!({
+                        "type": "webcam_share_stopped",
+                        "room_id": webcam_room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, webcam_room_id, &event).await;
                 }
             }
 
@@ -420,6 +436,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let publisher_room = teardown_screen_publisher(&state, user_id).await;
+                teardown_webcam_subscriptions_for_viewer(&state, user_id).await;
+                let webcam_publisher_room = teardown_webcam_publisher(&state, user_id).await;
 
                 // Clear occupied_since when channel empties
                 let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
@@ -453,6 +471,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "user_id": user_id
                     });
                     broadcast_to_room(&state, &published_room_id, &event).await;
+                }
+                if let Some(webcam_room_id) = webcam_publisher_room {
+                    let event = json!({
+                        "type": "webcam_share_stopped",
+                        "room_id": webcam_room_id,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, &webcam_room_id, &event).await;
                 }
             }
         }
@@ -580,6 +606,76 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .unwrap_or("");
             if !sharer_user_id.is_empty() {
                 teardown_screen_subscriber_pair(&state, user_id, sharer_user_id).await;
+            }
+        }
+        "webcam_share_start" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let event = json!({
+                "type": "webcam_share_started",
+                "room_id": room_id,
+                "channel_id": channel_id,
+                "user_id": user_id
+            });
+            broadcast_to_room(&state, room_id, &event).await;
+        }
+        "webcam_share_stop" => {
+            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let _ = teardown_webcam_publisher(&state, user_id).await;
+            let event = json!({
+                "type": "webcam_share_stopped",
+                "room_id": room_id,
+                "channel_id": channel_id,
+                "user_id": user_id
+            });
+            broadcast_to_room(&state, room_id, &event).await;
+        }
+        "webcam_webrtc_publish_offer" => {
+            let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
+            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            handle_webcam_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
+        }
+        "webcam_webrtc_publish_candidate" => {
+            if let Some(candidate_value) = msg.get("candidate") {
+                handle_webcam_webrtc_publish_candidate(&state, user_id, candidate_value).await;
+            }
+        }
+        "webcam_webrtc_subscribe_offer" => {
+            let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            handle_webcam_webrtc_subscribe_offer(
+                state.clone(),
+                user_id,
+                room_id,
+                sharer_user_id,
+                sdp,
+            )
+            .await;
+        }
+        "webcam_webrtc_subscribe_candidate" => {
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if let Some(candidate_value) = msg.get("candidate") {
+                handle_webcam_webrtc_subscribe_candidate(
+                    &state,
+                    user_id,
+                    sharer_user_id,
+                    candidate_value,
+                )
+                .await;
+            }
+        }
+        "webcam_webrtc_unsubscribe" => {
+            let sharer_user_id = msg
+                .get("sharer_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if !sharer_user_id.is_empty() {
+                teardown_webcam_subscriber_pair(&state, user_id, sharer_user_id).await;
             }
         }
         "voice_webrtc_publish_offer" => {
@@ -1559,6 +1655,9 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
     teardown_screen_subscriptions_for_viewer(state, user_id).await;
     let publisher_room = teardown_screen_publisher(state, user_id).await;
 
+    teardown_webcam_subscriptions_for_viewer(state, user_id).await;
+    let webcam_publisher_room = teardown_webcam_publisher(state, user_id).await;
+
     // Remove from voice channels and broadcast leaves
     let voice_rooms: Vec<(String, bool, Vec<String>)> = {
         let mut vc = state.voice_channels.write().await;
@@ -1613,6 +1712,15 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
             });
             broadcast_to_room(state, &room_id, &event).await;
         }
+    }
+
+    if let Some(room_id) = webcam_publisher_room {
+        let event = json!({
+            "type": "webcam_share_stopped",
+            "room_id": room_id,
+            "user_id": user_id
+        });
+        broadcast_to_room(state, &room_id, &event).await;
     }
 
     // Watch party host transfer

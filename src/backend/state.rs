@@ -58,6 +58,8 @@ pub struct AppState {
     pub(crate) webrtc_api: Arc<API>,
     pub(crate) screen_publishers: RwLock<HashMap<String, ScreenPublisherState>>,
     pub(crate) screen_subscribers: RwLock<HashMap<String, ScreenSubscriberState>>,
+    pub(crate) webcam_publishers: RwLock<HashMap<String, WebcamPublisherState>>,
+    pub(crate) webcam_subscribers: RwLock<HashMap<String, WebcamSubscriberState>>,
     pub(crate) voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
@@ -604,6 +606,24 @@ pub(crate) struct ScreenSubscriberState {
     pub(crate) peer_connection: Arc<RTCPeerConnection>,
     pub(crate) forward_task: JoinHandle<()>,
     pub(crate) audio_forward_task: Option<JoinHandle<()>>,
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub(crate) struct WebcamPublisherState {
+    pub(crate) room_id: String,
+    pub(crate) channel_id: String,
+    pub(crate) peer_connection: Arc<RTCPeerConnection>,
+    pub(crate) media_ssrc: Option<u32>,
+    pub(crate) video_codec: Option<RTCRtpCodecCapability>,
+    pub(crate) rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
+}
+
+pub(crate) struct WebcamSubscriberState {
+    pub(crate) viewer_user_id: String,
+    pub(crate) sharer_user_id: String,
+    pub(crate) peer_connection: Arc<RTCPeerConnection>,
+    pub(crate) forward_task: JoinHandle<()>,
 }
 
 #[derive(Clone)]

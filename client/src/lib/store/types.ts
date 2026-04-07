@@ -45,6 +45,9 @@ export interface AppState {
   screenViewerOpen: boolean;
   selectedScreenSharer: string | null;
   screenViewers: Record<string, string[]>;
+  // Webcam
+  isWebcamActive: boolean;
+  activeWebcamStreamers: string[];
   // Voice channel occupied-since timestamps (ms epoch), keyed by channel_id
   voiceChannelOccupiedSince: Record<string, number>;
   // UI
@@ -83,9 +86,10 @@ export interface AppState {
   blockedUsers: string[];
 }
 
-// Module-level shared map for screen share MediaStreams
+// Module-level shared maps for MediaStreams
 // (MediaStream is not serializable so it can't live in React state)
 export const screenStreamsMap = new Map<string, MediaStream>();
+export const webcamStreamsMap = new Map<string, MediaStream>();
 
 export type Action =
   | { type: "LOGIN"; payload: { accessToken: string; userId: string } }
@@ -101,7 +105,7 @@ export type Action =
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
-  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "voiceChannelId" | "voiceChannelName">> }
+  | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "isWebcamActive" | "voiceChannelId" | "voiceChannelName">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
@@ -111,6 +115,9 @@ export type Action =
   | { type: "SET_ACTIVE_SCREEN_SHARERS"; payload: string[] }
   | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null } }
   | { type: "SET_SCREEN_VIEWERS"; payload: { sharerId: string; viewers: string[] } }
+  | { type: "WEBCAM_SHARE_STARTED"; payload: string }
+  | { type: "WEBCAM_SHARE_STOPPED"; payload: string }
+  | { type: "SET_ACTIVE_WEBCAM_STREAMERS"; payload: string[] }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
@@ -204,6 +211,8 @@ export const initialState: AppState = {
   screenViewerOpen: false,
   selectedScreenSharer: null,
   screenViewers: {},
+  isWebcamActive: false,
+  activeWebcamStreamers: [],
   voiceChannelOccupiedSince: {},
   roomMentions: {},
   roomUnreadCounts: {},

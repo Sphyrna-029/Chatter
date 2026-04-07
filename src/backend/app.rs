@@ -55,6 +55,8 @@ pub async fn build_state() -> Arc<AppState> {
         webrtc_api,
         screen_publishers: RwLock::new(HashMap::new()),
         screen_subscribers: RwLock::new(HashMap::new()),
+        webcam_publishers: RwLock::new(HashMap::new()),
+        webcam_subscribers: RwLock::new(HashMap::new()),
         voice_publishers: RwLock::new(HashMap::new()),
         voice_subscribers: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),

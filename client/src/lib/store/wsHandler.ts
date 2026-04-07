@@ -370,6 +370,20 @@ export function createWsMessageHandler(
         type: "SET_SCREEN_VIEWERS",
         payload: { sharerId: msg.sharer_user_id, viewers: msg.viewers || [] },
       });
+    } else if (msg.type === "webcam_share_started") {
+      const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+      if (isVoiceRoom) {
+        dispatch({ type: "WEBCAM_SHARE_STARTED", payload: msg.user_id });
+        // Auto-open the viewer for other users when someone starts webcam
+        if (msg.user_id !== stateRef.current.userId && stateRef.current.inVoiceChannel) {
+          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true } });
+        }
+      }
+    } else if (msg.type === "webcam_share_stopped") {
+      const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
+      if (isVoiceRoom) {
+        dispatch({ type: "WEBCAM_SHARE_STOPPED", payload: msg.user_id });
+      }
     } else if (msg.type === "m.reply_notification") {
       if (msg.room_id !== stateRef.current.currentRoomId) {
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;

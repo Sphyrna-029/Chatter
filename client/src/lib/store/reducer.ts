@@ -202,6 +202,20 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload.sharerId]: action.payload.viewers,
         },
       };
+    case "WEBCAM_SHARE_STARTED":
+      return {
+        ...state,
+        activeWebcamStreamers: state.activeWebcamStreamers.includes(action.payload)
+          ? state.activeWebcamStreamers
+          : [...state.activeWebcamStreamers, action.payload],
+      };
+    case "WEBCAM_SHARE_STOPPED":
+      return {
+        ...state,
+        activeWebcamStreamers: state.activeWebcamStreamers.filter((id) => id !== action.payload),
+      };
+    case "SET_ACTIVE_WEBCAM_STREAMERS":
+      return { ...state, activeWebcamStreamers: action.payload };
     case "SET_VIEW":
       return { ...state, currentView: action.payload };
     case "SET_MENTION":

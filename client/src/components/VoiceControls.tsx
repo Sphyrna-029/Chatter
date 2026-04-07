@@ -8,11 +8,13 @@ import {
 import { useAppContext } from "@/lib/store";
 import { useWebRTCVoice } from "@/hooks/useWebRTCVoice";
 import { useWebRTCScreen } from "@/hooks/useWebRTCScreen";
+import { useWebRTCWebcam } from "@/hooks/useWebRTCWebcam";
 import { useConnectionStats } from "@/hooks/useConnectionStats";
 import { useSpeakingDetection } from "@/hooks/useSpeakingDetection";
 import { VoiceToolbar } from "./voice/VoiceToolbar";
 import { VoiceDebugPanel } from "./voice/VoiceDebugPanel";
 import { VoiceMemberList } from "./voice/VoiceMemberList";
+import { CameraSelectModal } from "./CameraSelectModal";
 
 export type ConnectionQuality = 0 | 1 | 2 | 3 | 4;
 export type VoiceConnectionStatus = "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
@@ -49,6 +51,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
 export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
+  const [cameraModalOpen, setCameraModalOpen] = useState(false);
   const [volumes, setVolumes] = useState<Record<string, number>>({});
 
   // Cross-hook cleanup coordination
@@ -56,6 +59,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
 
   const voice = useWebRTCVoice({ cleanupScreenRef });
   const screen = useWebRTCScreen();
+  const webcam = useWebRTCWebcam();
 
   // Expose voice actions to parent via refs
   useEffect(() => {
@@ -94,7 +98,10 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
   }, [setUserVolumeRef, voice.setUserVolume]);
 
   // Wire up the cleanup ref after both hooks are initialized
-  cleanupScreenRef.current = screen.fullCleanup;
+  cleanupScreenRef.current = async () => {
+    await screen.fullCleanup();
+    await webcam.fullCleanup();
+  };
 
   // Connection stats polling
   const connStats = useConnectionStats(state.inVoiceChannel, {
@@ -187,6 +194,13 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         </DialogContent>
       </Dialog>
 
+      {/* Camera device selection modal */}
+      <CameraSelectModal
+        open={cameraModalOpen}
+        onClose={() => setCameraModalOpen(false)}
+        onStart={(deviceId) => webcam.startWebcam(deviceId)}
+      />
+
       {/* Controls at bottom */}
       <VoiceToolbar
         inVoiceChannel={state.inVoiceChannel}
@@ -195,6 +209,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         voiceInputMode={state.voiceInputMode}
         isScreenSharing={state.isScreenSharing}
         screenFps={screen.screenFps}
+        isWebcamActive={state.isWebcamActive}
         debugOpen={debugOpen}
         hideScreenShare={
           (state.voiceRoomId
@@ -211,6 +226,8 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         onStartScreenShare={screen.startScreenShare}
         onStopScreenShare={screen.stopScreenShare}
         onSetScreenFps={screen.setScreenFps}
+        onStartWebcam={() => setCameraModalOpen(true)}
+        onStopWebcam={webcam.stopWebcam}
         onToggleDebug={() => setDebugOpen((o) => !o)}
       />
     </div>

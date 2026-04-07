@@ -330,7 +330,7 @@ export function useWebRTCScreen() {
     window.dispatchEvent(new CustomEvent("screen-stream-update"));
   }, [state.activeScreenSharers]);
 
-  // Auto-close viewer when no more sharers, or switch away from a sharer who left
+  // Auto-close viewer when no more sharers (only close if no webcam streams either)
   useEffect(() => {
     if (state.activeScreenSharers.length === 0) {
       screenStreamsMap.forEach((_stream, id) => {
@@ -338,7 +338,12 @@ export function useWebRTCScreen() {
           screenStreamsMap.delete(id);
         }
       });
-      dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: false, sharer: null } });
+      // Only close the viewer if no webcam streams are active
+      if (state.activeWebcamStreamers.length === 0) {
+        dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: false, sharer: null } });
+      } else {
+        dispatch({ type: "SET_SCREEN_VIEWER", payload: { sharer: null } });
+      }
     } else if (
       state.screenViewerOpen &&
       state.selectedScreenSharer &&
@@ -349,7 +354,7 @@ export function useWebRTCScreen() {
         : state.activeScreenSharers[0];
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { sharer: next } });
     }
-  }, [state.activeScreenSharers, state.screenViewerOpen, state.selectedScreenSharer, state.userId, dispatch]);
+  }, [state.activeScreenSharers, state.activeWebcamStreamers, state.screenViewerOpen, state.selectedScreenSharer, state.userId, dispatch]);
 
   // ─── Frozen screen share video detection ──────────────────────────────────
   const frozenCountersRef = useRef<Record<string, number>>({});
