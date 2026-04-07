@@ -198,10 +198,6 @@ export function WhiteboardArea() {
   const shapeStart = useRef<number[] | null>(null);
   const lastCursorSend = useRef(0);
 
-  const isOwnerOrMod = state.roomMembers.some(
-    (m) => m.userId === userId && (m.role === "owner" || m.role === "moderator")
-  );
-
   // Ensure buffer exists
   const getBuffer = useCallback(() => {
     if (!bufferRef.current) {
@@ -630,17 +626,15 @@ export function WhiteboardArea() {
             <TooltipContent side="right">Undo</TooltipContent>
           </Tooltip>
 
-          {/* Clear (owner/mod only) */}
-          {isOwnerOrMod && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={handleClear}>
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="right">Clear Canvas</TooltipContent>
-            </Tooltip>
-          )}
+          {/* Clear canvas */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={handleClear}>
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Clear Canvas</TooltipContent>
+          </Tooltip>
         </TooltipProvider>
       </div>
 

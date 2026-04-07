@@ -883,17 +883,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         "whiteboard_clear" => {
             if !room_id.is_empty() {
                 let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                // Only owner/moderator can clear
-                if is_moderator_or_owner(&state, room_id, user_id).await {
-                    let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
-                    let _ = coll.delete_many(doc! { "room_id": room_id, "channel_id": &channel_id }).await;
-                    let event = json!({
-                        "type": "whiteboard_clear",
-                        "room_id": room_id,
-                        "channel_id": channel_id,
-                    });
-                    broadcast_to_room(&state, room_id, &event).await;
-                }
+                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                let _ = coll.delete_many(doc! { "room_id": room_id, "channel_id": &channel_id }).await;
+                let event = json!({
+                    "type": "whiteboard_clear",
+                    "room_id": room_id,
+                    "channel_id": channel_id,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
             }
         }
         "whiteboard_undo" => {
