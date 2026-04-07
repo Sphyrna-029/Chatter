@@ -195,7 +195,7 @@ export function ChatLayout() {
   const hasActiveScreenShare =
     state.screenViewerOpen &&
     state.inVoiceChannel &&
-    state.activeScreenSharers.length > 0;
+    (state.activeScreenSharers.length > 0 || state.activeWebcamStreamers.length > 0);
   const showViewer = hasActiveScreenShare && isOnVoiceRoom;
 
   // Sync hidden video's srcObject with the selected screen sharer's stream
