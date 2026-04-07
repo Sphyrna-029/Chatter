@@ -313,6 +313,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         showNewDividerRef.current = true;
         setShowNewDivider(true);
         isNearBottomRef.current = false;
+        // Clear the badge immediately — count is already captured in unreadCountRef for the divider
+        dispatch({ type: "CLEAR_CHANNEL_UNREAD", payload: channelId! });
       } else {
         pendingDividerRef.current = false;
         showNewDividerRef.current = false;
