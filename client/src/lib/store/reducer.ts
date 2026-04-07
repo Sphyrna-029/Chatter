@@ -196,12 +196,12 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         screenViewerOpen: action.payload.open ?? state.screenViewerOpen,
         selectedScreenSharer: selectingSharer
-          ? action.payload.sharer
+          ? (action.payload.sharer ?? null)
           : selectingWebcam
             ? null
             : state.selectedScreenSharer,
         selectedWebcamStreamer: selectingWebcam
-          ? action.payload.webcamStreamer
+          ? (action.payload.webcamStreamer ?? null)
           : selectingSharer
             ? null
             : state.selectedWebcamStreamer,
