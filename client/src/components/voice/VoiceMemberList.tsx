@@ -11,6 +11,7 @@ interface VoiceMemberListProps {
   isMuted: boolean;
   voiceMemberStates: Record<string, { muted: boolean; screen_sharing: boolean }>;
   activeScreenSharers: string[];
+  activeWebcamStreamers: string[];
   selectedScreenSharer: string | null;
   screenViewerOpen: boolean;
   connStats: Record<string, PeerStats>;
@@ -29,6 +30,7 @@ export function VoiceMemberList({
   isMuted,
   voiceMemberStates,
   activeScreenSharers,
+  activeWebcamStreamers,
   selectedScreenSharer,
   screenViewerOpen,
   connStats,
@@ -49,6 +51,7 @@ export function VoiceMemberList({
           const memberState = voiceMemberStates[memberId];
           const isMutedMember = memberState?.muted || (isSelf && isMuted);
           const isSharing = memberState?.screen_sharing || activeScreenSharers.includes(memberId);
+          const isWebcamStreaming = activeWebcamStreamers.includes(memberId);
           const vol = volumes[memberId] ?? 1;
           const isSpeaking = speakingUsers.has(memberId) && !isMutedMember;
           const isWatching = selectedScreenSharer === memberId && screenViewerOpen;
@@ -90,6 +93,9 @@ export function VoiceMemberList({
                 <span className={cn("truncate", isSpeaking && "text-green-400 font-semibold")}>
                   {name}{isSelf && " (You)"}
                 </span>
+                {isWebcamStreaming && (
+                  <span className="text-[10px] shrink-0 text-blue-400" title="Sharing camera">📷</span>
+                )}
               </div>
               {/* Sharing badge — clickable to open/toggle stream */}
               {isSharing && (

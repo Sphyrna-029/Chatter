@@ -480,6 +480,19 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                     )}
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
+                      {state.activeWebcamStreamers.includes(m.userId) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true } });
+                          }}
+                          className="shrink-0 p-0.5 rounded hover:bg-blue-500/20 transition-colors"
+                          title={`${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))} is sharing their camera`}
+                        >
+                          <Camera className="h-3 w-3 text-blue-400" />
+                        </button>
+                      )}
                       {m.screen_sharing && (
                         <button
                           type="button"

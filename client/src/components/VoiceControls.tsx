@@ -186,6 +186,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         isMuted={state.isMuted}
         voiceMemberStates={state.voiceMemberStates}
         activeScreenSharers={state.activeScreenSharers}
+        activeWebcamStreamers={state.activeWebcamStreamers}
         selectedScreenSharer={state.selectedScreenSharer}
         screenViewerOpen={state.screenViewerOpen}
         connStats={connStats}
