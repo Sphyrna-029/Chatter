@@ -223,6 +223,7 @@ export function ScreenShareHeader({
 export function ScreenShareViewer() {
   const { state, dispatch } = useAppContext();
   const mainVideoRef = useRef<HTMLVideoElement>(null);
+  const mainWebcamVideoRef = useRef<HTMLVideoElement>(null);
   const videoContainerRef = useRef<HTMLDivElement | null>(null);
   const thumbVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const webcamVideoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
@@ -293,7 +294,14 @@ export function ScreenShareViewer() {
   const webcamStreamers = state.activeWebcamStreamers;
 
   const currentSharer = state.selectedScreenSharer;
+  const currentWebcamStreamer = state.selectedWebcamStreamer;
+  // A webcam is focused in the main view when explicitly selected, or when
+  // there are no screen sharers at all.
+  const focusedWebcam = currentWebcamStreamer
+    ?? (sharers.length === 0 && webcamStreamers.length > 0 ? webcamStreamers[0] : null);
+  const showingWebcam = focusedWebcam !== null && (currentWebcamStreamer !== null || !currentSharer);
   const isSelfSharer = currentSharer === state.userId;
+  const isSelfWebcam = focusedWebcam === state.userId;
   const currentVolume = currentSharer ? (screenVolumes[currentSharer] ?? 50) : 50;
   const currentMuted = currentSharer ? (screenMuted[currentSharer] ?? false) : false;
 
@@ -316,9 +324,16 @@ export function ScreenShareViewer() {
         mainVideoRef.current.srcObject = stream;
         mainVideoRef.current.play().catch(() => {});
       }
-      // Mute own stream to avoid audio feedback loop
       mainVideoRef.current.muted = isSelfSharer;
       mainVideoRef.current.volume = (isSelfSharer || currentMuted) ? 0 : currentVolume / 100;
+    }
+    if (focusedWebcam && mainWebcamVideoRef.current) {
+      const stream = webcamStreamsMap.get(focusedWebcam);
+      if (stream && mainWebcamVideoRef.current.srcObject !== stream) {
+        mainWebcamVideoRef.current.srcObject = stream;
+        mainWebcamVideoRef.current.play().catch(() => {});
+      }
+      mainWebcamVideoRef.current.muted = isSelfWebcam;
     }
     // Screen share thumbnails
     screenStreamsMap.forEach((stream, sharerId) => {
@@ -403,8 +418,17 @@ export function ScreenShareViewer() {
         onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
       >
-        {state.selectedScreenSharer &&
-        screenStreamsMap.has(state.selectedScreenSharer) ? (
+        {showingWebcam && focusedWebcam ? (
+          <div className="w-full h-full flex items-center justify-center">
+            <video
+              ref={mainWebcamVideoRef}
+              autoPlay
+              playsInline
+              className="object-contain w-full h-full bg-black select-none"
+              draggable={false}
+            />
+          </div>
+        ) : currentSharer && screenStreamsMap.has(currentSharer) ? (
           <div
             className="w-full h-full"
             style={{
@@ -422,14 +446,6 @@ export function ScreenShareViewer() {
               className="object-contain w-full h-full bg-black select-none"
               draggable={false}
             />
-          </div>
-        ) : sharers.length === 0 && webcamStreamers.length > 0 ? (
-          <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 opacity-50">
-              <path d="M23 7l-7 5 7 5V7z" />
-              <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-            </svg>
-            <p className="text-sm">Webcam feeds below</p>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
@@ -508,81 +524,76 @@ export function ScreenShareViewer() {
       )}
       </div>
 
-      {/* Preview thumbnails for multiple screen sharers */}
-      {sharers.length > 1 && (
-        <div className="flex gap-2 p-2 bg-black/80 border-t border-purple-500/20 overflow-x-auto shrink-0">
-          {sharers.map((sharerId) => (
-            <button
-              key={sharerId}
-              className={cn(
-                "relative shrink-0 w-28 rounded-md border-2 overflow-hidden bg-black aspect-video cursor-pointer transition-all",
-                sharerId === state.selectedScreenSharer
-                  ? "border-purple-500 ring-1 ring-purple-500/50"
-                  : "border-border/50 hover:border-purple-500/50 opacity-70 hover:opacity-100"
-              )}
-              onClick={() =>
-                dispatch({
-                  type: "SET_SCREEN_VIEWER",
-                  payload: { sharer: sharerId },
-                })
-              }
-            >
-              <video
-                ref={(el) => {
-                  if (el) thumbVideoRefs.current.set(sharerId, el);
-                }}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-contain"
-              />
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5">
-                <p className="text-[10px] text-purple-300 font-semibold truncate">
-                  {sharerId === state.userId ? "You" : displayUserId(sharerId)}
-                </p>
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Webcam feeds row */}
-      {webcamStreamers.length > 0 && (
-        <div className="flex gap-2 p-2 bg-black/80 border-t border-blue-500/20 overflow-x-auto shrink-0">
-          <span className="flex items-center text-[10px] text-blue-400 font-semibold uppercase tracking-wider shrink-0 self-center pr-1">
-            📷
-          </span>
-          {webcamStreamers.map((userId) => (
-            <div
-              key={userId}
-              className="relative shrink-0 rounded-md overflow-hidden bg-black border border-blue-500/30"
-              style={{ width: "7rem", aspectRatio: "4/3" }}
-            >
-              {webcamStreamsMap.has(userId) ? (
+      {/* Unified thumbnail strip — shown whenever there are multiple feeds */}
+      {(sharers.length + webcamStreamers.length) > 1 && (
+        <div className="flex gap-2 p-2 bg-black/80 border-t border-white/10 overflow-x-auto shrink-0">
+          {sharers.map((sharerId) => {
+            const isSelected = !showingWebcam && sharerId === state.selectedScreenSharer;
+            return (
+              <button
+                key={`screen-${sharerId}`}
+                className={cn(
+                  "relative shrink-0 w-28 rounded-md border-2 overflow-hidden bg-black aspect-video cursor-pointer transition-all",
+                  isSelected
+                    ? "border-purple-500 ring-1 ring-purple-500/50"
+                    : "border-border/50 hover:border-purple-500/50 opacity-70 hover:opacity-100"
+                )}
+                onClick={() => dispatch({ type: "SET_SCREEN_VIEWER", payload: { sharer: sharerId } })}
+              >
                 <video
-                  ref={(el) => {
-                    if (el) webcamVideoRefs.current.set(userId, el);
-                  }}
-                  autoPlay
-                  playsInline
-                  muted={userId === state.userId}
-                  className="w-full h-full object-cover"
+                  ref={(el) => { if (el) thumbVideoRefs.current.set(sharerId, el); }}
+                  autoPlay playsInline muted
+                  className="w-full h-full object-contain"
                 />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-blue-400/50">
-                    <path d="M23 7l-7 5 7 5V7z" />
-                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5 flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-purple-300 shrink-0">
+                    <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
                   </svg>
+                  <p className="text-[10px] text-purple-300 font-semibold truncate">
+                    {sharerId === state.userId ? "You" : displayUserId(sharerId)}
+                  </p>
                 </div>
-              )}
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5">
-                <p className="text-[10px] text-blue-300 font-semibold truncate">
-                  {userId === state.userId ? "You" : displayUserId(userId)}
-                </p>
-              </div>
-            </div>
-          ))}
+              </button>
+            );
+          })}
+          {webcamStreamers.map((userId) => {
+            const isSelected = showingWebcam && userId === focusedWebcam;
+            return (
+              <button
+                key={`webcam-${userId}`}
+                className={cn(
+                  "relative shrink-0 rounded-md border-2 overflow-hidden bg-black cursor-pointer transition-all",
+                  isSelected
+                    ? "border-blue-500 ring-1 ring-blue-500/50"
+                    : "border-border/50 hover:border-blue-500/50 opacity-70 hover:opacity-100"
+                )}
+                style={{ width: "7rem", aspectRatio: "4/3" }}
+                onClick={() => dispatch({ type: "SET_SCREEN_VIEWER", payload: { webcamStreamer: userId } })}
+              >
+                {webcamStreamsMap.has(userId) ? (
+                  <video
+                    ref={(el) => { if (el) webcamVideoRefs.current.set(userId, el); }}
+                    autoPlay playsInline muted={userId === state.userId}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-blue-400/50">
+                      <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                    </svg>
+                  </div>
+                )}
+                <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5 flex items-center gap-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-300 shrink-0">
+                    <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                  </svg>
+                  <p className="text-[10px] text-blue-300 font-semibold truncate">
+                    {userId === state.userId ? "You" : displayUserId(userId)}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

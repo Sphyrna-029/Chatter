@@ -38,6 +38,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeScreenSharers: preserveVoice ? state.activeScreenSharers : [],
         screenViewerOpen: preserveVoice ? state.screenViewerOpen : false,
         selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
+        selectedWebcamStreamer: preserveVoice ? state.selectedWebcamStreamer : null,
         screenViewers: preserveVoice ? state.screenViewers : {},
         typingUsers: [],
         adminDashboardOpen: false,
@@ -188,12 +189,24 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "SET_ACTIVE_SCREEN_SHARERS":
       return { ...state, activeScreenSharers: action.payload };
-    case "SET_SCREEN_VIEWER":
+    case "SET_SCREEN_VIEWER": {
+      const selectingSharer = action.payload.sharer !== undefined;
+      const selectingWebcam = action.payload.webcamStreamer !== undefined;
       return {
         ...state,
         screenViewerOpen: action.payload.open ?? state.screenViewerOpen,
-        selectedScreenSharer: action.payload.sharer !== undefined ? action.payload.sharer : state.selectedScreenSharer,
+        selectedScreenSharer: selectingSharer
+          ? action.payload.sharer
+          : selectingWebcam
+            ? null
+            : state.selectedScreenSharer,
+        selectedWebcamStreamer: selectingWebcam
+          ? action.payload.webcamStreamer
+          : selectingSharer
+            ? null
+            : state.selectedWebcamStreamer,
       };
+    }
     case "SET_SCREEN_VIEWERS":
       return {
         ...state,

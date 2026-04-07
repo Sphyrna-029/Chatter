@@ -44,6 +44,7 @@ export interface AppState {
   activeScreenSharers: string[];
   screenViewerOpen: boolean;
   selectedScreenSharer: string | null;
+  selectedWebcamStreamer: string | null;
   screenViewers: Record<string, string[]>;
   // Webcam
   isWebcamActive: boolean;
@@ -113,7 +114,7 @@ export type Action =
   | { type: "SCREEN_SHARE_STARTED"; payload: string }
   | { type: "SCREEN_SHARE_STOPPED"; payload: string }
   | { type: "SET_ACTIVE_SCREEN_SHARERS"; payload: string[] }
-  | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null } }
+  | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null; webcamStreamer?: string | null } }
   | { type: "SET_SCREEN_VIEWERS"; payload: { sharerId: string; viewers: string[] } }
   | { type: "WEBCAM_SHARE_STARTED"; payload: string }
   | { type: "WEBCAM_SHARE_STOPPED"; payload: string }
@@ -210,6 +211,7 @@ export const initialState: AppState = {
   activeScreenSharers: [],
   screenViewerOpen: false,
   selectedScreenSharer: null,
+  selectedWebcamStreamer: null,
   screenViewers: {},
   isWebcamActive: false,
   activeWebcamStreamers: [],
