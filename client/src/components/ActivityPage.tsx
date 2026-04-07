@@ -126,7 +126,7 @@ export function ActivityPage() {
           roomCounts[roomId] = msgs.length;
           for (const msg of msgs) {
             const sender = msg.sender;
-            if (sender && sender !== myUserId) {
+            if (sender && sender !== myUserId && !sender.startsWith("webhook:")) {
               peopleCounts[sender] = (peopleCounts[sender] || 0) + 1;
             }
           }
