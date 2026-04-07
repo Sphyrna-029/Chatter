@@ -92,45 +92,47 @@ export function VoiceToolbar({
         {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
       </Button>
 
-      {!hideScreenShare && (
-        <div className="flex items-center">
-          <Button
-            size="sm"
-            variant={isScreenSharing ? "destructive" : "outline"}
-            onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
-            className="text-xs flex-1 rounded-r-none"
-          >
-            {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant={isScreenSharing ? "destructive" : "outline"}
-                className="text-xs rounded-l-none border-l-0 px-1.5"
-              >
-                ▾
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
-                <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+      <div className="flex items-center gap-1.5">
+        <Button
+          size="sm"
+          variant={isWebcamActive ? "destructive" : "outline"}
+          onClick={isWebcamActive ? onStopWebcam : onStartWebcam}
+          className="text-xs px-2"
+          title={isWebcamActive ? "Stop camera" : "Share camera"}
+        >
+          📷
+        </Button>
 
-      <Button
-        size="sm"
-        variant={isWebcamActive ? "destructive" : "outline"}
-        onClick={isWebcamActive ? onStopWebcam : onStartWebcam}
-        className="text-xs w-full"
-        title={isWebcamActive ? "Stop camera" : "Share camera"}
-      >
-        {isWebcamActive ? "📷 Stop Camera" : "📷 Share Camera"}
-      </Button>
+        {!hideScreenShare && (
+          <div className="flex items-center flex-1">
+            <Button
+              size="sm"
+              variant={isScreenSharing ? "destructive" : "outline"}
+              onClick={isScreenSharing ? onStopScreenShare : onStartScreenShare}
+              className="text-xs flex-1 rounded-r-none"
+            >
+              {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant={isScreenSharing ? "destructive" : "outline"}
+                  className="text-xs rounded-l-none border-l-0 px-1.5"
+                >
+                  ▾
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
+                  <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+      </div>
 
       {voiceInputMode === "ptt" && !isMuted && (
         <span className="text-xs text-green-500 font-semibold animate-pulse text-center">
