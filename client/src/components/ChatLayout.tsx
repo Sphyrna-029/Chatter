@@ -481,6 +481,11 @@ export function ChatLayout() {
                     }
                   }}
                   isScreenSharing={state.isScreenSharing}
+                  onToggleWebcam={() => {
+                    if (state.isWebcamActive) stopWebcamRef.current?.();
+                    else startWebcamRef.current?.();
+                  }}
+                  isWebcamActive={state.isWebcamActive}
                   connQualityRef={connQualityRef}
                   setUserVolumeRef={setUserVolumeRef}
                   speakingUsersRef={speakingUsersRef}

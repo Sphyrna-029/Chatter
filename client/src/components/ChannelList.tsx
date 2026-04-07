@@ -3,7 +3,7 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
+  Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
   Film, LayoutList, PenTool, Sparkles,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
@@ -39,6 +39,8 @@ interface ChannelListProps {
   onToggleDeafen?: () => void;
   onToggleScreenShare?: () => void;
   isScreenSharing?: boolean;
+  onToggleWebcam?: () => void;
+  isWebcamActive?: boolean;
   connQualityRef?: React.MutableRefObject<ConnQualityData>;
   setUserVolumeRef?: React.MutableRefObject<((userId: string, vol: number) => void) | null>;
   speakingUsersRef?: React.MutableRefObject<Set<string>>;
@@ -75,7 +77,7 @@ function VoiceTimer({ since }: { since: number }) {
   return <span className="text-green-400 text-[10px] font-mono ml-1 shrink-0">{str}</span>;
 }
 
-export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
+export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -829,6 +831,19 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             >
               <HeadphoneOff className="h-3.5 w-3.5" />
             </button>
+            {onToggleWebcam && (
+              <button
+                onClick={onToggleWebcam}
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  isWebcamActive
+                    ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                }`}
+                title={isWebcamActive ? "Stop camera" : "Share camera"}
+              >
+                <Camera className="h-3.5 w-3.5" />
+              </button>
+            )}
             {onToggleScreenShare && (
               <button
                 onClick={onToggleScreenShare}
