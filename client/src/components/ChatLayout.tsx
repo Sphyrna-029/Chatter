@@ -107,7 +107,9 @@ export function ChatLayout() {
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
-  const [membersCollapsed, setMembersCollapsed] = useState(false);
+  const [membersCollapsed, setMembersCollapsed] = useState(
+    () => typeof window !== "undefined" && window.innerWidth < 1024
+  );
   const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
