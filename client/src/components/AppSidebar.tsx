@@ -697,6 +697,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             )}
           </span>
           Activity
+          {state.incomingFriendRequests.length > 0 && (
+            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold text-white leading-none">
+              {state.incomingFriendRequests.length}
+            </span>
+          )}
         </Button>
         <div className="flex gap-1">
           <Button
