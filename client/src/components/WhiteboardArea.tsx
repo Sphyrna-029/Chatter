@@ -194,6 +194,22 @@ export function WhiteboardArea() {
   const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
+  const scrollChatToBottom = useCallback(() => {
+    const el = chatScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
+
+  // Ref callback: fires every time the messages container mounts (chat opens).
+  // Double-rAF ensures flex layout + any synchronous image sizing are done.
+  const chatScrollCallbackRef = useCallback((node: HTMLDivElement | null) => {
+    chatScrollRef.current = node;
+    if (node) {
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        node.scrollTop = node.scrollHeight;
+      }));
+    }
+  }, []);
+
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const activeCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -620,22 +636,10 @@ export function WhiteboardArea() {
     });
   }, [cursors, state.roomMembers]);
 
-  // Auto-scroll chat to bottom on new messages
+  // Auto-scroll chat to bottom when new messages arrive
   useEffect(() => {
-    if (!chatOpen || !chatScrollRef.current) return;
-    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-  }, [state.messages, chatOpen]);
-
-  // When chat opens, defer scroll until after layout is complete
-  useEffect(() => {
-    if (!chatOpen) return;
-    const id = requestAnimationFrame(() => {
-      if (chatScrollRef.current) {
-        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-      }
-    });
-    return () => cancelAnimationFrame(id);
-  }, [chatOpen]);
+    if (chatOpen) scrollChatToBottom();
+  }, [state.messages, chatOpen, scrollChatToBottom]);
 
   const handleChatSend = useCallback(async () => {
     const body = chatInput.trim();
@@ -854,7 +858,7 @@ export function WhiteboardArea() {
             </div>
 
             {/* Messages */}
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto min-h-0 px-2 py-1 space-y-1.5">
+            <div ref={chatScrollCallbackRef} className="flex-1 overflow-y-auto min-h-0 px-2 py-1 space-y-1.5">
               {state.messages.filter((m) => m.content.msgtype !== "m.system" && !m.redacted).map((msg) => {
                 const name = state.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
                 const isOwn = msg.sender === userId;
