@@ -1009,23 +1009,21 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         "whiteboard_undo" => {
             if !room_id.is_empty() {
                 let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
-                // Find the user's most recent stroke in this channel
-                if let Ok(Some(stroke)) = coll
-                    .find_one(doc! { "room_id": room_id, "channel_id": &channel_id, "user_id": user_id })
-                    .sort(doc! { "timestamp": -1 })
-                    .await
-                {
-                    let stroke_id = stroke.stroke_id.clone();
-                    let _ = coll.delete_one(doc! { "_id": &stroke_id }).await;
-                    let event = json!({
-                        "type": "whiteboard_undo",
-                        "room_id": room_id,
-                        "channel_id": channel_id,
-                        "user_id": user_id,
-                        "stroke_id": stroke_id,
-                    });
-                    broadcast_to_room(&state, room_id, &event).await;
+                let stroke_id = msg.get("stroke_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if !stroke_id.is_empty() {
+                    let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                    // Delete by _id + user_id to prevent deleting other users' strokes
+                    let result = coll.delete_one(doc! { "_id": &stroke_id, "user_id": user_id }).await;
+                    if result.map(|r| r.deleted_count).unwrap_or(0) > 0 {
+                        let event = json!({
+                            "type": "whiteboard_undo",
+                            "room_id": room_id,
+                            "channel_id": channel_id,
+                            "user_id": user_id,
+                            "stroke_id": stroke_id,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
                 }
             }
         }

@@ -585,12 +585,13 @@ export function WhiteboardArea() {
     const idx = [...strokesRef.current].reverse().findIndex((s) => s.user_id === userId);
     if (idx === -1) return;
     const actualIdx = strokesRef.current.length - 1 - idx;
+    const strokeId = strokesRef.current[actualIdx].stroke_id;
     strokesRef.current = [
       ...strokesRef.current.slice(0, actualIdx),
       ...strokesRef.current.slice(actualIdx + 1),
     ];
     fullRebuild(strokesRef.current);
-    sendWs({ type: "whiteboard_undo", room_id: roomId, channel_id: channelId });
+    sendWs({ type: "whiteboard_undo", room_id: roomId, channel_id: channelId, stroke_id: strokeId });
   }, [roomId, userId, sendWs, fullRebuild]);
 
   const handleClear = useCallback(() => {
