@@ -771,7 +771,7 @@ export function WhiteboardArea() {
 
         {/* Chat overlay */}
         {chatOpen && (
-          <div className="absolute bottom-3 right-3 z-20 w-72 flex flex-col rounded-lg border border-border bg-background/90 backdrop-blur-sm shadow-xl overflow-hidden" style={{ maxHeight: "60%" }}>
+          <div className="absolute bottom-3 right-3 z-20 w-96 flex flex-col rounded-lg border border-border bg-background/90 backdrop-blur-sm shadow-xl overflow-hidden" style={{ maxHeight: "75%" }}>
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Chat</span>
@@ -789,7 +789,7 @@ export function WhiteboardArea() {
                 const name = state.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
                 const isOwn = msg.sender === userId;
                 const body = msg.content.body || "";
-                const isGif = /^https?:\/\/.+\.(gif|webp)(\?.*)?$/i.test(body) || body.includes("tenor.com") || body.includes("giphy.com");
+                const isGif = /^https?:\/\/.+\.(gif|webp|png|jpg|jpeg)(\?.*)?$/i.test(body) || body.includes("tenor.com") || body.includes("giphy.com");
                 return (
                   <div key={msg.event_id} className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}>
                     {!isOwn && (
