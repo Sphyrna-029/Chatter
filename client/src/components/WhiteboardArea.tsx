@@ -648,11 +648,16 @@ export function WhiteboardArea() {
         const cw = container.clientWidth;
         const ch = container.clientHeight;
 
+        // Scale factors: CSS px → canvas px, accounting for both the
+        // CSS canvas scaling (cw→CANVAS_W) and the zoom transform.
+        const scaleX = CANVAS_W / (cw * currentZoom);
+        const scaleY = CANVAS_H / (ch * currentZoom);
+
         // Visible canvas region in canvas-space pixels
-        const visX = Math.max(0, -currentPan.x / currentZoom);
-        const visY = Math.max(0, -currentPan.y / currentZoom);
-        const visW = Math.min(CANVAS_W, (cw - currentPan.x) / currentZoom) - visX;
-        const visH = Math.min(CANVAS_H, (ch - currentPan.y) / currentZoom) - visY;
+        const visX = Math.max(0, -currentPan.x * scaleX);
+        const visY = Math.max(0, -currentPan.y * scaleY);
+        const visW = Math.min(CANVAS_W, (cw - currentPan.x) * scaleX) - visX;
+        const visH = Math.min(CANVAS_H, (ch - currentPan.y) * scaleY) - visY;
 
         captureCanvas = document.createElement("canvas");
         captureCanvas.width = Math.round(visW);
