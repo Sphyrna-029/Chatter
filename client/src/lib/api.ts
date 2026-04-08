@@ -1243,13 +1243,26 @@ export async function apiSetNameColors(roomId: string, ownerColor?: string, modC
   return res.json();
 }
 
-export async function apiCreateDM(targetUserId: string) {
+export async function apiCreateDM(targetUserIds: string | string[]) {
+  const invite = Array.isArray(targetUserIds) ? targetUserIds : [targetUserIds];
   const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
     method: "POST",
-    body: JSON.stringify({ is_direct: true, invite: [targetUserId] }),
+    body: JSON.stringify({ is_direct: true, invite }),
   });
   if (!res.ok) throw new Error("Failed to create DM");
   return res.json() as Promise<{ room_id: string }>;
+}
+
+export async function apiAddToDM(roomId: string, userId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/dm/invite`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to add user to DM");
+  }
+  return res.json() as Promise<{ added: boolean }>;
 }
 
 // ─── Forum ──────────────────────────────────────────────────────────────────

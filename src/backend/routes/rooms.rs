@@ -1,8 +1,8 @@
 use super::super::{
-    dto::{CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
+    dto::{AddToDmRequest, CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
     helpers::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis, verify_password,
+        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis, send_to_user, verify_password,
     },
     state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord, UserRecord},
 };
@@ -31,6 +31,92 @@ pub(crate) async fn create_room(
     // If it's a DM, check if one already exists
     if is_dm {
         if let Some(invite_list) = &req.invite {
+            if invite_list.is_empty() {
+                return Err(error_response(StatusCode::BAD_REQUEST, "Cannot create DM with no users"));
+            }
+            if invite_list.len() > 19 {
+                return Err(error_response(StatusCode::BAD_REQUEST, "Group DMs support at most 20 members"));
+            }
+
+            if invite_list.len() >= 2 {
+                // Group DM creation (2–19 invitees, 20 members total including creator)
+                if invite_list.contains(&user_id) {
+                    return Err(error_response(StatusCode::BAD_REQUEST, "Cannot DM yourself"));
+                }
+
+                let users_coll = state.db.collection::<UserRecord>("users");
+                let mut valid_invites: Vec<String> = Vec::new();
+                for invited in invite_list {
+                    if users_coll.find_one(doc! { "_id": invited }).await.ok().flatten().is_some()
+                        && !valid_invites.contains(invited)
+                    {
+                        valid_invites.push(invited.clone());
+                    }
+                }
+
+                let room_id = generate_id("!");
+                let room_record = RoomRecord {
+                    room_id: room_id.clone(),
+                    name: "Group DM".to_string(),
+                    topic: "Group Direct Message".to_string(),
+                    creator: user_id.clone(),
+                    is_dm: true,
+                    tags: vec![],
+                    icon_url: String::new(),
+                    custom_emojis: vec![],
+                    emoji_aliases: std::collections::HashMap::new(),
+                    owner_name_color: String::new(),
+                    mod_name_color: String::new(),
+                    unlisted: false,
+                    password_hash: String::new(),
+                    room_type: String::new(),
+                    read_only: false,
+                    banner_url: String::new(),
+                };
+                let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+                let _ = rooms_coll.insert_one(room_record).await;
+
+                let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
+                let ts = now_millis();
+                let mut all_members = vec![user_id.clone()];
+                all_members.extend(valid_invites);
+
+                for member in &all_members {
+                    let role = if *member == user_id { "owner" } else { "member" };
+                    let _ = members_coll
+                        .insert_one(RoomMemberRecord {
+                            room_id: room_id.clone(),
+                            user_id: member.clone(),
+                            role: role.to_string(),
+                            joined_at: ts,
+                        })
+                        .await;
+                }
+
+                {
+                    let mut rm = state.room_members.write().await;
+                    rm.insert(room_id.clone(), all_members.clone());
+                }
+                {
+                    let mut roles = state.room_roles.write().await;
+                    let room_roles = roles.entry(room_id.clone()).or_default();
+                    for member in &all_members {
+                        let role = if *member == user_id { "owner" } else { "member" };
+                        room_roles.insert(member.clone(), role.to_string());
+                    }
+                }
+
+                let event = json!({
+                    "type": "m.room.created",
+                    "room_id": room_id,
+                    "sender": user_id,
+                    "content": { "is_direct": true }
+                });
+                broadcast_to_room(&state, &room_id, &event).await;
+
+                return Ok(Json(json!({"room_id": room_id})));
+            }
+
             if invite_list.len() == 1 {
                 let other_user = &invite_list[0];
 
@@ -1327,4 +1413,71 @@ pub(crate) async fn list_banned_users(
     }
 
     Ok(Json(json!({ "bans": bans })))
+}
+
+pub(crate) async fn add_to_dm(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<AddToDmRequest>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Verify room exists and is a DM
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    if !room.is_dm {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Room is not a DM"));
+    }
+
+    // Requester must be a member
+    let is_member = {
+        let rm = state.room_members.read().await;
+        rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false)
+    };
+    if !is_member {
+        return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+    }
+
+    // Enforce 20-member cap
+    let current_count = {
+        let rm = state.room_members.read().await;
+        rm.get(&room_id).map(|m| m.len()).unwrap_or(0)
+    };
+    if current_count >= 20 {
+        return Err(error_response(StatusCode::BAD_REQUEST, "Group DMs support at most 20 members"));
+    }
+
+    // Target user must exist
+    let users_coll = state.db.collection::<UserRecord>("users");
+    if users_coll.find_one(doc! { "_id": &req.user_id }).await.ok().flatten().is_none() {
+        return Err(error_response(StatusCode::NOT_FOUND, "User not found"));
+    }
+
+    // Add user (do_join_room handles already-member and broadcasts m.room.member)
+    match do_join_room(&state, &room_id, &req.user_id).await {
+        Ok(false) => return Err(error_response(StatusCode::BAD_REQUEST, "User is already a member")),
+        Err(msg) => return Err(error_response(StatusCode::FORBIDDEN, msg)),
+        Ok(true) => {}
+    }
+
+    // Notify the new member so their frontend picks up the room immediately
+    let event = json!({
+        "type": "m.room.created",
+        "room_id": room_id,
+        "sender": user_id,
+        "content": { "is_direct": true }
+    });
+    send_to_user(&state, &req.user_id, &event).await;
+
+    Ok(Json(json!({ "added": true })))
 }

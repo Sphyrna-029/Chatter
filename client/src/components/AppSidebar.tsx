@@ -5,7 +5,8 @@ import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2, Settings2 } from "lucide-react";
+import { GroupDMDialog } from "@/components/GroupDMDialog";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2, Settings2, UsersRound } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -47,6 +48,8 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const [groupDialogName, setGroupDialogName] = useState<string | undefined>();
   // Track which group has its context menu open
   const [groupMenuOpen, setGroupMenuOpen] = useState<string | null>(null);
+  // Group DM dialog
+  const [groupDMDialogOpen, setGroupDMDialogOpen] = useState(false);
   // Drag-and-drop state
   const [draggedRoomId, setDraggedRoomId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
@@ -648,6 +651,15 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                 </>
               ) : (
                 <>
+                  <div className="px-2 pb-1">
+                    <button
+                      onClick={() => setGroupDMDialogOpen(true)}
+                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <UsersRound className="h-3 w-3" />
+                      Group DM
+                    </button>
+                  </div>
                   {dmRoomIds.length === 0 && (
                     <p className="px-3 py-3 text-xs text-muted-foreground">
                       No direct messages yet
@@ -740,6 +752,10 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           mode={groupDialogMode}
           groupId={groupDialogId}
           groupName={groupDialogName}
+        />
+        <GroupDMDialog
+          open={groupDMDialogOpen}
+          onOpenChange={setGroupDMDialogOpen}
         />
         {settingsRoomId && (
           <RoomSettingsDialog

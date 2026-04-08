@@ -15,7 +15,7 @@ use super::{
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         rooms::{
-            ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
+            add_to_dm, ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
             leave_room, list_all_rooms, list_banned_users, set_member_role, set_name_colors,
             unban_member, update_room_settings, update_room_topic,
         },
@@ -73,6 +73,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/_matrix/client/r0/createRoom", post(create_room))
            .route("/_matrix/client/r0/rooms/{room_id}/join", post(join_room))
            .route("/_matrix/client/r0/rooms/{room_id}/leave", post(leave_room))
+           .route("/api/rooms/{room_id}/dm/invite", post(add_to_dm))
            .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
            .route("/api/rooms", get(list_all_rooms))
            .route("/api/rooms/{room_id}", delete(delete_room))

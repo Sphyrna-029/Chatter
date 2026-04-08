@@ -270,7 +270,8 @@ export interface AppContextValue {
   loadMessagesAround: (roomId: string, ts: number) => Promise<void>;
   sendTyping: () => void;
   getAllRooms: () => Promise<import("../api").RoomSummary[]>;
-  openDM: (targetUserId: string) => Promise<void>;
+  openDM: (targetUserIds: string | string[]) => Promise<void>;
+  addToGroupDM: (roomId: string, userId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
   updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }) => Promise<void>;
   setCustomStatus: (status: string) => void;

@@ -158,18 +158,23 @@ pub(crate) async fn sync(
             })
             .collect();
 
-        // For DMs, show the other person's name
+        // For DMs, show all other members' names
         let display_name = if room_data.is_dm {
-            let other = members.iter().find(|m| *m != &user_id);
-            if let Some(other_id) = other {
-                let other_display = other_id
-                    .split(':')
-                    .next()
-                    .unwrap_or(other_id)
-                    .trim_start_matches('@');
-                format!("DM with {}", other_display)
-            } else {
+            let others: Vec<String> = members
+                .iter()
+                .filter(|m| **m != user_id)
+                .map(|id| {
+                    id.split(':')
+                        .next()
+                        .unwrap_or(id)
+                        .trim_start_matches('@')
+                        .to_string()
+                })
+                .collect();
+            if others.is_empty() {
                 room_data.name.clone()
+            } else {
+                format!("DM with {}", others.join(", "))
             }
         } else {
             room_data.name.clone()

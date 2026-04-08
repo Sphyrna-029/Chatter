@@ -4,8 +4,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet, UserPlus } from "lucide-react";
 import { CommandBar } from "./CommandBar";
+import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -83,6 +84,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [selectedEmojiIdx, setSelectedEmojiIdx] = useState(0);
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState("");
+  const [addToDMOpen, setAddToDMOpen] = useState(false);
   const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
@@ -1174,6 +1176,17 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           })()}
         </div>
         <div className="flex items-center gap-1">
+          {roomInfo?.is_direct && state.currentRoomId && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={() => setAddToDMOpen(true)}
+              title="Add people to DM"
+            >
+              <UserPlus className="h-4 w-4" />
+            </Button>
+          )}
           {roomInfo?.room_type === "text" && (
             <Button
               variant="ghost"
@@ -1212,6 +1225,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           </Button>
         </div>
       </div>
+      {state.currentRoomId && (
+        <AddToDMDialog
+          open={addToDMOpen}
+          onOpenChange={setAddToDMOpen}
+          roomId={state.currentRoomId}
+        />
+      )}
 
       {/* Mentions bar */}
       {mentionsOpen && (

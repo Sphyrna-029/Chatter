@@ -103,6 +103,11 @@ pub(crate) struct UpdateTopicRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct AddToDmRequest {
+    pub(crate) user_id: String,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct EditMessageRequest {
     pub(crate) body: String,
 }

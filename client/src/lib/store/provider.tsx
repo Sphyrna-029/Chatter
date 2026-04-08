@@ -38,6 +38,7 @@ import {
   apiGetPresence,
   apiGetAllRooms,
   apiCreateDM,
+  apiAddToDM,
   apiUpdateTopic,
   apiUpdateRoomSettings,
   apiKickMember,
@@ -842,12 +843,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openDM = useCallback(
-    async (targetUserId: string) => {
-      const data = await apiCreateDM(targetUserId);
+    async (targetUserIds: string | string[]) => {
+      const data = await apiCreateDM(targetUserIds);
       await loadRooms();
       await selectRoom(data.room_id);
     },
     [loadRooms, selectRoom]
+  );
+
+  const addToGroupDM = useCallback(
+    async (roomId: string, userId: string) => {
+      await apiAddToDM(roomId, userId);
+    },
+    []
   );
 
   const updateTopic = useCallback(
@@ -1028,6 +1036,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         sendTyping,
         getAllRooms,
         openDM,
+        addToGroupDM,
         updateTopic,
         updateRoomSettings,
         setCustomStatus,
