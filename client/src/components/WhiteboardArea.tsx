@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiGetWhiteboardStrokes, type WhiteboardStroke } from "@/lib/api";
+import { apiGetWhiteboardStrokes, apiUploadFile, type WhiteboardStroke } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
@@ -21,6 +21,7 @@ import {
   MessageSquare,
   X,
   Send,
+  Camera,
 } from "lucide-react";
 
 type Tool = "pen" | "eraser" | "line" | "rect" | "circle" | "fill";
@@ -188,6 +189,7 @@ export function WhiteboardArea() {
   // Chat overlay
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [capturing, setCapturing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
@@ -602,6 +604,26 @@ export function WhiteboardArea() {
     await sendMessage(body);
   }, [chatInput, sendMessage]);
 
+  const handleCapture = useCallback(async () => {
+    const canvas = baseCanvasRef.current;
+    if (!canvas || capturing) return;
+    setCapturing(true);
+    try {
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/png")
+      );
+      if (!blob) return;
+      const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: "image/png" });
+      const { url } = await apiUploadFile(file);
+      if (!chatOpen) setChatOpen(true);
+      await sendMessage(url);
+    } catch (err) {
+      console.error("Whiteboard capture failed", err);
+    } finally {
+      setCapturing(false);
+    }
+  }, [capturing, chatOpen, sendMessage]);
+
   if (!roomId) return null;
 
   return (
@@ -707,6 +729,22 @@ export function WhiteboardArea() {
               </Button>
             </TooltipTrigger>
             <TooltipContent side="right">Toggle Chat</TooltipContent>
+          </Tooltip>
+
+          {/* Capture & post */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={handleCapture}
+                disabled={capturing}
+              >
+                {capturing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Capture & Post to Chat</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       </div>
