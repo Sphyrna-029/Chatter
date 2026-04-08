@@ -191,6 +191,7 @@ export function WhiteboardArea() {
   const [chatInput, setChatInput] = useState("");
   const [capturing, setCapturing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -621,7 +622,9 @@ export function WhiteboardArea() {
 
   // Auto-scroll chat to bottom when new messages arrive or chat opens
   useEffect(() => {
-    if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatOpen && chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+    }
   }, [state.messages, chatOpen]);
 
   const handleChatSend = useCallback(async () => {
@@ -841,7 +844,7 @@ export function WhiteboardArea() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1 space-y-1.5">
+            <div ref={chatScrollRef} className="flex-1 overflow-y-auto min-h-0 px-2 py-1 space-y-1.5">
               {state.messages.filter((m) => m.content.msgtype !== "m.system" && !m.redacted).map((msg) => {
                 const name = state.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
                 const isOwn = msg.sender === userId;
