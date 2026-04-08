@@ -1836,7 +1836,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               {/* Placeholder — shown when the div is empty */}
               {!input && (
                 <span className="absolute top-2 left-3 text-sm text-muted-foreground pointer-events-none select-none z-10">
-                  {isMobile ? "Type a message..." : "Type your message... (/ for commands, Ctrl+O for CLI)"}
+                  Type your message...
                 </span>
               )}
               <div
