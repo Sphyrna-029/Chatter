@@ -633,11 +633,36 @@ export function WhiteboardArea() {
 
   const handleCapture = useCallback(async () => {
     const canvas = baseCanvasRef.current;
-    if (!canvas || capturing) return;
+    const container = containerRef.current;
+    if (!canvas || !container || capturing) return;
     setCapturing(true);
     try {
+      const currentZoom = zoomRef.current;
+      const currentPan = panRef.current;
+
+      let captureCanvas: HTMLCanvasElement;
+
+      if (currentZoom === 1 && currentPan.x === 0 && currentPan.y === 0) {
+        captureCanvas = canvas;
+      } else {
+        const cw = container.clientWidth;
+        const ch = container.clientHeight;
+
+        // Visible canvas region in canvas-space pixels
+        const visX = Math.max(0, -currentPan.x / currentZoom);
+        const visY = Math.max(0, -currentPan.y / currentZoom);
+        const visW = Math.min(CANVAS_W, (cw - currentPan.x) / currentZoom) - visX;
+        const visH = Math.min(CANVAS_H, (ch - currentPan.y) / currentZoom) - visY;
+
+        captureCanvas = document.createElement("canvas");
+        captureCanvas.width = Math.round(visW);
+        captureCanvas.height = Math.round(visH);
+        const ctx = captureCanvas.getContext("2d")!;
+        ctx.drawImage(canvas, visX, visY, visW, visH, 0, 0, captureCanvas.width, captureCanvas.height);
+      }
+
       const blob = await new Promise<Blob | null>((resolve) =>
-        canvas.toBlob(resolve, "image/png")
+        captureCanvas.toBlob(resolve, "image/png")
       );
       if (!blob) return;
       const file = new File([blob], `whiteboard-${Date.now()}.png`, { type: "image/png" });
