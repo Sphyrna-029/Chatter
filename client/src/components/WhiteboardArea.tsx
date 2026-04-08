@@ -213,6 +213,8 @@ export function WhiteboardArea() {
   const panRef = useRef({ x: 0, y: 0 });
 
   const isDrawing = useRef(false);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0, panX: 0, panY: 0 });
   const currentPoints = useRef<number[][]>([]);
   const shapeStart = useRef<number[] | null>(null);
   const lastCursorSend = useRef(0);
@@ -421,6 +423,15 @@ export function WhiteboardArea() {
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!roomId) return;
+
+    // Middle mouse → start panning
+    if (e.button === 1) {
+      e.preventDefault();
+      isPanning.current = true;
+      panStart.current = { x: e.clientX, y: e.clientY, panX: panRef.current.x, panY: panRef.current.y };
+      return;
+    }
+
     const [x, y] = getCanvasPos(e);
 
     if (tool === "fill") {
@@ -459,6 +470,18 @@ export function WhiteboardArea() {
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!roomId) return;
+
+    // Middle-mouse pan
+    if (isPanning.current) {
+      const dx = e.clientX - panStart.current.x;
+      const dy = e.clientY - panStart.current.y;
+      const newPanX = panStart.current.panX + dx;
+      const newPanY = panStart.current.panY + dy;
+      panRef.current = { x: newPanX, y: newPanY };
+      setPan({ x: newPanX, y: newPanY });
+      return;
+    }
+
     const [x, y] = getCanvasPos(e);
 
     // Throttled cursor broadcast
@@ -511,6 +534,10 @@ export function WhiteboardArea() {
   }, [roomId, tool, color, width, userId, sendWs, addStrokeLocal]);
 
   const handleMouseUp = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (e.button === 1) {
+      isPanning.current = false;
+      return;
+    }
     if (!isDrawing.current || !roomId) return;
     isDrawing.current = false;
 
@@ -896,11 +923,12 @@ export function WhiteboardArea() {
             width={CANVAS_W}
             height={CANVAS_H}
             className="absolute inset-0 w-full h-full"
-            style={{ cursor: "crosshair", imageRendering: "auto" }}
+            style={{ cursor: isPanning.current ? "grabbing" : "crosshair", imageRendering: "auto" }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
             onMouseLeave={() => {
+              isPanning.current = false;
               if (isDrawing.current) {
                 isDrawing.current = false;
                 const activeCanvas = activeCanvasRef.current;
