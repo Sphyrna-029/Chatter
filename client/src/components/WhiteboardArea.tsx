@@ -620,12 +620,22 @@ export function WhiteboardArea() {
     });
   }, [cursors, state.roomMembers]);
 
-  // Auto-scroll chat to bottom when new messages arrive or chat opens
+  // Auto-scroll chat to bottom on new messages
   useEffect(() => {
-    if (chatOpen && chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
-    }
+    if (!chatOpen || !chatScrollRef.current) return;
+    chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
   }, [state.messages, chatOpen]);
+
+  // When chat opens, defer scroll until after layout is complete
+  useEffect(() => {
+    if (!chatOpen) return;
+    const id = requestAnimationFrame(() => {
+      if (chatScrollRef.current) {
+        chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [chatOpen]);
 
   const handleChatSend = useCallback(async () => {
     const body = chatInput.trim();
