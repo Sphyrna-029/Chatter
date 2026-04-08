@@ -439,113 +439,114 @@ export function ChatLayout() {
               </div>
             )}
 
-            {/* VoiceControls: always mounted (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
-            <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "contents"}>
-              <VoiceControls
-                joinVoiceRef={joinVoiceRef}
-                leaveVoiceRef={leaveVoiceRef}
-                toggleMuteRef={toggleMuteRef}
-                toggleDeafenRef={toggleDeafenRef}
-                startScreenShareRef={startScreenShareRef}
-                stopScreenShareRef={stopScreenShareRef}
-                startWebcamRef={startWebcamRef}
-                stopWebcamRef={stopWebcamRef}
-                connQualityRef={connQualityRef}
-                setUserVolumeRef={setUserVolumeRef}
-                speakingUsersRef={speakingUsersRef}
-              />
-            </div>
-
             {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
-            {state.adminDashboardOpen ? (
-              <AdminDashboard />
-            ) : !state.currentRoomId ? (
-              <ActivityPage />
-            ) : (
+            {/* VoiceControls is always mounted here (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              {hasChannels && !isTankWarRoom && !isTugOfWarRoom && (
-                <ChannelList
-                  onJoinVoiceChannel={(channelId) => {
-                    const ch = state.channels.find((c) => c.channel_id === channelId);
-                    if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
-                    joinVoiceRef.current?.(channelId);
-                  }}
-                  onLeaveVoice={() => leaveVoiceRef.current?.()}
-                  onToggleMute={() => toggleMuteRef.current?.()}
-                  onToggleDeafen={() => toggleDeafenRef.current?.()}
-                  onToggleScreenShare={() => {
-                    if (state.isScreenSharing) {
-                      stopScreenShareRef.current?.();
-                    } else {
-                      startScreenShareRef.current?.();
-                    }
-                  }}
-                  isScreenSharing={state.isScreenSharing}
-                  onToggleWebcam={() => {
-                    if (state.isWebcamActive) stopWebcamRef.current?.();
-                    else startWebcamRef.current?.();
-                  }}
-                  isWebcamActive={state.isWebcamActive}
+              <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
+                <VoiceControls
+                  joinVoiceRef={joinVoiceRef}
+                  leaveVoiceRef={leaveVoiceRef}
+                  toggleMuteRef={toggleMuteRef}
+                  toggleDeafenRef={toggleDeafenRef}
+                  startScreenShareRef={startScreenShareRef}
+                  stopScreenShareRef={stopScreenShareRef}
+                  startWebcamRef={startWebcamRef}
+                  stopWebcamRef={stopWebcamRef}
                   connQualityRef={connQualityRef}
                   setUserVolumeRef={setUserVolumeRef}
                   speakingUsersRef={speakingUsersRef}
                 />
-              )}
-              {isTankWarRoom ? (
-                <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
-              ) : isTugOfWarRoom ? (
-                <TugOfWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
-              ) : isWatchPartyRoom ? (
-                <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
-              ) : isShowcaseChannel ? (
-                <ShowcaseArea />
-              ) : isWhiteboardRoom ? (
-                <WhiteboardArea />
-              ) : isForumRoom ? (
-                <ForumArea />
-              ) : showViewer ? (
-                <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
-                  {/* Header lives outside the resizable panels — always visible */}
-                  <ScreenShareHeader
-                    containerRef={viewerContainerRef}
-                    isPiP={isPiP}
-                    onTogglePiP={togglePiP}
-                  />
-
-                  <ResizablePanelGroup
-                    orientation="vertical"
-                    className="flex-1"
-                  >
-                    <ResizablePanel defaultSize={50} minSize={15}>
-                      <div className="h-full flex flex-col min-h-0">
-                        <ScreenShareViewer />
-                      </div>
-                    </ResizablePanel>
-                    <ResizableHandle withHandle />
-                    <ResizablePanel defaultSize={50} minSize={15}>
-                      <div className="h-full flex flex-col min-h-0">
-                        {state.activeThreadEventId ? (
-                          <ThreadPanel />
-                        ) : (
-                          <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
-                        )}
-                      </div>
-                    </ResizablePanel>
-                  </ResizablePanelGroup>
-                </div>
-              ) : state.activeThreadEventId ? (
-                <ThreadPanel />
+              </div>
+              {state.adminDashboardOpen ? (
+                <AdminDashboard />
+              ) : !state.currentRoomId ? (
+                <ActivityPage />
               ) : (
-                <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
-              )}
-              {!isMobile && (
-                <MembersPanel
-                  collapsed={membersCollapsed}
-                  onToggle={() => setMembersCollapsed((v) => !v)}
-                />
+              <>
+                {hasChannels && !isTankWarRoom && !isTugOfWarRoom && (
+                  <ChannelList
+                    onJoinVoiceChannel={(channelId) => {
+                      const ch = state.channels.find((c) => c.channel_id === channelId);
+                      if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
+                      joinVoiceRef.current?.(channelId);
+                    }}
+                    onLeaveVoice={() => leaveVoiceRef.current?.()}
+                    onToggleMute={() => toggleMuteRef.current?.()}
+                    onToggleDeafen={() => toggleDeafenRef.current?.()}
+                    onToggleScreenShare={() => {
+                      if (state.isScreenSharing) {
+                        stopScreenShareRef.current?.();
+                      } else {
+                        startScreenShareRef.current?.();
+                      }
+                    }}
+                    isScreenSharing={state.isScreenSharing}
+                    onToggleWebcam={() => {
+                      if (state.isWebcamActive) stopWebcamRef.current?.();
+                      else startWebcamRef.current?.();
+                    }}
+                    isWebcamActive={state.isWebcamActive}
+                    connQualityRef={connQualityRef}
+                    setUserVolumeRef={setUserVolumeRef}
+                    speakingUsersRef={speakingUsersRef}
+                  />
+                )}
+                {isTankWarRoom ? (
+                  <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                ) : isTugOfWarRoom ? (
+                  <TugOfWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                ) : isWatchPartyRoom ? (
+                  <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                ) : isShowcaseChannel ? (
+                  <ShowcaseArea />
+                ) : isWhiteboardRoom ? (
+                  <WhiteboardArea />
+                ) : isForumRoom ? (
+                  <ForumArea />
+                ) : showViewer ? (
+                  <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
+                    {/* Header lives outside the resizable panels — always visible */}
+                    <ScreenShareHeader
+                      containerRef={viewerContainerRef}
+                      isPiP={isPiP}
+                      onTogglePiP={togglePiP}
+                    />
+
+                    <ResizablePanelGroup
+                      orientation="vertical"
+                      className="flex-1"
+                    >
+                      <ResizablePanel defaultSize={50} minSize={15}>
+                        <div className="h-full flex flex-col min-h-0">
+                          <ScreenShareViewer />
+                        </div>
+                      </ResizablePanel>
+                      <ResizableHandle withHandle />
+                      <ResizablePanel defaultSize={50} minSize={15}>
+                        <div className="h-full flex flex-col min-h-0">
+                          {state.activeThreadEventId ? (
+                            <ThreadPanel />
+                          ) : (
+                            <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                          )}
+                        </div>
+                      </ResizablePanel>
+                    </ResizablePanelGroup>
+                  </div>
+                ) : state.activeThreadEventId ? (
+                  <ThreadPanel />
+                ) : (
+                  <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                )}
+                {!isMobile && (
+                  <MembersPanel
+                    collapsed={membersCollapsed}
+                    onToggle={() => setMembersCollapsed((v) => !v)}
+                  />
+                )}
+              </>
               )}
             </div>
-            )}
             {/* Voice bar when user is in voice but viewing a different room */}
             {state.inVoiceChannel && !isOnVoiceRoom && (
               <VoiceBar
