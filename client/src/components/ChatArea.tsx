@@ -282,6 +282,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     ) ?? null;
   }, []);
 
+  // Scroll only the viewport to the bottom — avoids scrollIntoView() which can
+  // scroll overflow:hidden ancestors in Chromium, causing layout shifts.
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "instant") => {
+    const viewport = getViewport();
+    if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+  }, [getViewport]);
+
   // Capture room-level unread count on room change and show banner
   useEffect(() => {
     if (state.currentRoomId !== prevRoomIdRef.current) {
@@ -361,25 +368,25 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (autoScrollRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottom("smooth");
     }
-  }, [state.messages]);
+  }, [state.messages, scrollToBottom]);
 
   // Scroll to show reactions added to the last message
   useEffect(() => {
     const lastMessage = state.messages[state.messages.length - 1];
     if (!lastMessage) return;
     if (state.messageReactions[lastMessage.event_id] && isNearBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      scrollToBottom("smooth");
     }
-  }, [state.messageReactions, state.messages]);
+  }, [state.messageReactions, state.messages, scrollToBottom]);
 
   // Scroll to bottom on channel switch when auto-scroll is enabled
   useEffect(() => {
     if (state.currentChannelId && autoScrollRef.current) {
-      messagesEndRef.current?.scrollIntoView();
+      scrollToBottom();
     }
-  }, [state.currentChannelId]);
+  }, [state.currentChannelId, scrollToBottom]);
 
   // When messages load for a channel with unreads, compute the first unread event ID
   useLayoutEffect(() => {
@@ -414,8 +421,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Scroll to bottom on initial room load
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView();
-  }, [state.currentRoomId]);
+    scrollToBottom();
+  }, [state.currentRoomId, scrollToBottom]);
 
   // Focus the input when the user starts a reply
   useEffect(() => {
@@ -1176,7 +1183,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 const next = !autoScroll;
                 setAutoScroll(next);
                 autoScrollRef.current = next;
-                if (next) messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                if (next) scrollToBottom("smooth");
               }}
               title={autoScroll ? "Auto-scroll enabled (click to disable)" : "Auto-scroll disabled (click to enable)"}
             >
@@ -1513,9 +1520,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             variant="secondary"
             size="icon"
             className="absolute bottom-3 right-5 h-8 w-8 rounded-full shadow-lg border opacity-80 hover:opacity-100 transition-opacity z-10"
-            onClick={() => {
-              messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-            }}
+            onClick={() => scrollToBottom("smooth")}
           >
             <ArrowDown className="h-4 w-4" />
           </Button>
