@@ -4,7 +4,10 @@ import { apiGetWhiteboardStrokes, type WhiteboardStroke } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { displayUserId } from "@/lib/utils";
+import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
+import { GifPicker } from "./GifPicker";
 import {
   Pen,
   Eraser,
@@ -15,6 +18,9 @@ import {
   Undo2,
   Trash2,
   Loader2,
+  MessageSquare,
+  X,
+  Send,
 } from "lucide-react";
 
 type Tool = "pen" | "eraser" | "line" | "rect" | "circle" | "fill";
@@ -168,7 +174,7 @@ function renderAllStrokes(ctx: Ctx2D, strokes: WhiteboardStroke[]) {
 }
 
 export function WhiteboardArea() {
-  const { state, wsRef } = useAppContext();
+  const { state, wsRef, sendMessage } = useAppContext();
   const roomId = state.currentRoomId;
   const channelId = state.currentChannelId;
   const userId = state.userId;
@@ -178,6 +184,12 @@ export function WhiteboardArea() {
   const [width, setWidth] = useState(3);
   const [loading, setLoading] = useState(true);
   const [cursors, setCursors] = useState<Map<string, CursorInfo>>(new Map());
+
+  // Chat overlay
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState("");
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   const baseCanvasRef = useRef<HTMLCanvasElement>(null);
   const activeCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -578,6 +590,18 @@ export function WhiteboardArea() {
     });
   }, [cursors, state.roomMembers]);
 
+  // Auto-scroll chat to bottom when new messages arrive or chat opens
+  useEffect(() => {
+    if (chatOpen) chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [state.messages, chatOpen]);
+
+  const handleChatSend = useCallback(async () => {
+    const body = chatInput.trim();
+    if (!body) return;
+    setChatInput("");
+    await sendMessage(body);
+  }, [chatInput, sendMessage]);
+
   if (!roomId) return null;
 
   return (
@@ -667,6 +691,23 @@ export function WhiteboardArea() {
             </TooltipTrigger>
             <TooltipContent side="right">Clear Canvas</TooltipContent>
           </Tooltip>
+
+          <div className="w-8 border-t border-border my-1" />
+
+          {/* Chat toggle */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant={chatOpen ? "default" : "ghost"}
+                size="icon"
+                className="h-9 w-9"
+                onClick={() => setChatOpen((o) => !o)}
+              >
+                <MessageSquare className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Toggle Chat</TooltipContent>
+          </Tooltip>
         </TooltipProvider>
       </div>
 
@@ -688,6 +729,105 @@ export function WhiteboardArea() {
           >
             {Math.round(zoom * 100)}% · Reset
           </button>
+        )}
+
+        {/* Chat overlay */}
+        {chatOpen && (
+          <div className="absolute bottom-3 right-3 z-20 w-72 flex flex-col rounded-lg border border-border bg-background/90 backdrop-blur-sm shadow-xl overflow-hidden" style={{ maxHeight: "60%" }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
+              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Chat</span>
+              <button
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setChatOpen(false)}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto min-h-0 px-2 py-1 space-y-1.5">
+              {state.messages.filter((m) => m.content.msgtype !== "m.system" && !m.redacted).map((msg) => {
+                const name = state.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
+                const isOwn = msg.sender === userId;
+                const body = msg.content.body || "";
+                const isGif = /^https?:\/\/.+\.(gif|webp)(\?.*)?$/i.test(body) || body.includes("tenor.com") || body.includes("giphy.com");
+                return (
+                  <div key={msg.event_id} className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}>
+                    {!isOwn && (
+                      <span className="text-[10px] text-muted-foreground px-1 mb-0.5">{name}</span>
+                    )}
+                    <div className={`max-w-[90%] rounded-lg px-2.5 py-1.5 text-sm break-words ${isOwn ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
+                      {isGif ? (
+                        <img src={body} alt="GIF" className="rounded max-w-full max-h-40 object-contain" />
+                      ) : (
+                        <span>{renderInlineEmojis(body)}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {state.messages.filter((m) => m.content.msgtype !== "m.system" && !m.redacted).length === 0 && (
+                <p className="text-center text-xs text-muted-foreground py-4">No messages yet</p>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Input */}
+            <div className="border-t border-border px-2 py-2 flex items-center gap-1.5 shrink-0">
+              <input
+                ref={chatInputRef}
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+                placeholder="Send a message…"
+                className="flex-1 min-w-0 rounded-md bg-muted px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              {/* Emoji picker */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="shrink-0 text-muted-foreground hover:text-foreground transition-colors text-base leading-none" title="Emoji">
+                    😊
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent side="top" align="end" className="w-auto p-0">
+                  <EmojiPicker
+                    onSelect={(emoji) => {
+                      if (isCustomEmojiUrl(emoji)) {
+                        sendMessage(`:emoji{${emoji}}:`);
+                      } else {
+                        setChatInput((v) => v + emoji);
+                        chatInputRef.current?.focus();
+                      }
+                    }}
+                    roomCustomEmojis={state.currentRoomId ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? []) : []}
+                    emojiAliases={state.currentRoomId ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {}) : {}}
+                  />
+                </PopoverContent>
+              </Popover>
+              {/* GIF picker */}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button className="shrink-0 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-colors leading-none" title="GIF">
+                    GIF
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent side="top" align="end" className="w-auto p-0">
+                  <GifPicker onSelect={(url) => sendMessage(url)} />
+                </PopoverContent>
+              </Popover>
+              {/* Send */}
+              <button
+                className="shrink-0 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40"
+                onClick={handleChatSend}
+                disabled={!chatInput.trim()}
+                title="Send"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         )}
         <div
           className="relative"
