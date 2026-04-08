@@ -369,8 +369,10 @@ pub(crate) async fn broadcast_to_room(state: &AppState, room_id: &str, message: 
     let text = message.to_string();
     let ws_map = state.active_websockets.read().await;
     for uid in &members {
-        if let Some(tx) = ws_map.get(uid) {
-            let _ = tx.send(Message::Text(text.clone().into()));
+        if let Some(conns) = ws_map.get(uid) {
+            for tx in conns.values() {
+                let _ = tx.send(Message::Text(text.clone().into()));
+            }
         }
     }
 }
@@ -393,8 +395,10 @@ pub(crate) async fn broadcast_to_voice_channel(
     let text = message.to_string();
     let ws_map = state.active_websockets.read().await;
     for uid in &members {
-        if let Some(tx) = ws_map.get(uid) {
-            let _ = tx.send(Message::Text(text.clone().into()));
+        if let Some(conns) = ws_map.get(uid) {
+            for tx in conns.values() {
+                let _ = tx.send(Message::Text(text.clone().into()));
+            }
         }
     }
 }
@@ -518,11 +522,14 @@ pub(crate) async fn do_join_room(
     Ok(true)
 }
 
-/// Send a JSON message to a single WebSocket-connected user.
+/// Send a JSON message to a single WebSocket-connected user (all their active connections).
 pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Value) {
     let ws_map = state.active_websockets.read().await;
-    if let Some(tx) = ws_map.get(user_id) {
-        let _ = tx.send(Message::Text(message.to_string().into()));
+    if let Some(conns) = ws_map.get(user_id) {
+        let text = message.to_string();
+        for tx in conns.values() {
+            let _ = tx.send(Message::Text(text.clone().into()));
+        }
     }
 }
 

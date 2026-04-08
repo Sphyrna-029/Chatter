@@ -47,7 +47,8 @@ pub struct AppState {
     pub(crate) banned_users: RwLock<HashMap<String, Vec<String>>>,
 
     // Ephemeral in-memory state (not persisted)
-    pub(crate) active_websockets: RwLock<HashMap<String, WsSender>>,
+    // Maps user_id -> { conn_id -> sender } so multiple devices can be connected simultaneously.
+    pub(crate) active_websockets: RwLock<HashMap<String, HashMap<u64, WsSender>>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied
     pub(crate) voice_channel_occupied_since: RwLock<HashMap<String, u64>>,

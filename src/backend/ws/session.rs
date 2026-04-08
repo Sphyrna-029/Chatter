@@ -84,14 +84,18 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         }
     };
 
-    // Set up mpsc channel for this user
+    // Set up mpsc channel for this connection
+    let conn_id: u64 = rand::random();
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let ping_tx_clone = tx.clone();
 
     state
         .active_websockets
         .write()
         .await
-        .insert(user_id.clone(), tx);
+        .entry(user_id.clone())
+        .or_default()
+        .insert(conn_id, tx);
 
     // Update presence – preserve custom_status and manual_status on reconnect
     // On first connect (no existing PresenceRecord), load persisted values from MongoDB
@@ -204,7 +208,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     });
 
     // Spawn periodic ping sender (every 15s) to detect dead connections
-    let ping_tx = state.active_websockets.read().await.get(&user_id).cloned();
+    let ping_tx = Some(ping_tx_clone);
     let ping_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(15));
         interval.tick().await; // skip immediate first tick
@@ -246,7 +250,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
 
     // Disconnect cleanup
     ping_task.abort();
-    cleanup_disconnect(&state, &user_id).await;
+    cleanup_disconnect(&state, &user_id, conn_id).await;
     sink_task.abort();
 }
 
@@ -288,6 +292,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_join" => {
             let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+
+            // Reject if this user is already in the target channel from another device.
+            {
+                let vc = state.voice_channels.read().await;
+                if vc.get(channel_id).map(|ch| ch.contains_key(user_id)).unwrap_or(false) {
+                    send_to_user(&state, user_id, &json!({
+                        "type": "error",
+                        "error": "already_in_channel",
+                        "message": "You are already in this voice channel on another device"
+                    })).await;
+                    return;
+                }
+            }
 
             // Atomically: remove user from every other channel AND insert into the target
             // channel in one write-lock hold. This prevents a second voice_join from racing
@@ -1637,8 +1654,10 @@ pub(crate) async fn relay_audio(state: &AppState, user_id: &str, data: &[u8]) {
 
                 let ws_map = state.active_websockets.read().await;
                 for mid in &targets {
-                    if let Some(tx) = ws_map.get(mid) {
-                        let _ = tx.send(Message::Binary(data.to_vec().into()));
+                    if let Some(conns) = ws_map.get(mid) {
+                        for tx in conns.values() {
+                            let _ = tx.send(Message::Binary(data.to_vec().into()));
+                        }
                     }
                 }
                 return;
@@ -1647,7 +1666,7 @@ pub(crate) async fn relay_audio(state: &AppState, user_id: &str, data: &[u8]) {
     }
 }
 
-pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
+pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id: u64) {
     // Teardown voice WebRTC
     teardown_voice_subscriptions_for_listener(state, user_id).await;
     let _ = teardown_voice_publisher(state, user_id).await;
@@ -1756,20 +1775,32 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str) {
         }
     }
 
-    // Remove websocket
-    state.active_websockets.write().await.remove(user_id);
-
-    // Mark offline
-    {
-        let mut up = state.user_presence.write().await;
-        if let Some(p) = up.get_mut(user_id) {
-            p.connected = false;
-            p.last_active = now_secs();
+    // Remove this specific connection; check whether any remain.
+    let still_connected = {
+        let mut ws_map = state.active_websockets.write().await;
+        if let Some(conns) = ws_map.get_mut(user_id) {
+            conns.remove(&conn_id);
+            if conns.is_empty() {
+                ws_map.remove(user_id);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
         }
-    }
+    };
 
-    // Broadcast offline presence
-    {
+    // Only mark offline and broadcast when the last connection closes.
+    if !still_connected {
+        {
+            let mut up = state.user_presence.write().await;
+            if let Some(p) = up.get_mut(user_id) {
+                p.connected = false;
+                p.last_active = now_secs();
+            }
+        }
+
         let rm = state.room_members.read().await;
         let user_rooms: Vec<String> = rm
             .iter()
