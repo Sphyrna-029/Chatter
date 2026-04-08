@@ -727,30 +727,83 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     const body = message.content.body;
     const isWatchparty = body.includes("the video") || body.includes("skipped to");
     const isLeave = body.includes("has left");
+    const systemReactions = state.messageReactions[message.event_id] || {};
+    const hasReactions = Object.keys(systemReactions).length > 0;
     return (
-      <div className="group flex items-center justify-center gap-2 py-1.5 px-2">
-        <div className="h-px flex-1 bg-border" />
-        <span className={cn(
-          "text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap",
-          isWatchparty
-            ? "text-blue-400/80 bg-blue-500/10"
-            : isLeave
-              ? "text-red-400/80 bg-red-500/10"
-              : "text-green-400/80 bg-green-500/10"
-        )}>
-          {body}
-        </span>
-        <span className="text-xs text-muted-foreground/50">{time}</span>
-        {canDeleteNotification && (
-          <button
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
-            title="Delete notification"
-            onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
-          >
-            <span className="text-xs">✕</span>
-          </button>
+      <div className="py-0.5 px-2" data-event-id={message.event_id}>
+        <div className="group flex items-center gap-2">
+          <div className="h-px flex-1 bg-border" />
+          <span className={cn(
+            "text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap",
+            isWatchparty
+              ? "text-blue-400/80 bg-blue-500/10"
+              : isLeave
+                ? "text-red-400/80 bg-red-500/10"
+                : "text-green-400/80 bg-green-500/10"
+          )}>
+            {body}
+          </span>
+          <span className="text-xs text-muted-foreground/50">{time}</span>
+          <Popover>
+            <PopoverTrigger asChild>
+              <button
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-foreground text-xs"
+                title="Add reaction"
+              >
+                😊
+              </button>
+            </PopoverTrigger>
+            <PopoverContent side="top" className="w-auto p-0" align="center">
+              <EmojiPicker
+                onSelect={(emoji) => addReaction(message.event_id, emoji)}
+                roomCustomEmojis={state.currentRoomId ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? []) : []}
+                emojiAliases={state.currentRoomId ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {}) : {}}
+              />
+            </PopoverContent>
+          </Popover>
+          {canDeleteNotification && (
+            <button
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
+              title="Delete notification"
+              onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
+            >
+              <span className="text-xs">✕</span>
+            </button>
+          )}
+          <div className="h-px flex-1 bg-border" />
+        </div>
+        {hasReactions && (
+          <div className="flex flex-wrap gap-1 mt-1 justify-center">
+            {Object.entries(systemReactions).map(([emoji, userIds]) =>
+              userIds.length > 0 && (
+                <Tooltip key={emoji}>
+                  <TooltipTrigger asChild>
+                    <button
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-sm transition-colors cursor-pointer hover:bg-accent",
+                        userIds.includes(state.userId || "") ? "border-primary/50 bg-primary/10" : "border-border"
+                      )}
+                      onClick={() => addReaction(message.event_id, emoji)}
+                    >
+                      {isCustomEmojiUrl(emoji) ? (
+                        <img src={emoji} alt="emoji" className="inline-block h-5 w-5 object-contain" />
+                      ) : emoji}
+                      <span className="text-muted-foreground font-medium">{userIds.length}</span>
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {(() => {
+                      const names = userIds.map((id) => state.userPresence[id]?.displayName || displayUserId(id));
+                      const shown = names.slice(0, 5);
+                      const remaining = names.length - shown.length;
+                      return shown.join(", ") + (remaining > 0 ? ` +${remaining} more` : "");
+                    })()}
+                  </TooltipContent>
+                </Tooltip>
+              )
+            )}
+          </div>
         )}
-        <div className="h-px flex-1 bg-border" />
       </div>
     );
   }
