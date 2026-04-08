@@ -18,7 +18,7 @@ use super::{
     },
 };
 use crate::backend::{
-    helpers::{broadcast_to_room, generate_id, get_user_from_token, is_moderator_or_owner, now_millis, now_secs, send_to_user},
+    helpers::{broadcast_to_room, generate_id, get_user_from_token, now_millis, now_secs, send_to_user},
     state::{AppState, PresenceRecord, TankGameRecord, TankPlayer, TugOfWarGame, TugOfWarPlayer, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
     tankwar_engine,
     tugofwar_engine,
