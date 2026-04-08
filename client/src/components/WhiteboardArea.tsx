@@ -98,24 +98,35 @@ function drawStrokeToCtx(ctx: Ctx2D, stroke: WhiteboardStroke) {
         const fB = parseInt(stroke.color.slice(5, 7), 16);
 
         if (!(tR === fR && tG === fG && tB === fB && tA === 255)) {
-          const stack = [[px, py]];
+          // Flat typed-array BFS queue — no per-pixel heap allocations
+          const queue = new Int32Array(CANVAS_W * CANVAS_H);
           const visited = new Uint8Array(CANVAS_W * CANVAS_H);
+          let head = 0, tail = 0;
+          const startPos = py * CANVAS_W + px;
+          queue[tail++] = startPos;
+          visited[startPos] = 1;
 
-          while (stack.length > 0) {
-            const [cx, cy] = stack.pop()!;
-            if (cx < 0 || cx >= CANVAS_W || cy < 0 || cy >= CANVAS_H) continue;
-            const ci = cy * CANVAS_W + cx;
-            if (visited[ci]) continue;
-            const idx = ci * 4;
-            if (data[idx] !== tR || data[idx + 1] !== tG || data[idx + 2] !== tB || data[idx + 3] !== tA) continue;
+          while (head < tail) {
+            const pos = queue[head++];
+            const cx = pos % CANVAS_W;
+            const cy = (pos / CANVAS_W) | 0;
+            const idx = pos * 4;
+            data[idx] = fR; data[idx + 1] = fG; data[idx + 2] = fB; data[idx + 3] = 255;
 
-            visited[ci] = 1;
-            data[idx] = fR;
-            data[idx + 1] = fG;
-            data[idx + 2] = fB;
-            data[idx + 3] = 255;
-
-            stack.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+            const neighbors = [
+              cx + 1 < CANVAS_W  ? pos + 1        : -1,
+              cx - 1 >= 0        ? pos - 1        : -1,
+              cy + 1 < CANVAS_H  ? pos + CANVAS_W : -1,
+              cy - 1 >= 0        ? pos - CANVAS_W : -1,
+            ];
+            for (const npos of neighbors) {
+              if (npos === -1 || visited[npos]) continue;
+              const nidx = npos * 4;
+              if (data[nidx] === tR && data[nidx+1] === tG && data[nidx+2] === tB && data[nidx+3] === tA) {
+                visited[npos] = 1;
+                queue[tail++] = npos;
+              }
+            }
           }
           ctx.putImageData(imageData, 0, 0);
         }
@@ -164,13 +175,22 @@ function drawStrokeToCtx(ctx: Ctx2D, stroke: WhiteboardStroke) {
   }
 }
 
-/** Render all strokes to a context (with white bg). Used for full rebuilds. */
-function renderAllStrokes(ctx: Ctx2D, strokes: WhiteboardStroke[]) {
+/** Render all strokes to a context (with white bg). Used for full rebuilds.
+ *  fillCache: stroke_id → ImageData of canvas state immediately after that fill.
+ *  Cached fills are restored via putImageData (fast) instead of re-running flood fill. */
+function renderAllStrokes(ctx: Ctx2D, strokes: WhiteboardStroke[], fillCache?: Map<string, ImageData>) {
   ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
   for (const s of strokes) {
-    drawStrokeToCtx(ctx, s);
+    if (s.tool === "fill" && fillCache?.has(s.stroke_id)) {
+      ctx.putImageData(fillCache.get(s.stroke_id)!, 0, 0);
+    } else {
+      drawStrokeToCtx(ctx, s);
+      if (s.tool === "fill" && fillCache) {
+        fillCache.set(s.stroke_id, ctx.getImageData(0, 0, CANVAS_W, CANVAS_H));
+      }
+    }
   }
 }
 
@@ -221,6 +241,9 @@ export function WhiteboardArea() {
   const strokesRef = useRef<WhiteboardStroke[]>([]);
   // How many strokes are already rendered in the buffer
   const renderedCountRef = useRef(0);
+  // Cache of canvas ImageData snapshots taken immediately after each fill stroke.
+  // Avoids re-running the expensive flood fill on every full rebuild.
+  const fillCacheRef = useRef<Map<string, ImageData>>(new Map());
   // Mounted flag to skip work after unmount
   const mountedRef = useRef(true);
 
@@ -262,7 +285,7 @@ export function WhiteboardArea() {
   const fullRebuild = useCallback((strokes: WhiteboardStroke[]) => {
     const buffer = getBuffer();
     const ctx = buffer.getContext("2d")!;
-    renderAllStrokes(ctx, strokes);
+    renderAllStrokes(ctx, strokes, fillCacheRef.current);
     renderedCountRef.current = strokes.length;
     blitToScreen();
   }, [getBuffer, blitToScreen]);
@@ -302,10 +325,11 @@ export function WhiteboardArea() {
   useEffect(() => {
     if (!roomId || !channelId) return;
     let cancelled = false;
-    // Reset buffer and zoom for new channel
+    // Reset buffer, cache, and zoom for new channel
     bufferRef.current = null;
     strokesRef.current = [];
     renderedCountRef.current = 0;
+    fillCacheRef.current.clear();
     zoomRef.current = 1;
     panRef.current = { x: 0, y: 0 };
     setZoom(1);
@@ -356,6 +380,7 @@ export function WhiteboardArea() {
       if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId || detail.channel_id !== channelId) return;
+      fillCacheRef.current.clear();
       strokesRef.current = [];
       fullRebuild([]);
     };
@@ -365,6 +390,15 @@ export function WhiteboardArea() {
       const detail = (e as CustomEvent).detail;
       if (detail.room_id !== roomId || detail.channel_id !== channelId) return;
       if (detail.user_id === userId) return;
+      const removedIdx = strokesRef.current.findIndex((s) => s.stroke_id === detail.stroke_id);
+      if (removedIdx !== -1) {
+        fillCacheRef.current.delete(detail.stroke_id);
+        for (let i = removedIdx + 1; i < strokesRef.current.length; i++) {
+          if (strokesRef.current[i].tool === "fill") {
+            fillCacheRef.current.delete(strokesRef.current[i].stroke_id);
+          }
+        }
+      }
       strokesRef.current = strokesRef.current.filter((s) => s.stroke_id !== detail.stroke_id);
       fullRebuild(strokesRef.current);
     };
@@ -586,6 +620,14 @@ export function WhiteboardArea() {
     if (idx === -1) return;
     const actualIdx = strokesRef.current.length - 1 - idx;
     const strokeId = strokesRef.current[actualIdx].stroke_id;
+    // Invalidate fill caches for the removed stroke and any fills that follow it
+    // (their cached state included the now-removed stroke)
+    fillCacheRef.current.delete(strokeId);
+    for (let i = actualIdx + 1; i < strokesRef.current.length; i++) {
+      if (strokesRef.current[i].tool === "fill") {
+        fillCacheRef.current.delete(strokesRef.current[i].stroke_id);
+      }
+    }
     strokesRef.current = [
       ...strokesRef.current.slice(0, actualIdx),
       ...strokesRef.current.slice(actualIdx + 1),
