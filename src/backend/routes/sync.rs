@@ -158,8 +158,8 @@ pub(crate) async fn sync(
             })
             .collect();
 
-        // For DMs, show all other members' names
-        let display_name = if room_data.is_dm {
+        // For DMs, show all other members' names unless a custom name has been set
+        let display_name = if room_data.is_dm && !room_data.dm_name_override {
             let others: Vec<String> = members
                 .iter()
                 .filter(|m| **m != user_id)

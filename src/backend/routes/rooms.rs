@@ -72,6 +72,7 @@ pub(crate) async fn create_room(
                     room_type: String::new(),
                     read_only: false,
                     banner_url: String::new(),
+                    dm_name_override: false,
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -179,6 +180,7 @@ pub(crate) async fn create_room(
                     room_type: String::new(),
                     read_only: false,
                     banner_url: String::new(),
+                    dm_name_override: false,
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -355,6 +357,7 @@ pub(crate) async fn create_room(
         room_type: req.room_type.unwrap_or_default(),
         read_only: false,
         banner_url: String::new(),
+        dm_name_override: false,
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -852,59 +855,78 @@ pub(crate) async fn update_room_settings(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    if rooms_coll
+    let room = rooms_coll
         .find_one(doc! { "_id": &room_id })
         .await
         .ok()
         .flatten()
-        .is_none()
-    {
-        return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
-    }
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    // SECURITY: use get_user_role (which gates on membership) rather than checking
-    // room.creator directly.  An ex-member who created the room must not be able
-    // to update settings after leaving.
-    let caller_role = get_user_role(&state, &room_id, &user_id).await;
-    if caller_role != "owner" && caller_role != "moderator" {
-        return Err(error_response(
-            StatusCode::FORBIDDEN,
-            "Only the room owner or moderators can edit settings",
-        ));
-    }
-
-    let is_owner = caller_role == "owner";
-    let is_mod = caller_role == "moderator";
-
-    // Moderators may only toggle read_only; any other field requires owner
-    if is_mod && !is_owner {
-        let has_non_read_only = req.name.is_some()
-            || req.icon_url.is_some()
+    if room.is_dm {
+        // For DMs: any member may rename; no other settings are editable
+        {
+            let rm = state.room_members.read().await;
+            if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
+                return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+            }
+        }
+        let has_non_name = req.icon_url.is_some()
             || req.tags.is_some()
             || req.custom_emojis.is_some()
             || req.emoji_aliases.is_some()
             || req.unlisted.is_some()
             || req.password.is_some()
-            || req.remove_password.is_some();
-        if has_non_read_only {
+            || req.remove_password.is_some()
+            || req.read_only.is_some()
+            || req.banner_url.is_some();
+        if has_non_name {
+            return Err(error_response(StatusCode::FORBIDDEN, "Only the name can be changed for DM rooms"));
+        }
+    } else {
+        // SECURITY: use get_user_role (which gates on membership) rather than checking
+        // room.creator directly.  An ex-member who created the room must not be able
+        // to update settings after leaving.
+        let caller_role = get_user_role(&state, &room_id, &user_id).await;
+        if caller_role != "owner" && caller_role != "moderator" {
             return Err(error_response(
                 StatusCode::FORBIDDEN,
-                "Moderators can only change the read-only setting",
+                "Only the room owner or moderators can edit settings",
             ));
         }
-    }
 
-    {
-        let rm = state.room_members.read().await;
-        if !rm
-            .get(&room_id)
-            .map(|m| m.contains(&user_id))
-            .unwrap_or(false)
+        let is_owner = caller_role == "owner";
+        let is_mod = caller_role == "moderator";
+
+        // Moderators may only toggle read_only; any other field requires owner
+        if is_mod && !is_owner {
+            let has_non_read_only = req.name.is_some()
+                || req.icon_url.is_some()
+                || req.tags.is_some()
+                || req.custom_emojis.is_some()
+                || req.emoji_aliases.is_some()
+                || req.unlisted.is_some()
+                || req.password.is_some()
+                || req.remove_password.is_some();
+            if has_non_read_only {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Moderators can only change the read-only setting",
+                ));
+            }
+        }
+
         {
-            return Err(error_response(
-                StatusCode::FORBIDDEN,
-                "Not a member of this room",
-            ));
+            let rm = state.room_members.read().await;
+            if !rm
+                .get(&room_id)
+                .map(|m| m.contains(&user_id))
+                .unwrap_or(false)
+            {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Not a member of this room",
+                ));
+            }
         }
     }
 
@@ -919,6 +941,10 @@ pub(crate) async fn update_room_settings(
         }
         set_doc.insert("name", sanitized.as_str());
         content.insert("name".to_string(), json!(sanitized));
+        // For DM rooms, mark that a custom name has been set so sync won't auto-generate
+        if room.is_dm {
+            set_doc.insert("dm_name_override", true);
+        }
     }
     if let Some(ref icon_url) = req.icon_url {
         set_doc.insert("icon_url", icon_url.as_str());

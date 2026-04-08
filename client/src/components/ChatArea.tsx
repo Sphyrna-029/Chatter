@@ -4,7 +4,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet, UserPlus } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet, UserPlus, Pencil } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -69,7 +69,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, loadOlderMessages, loadMessagesAround, openThread, selectChannel } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -85,6 +85,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [editingTopic, setEditingTopic] = useState(false);
   const [topicDraft, setTopicDraft] = useState("");
   const [addToDMOpen, setAddToDMOpen] = useState(false);
+  const [editingDMName, setEditingDMName] = useState(false);
+  const [dmNameDraft, setDmNameDraft] = useState("");
   const topicInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
@@ -1122,11 +1124,44 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       <div className={`flex items-center justify-between border-b px-4 ${isMobile ? "py-1.5" : "py-3"}`}>
         <div className={isMobile ? "w-0" : "w-8"} />
         <div className={`flex-1 min-w-0 text-center ${isMobile ? "hidden" : ""}`}>
-          <h2 className="text-sm font-semibold">
-            {state.currentChannelId && state.channels.length > 0
-              ? `# ${state.channels.find((c) => c.channel_id === state.currentChannelId)?.name || "channel"}`
-              : roomInfo?.name || "Unnamed Room"}
-          </h2>
+          {roomInfo?.is_direct && editingDMName ? (
+            <input
+              className="text-sm font-semibold text-center bg-transparent border-b border-primary outline-none w-full max-w-xs mx-auto block"
+              value={dmNameDraft}
+              onChange={(e) => setDmNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") e.currentTarget.blur();
+                else if (e.key === "Escape") setEditingDMName(false);
+              }}
+              onBlur={async () => {
+                const trimmed = dmNameDraft.trim();
+                const current = roomInfo?.name || "";
+                if (trimmed && trimmed !== current && state.currentRoomId) {
+                  await updateRoomSettings(state.currentRoomId, { name: trimmed });
+                }
+                setEditingDMName(false);
+              }}
+              autoFocus
+            />
+          ) : (
+            <h2
+              className={`text-sm font-semibold ${roomInfo?.is_direct ? "group inline-flex items-center gap-1 cursor-pointer" : ""}`}
+              onClick={() => {
+                if (roomInfo?.is_direct) {
+                  setDmNameDraft(roomInfo.name || "");
+                  setEditingDMName(true);
+                }
+              }}
+              title={roomInfo?.is_direct ? "Click to rename" : undefined}
+            >
+              {state.currentChannelId && state.channels.length > 0
+                ? `# ${state.channels.find((c) => c.channel_id === state.currentChannelId)?.name || "channel"}`
+                : roomInfo?.name || "Unnamed Room"}
+              {roomInfo?.is_direct && (
+                <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              )}
+            </h2>
+          )}
           {(() => {
             const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
             const channelTopic = currentChannel?.topic || "";

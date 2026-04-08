@@ -163,6 +163,9 @@ pub(crate) struct RoomRecord {
     pub(crate) read_only: bool,
     #[serde(default)]
     pub(crate) banner_url: String,
+    /// When true, use the stored name as-is for DMs instead of auto-generating from members.
+    #[serde(default)]
+    pub(crate) dm_name_override: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
