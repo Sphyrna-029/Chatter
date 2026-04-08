@@ -193,6 +193,11 @@ export function WhiteboardArea() {
   // Mounted flag to skip work after unmount
   const mountedRef = useRef(true);
 
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+
   const isDrawing = useRef(false);
   const currentPoints = useRef<number[][]>([]);
   const shapeStart = useRef<number[] | null>(null);
@@ -264,10 +269,14 @@ export function WhiteboardArea() {
   useEffect(() => {
     if (!roomId || !channelId) return;
     let cancelled = false;
-    // Reset buffer for new channel
+    // Reset buffer and zoom for new channel
     bufferRef.current = null;
     strokesRef.current = [];
     renderedCountRef.current = 0;
+    zoomRef.current = 1;
+    panRef.current = { x: 0, y: 0 };
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
     setLoading(true);
 
     apiGetWhiteboardStrokes(roomId, channelId).then((res) => {
@@ -357,6 +366,29 @@ export function WhiteboardArea() {
       });
     }, 500);
     return () => clearInterval(interval);
+  }, []);
+
+  // ─── Wheel zoom (non-passive so we can preventDefault) ──────────────────────
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      const newZoom = Math.min(Math.max(zoomRef.current * factor, 0.25), 8);
+      const newPanX = mouseX - (mouseX - panRef.current.x) * (newZoom / zoomRef.current);
+      const newPanY = mouseY - (mouseY - panRef.current.y) * (newZoom / zoomRef.current);
+      zoomRef.current = newZoom;
+      panRef.current = { x: newPanX, y: newPanY };
+      setZoom(newZoom);
+      setPan({ x: newPanX, y: newPanY });
+    };
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
   }, []);
 
   // ─── Drawing handlers ──────────────────────────────────────────────────────
@@ -641,9 +673,31 @@ export function WhiteboardArea() {
       {/* Canvas area */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 min-w-0 overflow-auto bg-muted/30 flex items-center justify-center"
+        className="flex-1 min-h-0 min-w-0 overflow-hidden bg-muted/30 relative"
       >
-        <div className="relative" style={{ width: "100%", height: "100%" }}>
+        {/* Reset zoom button */}
+        {zoom !== 1 && (
+          <button
+            className="absolute top-2 right-2 z-20 rounded bg-background/80 border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors backdrop-blur-sm"
+            onClick={() => {
+              zoomRef.current = 1;
+              panRef.current = { x: 0, y: 0 };
+              setZoom(1);
+              setPan({ x: 0, y: 0 });
+            }}
+          >
+            {Math.round(zoom * 100)}% · Reset
+          </button>
+        )}
+        <div
+          className="relative"
+          style={{
+            width: "100%",
+            height: "100%",
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "0 0",
+          }}
+        >
           {loading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80">
               <div className="flex flex-col items-center gap-2 text-muted-foreground">
