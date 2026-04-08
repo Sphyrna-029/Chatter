@@ -1098,7 +1098,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   return (
     <div
-      className="flex flex-1 flex-col min-h-0 min-w-0 relative"
+      className="flex flex-1 flex-col min-h-0 min-w-0 relative bg-background"
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
