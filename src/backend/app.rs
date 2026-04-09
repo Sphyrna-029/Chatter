@@ -323,7 +323,7 @@ pub async fn run() {
 
     println!("Chatter server running on http://0.0.0.0:8000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
 }
 
 async fn steam_presence_poller(state: Arc<AppState>) {

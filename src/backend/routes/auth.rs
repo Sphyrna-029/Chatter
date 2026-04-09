@@ -13,10 +13,11 @@ use super::super::{
     state::{AppState, PendingRegistration, RefreshTokenRecord, UserRecord},
 };
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
+use std::net::SocketAddr;
 use mongodb::bson::doc;
 use serde_json::{json, Value};
 use sha2::{Sha256, Digest};
@@ -427,6 +428,7 @@ pub(crate) async fn totp_verify(
 
 pub(crate) async fn login(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
@@ -515,7 +517,7 @@ pub(crate) async fn login(
     let access_token = create_access_token(&user_id, &state.jwt_secret);
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
 
-    let ip = extract_ip(&headers);
+    let ip = extract_ip(&headers, Some(peer));
     let ua = extract_ua(&headers);
     store_refresh_token(&state, &refresh_token, &user_id, &ip, &ua).await;
 
@@ -791,6 +793,7 @@ pub(crate) async fn logout(
 
 pub(crate) async fn refresh(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Json(req): Json<RefreshTokenRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
@@ -832,9 +835,18 @@ pub(crate) async fn refresh(
     let is_admin = user.as_ref().map(|u| u.is_admin).unwrap_or(false);
     let totp_verified = user.as_ref().map(|u| u.totp_verified).unwrap_or(false);
 
-    // Issue new token pair, preserving the IP/UA from the consumed token
-    let ip = found.as_ref().map(|r| r.ip_address.as_str()).unwrap_or("Unknown").to_string();
-    let ua = found.as_ref().map(|r| r.user_agent.as_str()).unwrap_or("Unknown").to_string();
+    // Issue new token pair, preserving the IP/UA from the consumed token.
+    // If the old token has no IP (pre-feature record), capture it from the current request.
+    let ip = found.as_ref()
+        .map(|r| r.ip_address.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| extract_ip(&headers, Some(peer)));
+    let ua = found.as_ref()
+        .map(|r| r.user_agent.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| extract_ua(&headers));
     let new_access = create_access_token(&user_id, &state.jwt_secret);
     let new_refresh = create_refresh_token(&user_id, &state.jwt_secret);
     store_refresh_token(&state, &new_refresh, &user_id, &ip, &ua).await;
@@ -973,13 +985,14 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_ad
     let _ = collection.insert_one(record).await;
 }
 
-/// Extract the best available client IP from request headers.
-fn extract_ip(headers: &HeaderMap) -> String {
+/// Extract the best available client IP from request headers, falling back to the peer address.
+fn extract_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
     headers.get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string())
         .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()).map(str::to_string))
+        .or_else(|| peer.map(|a| a.ip().to_string()))
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
