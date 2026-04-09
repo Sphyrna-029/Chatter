@@ -971,6 +971,8 @@ pub(crate) async fn account_status(
 }
 
 async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_address: &str, user_agent: &str) {
+    use rand::Rng;
+    let session_id = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
     let collection = state
         .db
         .collection::<RefreshTokenRecord>("refresh_tokens");
@@ -981,6 +983,7 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_ad
         ip_address: ip_address.to_string(),
         user_agent: user_agent.to_string(),
         created_at: chrono::Utc::now().timestamp_millis(),
+        session_id,
     };
     let _ = collection.insert_one(record).await;
 }
@@ -1023,6 +1026,7 @@ pub(crate) async fn list_sessions(
     let mut sessions = Vec::new();
     while let Ok(Some(record)) = cursor.try_next().await {
         sessions.push(json!({
+            "session_id": record.session_id,
             "ip_address": record.ip_address,
             "user_agent": record.user_agent,
             "created_at": record.created_at,
@@ -1030,4 +1034,29 @@ pub(crate) async fn list_sessions(
     }
 
     Ok(Json(json!({ "sessions": sessions })))
+}
+
+/// DELETE /api/account/sessions/:session_id
+/// Revokes a specific session belonging to the authenticated user.
+pub(crate) async fn revoke_session(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let collection = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
+    let result = collection
+        .delete_one(doc! { "session_id": &session_id, "user_id": &user_id })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+
+    if result.deleted_count == 0 {
+        return Err(error_response(StatusCode::NOT_FOUND, "Session not found"));
+    }
+
+    Ok(Json(json!({ "success": true })))
 }

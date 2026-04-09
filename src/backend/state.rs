@@ -292,6 +292,8 @@ pub(crate) struct RefreshTokenRecord {
     pub(crate) user_agent: String,
     #[serde(default)]
     pub(crate) created_at: i64, // ms since epoch
+    #[serde(default)]
+    pub(crate) session_id: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

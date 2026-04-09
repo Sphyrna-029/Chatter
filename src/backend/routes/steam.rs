@@ -79,6 +79,8 @@ async fn verify_steam_openid(params: &HashMap<String, String>) -> Result<String,
 }
 
 async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {
+    use rand::Rng;
+    let session_id = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
     let collection = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
     let record = RefreshTokenRecord {
         token: token.to_string(),
@@ -87,6 +89,7 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {
         ip_address: "Unknown".to_string(),
         user_agent: "Unknown".to_string(),
         created_at: chrono::Utc::now().timestamp_millis(),
+        session_id,
     };
     let _ = collection.insert_one(record).await;
 }

@@ -1244,6 +1244,7 @@ export async function apiSetNameColors(roomId: string, ownerColor?: string, modC
 }
 
 export interface SessionInfo {
+  session_id: string;
   ip_address: string;
   user_agent: string;
   created_at: number; // ms since epoch
@@ -1253,6 +1254,11 @@ export async function apiGetSessions(): Promise<{ sessions: SessionInfo[] }> {
   const res = await authenticatedFetch("/api/account/sessions");
   if (!res.ok) throw new Error("Failed to fetch sessions");
   return res.json();
+}
+
+export async function apiRevokeSession(sessionId: string): Promise<void> {
+  const res = await authenticatedFetch(`/api/account/sessions/${sessionId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to revoke session");
 }
 
 export async function apiCreateDM(targetUserIds: string | string[]) {

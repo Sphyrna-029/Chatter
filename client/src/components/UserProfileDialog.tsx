@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetMutualFriends, apiGetSessions, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetMutualFriends, apiGetSessions, apiRevokeSession, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import type { UploadRecord, SessionInfo } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
@@ -1509,11 +1509,33 @@ export function UserProfileDialog({
         ) : (
           <div className="space-y-2">
             {sessions.map((s, i) => (
-              <div key={i} className="rounded-md border px-3 py-2 text-xs space-y-0.5">
-                <div className="font-medium text-foreground truncate">{s.user_agent || "Unknown browser"}</div>
-                <div className="text-muted-foreground">{s.ip_address || "Unknown IP"}</div>
-                <div className="text-muted-foreground">
-                  {s.created_at ? new Date(s.created_at).toLocaleString() : "Unknown time"}
+              <div key={s.session_id || i} className="rounded-md border px-3 py-2 text-xs space-y-0.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 space-y-0.5">
+                    <div className="font-medium text-foreground truncate">{s.user_agent || "Unknown browser"}</div>
+                    <div className="text-muted-foreground">{s.ip_address || "Unknown IP"}</div>
+                    <div className="text-muted-foreground">
+                      {s.created_at ? new Date(s.created_at).toLocaleString() : "Unknown time"}
+                    </div>
+                  </div>
+                  {s.session_id && (
+                    <button
+                      onClick={async () => {
+                        try {
+                          await apiRevokeSession(s.session_id);
+                          setSessions((prev) => prev.filter((x) => x.session_id !== s.session_id));
+                        } catch {}
+                      }}
+                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors mt-0.5"
+                      title="Log out this session"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                      </svg>
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
