@@ -550,14 +550,13 @@ pub(crate) struct MemberCustomRoleRecord {
 
 // ─── Ephemeral types (not persisted) ─────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct WatchPartyState {
     pub(crate) channel_id: String,
     pub(crate) video_url: String,
     pub(crate) playing: bool,
     pub(crate) position_secs: f64,
     pub(crate) position_updated_at: f64,
-    pub(crate) host_user_id: String,
     pub(crate) duration_secs: f64,
 }
 

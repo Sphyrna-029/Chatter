@@ -9,8 +9,7 @@ import {
 } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Play, Pause, Film, RefreshCw, Volume2, VolumeX, Crown } from "lucide-react";
-import { displayUserId } from "@/lib/utils";
+import { Play, Pause, Film, RefreshCw, Volume2, VolumeX } from "lucide-react";
 
 function extractYouTubeId(url: string): string | null {
   const m = url.match(
@@ -33,7 +32,6 @@ interface WatchState {
   playing: boolean;
   positionSecs: number;
   positionUpdatedAt: number;
-  hostUserId: string;
 }
 
 export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
@@ -46,10 +44,8 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     playing: false,
     positionSecs: 0,
     positionUpdatedAt: 0,
-    hostUserId: "",
   });
   const [urlInput, setUrlInput] = useState("");
-  const [showTransfer, setShowTransfer] = useState(false);
   const [displayPosition, setDisplayPosition] = useState(0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [volume, setVolume] = useState(() => {
@@ -72,15 +68,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     watchStateRef.current = watchState;
   }, [watchState]);
 
-  // Can use UI controls (everyone when no host, or the specific host)
-  const isHost =
-    state.userId !== null &&
-    (watchState.hostUserId === "" || watchState.hostUserId === state.userId);
-  // Is the specifically assigned host — video element events + heartbeats only fire for this user
-  const isDesignatedHost =
-    state.userId !== null &&
-    watchState.hostUserId !== "" &&
-    watchState.hostUserId === state.userId;
   const ytId = extractYouTubeId(watchState.videoUrl);
   const isYoutube = ytId !== null;
 
@@ -98,7 +85,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   useEffect(() => { volumeRef.current = volume; }, [volume]);
   useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
 
-  // isHost as a ref so the YouTube listener can check it without a stale closure
   const send = useCallback(
     (msg: object) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -204,7 +190,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
 
   // Fetch state on mount and request sync
   useEffect(() => {
-    setWatchState({ videoUrl: "", playing: false, positionSecs: 0, positionUpdatedAt: 0, hostUserId: "" });
+    setWatchState({ videoUrl: "", playing: false, positionSecs: 0, positionUpdatedAt: 0 });
     setDisplayPosition(0);
     displayPositionRef.current = 0;
 
@@ -219,7 +205,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
           playing: data.playing,
           positionSecs: data.position_secs,
           positionUpdatedAt: data.position_updated_at,
-          hostUserId: data.host_user_id,
         });
         if (data.duration_secs > 0) {
           setVideoDuration(data.duration_secs);
@@ -244,7 +229,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         playing: msg.playing,
         positionSecs: msg.position_secs,
         positionUpdatedAt: msg.position_updated_at,
-        hostUserId: msg.host_user_id,
       };
       setWatchState(newState);
 
@@ -259,7 +243,8 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       // Only seek the player when something meaningful changed.
       // Heartbeat syncs (same play state, no video change) just update the
       // progress bar via state — they must not seek or they cause stuttering.
-      const iAmHost = state.userId === msg.host_user_id;
+      // Skip applying sync if we sent this message (already applied locally).
+      const iAmSender = state.userId === msg.sender_user_id;
       const isVideoChanged = msg.type === "watchparty_video_changed";
 
       if (isVideoChanged) {
@@ -267,7 +252,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         // will remount (key={videoUrl}) and onCanPlay will handle initial sync.
         // Just store the desired state so onCanPlay can pick it up.
         pendingSyncRef.current = { position: compensated, playing: msg.playing };
-      } else if (!iAmHost) {
+      } else if (!iAmSender) {
         const playStateChanged = msg.playing !== watchStateRef.current.playing;
         if (playStateChanged) {
           applySync(compensated, msg.playing);
@@ -295,26 +280,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     }, 500);
     return () => clearInterval(interval);
   }, [watchState.playing, watchState.positionSecs, watchState.positionUpdatedAt]);
-
-  // Host heartbeat — broadcast position every 5s while playing (designated host only)
-  useEffect(() => {
-    if (!isDesignatedHost || !watchState.playing) return;
-    const interval = setInterval(() => {
-      send({
-        type: "watchparty_control",
-        playing: true,
-        position_secs: displayPositionRef.current,
-        duration_secs: videoDuration > 0 ? videoDuration : undefined,
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [isDesignatedHost, watchState.playing, send, videoDuration]);
-
-  // Host controls
-  const handleTransferHost = (newHostId: string) => {
-    send({ type: "watchparty_transfer_host", new_host_user_id: newHostId });
-    setShowTransfer(false);
-  };
 
   const handleLoadVideo = () => {
     const url = urlInput.trim();
@@ -355,39 +320,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     applySync(pos, playing);
   };
 
-  // Direct video event handlers — only the designated host auto-broadcasts
-  // element events. When there's no host, only explicit UI actions (button
-  // clicks / seekbar) send controls, preventing cross-user feedback loops.
-  const handleVideoPlay = useCallback(() => {
-    if (!isDesignatedHost || isApplyingSync.current) return;
-    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
-    send({ type: "watchparty_control", playing: true, position_secs: pos });
-    setWatchState((prev) => ({
-      ...prev,
-      playing: true,
-      positionSecs: pos,
-      positionUpdatedAt: Date.now() / 1000,
-    }));
-  }, [isDesignatedHost, send]);
-
-  const handleVideoPause = useCallback(() => {
-    if (!isDesignatedHost || isApplyingSync.current) return;
-    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
-    send({ type: "watchparty_control", playing: false, position_secs: pos });
-    setWatchState((prev) => ({ ...prev, playing: false, positionSecs: pos }));
-  }, [isDesignatedHost, send]);
-
-  const handleVideoSeeked = useCallback(() => {
-    if (!isDesignatedHost || isApplyingSync.current) return;
-    const pos = videoRef.current?.currentTime ?? displayPositionRef.current;
-    displayPositionRef.current = pos;
-    setDisplayPosition(pos);
-    send({
-      type: "watchparty_control",
-      playing: watchStateRef.current.playing,
-      position_secs: pos,
-    });
-  }, [isDesignatedHost, send]);
+  // Video element events are suppressed — only explicit UI actions (play/pause
+  // button, seekbar) broadcast controls to prevent cross-user feedback loops.
+  const handleVideoPlay = useCallback(() => {}, []);
+  const handleVideoPause = useCallback(() => {}, []);
+  const handleVideoSeeked = useCallback(() => {}, []);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const vol = parseFloat(e.target.value);
@@ -407,11 +344,6 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     applyVolume(volumeRef.current, newMuted);
   };
 
-  const hostName = watchState.hostUserId
-    ? state.userPresence[watchState.hostUserId]?.displayName ||
-      displayUserId(watchState.hostUserId)
-    : null;
-
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <ResizablePanelGroup orientation="vertical" className="flex-1">
@@ -423,11 +355,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                 <div className="flex flex-col items-center gap-3 text-muted-foreground select-none">
                   <Film className="w-12 h-12 opacity-20" />
                   <p className="text-sm opacity-60">No video loaded</p>
-                  {isHost && (
-                    <p className="text-xs opacity-40">
-                      Paste a YouTube or direct video URL below
-                    </p>
-                  )}
+                  <p className="text-xs opacity-40">Paste a YouTube or direct video URL below</p>
                 </div>
               ) : isYoutube ? (
                 <iframe
@@ -500,57 +428,22 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
 
             {/* Controls bar */}
             <div className="flex flex-col gap-1.5 px-3 py-2 bg-zinc-900 border-t border-border shrink-0">
-              {/* Host info row */}
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>
-                  {hostName ? (
-                    <>
-                      <span className="opacity-60">Host: </span>
-                      <span className="font-medium text-zinc-300">{hostName}</span>
-                    </>
-                  ) : (
-                    <span className="opacity-40">No host yet</span>
-                  )}
-                </span>
-                {!isHost && (
-                  <button
-                    className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-                    onClick={() => send({ type: "watchparty_request_sync" })}
-                    title="Request sync from host"
-                  >
-                    <RefreshCw className="w-3 h-3" />
-                    Sync
-                  </button>
-                )}
-              </div>
-
               {/* Progress bar + volume */}
               {watchState.videoUrl && (
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span className="shrink-0 tabular-nums w-10 text-right">
                     {formatTime(Math.max(0, displayPosition))}
                   </span>
-                  {isHost ? (
-                    <input
-                      type="range"
-                      min={0}
-                      max={videoDuration || 14400}
-                      step={1}
-                      value={Math.max(0, displayPosition)}
-                      onChange={handleSeekDrag}
-                      onPointerUp={handleSeekCommit}
-                      className="flex-1 accent-purple-500 cursor-pointer h-1"
-                    />
-                  ) : (
-                    <div className="flex-1 h-1 bg-zinc-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500"
-                        style={{
-                          width: videoDuration > 0 ? `${Math.min(100, (Math.max(0, displayPosition) / videoDuration) * 100)}%` : "0%",
-                        }}
-                      />
-                    </div>
-                  )}
+                  <input
+                    type="range"
+                    min={0}
+                    max={videoDuration || 14400}
+                    step={1}
+                    value={Math.max(0, displayPosition)}
+                    onChange={handleSeekDrag}
+                    onPointerUp={handleSeekCommit}
+                    className="flex-1 accent-purple-500 cursor-pointer h-1"
+                  />
                   {/* Volume */}
                   <button
                     onClick={handleToggleMute}
@@ -576,69 +469,43 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                 </div>
               )}
 
-              {/* Host action row */}
-              {isHost && (
-                <div className="flex items-center gap-2">
-                  {watchState.videoUrl && (
-                    <button
-                      onClick={handlePlayPause}
-                      className="p-1.5 rounded hover:bg-white/10 text-white transition-colors cursor-pointer shrink-0"
-                    >
-                      {watchState.playing ? (
-                        <Pause className="w-4 h-4" />
-                      ) : (
-                        <Play className="w-4 h-4" />
-                      )}
-                    </button>
-                  )}
-                  <Input
-                    className="flex-1 h-7 text-xs bg-zinc-800 border-zinc-700 placeholder:text-zinc-500"
-                    placeholder="YouTube URL or direct video URL…"
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleLoadVideo()}
-                  />
-                  <Button
-                    size="sm"
-                    className="h-7 text-xs shrink-0"
-                    onClick={handleLoadVideo}
-                    disabled={!urlInput.trim()}
-                  >
-                    Load
-                  </Button>
+              {/* Action row — available to all users */}
+              <div className="flex items-center gap-2">
+                {watchState.videoUrl && (
                   <button
-                    onClick={() => setShowTransfer((v) => !v)}
-                    className="p-1.5 rounded hover:bg-white/10 text-yellow-400 transition-colors cursor-pointer shrink-0"
-                    title="Transfer host"
+                    onClick={handlePlayPause}
+                    className="p-1.5 rounded hover:bg-white/10 text-white transition-colors cursor-pointer shrink-0"
                   >
-                    <Crown className="w-4 h-4" />
+                    {watchState.playing ? (
+                      <Pause className="w-4 h-4" />
+                    ) : (
+                      <Play className="w-4 h-4" />
+                    )}
                   </button>
-                </div>
-              )}
-
-              {/* Transfer host panel */}
-              {isHost && showTransfer && (
-                <div className="flex flex-col gap-1 pt-1 border-t border-zinc-700">
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                    Promote to host
-                  </span>
-                  {state.roomMembers
-                    .filter((m) => m.userId !== state.userId)
-                    .map((m) => (
-                      <button
-                        key={m.userId}
-                        onClick={() => handleTransferHost(m.userId)}
-                        className="flex items-center gap-2 px-2 py-1 rounded hover:bg-white/10 text-left text-xs text-zinc-300 transition-colors cursor-pointer"
-                      >
-                        <Crown className="w-3 h-3 text-yellow-400 shrink-0" />
-                        {m.displayName || displayUserId(m.userId)}
-                      </button>
-                    ))}
-                  {state.roomMembers.filter((m) => m.userId !== state.userId).length === 0 && (
-                    <span className="text-[11px] text-zinc-600 px-2">No other members in room</span>
-                  )}
-                </div>
-              )}
+                )}
+                <Input
+                  className="flex-1 h-7 text-xs bg-zinc-800 border-zinc-700 placeholder:text-zinc-500"
+                  placeholder="YouTube URL or direct video URL…"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLoadVideo()}
+                />
+                <Button
+                  size="sm"
+                  className="h-7 text-xs shrink-0"
+                  onClick={handleLoadVideo}
+                  disabled={!urlInput.trim()}
+                >
+                  Load
+                </Button>
+                <button
+                  className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors cursor-pointer shrink-0"
+                  onClick={() => send({ type: "watchparty_request_sync" })}
+                  title="Sync to current playback position"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                </button>
+              </div>
             </div>
           </div>
         </ResizablePanel>

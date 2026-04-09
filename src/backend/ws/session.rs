@@ -1211,40 +1211,119 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             if !room_id.is_empty() {
                 let video_url = msg.get("video_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let is_host = {
+                let now = now_secs();
+                {
+                    let mut wp = state.watch_party_rooms.write().await;
+                    wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
+                        channel_id: channel_id.clone(),
+                        video_url: video_url.clone(),
+                        playing: false,
+                        position_secs: 0.0,
+                        position_updated_at: now,
+                        duration_secs: 0.0,
+                    });
+                }
+                let event = json!({
+                    "type": "watchparty_video_changed",
+                    "room_id": room_id,
+                    "video_url": video_url,
+                    "playing": false,
+                    "position_secs": 0.0,
+                    "position_updated_at": now,
+                    "sender_user_id": user_id,
+                    "duration_secs": 0.0,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
+
+                let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
+                let body = format!("{} changed the video", display);
+                let mut sys_event = json!({
+                    "type": "m.room.message",
+                    "room_id": room_id,
+                    "sender": user_id,
+                    "content": {
+                        "msgtype": "m.watchparty",
+                        "body": body
+                    },
+                    "event_id": generate_id("$"),
+                    "origin_server_ts": now_millis()
+                });
+                if !channel_id.is_empty() {
+                    sys_event["channel_id"] = json!(channel_id);
+                }
+                let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
+                if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
+                    let _ = msg_col.insert_one(doc).await;
+                }
+                broadcast_to_room(&state, room_id, &sys_event).await;
+            }
+        }
+        "watchparty_control" => {
+            if !room_id.is_empty() {
+                let (stored_channel_id, prev_playing, prev_pos, prev_updated_at) = {
                     let wp = state.watch_party_rooms.read().await;
                     wp.get(room_id)
-                        .map(|s| s.host_user_id == user_id || s.host_user_id.is_empty() || s.video_url.is_empty())
-                        .unwrap_or(true)
+                        .map(|s| (
+                            s.channel_id.clone(),
+                            s.playing,
+                            s.position_secs,
+                            s.position_updated_at,
+                        ))
+                        .unwrap_or_default()
                 };
-                if is_host {
-                    let now = now_secs();
-                    {
-                        let mut wp = state.watch_party_rooms.write().await;
-                        wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
-                            channel_id: channel_id.clone(),
-                            video_url: video_url.clone(),
-                            playing: false,
-                            position_secs: 0.0,
-                            position_updated_at: now,
-                            host_user_id: user_id.to_string(),
-                            duration_secs: 0.0,
-                        });
+                let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
+                let position_secs = msg.get("position_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let duration_secs = msg.get("duration_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let now = now_secs();
+                {
+                    let mut wp = state.watch_party_rooms.write().await;
+                    if let Some(s) = wp.get_mut(room_id) {
+                        s.playing = playing;
+                        s.position_secs = position_secs;
+                        s.position_updated_at = now;
+                        if duration_secs > 0.0 {
+                            s.duration_secs = duration_secs;
+                        }
                     }
-                    let event = json!({
-                        "type": "watchparty_video_changed",
-                        "room_id": room_id,
-                        "video_url": video_url,
-                        "playing": false,
-                        "position_secs": 0.0,
-                        "position_updated_at": now,
-                        "host_user_id": user_id,
-                        "duration_secs": 0.0,
-                    });
-                    broadcast_to_room(&state, room_id, &event).await;
+                }
+                let stored_duration = {
+                    let wp = state.watch_party_rooms.read().await;
+                    wp.get(room_id).map(|s| s.duration_secs).unwrap_or(0.0)
+                };
+                let event = json!({
+                    "type": "watchparty_sync",
+                    "room_id": room_id,
+                    "playing": playing,
+                    "position_secs": position_secs,
+                    "position_updated_at": now,
+                    "sender_user_id": user_id,
+                    "duration_secs": stored_duration,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
 
+                // Determine action type to send a chat notification
+                let play_state_changed = playing != prev_playing;
+                let expected_pos = if prev_playing { prev_pos + (now - prev_updated_at) } else { prev_pos };
+                let pos_jumped = (position_secs - expected_pos).abs() > 3.0;
+                let is_seek = !play_state_changed && pos_jumped;
+                let is_heartbeat = !play_state_changed && !pos_jumped;
+
+                if !is_heartbeat {
                     let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
-                    let body = format!("{} changed the video", display);
+                    let fmt_time = |secs: f64| -> String {
+                        let total = secs as u64;
+                        let h = total / 3600;
+                        let m = (total % 3600) / 60;
+                        let s = total % 60;
+                        if h > 0 { format!("{}:{:02}:{:02}", h, m, s) } else { format!("{}:{:02}", m, s) }
+                    };
+                    let body = if is_seek {
+                        format!("{} skipped to {}", display, fmt_time(position_secs))
+                    } else if playing {
+                        format!("{} resumed the video", display)
+                    } else {
+                        format!("{} paused the video at {}", display, fmt_time(position_secs))
+                    };
                     let mut sys_event = json!({
                         "type": "m.room.message",
                         "room_id": room_id,
@@ -1256,139 +1335,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "event_id": generate_id("$"),
                         "origin_server_ts": now_millis()
                     });
-                    if !channel_id.is_empty() {
-                        sys_event["channel_id"] = json!(channel_id);
+                    if !stored_channel_id.is_empty() {
+                        sys_event["channel_id"] = json!(stored_channel_id);
                     }
                     let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
                     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
                         let _ = msg_col.insert_one(doc).await;
                     }
                     broadcast_to_room(&state, room_id, &sys_event).await;
-                }
-            }
-        }
-        "watchparty_control" => {
-            if !room_id.is_empty() {
-                let (can_control, stored_host, stored_channel_id, prev_playing, prev_pos, prev_updated_at) = {
-                    let wp = state.watch_party_rooms.read().await;
-                    wp.get(room_id)
-                        .map(|s| (
-                            s.host_user_id == user_id || s.host_user_id.is_empty(),
-                            s.host_user_id.clone(),
-                            s.channel_id.clone(),
-                            s.playing,
-                            s.position_secs,
-                            s.position_updated_at,
-                        ))
-                        .unwrap_or((false, String::new(), String::new(), false, 0.0, 0.0))
-                };
-                if can_control {
-                    let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let position_secs = msg.get("position_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let duration_secs = msg.get("duration_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    let now = now_secs();
-                    {
-                        let mut wp = state.watch_party_rooms.write().await;
-                        if let Some(s) = wp.get_mut(room_id) {
-                            s.playing = playing;
-                            s.position_secs = position_secs;
-                            s.position_updated_at = now;
-                            if duration_secs > 0.0 {
-                                s.duration_secs = duration_secs;
-                            }
-                        }
-                    }
-                    let stored_duration = {
-                        let wp = state.watch_party_rooms.read().await;
-                        wp.get(room_id).map(|s| s.duration_secs).unwrap_or(0.0)
-                    };
-                    let event = json!({
-                        "type": "watchparty_sync",
-                        "room_id": room_id,
-                        "playing": playing,
-                        "position_secs": position_secs,
-                        "position_updated_at": now,
-                        "host_user_id": stored_host,
-                        "duration_secs": stored_duration,
-                    });
-                    broadcast_to_room(&state, room_id, &event).await;
-
-                    // Determine action type to send a chat notification
-                    let play_state_changed = playing != prev_playing;
-                    let expected_pos = if prev_playing { prev_pos + (now - prev_updated_at) } else { prev_pos };
-                    let pos_jumped = (position_secs - expected_pos).abs() > 3.0;
-                    let is_seek = !play_state_changed && pos_jumped;
-                    let is_heartbeat = !play_state_changed && !pos_jumped;
-
-                    if !is_heartbeat {
-                        let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
-                        let fmt_time = |secs: f64| -> String {
-                            let total = secs as u64;
-                            let h = total / 3600;
-                            let m = (total % 3600) / 60;
-                            let s = total % 60;
-                            if h > 0 { format!("{}:{:02}:{:02}", h, m, s) } else { format!("{}:{:02}", m, s) }
-                        };
-                        let body = if is_seek {
-                            format!("{} skipped to {}", display, fmt_time(position_secs))
-                        } else if playing {
-                            format!("{} resumed the video", display)
-                        } else {
-                            format!("{} paused the video at {}", display, fmt_time(position_secs))
-                        };
-                        let mut sys_event = json!({
-                            "type": "m.room.message",
-                            "room_id": room_id,
-                            "sender": user_id,
-                            "content": {
-                                "msgtype": "m.watchparty",
-                                "body": body
-                            },
-                            "event_id": generate_id("$"),
-                            "origin_server_ts": now_millis()
-                        });
-                        if !stored_channel_id.is_empty() {
-                            sys_event["channel_id"] = json!(stored_channel_id);
-                        }
-                        let msg_col = state.db.collection::<mongodb::bson::Document>("messages");
-                        if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
-                            let _ = msg_col.insert_one(doc).await;
-                        }
-                        broadcast_to_room(&state, room_id, &sys_event).await;
-                    }
-                }
-            }
-        }
-        "watchparty_transfer_host" => {
-            if !room_id.is_empty() {
-                let new_host = msg.get("new_host_user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if !new_host.is_empty() {
-                    let is_host = {
-                        let wp = state.watch_party_rooms.read().await;
-                        wp.get(room_id).map(|s| s.host_user_id == user_id).unwrap_or(false)
-                    };
-                    if is_host {
-                        let (playing, position_secs, position_updated_at, video_url, duration_secs) = {
-                            let mut wp = state.watch_party_rooms.write().await;
-                            if let Some(s) = wp.get_mut(room_id) {
-                                s.host_user_id = new_host.clone();
-                                (s.playing, s.position_secs, s.position_updated_at, s.video_url.clone(), s.duration_secs)
-                            } else {
-                                return;
-                            }
-                        };
-                        let event = json!({
-                            "type": "watchparty_sync",
-                            "room_id": room_id,
-                            "video_url": video_url,
-                            "playing": playing,
-                            "position_secs": position_secs,
-                            "position_updated_at": position_updated_at,
-                            "host_user_id": new_host,
-                            "duration_secs": duration_secs,
-                        });
-                        broadcast_to_room(&state, room_id, &event).await;
-                    }
                 }
             }
         }
@@ -1403,7 +1357,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         "playing": s.playing,
                         "position_secs": s.position_secs,
                         "position_updated_at": s.position_updated_at,
-                        "host_user_id": s.host_user_id,
                         "duration_secs": s.duration_secs,
                     });
                     drop(wp);
@@ -1738,39 +1691,6 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
             "user_id": user_id
         });
         broadcast_to_room(state, &room_id, &event).await;
-    }
-
-    // Watch party host transfer
-    let wp_rooms: Vec<String> = {
-        let wp = state.watch_party_rooms.read().await;
-        wp.iter()
-            .filter(|(_, s)| s.host_user_id == user_id)
-            .map(|(rid, _)| rid.clone())
-            .collect()
-    };
-    for room_id in wp_rooms {
-        let event_opt = {
-            let mut wp = state.watch_party_rooms.write().await;
-            if let Some(s) = wp.get_mut(&room_id) {
-                // Clear host so anyone remaining can control playback
-                s.host_user_id = String::new();
-                Some(json!({
-                    "type": "watchparty_sync",
-                    "room_id": room_id,
-                    "video_url": s.video_url,
-                    "playing": s.playing,
-                    "position_secs": s.position_secs,
-                    "position_updated_at": s.position_updated_at,
-                    "host_user_id": "",
-                    "duration_secs": s.duration_secs,
-                }))
-            } else {
-                None
-            }
-        };
-        if let Some(event) = event_opt {
-            broadcast_to_room(state, &room_id, &event).await;
-        }
     }
 
     // Remove this specific connection; check whether any remain.
