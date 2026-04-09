@@ -1243,6 +1243,18 @@ export async function apiSetNameColors(roomId: string, ownerColor?: string, modC
   return res.json();
 }
 
+export interface SessionInfo {
+  ip_address: string;
+  user_agent: string;
+  created_at: number; // ms since epoch
+}
+
+export async function apiGetSessions(): Promise<{ sessions: SessionInfo[] }> {
+  const res = await authenticatedFetch("/api/account/sessions");
+  if (!res.ok) throw new Error("Failed to fetch sessions");
+  return res.json();
+}
+
 export async function apiCreateDM(targetUserIds: string | string[]) {
   const invite = Array.isArray(targetUserIds) ? targetUserIds : [targetUserIds];
   const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {

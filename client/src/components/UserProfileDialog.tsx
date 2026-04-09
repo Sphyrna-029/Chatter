@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetMutualFriends, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
-import type { UploadRecord } from "@/lib/api";
+import { apiUploadFile, apiListUploads, apiDeleteUpload, apiChangePassword, apiDeleteAccount, apiGetRecoveryCodes, apiSetupTotp, apiVerifyTotp, apiGetAccountStatus, apiGetSteamLinkUrl, apiGetSteamStatus, apiSetSteamHideGame, apiUnlinkSteam, apiGetMutualFriends, apiGetSessions, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
+import type { UploadRecord, SessionInfo } from "@/lib/api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Button } from "@/components/ui/button";
@@ -205,6 +205,10 @@ export function UserProfileDialog({
   const [totpSetupError, setTotpSetupError] = useState<string | null>(null);
   const [totpSetupRecoveryCodes, setTotpSetupRecoveryCodes] = useState<string[] | null>(null);
 
+  // Active sessions state
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
   // Steam state
   const [steamId, setSteamId] = useState<string | null>(null);
   const [steamHideGame, setSteamHideGame] = useState(false);
@@ -286,6 +290,10 @@ export function UserProfileDialog({
         setSteamId(data.steam_id);
         setSteamHideGame(data.hide_game);
       }).catch(() => {});
+      setSessionsLoading(true);
+      apiGetSessions().then((data) => {
+        setSessions(data.sessions);
+      }).catch(() => {}).finally(() => setSessionsLoading(false));
     }
   }, [activeTab, isSelf]);
 
@@ -1487,6 +1495,28 @@ export function UserProfileDialog({
             >
               {steamLoading ? "Redirecting..." : "Link Steam Account"}
             </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Active Sessions */}
+      <div className="space-y-3 border-t pt-4">
+        <h3 className="text-sm font-semibold">Active Sessions</h3>
+        {sessionsLoading ? (
+          <p className="text-xs text-muted-foreground">Loading sessions...</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No active sessions found.</p>
+        ) : (
+          <div className="space-y-2">
+            {sessions.map((s, i) => (
+              <div key={i} className="rounded-md border px-3 py-2 text-xs space-y-0.5">
+                <div className="font-medium text-foreground truncate">{s.user_agent || "Unknown browser"}</div>
+                <div className="text-muted-foreground">{s.ip_address || "Unknown IP"}</div>
+                <div className="text-muted-foreground">
+                  {s.created_at ? new Date(s.created_at).toLocaleString() : "Unknown time"}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

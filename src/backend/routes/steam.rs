@@ -84,6 +84,9 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {
         token: token.to_string(),
         user_id: user_id.to_string(),
         expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+        ip_address: "Unknown".to_string(),
+        user_agent: "Unknown".to_string(),
+        created_at: chrono::Utc::now().timestamp_millis(),
     };
     let _ = collection.insert_one(record).await;
 }

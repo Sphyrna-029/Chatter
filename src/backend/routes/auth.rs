@@ -353,7 +353,7 @@ pub(crate) async fn totp_verify(
         // Issue tokens
         let access_token = create_access_token(&user_id, &state.jwt_secret);
         let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
-        store_refresh_token(&state, &refresh_token, &user_id).await;
+        store_refresh_token(&state, &refresh_token, &user_id, "Unknown", "Unknown").await;
 
         return Ok((
             auth_cookie_headers(&access_token, &refresh_token),
@@ -409,7 +409,7 @@ pub(crate) async fn totp_verify(
     // Now that TOTP is verified, issue tokens
     let access_token = create_access_token(&user_id, &state.jwt_secret);
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
-    store_refresh_token(&state, &refresh_token, &user_id).await;
+    store_refresh_token(&state, &refresh_token, &user_id, "Unknown", "Unknown").await;
 
     Ok((
         auth_cookie_headers(&access_token, &refresh_token),
@@ -427,6 +427,7 @@ pub(crate) async fn totp_verify(
 
 pub(crate) async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let username = req.username.trim();
@@ -514,7 +515,9 @@ pub(crate) async fn login(
     let access_token = create_access_token(&user_id, &state.jwt_secret);
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
 
-    store_refresh_token(&state, &refresh_token, &user_id).await;
+    let ip = extract_ip(&headers);
+    let ua = extract_ua(&headers);
+    store_refresh_token(&state, &refresh_token, &user_id, &ip, &ua).await;
 
     Ok((
         auth_cookie_headers(&access_token, &refresh_token),
@@ -609,7 +612,7 @@ pub(crate) async fn recovery_login(
     let device_id = generate_id("DEVICE");
     let access_token = create_access_token(&user_id, &state.jwt_secret);
     let refresh_token = create_refresh_token(&user_id, &state.jwt_secret);
-    store_refresh_token(&state, &refresh_token, &user_id).await;
+    store_refresh_token(&state, &refresh_token, &user_id, "Unknown", "Unknown").await;
 
     Ok((
         auth_cookie_headers(&access_token, &refresh_token),
@@ -829,10 +832,12 @@ pub(crate) async fn refresh(
     let is_admin = user.as_ref().map(|u| u.is_admin).unwrap_or(false);
     let totp_verified = user.as_ref().map(|u| u.totp_verified).unwrap_or(false);
 
-    // Issue new token pair
+    // Issue new token pair, preserving the IP/UA from the consumed token
+    let ip = found.as_ref().map(|r| r.ip_address.as_str()).unwrap_or("Unknown").to_string();
+    let ua = found.as_ref().map(|r| r.user_agent.as_str()).unwrap_or("Unknown").to_string();
     let new_access = create_access_token(&user_id, &state.jwt_secret);
     let new_refresh = create_refresh_token(&user_id, &state.jwt_secret);
-    store_refresh_token(&state, &new_refresh, &user_id).await;
+    store_refresh_token(&state, &new_refresh, &user_id, &ip, &ua).await;
 
     Ok((
         auth_cookie_headers(&new_access, &new_refresh),
@@ -953,7 +958,7 @@ pub(crate) async fn account_status(
     })))
 }
 
-async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {
+async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_address: &str, user_agent: &str) {
     let collection = state
         .db
         .collection::<RefreshTokenRecord>("refresh_tokens");
@@ -961,6 +966,55 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str) {
         token: token.to_string(),
         user_id: user_id.to_string(),
         expires_at: chrono::Utc::now() + chrono::Duration::days(7),
+        ip_address: ip_address.to_string(),
+        user_agent: user_agent.to_string(),
+        created_at: chrono::Utc::now().timestamp_millis(),
     };
     let _ = collection.insert_one(record).await;
+}
+
+/// Extract the best available client IP from request headers.
+fn extract_ip(headers: &HeaderMap) -> String {
+    headers.get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()).map(str::to_string))
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Extract User-Agent from request headers.
+fn extract_ua(headers: &HeaderMap) -> String {
+    headers.get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
+pub(crate) async fn list_sessions(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    use futures_util::TryStreamExt;
+    let collection = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
+    let mut cursor = collection
+        .find(doc! { "user_id": &user_id })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+
+    let mut sessions = Vec::new();
+    while let Ok(Some(record)) = cursor.try_next().await {
+        sessions.push(json!({
+            "ip_address": record.ip_address,
+            "user_agent": record.user_agent,
+            "created_at": record.created_at,
+        }));
+    }
+
+    Ok(Json(json!({ "sessions": sessions })))
 }

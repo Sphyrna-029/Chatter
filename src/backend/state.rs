@@ -286,6 +286,12 @@ pub(crate) struct RefreshTokenRecord {
     pub(crate) token: String,
     pub(crate) user_id: String,
     pub(crate) expires_at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    pub(crate) ip_address: String,
+    #[serde(default)]
+    pub(crate) user_agent: String,
+    #[serde(default)]
+    pub(crate) created_at: i64, // ms since epoch
 }
 
 #[derive(Clone, Serialize, Deserialize)]
