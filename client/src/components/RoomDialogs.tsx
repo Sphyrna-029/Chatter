@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, apiCreateWebhook, apiListWebhooks, apiDeleteWebhook, type RoomSummary, type BannedUser, type Webhook } from "@/lib/api";
+import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, apiCreateWebhook, apiListWebhooks, apiDeleteWebhook, apiCreateBot, apiListBots, apiDeleteBot, apiRegenerateBotToken, apiCreateChannel, type RoomSummary, type BannedUser, type Webhook, type Bot } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 
@@ -429,6 +429,17 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [webhookChannelId, setWebhookChannelId] = useState("");
   const webhookAvatarInputRef = useRef<HTMLInputElement>(null);
 
+  // Bot state
+  const [bots, setBots] = useState<Bot[]>([]);
+  const [botName, setBotName] = useState("");
+  const [botAvatarUrl, setBotAvatarUrl] = useState("");
+  const [botDescription, setBotDescription] = useState("");
+  const [botAvatarUploading, setBotAvatarUploading] = useState(false);
+  const [botLoading, setBotLoading] = useState(false);
+  const [newBotToken, setNewBotToken] = useState<string | null>(null);
+  const [copiedBotToken, setCopiedBotToken] = useState(false);
+  const botAvatarInputRef = useRef<HTMLInputElement>(null);
+
   // Banned users state
   const [bannedUsers, setBannedUsers] = useState<BannedUser[]>([]);
   const [loadingBans, setLoadingBans] = useState(false);
@@ -464,9 +475,16 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setWebhooks([]);
       setWebhookName("");
       setWebhookAvatarUrl("");
+      setBots([]);
+      setBotName("");
+      setBotAvatarUrl("");
+      setBotDescription("");
+      setNewBotToken(null);
+      setCopiedBotToken(false);
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
         apiListWebhooks(roomId).then((data) => setWebhooks(data.webhooks)).catch(() => {});
+        apiListBots(roomId).then((data) => setBots(data.bots)).catch(() => {});
       }
       if (canManageBans) {
         setLoadingBans(true);
@@ -593,6 +611,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
             <TabsTrigger value="emojis" className="flex-1">Emojis</TabsTrigger>
             {isOwner && <TabsTrigger value="invites" className="flex-1">Invites</TabsTrigger>}
+            {isOwner && <TabsTrigger value="bots" className="flex-1">Bots</TabsTrigger>}
             {isOwner && <TabsTrigger value="webhooks" className="flex-1">Webhooks</TabsTrigger>}
             {canManageBans && <TabsTrigger value="moderation" className="flex-1">Moderation</TabsTrigger>}
           </TabsList>
@@ -962,6 +981,209 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   </div>
                 ) : (
                   <p className="text-xs text-muted-foreground py-2">No invite links yet. Create one to share with others.</p>
+                )}
+              </div>
+            </TabsContent>
+          )}
+
+          {isOwner && (
+            <TabsContent value="bots" className="space-y-4 mt-4">
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1.5">
+                  <BotIcon className="w-3.5 h-3.5" />
+                  Create Bot
+                </Label>
+                <div className="space-y-2">
+                  <Input
+                    placeholder="Bot name (required)"
+                    value={botName}
+                    maxLength={64}
+                    onChange={(e) => setBotName(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    {botAvatarUrl ? (
+                      <AuthImage src={botAvatarUrl} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                        <BotIcon className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    )}
+                    <Input
+                      placeholder="Avatar URL (optional)"
+                      value={botAvatarUrl}
+                      onChange={(e) => setBotAvatarUrl(e.target.value)}
+                      className="flex-1"
+                    />
+                    <input
+                      ref={botAvatarInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        setBotAvatarUploading(true);
+                        try {
+                          const { url } = await apiUploadFile(file);
+                          setBotAvatarUrl(url);
+                        } catch {
+                          alert("Failed to upload image");
+                        } finally {
+                          setBotAvatarUploading(false);
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      title="Upload avatar image"
+                      disabled={botAvatarUploading}
+                      onClick={() => botAvatarInputRef.current?.click()}
+                    >
+                      <ImagePlus className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  <Input
+                    placeholder="Description (optional)"
+                    value={botDescription}
+                    onChange={(e) => setBotDescription(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!botName.trim() || botLoading}
+                    onClick={async () => {
+                      setBotLoading(true);
+                      try {
+                        const result = await apiCreateBot(roomId, botName.trim(), botAvatarUrl.trim() || undefined, botDescription.trim() || undefined);
+                        setBots((prev) => [...prev, {
+                          bot_id: result.bot_id,
+                          name: botName.trim(),
+                          avatar_url: botAvatarUrl.trim(),
+                          description: botDescription.trim(),
+                          created_at: Date.now(),
+                        }]);
+                        setNewBotToken(result.token);
+                        setCopiedBotToken(false);
+                        setBotName("");
+                        setBotAvatarUrl("");
+                        setBotDescription("");
+                      } catch (e: any) {
+                        alert(e.message || "Failed to create bot");
+                      } finally {
+                        setBotLoading(false);
+                      }
+                    }}
+                  >
+                    {botLoading ? "Creating..." : "Create"}
+                  </Button>
+                </div>
+              </div>
+
+              {newBotToken && (
+                <div className="p-3 rounded-md border border-yellow-500/50 bg-yellow-500/10 space-y-2">
+                  <p className="text-sm font-semibold text-yellow-400">Save this token - it cannot be shown again!</p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 text-xs bg-background p-2 rounded border font-mono break-all select-all">{newBotToken}</code>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-8 w-8 shrink-0"
+                      onClick={() => {
+                        navigator.clipboard.writeText(newBotToken);
+                        setCopiedBotToken(true);
+                        setTimeout(() => setCopiedBotToken(false), 2000);
+                      }}
+                    >
+                      {copiedBotToken ? <Eye className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <Label>Existing Bots</Label>
+                {bots.length > 0 ? (
+                  <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                    {bots.map((bot) => (
+                      <div
+                        key={bot.bot_id}
+                        className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                      >
+                        {bot.avatar_url ? (
+                          <AuthImage src={bot.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                            <BotIcon className="w-3 h-3 text-muted-foreground" />
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{bot.name}</div>
+                          {bot.description && <div className="text-xs text-muted-foreground truncate">{bot.description}</div>}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          title="Create bot channel"
+                          onClick={async () => {
+                            try {
+                              await apiCreateChannel(roomId, { name: bot.name, channel_type: "bot", bot_id: bot.bot_id });
+                            } catch (e: any) {
+                              alert(e.message || "Failed to create bot channel");
+                            }
+                          }}
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          title="Regenerate token"
+                          onClick={async () => {
+                            if (!confirm("Regenerate token? The old token will stop working.")) return;
+                            try {
+                              const result = await apiRegenerateBotToken(bot.bot_id);
+                              setNewBotToken(result.token);
+                              setCopiedBotToken(false);
+                            } catch (e: any) {
+                              alert(e.message || "Failed to regenerate token");
+                            }
+                          }}
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
+                          title="Delete bot"
+                          onClick={async () => {
+                            if (!confirm(`Delete bot "${bot.name}"? This will also delete its channels.`)) return;
+                            try {
+                              await apiDeleteBot(bot.bot_id);
+                              setBots((prev) => prev.filter((b) => b.bot_id !== bot.bot_id));
+                            } catch (e: any) {
+                              alert(e.message || "Failed to delete bot");
+                            }
+                          }}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No bots yet.</p>
                 )}
               </div>
             </TabsContent>

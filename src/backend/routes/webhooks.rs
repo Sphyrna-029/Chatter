@@ -287,11 +287,11 @@ pub(crate) async fn execute_webhook(
     headers: HeaderMap,
     body: String,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let text = if let Some(event_type) = headers.get("X-GitHub-Event") {
+    let (text, embeds) = if let Some(event_type) = headers.get("X-GitHub-Event") {
         let event_type = event_type.to_str().unwrap_or("unknown");
         let payload: Value = serde_json::from_str(&body)
             .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid JSON body"))?;
-        format_github_event(event_type, &payload)
+        (format_github_event(event_type, &payload), None)
     } else {
         let payload: Value = serde_json::from_str(&body)
             .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid JSON body"))?;
@@ -301,10 +301,13 @@ pub(crate) async fn execute_webhook(
             .unwrap_or("")
             .trim()
             .to_string();
-        text
+        let embeds = payload.get("embeds").and_then(|e| e.as_array()).cloned();
+        (text, embeds)
     };
 
-    if text.is_empty() {
+    // Allow empty text if embeds are present
+    let has_embeds = embeds.as_ref().map_or(false, |e| !e.is_empty());
+    if text.is_empty() && !has_embeds {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "Message content is required",
@@ -352,17 +355,22 @@ pub(crate) async fn execute_webhook(
     let ts = now_millis();
     let sender = format!("webhook:{}", webhook_id);
 
+    let mut content = json!({
+        "msgtype": "m.text",
+        "body": text,
+        "webhook": true,
+        "webhook_name": webhook.name,
+        "webhook_avatar_url": webhook.avatar_url,
+    });
+    if let Some(ref embeds) = embeds {
+        content["embeds"] = json!(embeds);
+    }
+
     let mut event = json!({
         "type": "m.room.message",
         "room_id": webhook.room_id,
         "sender": sender,
-        "content": {
-            "msgtype": "m.text",
-            "body": text,
-            "webhook": true,
-            "webhook_name": webhook.name,
-            "webhook_avatar_url": webhook.avatar_url,
-        },
+        "content": content,
         "event_id": event_id,
         "origin_server_ts": ts,
     });

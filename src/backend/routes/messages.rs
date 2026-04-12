@@ -2,7 +2,7 @@ use super::super::{
     dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
     helpers::{
         broadcast_to_room, error_response,
-        extract_token, generate_id, get_allowed_channel_ids, get_reactions_for_events, get_thread_counts_for_events,
+        extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token, get_reactions_for_events, get_thread_counts_for_events,
         get_user_from_token, get_user_role, get_user_custom_role_ids, is_moderator_or_owner,
         now_millis, send_to_user,
     },
@@ -28,8 +28,27 @@ pub(crate) async fn send_message(
     let _ = txn_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Try JWT first (stateless, fast), then fall back to bot token (DB lookup)
+    let user_id_opt = get_user_from_token(&state, &token);
+    let bot_record = if user_id_opt.is_none() {
+        get_bot_from_token(&state, &token).await
+    } else {
+        None
+    };
+
+    let is_bot = bot_record.is_some();
+    let (sender_id, bot_name, bot_avatar_url) = if let Some(ref bot) = bot_record {
+        (
+            format!("bot:{}", bot.bot_id),
+            Some(bot.name.clone()),
+            Some(bot.avatar_url.clone()),
+        )
+    } else if let Some(uid) = user_id_opt {
+        (uid, None, None)
+    } else {
+        return Err(error_response(StatusCode::UNAUTHORIZED, "Invalid token"));
+    };
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let room = rooms_coll
@@ -39,27 +58,39 @@ pub(crate) async fn send_message(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    {
-        let rm = state.room_members.read().await;
-        if !rm
-            .get(&room_id)
-            .map(|m| m.contains(&user_id))
-            .unwrap_or(false)
-        {
+    if is_bot {
+        // Bots must target their own room and a channel with matching bot_id
+        let bot = bot_record.as_ref().unwrap();
+        if bot.room_id != room_id {
             return Err(error_response(
                 StatusCode::FORBIDDEN,
-                "Not a member of this room",
+                "Bot does not belong to this room",
             ));
         }
-    }
+    } else {
+        // Regular user: check room membership
+        {
+            let rm = state.room_members.read().await;
+            if !rm
+                .get(&room_id)
+                .map(|m| m.contains(&sender_id))
+                .unwrap_or(false)
+            {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Not a member of this room",
+                ));
+            }
+        }
 
-    if room.read_only {
-        let role = get_user_role(&state, &room_id, &user_id).await;
-        if role != "owner" && role != "moderator" {
-            return Err(error_response(
-                StatusCode::FORBIDDEN,
-                "This room is read-only",
-            ));
+        if room.read_only {
+            let role = get_user_role(&state, &room_id, &sender_id).await;
+            if role != "owner" && role != "moderator" {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "This room is read-only",
+                ));
+            }
         }
     }
 
@@ -81,7 +112,7 @@ pub(crate) async fn send_message(
     } else if !room.is_dm {
         // Find the default (first) text channel
         use super::channels::ensure_default_channels;
-        ensure_default_channels(&state, &room_id, &user_id).await
+        ensure_default_channels(&state, &room_id, &sender_id).await
     } else {
         String::new()
     };
@@ -90,53 +121,64 @@ pub(crate) async fn send_message(
     if !channel_id.is_empty() {
         let channels_coll = state.db.collection::<ChannelRecord>("channels");
         if let Ok(Some(ch)) = channels_coll.find_one(mongodb::bson::doc! { "_id": &channel_id }).await {
-            let role = get_user_role(&state, &room_id, &user_id).await;
-            let is_privileged = role == "owner" || role == "moderator";
-
-            if ch.read_only && !is_privileged {
-                return Err(error_response(
-                    StatusCode::FORBIDDEN,
-                    "This channel is read-only",
-                ));
-            }
-
-            // Check view_roles: user must be able to see the channel to send messages
-            if !ch.view_roles.is_empty() && !is_privileged {
-                let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
+            if is_bot {
+                // Bots can only send in their own bot channels
+                let bot = bot_record.as_ref().unwrap();
+                if ch.bot_id != bot.bot_id {
                     return Err(error_response(
                         StatusCode::FORBIDDEN,
-                        "You do not have access to this channel",
+                        "Bot can only send messages in its own channels",
                     ));
                 }
-            }
+            } else {
+                let role = get_user_role(&state, &room_id, &sender_id).await;
+                let is_privileged = role == "owner" || role == "moderator";
 
-            // Check write_roles: if set, only those roles can send
-            if !ch.write_roles.is_empty() && !is_privileged {
-                let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
+                if ch.read_only && !is_privileged {
                     return Err(error_response(
                         StatusCode::FORBIDDEN,
-                        "You do not have permission to send messages in this channel",
+                        "This channel is read-only",
                     ));
                 }
-            }
 
-            // For showcase channels, enforce featured pane write restrictions
-            if ch.channel_type == "showcase" {
-                if req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
-                    if ch.showcase_write_roles.is_empty() {
+                // Check view_roles: user must be able to see the channel to send messages
+                if !ch.view_roles.is_empty() && !is_privileged {
+                    let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
+                    if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
                         return Err(error_response(
                             StatusCode::FORBIDDEN,
-                            "Only owners and moderators can post in the featured pane",
+                            "You do not have access to this channel",
                         ));
                     }
-                    let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                    if !ch.showcase_write_roles.iter().any(|r| user_roles.contains(r)) {
+                }
+
+                // Check write_roles: if set, only those roles can send
+                if !ch.write_roles.is_empty() && !is_privileged {
+                    let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
+                    if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
                         return Err(error_response(
                             StatusCode::FORBIDDEN,
-                            "You do not have permission to post in the featured pane",
+                            "You do not have permission to send messages in this channel",
                         ));
+                    }
+                }
+
+                // For showcase channels, enforce featured pane write restrictions
+                if ch.channel_type == "showcase" {
+                    if req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
+                        if ch.showcase_write_roles.is_empty() {
+                            return Err(error_response(
+                                StatusCode::FORBIDDEN,
+                                "Only owners and moderators can post in the featured pane",
+                            ));
+                        }
+                        let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
+                        if !ch.showcase_write_roles.iter().any(|r| user_roles.contains(r)) {
+                            return Err(error_response(
+                                StatusCode::FORBIDDEN,
+                                "You do not have permission to post in the featured pane",
+                            ));
+                        }
                     }
                 }
             }
@@ -157,6 +199,24 @@ pub(crate) async fn send_message(
 
     if let Some(ref pane) = req.showcase_pane {
         content["showcase_pane"] = json!(pane);
+    }
+
+    // Bot metadata
+    if is_bot {
+        content["bot"] = json!(true);
+        if let Some(ref name) = bot_name {
+            content["bot_name"] = json!(name);
+        }
+        if let Some(ref url) = bot_avatar_url {
+            content["bot_avatar_url"] = json!(url);
+        }
+    }
+
+    // Rich embeds
+    if let Some(ref embeds) = req.embeds {
+        if !embeds.is_empty() {
+            content["embeds"] = json!(embeds);
+        }
     }
 
     // If replying to a message, look up parent and embed reply metadata
@@ -189,7 +249,7 @@ pub(crate) async fn send_message(
     let mut event = json!({
         "type": "m.room.message",
         "room_id": room_id,
-        "sender": user_id,
+        "sender": sender_id,
         "content": content,
         "event_id": event_id,
         "origin_server_ts": timestamp
@@ -206,17 +266,19 @@ pub(crate) async fn send_message(
 
     broadcast_to_room(&state, &room_id, &event).await;
 
-    // Send reply notification
-    if let Some(ref replied_user) = reply_to_user {
-        if replied_user != &user_id {
-            let notification = json!({
-                "type": "m.reply_notification",
-                "room_id": room_id,
-                "sender": user_id,
-                "event_id": event_id,
-                "reply_to_event_id": req.in_reply_to,
-            });
-            send_to_user(&state, replied_user, &notification).await;
+    // Send reply notification (not for bots)
+    if !is_bot {
+        if let Some(ref replied_user) = reply_to_user {
+            if replied_user != &sender_id {
+                let notification = json!({
+                    "type": "m.reply_notification",
+                    "room_id": room_id,
+                    "sender": sender_id,
+                    "event_id": event_id,
+                    "reply_to_event_id": req.in_reply_to,
+                });
+                send_to_user(&state, replied_user, &notification).await;
+            }
         }
     }
 

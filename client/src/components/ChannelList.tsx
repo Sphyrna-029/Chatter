@@ -4,7 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
-  Film, LayoutList, PenTool, Sparkles,
+  Film, LayoutList, PenTool, Sparkles, Bot,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -449,7 +449,9 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                       ? <PenTool className="h-4 w-4 shrink-0 text-muted-foreground" />
                       : ch.channel_type === "showcase"
                         ? <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        : ch.channel_type === "bot"
+                          ? <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          : <Hash className="h-4 w-4 shrink-0 text-muted-foreground" />
             }
             showGrip={canManage}
             badge={occupiedSince ? <VoiceTimer since={occupiedSince} /> : undefined}

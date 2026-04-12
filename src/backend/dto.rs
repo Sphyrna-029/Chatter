@@ -75,6 +75,7 @@ pub(crate) struct SendMessageRequest {
     pub(crate) spoiler: Option<bool>,
     pub(crate) channel_id: Option<String>,
     pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
+    pub(crate) embeds: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Deserialize)]
@@ -210,6 +211,13 @@ pub(crate) struct CreateInviteRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct CreateBotRequest {
+    pub(crate) name: String,
+    pub(crate) avatar_url: Option<String>,
+    pub(crate) description: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct CreateWebhookRequest {
     pub(crate) name: String,
     pub(crate) avatar_url: Option<String>,
@@ -261,6 +269,7 @@ pub(crate) struct CreateChannelRequest {
     pub(crate) channel_type: String,
     pub(crate) topic: Option<String>,
     pub(crate) category_id: Option<String>,
+    pub(crate) bot_id: Option<String>,
 }
 
 #[derive(Deserialize)]

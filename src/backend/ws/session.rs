@@ -65,22 +65,42 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    // JWT decode — no DB call
-    let user_id = match token {
+    // JWT decode — no DB call; fall back to bot token if JWT fails
+    let user_id_opt = match token {
         Some(ref t) => get_user_from_token(&state, t),
         None => None,
     };
 
-    let user_id = match user_id {
-        Some(uid) => uid,
-        None => {
-            let _ = ws_sink
-                .send(Message::Text(
-                    json!({"error": "Invalid token"}).to_string().into(),
-                ))
-                .await;
-            let _ = ws_sink.close().await;
-            return;
+    let is_bot_connection;
+    let bot_room_id: Option<String>;
+    let user_id;
+
+    if let Some(uid) = user_id_opt {
+        user_id = uid;
+        is_bot_connection = false;
+        bot_room_id = None;
+    } else {
+        // Try bot token
+        use crate::backend::helpers::get_bot_from_token;
+        let bot = match token {
+            Some(ref t) => get_bot_from_token(&state, t).await,
+            None => None,
+        };
+        match bot {
+            Some(b) => {
+                user_id = format!("bot:{}", b.bot_id);
+                is_bot_connection = true;
+                bot_room_id = Some(b.room_id.clone());
+            }
+            None => {
+                let _ = ws_sink
+                    .send(Message::Text(
+                        json!({"error": "Invalid token"}).to_string().into(),
+                    ))
+                    .await;
+                let _ = ws_sink.close().await;
+                return;
+            }
         }
     };
 
@@ -97,95 +117,105 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .or_default()
         .insert(conn_id, tx);
 
-    // Update presence – preserve custom_status and manual_status on reconnect
-    // On first connect (no existing PresenceRecord), load persisted values from MongoDB
-    {
-        let mut up = state.user_presence.write().await;
-        if let Some(p) = up.get_mut(&user_id) {
-            p.last_active = now_secs();
-            p.last_typing = 0.0;
-            p.connected = true;
-            p.is_mobile = is_mobile;
-        } else {
-            // Load persisted custom_status and manual_status from user record
-            let (saved_custom_status, saved_manual_status) = {
-                let users_coll = state.db.collection::<UserRecord>("users");
-                match users_coll.find_one(doc! { "_id": &user_id }).await {
-                    Ok(Some(u)) => (u.custom_status, u.manual_status),
-                    _ => (String::new(), None),
-                }
-            };
-            up.insert(
-                user_id.clone(),
-                PresenceRecord {
-                    last_active: now_secs(),
-                    last_typing: 0.0,
-                    connected: true,
-                    custom_status: saved_custom_status,
-                    manual_status: saved_manual_status,
-                    is_mobile,
-                    steam_game: None,
-                    steam_appid: None,
-                    game_session_start: None,
-                    spotify_track: None,
-                    spotify_artist: None,
-                    spotify_album_art: None,
-                },
-            );
+    // For bots: add to room_members cache so broadcast_to_room delivers messages
+    if is_bot_connection {
+        if let Some(ref rid) = bot_room_id {
+            let mut rm = state.room_members.write().await;
+            rm.entry(rid.clone()).or_default().push(user_id.clone());
         }
     }
 
-    // Broadcast presence to all rooms this user is in
-    {
-        let rm = state.room_members.read().await;
-        let user_rooms: Vec<String> = rm
-            .iter()
-            .filter(|(_, members)| members.contains(&user_id))
-            .map(|(rid, _)| rid.clone())
-            .collect();
-        drop(rm);
-        let (custom_status, presence_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
-            let up = state.user_presence.read().await;
-            let p = up.get(&user_id);
-            (
-                p.map(|p| p.custom_status.clone()).unwrap_or_default(),
-                p.map(|p| p.is_mobile).unwrap_or(false),
-                p.and_then(|p| p.steam_game.clone()),
-                p.and_then(|p| p.steam_appid.clone()),
-                p.and_then(|p| p.game_session_start),
-                p.and_then(|p| p.spotify_track.clone()),
-                p.and_then(|p| p.spotify_artist.clone()),
-                p.and_then(|p| p.spotify_album_art.clone()),
-            )
-        };
-        // Get avatar/about/banner/display_name from MongoDB
-        let (avatar_url, about, banner_url, display_name, name_font_url) = {
-            let users_coll = state.db.collection::<UserRecord>("users");
-            match users_coll.find_one(doc! { "_id": &user_id }).await {
-                Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
-                _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
+    if !is_bot_connection {
+        // Update presence – preserve custom_status and manual_status on reconnect
+        // On first connect (no existing PresenceRecord), load persisted values from MongoDB
+        {
+            let mut up = state.user_presence.write().await;
+            if let Some(p) = up.get_mut(&user_id) {
+                p.last_active = now_secs();
+                p.last_typing = 0.0;
+                p.connected = true;
+                p.is_mobile = is_mobile;
+            } else {
+                // Load persisted custom_status and manual_status from user record
+                let (saved_custom_status, saved_manual_status) = {
+                    let users_coll = state.db.collection::<UserRecord>("users");
+                    match users_coll.find_one(doc! { "_id": &user_id }).await {
+                        Ok(Some(u)) => (u.custom_status, u.manual_status),
+                        _ => (String::new(), None),
+                    }
+                };
+                up.insert(
+                    user_id.clone(),
+                    PresenceRecord {
+                        last_active: now_secs(),
+                        last_typing: 0.0,
+                        connected: true,
+                        custom_status: saved_custom_status,
+                        manual_status: saved_manual_status,
+                        is_mobile,
+                        steam_game: None,
+                        steam_appid: None,
+                        game_session_start: None,
+                        spotify_track: None,
+                        spotify_artist: None,
+                        spotify_album_art: None,
+                    },
+                );
             }
-        };
-        let event = json!({
-            "type": "presence_update",
-            "user_id": user_id,
-            "status": "active",
-            "custom_status": custom_status,
-            "avatar_url": avatar_url,
-            "about": about,
-            "banner_url": banner_url,
-            "display_name": display_name,
-            "name_font_url": name_font_url,
-            "is_mobile": presence_is_mobile,
-            "steam_game": steam_game,
-            "steam_appid": steam_appid,
-            "game_session_start": game_session_start,
-            "spotify_track": spotify_track,
-            "spotify_artist": spotify_artist,
-            "spotify_album_art": spotify_album_art,
-        });
-        for rid in user_rooms {
-            broadcast_to_room(&state, &rid, &event).await;
+        }
+
+        // Broadcast presence to all rooms this user is in
+        {
+            let rm = state.room_members.read().await;
+            let user_rooms: Vec<String> = rm
+                .iter()
+                .filter(|(_, members)| members.contains(&user_id))
+                .map(|(rid, _)| rid.clone())
+                .collect();
+            drop(rm);
+            let (custom_status, presence_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
+                let up = state.user_presence.read().await;
+                let p = up.get(&user_id);
+                (
+                    p.map(|p| p.custom_status.clone()).unwrap_or_default(),
+                    p.map(|p| p.is_mobile).unwrap_or(false),
+                    p.and_then(|p| p.steam_game.clone()),
+                    p.and_then(|p| p.steam_appid.clone()),
+                    p.and_then(|p| p.game_session_start),
+                    p.and_then(|p| p.spotify_track.clone()),
+                    p.and_then(|p| p.spotify_artist.clone()),
+                    p.and_then(|p| p.spotify_album_art.clone()),
+                )
+            };
+            // Get avatar/about/banner/display_name from MongoDB
+            let (avatar_url, about, banner_url, display_name, name_font_url) = {
+                let users_coll = state.db.collection::<UserRecord>("users");
+                match users_coll.find_one(doc! { "_id": &user_id }).await {
+                    Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
+                    _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
+                }
+            };
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": "active",
+                "custom_status": custom_status,
+                "avatar_url": avatar_url,
+                "about": about,
+                "banner_url": banner_url,
+                "display_name": display_name,
+                "name_font_url": name_font_url,
+                "is_mobile": presence_is_mobile,
+                "steam_game": steam_game,
+                "steam_appid": steam_appid,
+                "game_session_start": game_session_start,
+                "spotify_track": spotify_track,
+                "spotify_artist": spotify_artist,
+                "spotify_album_art": spotify_album_art,
+            });
+            for rid in user_rooms {
+                broadcast_to_room(&state, &rid, &event).await;
+            }
         }
     }
 
@@ -1711,29 +1741,37 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 
     // Only mark offline and broadcast when the last connection closes.
     if !still_connected {
-        {
-            let mut up = state.user_presence.write().await;
-            if let Some(p) = up.get_mut(user_id) {
-                p.connected = false;
-                p.last_active = now_secs();
+        if user_id.starts_with("bot:") {
+            // Remove bot from room_members cache
+            let mut rm = state.room_members.write().await;
+            for members in rm.values_mut() {
+                members.retain(|m| m != user_id);
             }
-        }
+        } else {
+            {
+                let mut up = state.user_presence.write().await;
+                if let Some(p) = up.get_mut(user_id) {
+                    p.connected = false;
+                    p.last_active = now_secs();
+                }
+            }
 
-        let rm = state.room_members.read().await;
-        let user_rooms: Vec<String> = rm
-            .iter()
-            .filter(|(_, members)| members.contains(&user_id.to_string()))
-            .map(|(rid, _)| rid.clone())
-            .collect();
-        drop(rm);
-        let event = json!({
-            "type": "presence_update",
-            "user_id": user_id,
-            "status": "offline",
-            "is_mobile": false
-        });
-        for rid in user_rooms {
-            broadcast_to_room(state, &rid, &event).await;
+            let rm = state.room_members.read().await;
+            let user_rooms: Vec<String> = rm
+                .iter()
+                .filter(|(_, members)| members.contains(&user_id.to_string()))
+                .map(|(rid, _)| rid.clone())
+                .collect();
+            drop(rm);
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": "offline",
+                "is_mobile": false
+            });
+            for rid in user_rooms {
+                broadcast_to_room(state, &rid, &event).await;
+            }
         }
     }
 }

@@ -216,6 +216,26 @@ async fn create_indexes(db: &mongodb::Database) {
                 .build(),
         )
         .await;
+
+    // bots: unique token_hash for auth lookups, room_id for listing
+    let _ = db
+        .collection::<mongodb::bson::Document>("bots")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "token_hash": 1 })
+                .options(IndexOptions::builder().unique(true).build())
+                .build(),
+        )
+        .await;
+
+    let _ = db
+        .collection::<mongodb::bson::Document>("bots")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1 })
+                .build(),
+        )
+        .await;
 }
 
 async fn load_room_members_cache(

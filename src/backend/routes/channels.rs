@@ -67,6 +67,7 @@ pub(crate) async fn list_channels(
             "showcase_write_roles": ch.showcase_write_roles,
             "showcase_posters": ch.showcase_posters,
             "system_channel": ch.system_channel,
+            "bot_id": ch.bot_id,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
         }));
@@ -134,9 +135,26 @@ pub(crate) async fn create_channel(
     if name.is_empty() {
         return Err(error_response(StatusCode::BAD_REQUEST, "Channel name cannot be empty"));
     }
-    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard", "showcase"];
+    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard", "showcase", "bot"];
     if !valid_channel_types.contains(&req.channel_type.as_str()) {
         return Err(error_response(StatusCode::BAD_REQUEST, "Invalid channel type"));
+    }
+
+    // Bot channels require a valid bot_id
+    if req.channel_type == "bot" {
+        let bid = req.bot_id.as_deref().unwrap_or("");
+        if bid.is_empty() {
+            return Err(error_response(StatusCode::BAD_REQUEST, "Bot channels require a bot_id"));
+        }
+        let bots_coll = state.db.collection::<super::super::state::BotRecord>("bots");
+        let bot = bots_coll
+            .find_one(doc! { "_id": bid, "room_id": &room_id })
+            .await
+            .ok()
+            .flatten();
+        if bot.is_none() {
+            return Err(error_response(StatusCode::BAD_REQUEST, "Bot not found in this room"));
+        }
     }
 
     // Get next position
@@ -161,6 +179,7 @@ pub(crate) async fn create_channel(
         showcase_write_roles: vec![],
         showcase_posters: vec![],
         system_channel: false,
+        bot_id: req.bot_id.unwrap_or_default(),
         created_by: user_id.clone(),
         created_at: now_millis(),
     };
@@ -185,6 +204,7 @@ pub(crate) async fn create_channel(
             "showcase_write_roles": channel.showcase_write_roles,
             "showcase_posters": channel.showcase_posters,
             "system_channel": channel.system_channel,
+            "bot_id": channel.bot_id,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
         }
@@ -392,6 +412,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             showcase_write_roles: vec![],
             showcase_posters: vec![],
             system_channel: false,
+            bot_id: String::new(),
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
@@ -414,6 +435,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             showcase_write_roles: vec![],
             showcase_posters: vec![],
             system_channel: false,
+            bot_id: String::new(),
             created_by: creator.to_string(),
             created_at: now_millis(),
         })

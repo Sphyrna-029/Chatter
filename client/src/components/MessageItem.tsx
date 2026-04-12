@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check } from "lucide-react";
 import { useAppContext } from "@/lib/store";
-import type { MatrixMessage } from "@/lib/api";
+import type { MatrixMessage, Embed } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -426,6 +426,65 @@ function YouTubeEmbed({ id }: { id: string }) {
   );
 }
 
+/** Discord-style embed card for bot/webhook messages */
+function EmbedCard({ embed }: { embed: Embed }) {
+  const borderColor = embed.color || "#5865F2";
+  return (
+    <div className="max-w-[520px] rounded overflow-hidden mt-1 flex" style={{ borderLeft: `4px solid ${borderColor}` }}>
+      <div className="bg-secondary/50 p-3 flex-1 min-w-0">
+        {embed.author && (
+          <div className="flex items-center gap-1.5 mb-1">
+            {embed.author.icon_url && <img src={embed.author.icon_url} alt="" className="w-5 h-5 rounded-full" />}
+            {embed.author.url ? (
+              <a href={embed.author.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-foreground hover:underline">{embed.author.name}</a>
+            ) : (
+              <span className="text-xs font-semibold text-foreground">{embed.author.name}</span>
+            )}
+          </div>
+        )}
+        <div className="flex gap-3">
+          <div className="flex-1 min-w-0">
+            {embed.title && (
+              embed.url ? (
+                <a href={embed.url} target="_blank" rel="noopener noreferrer" className="block text-sm font-semibold text-primary hover:underline mb-0.5">{embed.title}</a>
+              ) : (
+                <div className="text-sm font-semibold text-foreground mb-0.5">{embed.title}</div>
+              )
+            )}
+            {embed.description && (
+              <div className="text-sm text-muted-foreground whitespace-pre-wrap break-words">{embed.description}</div>
+            )}
+            {embed.fields && embed.fields.length > 0 && (
+              <div className="grid gap-y-1.5 gap-x-2 mt-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))" }}>
+                {embed.fields.map((field, i) => (
+                  <div key={i} className={field.inline ? "" : "col-span-full"}>
+                    <div className="text-xs font-semibold text-foreground">{field.name}</div>
+                    <div className="text-xs text-muted-foreground whitespace-pre-wrap">{field.value}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {embed.thumbnail && (
+            <img src={embed.thumbnail.url} alt="" className="w-16 h-16 rounded object-cover flex-shrink-0 mt-0.5" />
+          )}
+        </div>
+        {embed.image && (
+          <img src={embed.image.url} alt="" className="max-w-full rounded mt-2" />
+        )}
+        {(embed.footer || embed.timestamp) && (
+          <div className="flex items-center gap-1.5 mt-2 text-[11px] text-muted-foreground">
+            {embed.footer?.icon_url && <img src={embed.footer.icon_url} alt="" className="w-4 h-4 rounded-full" />}
+            {embed.footer?.text && <span>{embed.footer.text}</span>}
+            {embed.footer?.text && embed.timestamp && <span>&middot;</span>}
+            {embed.timestamp && <span>{new Date(embed.timestamp).toLocaleString()}</span>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
@@ -611,11 +670,15 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
   }, []);
   const isSystem = message.content.msgtype === "m.system";
   const isWebhook = message.content.webhook === true;
+  const isBot = message.content.bot === true;
+  const isExternal = isWebhook || isBot;
   const senderUsername = isWebhook
     ? (message.content.webhook_name || "Webhook")
+    : isBot
+    ? (message.content.bot_name || "Bot")
     : displayUserId(message.sender);
-  const sender = isWebhook
-    ? (message.content.webhook_name || "Webhook")
+  const sender = isExternal
+    ? senderUsername
     : (state.userPresence[message.sender]?.displayName || senderUsername);
   const initial = sender.substring(0, 1).toUpperCase();
   const time = new Date(message.origin_server_ts).toLocaleTimeString([], {
@@ -624,6 +687,8 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
   });
   const avatarUrl = isWebhook
     ? (message.content.webhook_avatar_url || undefined)
+    : isBot
+    ? (message.content.bot_avatar_url || undefined)
     : state.userPresence[message.sender]?.avatarUrl;
   const isDeleted = message.redacted || message.content.body === "[deleted]";
   const isOwn = message.sender === state.userId;
@@ -694,7 +759,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     return map;
   }, [state.customRoles, roomInfo?.owner_name_color, roomInfo?.mod_name_color]);
 
-  const nameFontUrl = !isWebhook ? state.userPresence[message.sender]?.nameFontUrl : undefined;
+  const nameFontUrl = !isExternal ? state.userPresence[message.sender]?.nameFontUrl : undefined;
   if (nameFontUrl) {
     ensureFontFace(message.sender, nameFontUrl);
   }
@@ -838,7 +903,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         {grouped ? (
           <span className={cn("flex-shrink-0", isMobile ? "w-7" : "w-10")} />
         ) : (
-          <Avatar className={cn("mt-0.5 flex-shrink-0", isMobile ? "h-7 w-7" : "h-10 w-10", !isWebhook && "cursor-pointer")} onClick={() => !isWebhook && setProfileOpen(true)}>
+          <Avatar className={cn("mt-0.5 flex-shrink-0", isMobile ? "h-7 w-7" : "h-10 w-10", !isExternal && "cursor-pointer")} onClick={() => !isExternal && setProfileOpen(true)}>
             <AuthAvatarImage src={avatarUrl} />
             <AvatarFallback className={cn("font-semibold bg-secondary", isMobile ? "text-[10px]" : "text-xs")}>
               {initial}
@@ -865,17 +930,17 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           {!grouped && (
             <div className="flex items-baseline gap-2">
               <span
-                className={cn("text-sm font-semibold", !isWebhook && "cursor-pointer hover:underline")}
+                className={cn("text-sm font-semibold", !isExternal && "cursor-pointer hover:underline")}
                 style={{
                   ...(senderNameColor ? { color: senderNameColor } : {}),
                   ...(nameFontUrl ? { fontFamily: `'user-font-${CSS.escape(message.sender)}'` } : {}),
                 }}
-                onClick={() => !isWebhook && setProfileOpen(true)}
+                onClick={() => !isExternal && setProfileOpen(true)}
               >
                 {sender}
               </span>
-              {isWebhook && (
-                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">BOT</span>
+              {isExternal && (
+                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">{isBot ? "BOT" : "HOOK"}</span>
               )}
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>
@@ -1011,6 +1076,11 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           {/* Media rendered as stable React elements — not inside innerHTML */}
           {!isDeleted && <MediaPreview body={message.content.body} hiddenBySpoiler={showSpoilerMask} onReveal={() => setSpoilerRevealed(true)} />}
 
+          {/* Rich embeds */}
+          {!isDeleted && message.content.embeds?.map((embed, i) => (
+            <EmbedCard key={i} embed={embed} />
+          ))}
+
           {/* Reactions */}
           {!disableReactions && Object.keys(reactions).length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
@@ -1111,7 +1181,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
             >
               <span className="text-xs">↩</span>
             </Button>
-            {!inThread && !isWebhook && message.content.msgtype !== "m.system" && (
+            {!inThread && !isExternal && message.content.msgtype !== "m.system" && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -1177,7 +1247,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           </div>
         )}
       </div>
-      {!isWebhook && <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />}
+      {!isExternal && <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />}
     </div>
   );
 }

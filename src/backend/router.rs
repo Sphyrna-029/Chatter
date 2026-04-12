@@ -3,6 +3,7 @@ use super::{
     routes::{
         admin::{admin_stats, admin_list_users, admin_disable_user, admin_enable_user, admin_delete_user, admin_reset_password, admin_list_rooms, admin_delete_room, admin_get_settings, admin_update_settings, admin_refresh_invite},
         auth::{account_status, change_password, check_username, delete_account, force_reset_password, get_recovery_codes, ice_servers, list_sessions, login, logout, recovery_login, refresh, register, revoke_session, server_info, totp_setup, totp_verify},
+        bots::{create_bot, delete_bot, list_bots, regenerate_bot_token},
         channels::{list_channels, create_channel, update_channel, delete_channel, create_category, update_category, delete_category},
         forum::{create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post, get_post, list_posts, search_posts},
         friends::{get_friends, get_friend_status, get_mutual_friends, send_friend_request, accept_friend_request, reject_friend_request, remove_friend, block_user, unblock_user},
@@ -168,6 +169,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            .route("/api/invites/{code}", delete(delete_invite))
            .route("/api/invites/{code}", get(get_invite_info))
            .route("/api/invites/{code}/accept", post(accept_invite))
+           // Bots
+           .route("/api/rooms/{room_id}/bots", post(create_bot).get(list_bots))
+           .route("/api/bots/{bot_id}", delete(delete_bot))
+           .route("/api/bots/{bot_id}/regenerate-token", post(regenerate_bot_token))
            // Webhooks
            .route("/api/rooms/{room_id}/webhooks", post(create_webhook).get(list_webhooks))
            .route("/api/webhooks/{webhook_id}", delete(delete_webhook).post(execute_webhook))

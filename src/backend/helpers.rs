@@ -151,6 +151,22 @@ pub(crate) fn get_user_from_token(state: &AppState, token: &str) -> Option<Strin
     decode_token(token, &state.jwt_secret).map(|c| c.sub)
 }
 
+/// Look up a bot by its opaque API token (SHA-256 hash lookup in DB).
+pub(crate) async fn get_bot_from_token(
+    state: &AppState,
+    token: &str,
+) -> Option<super::state::BotRecord> {
+    use super::routes::bots::hash_bot_token;
+    let token_hash = hash_bot_token(token);
+    let coll = state
+        .db
+        .collection::<super::state::BotRecord>("bots");
+    coll.find_one(mongodb::bson::doc! { "token_hash": &token_hash })
+        .await
+        .ok()
+        .flatten()
+}
+
 pub(crate) fn error_response(status: StatusCode, detail: &str) -> (StatusCode, Json<Value>) {
     (
         status,

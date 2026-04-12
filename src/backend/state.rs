@@ -355,6 +355,20 @@ pub(crate) struct WebhookRecord {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct BotRecord {
+    #[serde(rename = "_id")]
+    pub(crate) bot_id: String,
+    pub(crate) room_id: String,
+    pub(crate) name: String,
+    pub(crate) avatar_url: String,
+    #[serde(default)]
+    pub(crate) description: String,
+    pub(crate) token_hash: String,
+    pub(crate) created_by: String,
+    pub(crate) created_at: i64,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct RoomGroupEntry {
     pub(crate) group_id: String,
     pub(crate) name: String,
@@ -485,6 +499,8 @@ pub(crate) struct ChannelRecord {
     pub(crate) showcase_posters: Vec<String>,     // user_ids explicitly approved to post in the featured pane
     #[serde(default)]
     pub(crate) system_channel: bool,      // if true, join/leave/kick/ban messages go here
+    #[serde(default)]
+    pub(crate) bot_id: String,            // non-empty only for channel_type == "bot"
     pub(crate) created_by: String,
     pub(crate) created_at: i64,
 }

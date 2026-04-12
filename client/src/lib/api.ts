@@ -572,6 +572,25 @@ export async function apiGetPresence(roomId: string) {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+export interface EmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+export interface Embed {
+  title?: string;
+  description?: string;
+  url?: string;
+  color?: string;
+  fields?: EmbedField[];
+  thumbnail?: { url: string };
+  image?: { url: string };
+  footer?: { text: string; icon_url?: string };
+  author?: { name: string; url?: string; icon_url?: string };
+  timestamp?: string;
+}
+
 export interface MatrixMessage {
   event_id: string;
   sender: string;
@@ -593,6 +612,10 @@ export interface MatrixMessage {
     webhook?: boolean;
     webhook_name?: string;
     webhook_avatar_url?: string;
+    bot?: boolean;
+    bot_name?: string;
+    bot_avatar_url?: string;
+    embeds?: Embed[];
     showcase_pane?: string;
   };
   redacted?: boolean;
@@ -642,7 +665,7 @@ export interface Channel {
   channel_id: string;
   room_id?: string;
   name: string;
-  channel_type: "text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase";
+  channel_type: "text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase" | "bot";
   topic: string;
   position: number;
   category_id?: string;
@@ -652,6 +675,7 @@ export interface Channel {
   showcase_write_roles?: string[];
   showcase_posters?: string[];
   system_channel?: boolean;
+  bot_id?: string;
   created_by?: string;
   created_at?: number;
 }
@@ -744,7 +768,7 @@ export async function apiGetChannels(roomId: string) {
   return res.json() as Promise<{ channels: Channel[]; categories: ChannelCategory[] }>;
 }
 
-export async function apiCreateChannel(roomId: string, data: { name: string; channel_type: string; topic?: string; category_id?: string }) {
+export async function apiCreateChannel(roomId: string, data: { name: string; channel_type: string; topic?: string; category_id?: string; bot_id?: string }) {
   const res = await authenticatedFetch(`/api/rooms/${roomId}/channels`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -1628,6 +1652,59 @@ export async function apiDeleteWebhook(webhookId: string) {
     throw new Error(body?.error || "Failed to delete webhook");
   }
   return res.json();
+}
+
+// ─── Bots ───────────────────────────────────────────────────────────────────
+
+export interface Bot {
+  bot_id: string;
+  name: string;
+  avatar_url: string;
+  description: string;
+  created_at: number;
+}
+
+export async function apiCreateBot(roomId: string, name: string, avatarUrl?: string, description?: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/bots`, {
+    method: "POST",
+    body: JSON.stringify({ name, avatar_url: avatarUrl, description }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to create bot");
+  }
+  return res.json() as Promise<{ bot_id: string; token: string }>;
+}
+
+export async function apiListBots(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/bots`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to list bots");
+  }
+  return res.json() as Promise<{ bots: Bot[] }>;
+}
+
+export async function apiDeleteBot(botId: string) {
+  const res = await authenticatedFetch(`/api/bots/${botId}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to delete bot");
+  }
+  return res.json();
+}
+
+export async function apiRegenerateBotToken(botId: string) {
+  const res = await authenticatedFetch(`/api/bots/${botId}/regenerate-token`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to regenerate token");
+  }
+  return res.json() as Promise<{ token: string }>;
 }
 
 // ─── Room Groups ─────────────────────────────────────────────────────
