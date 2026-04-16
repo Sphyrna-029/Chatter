@@ -1,7 +1,7 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast } from "lucide-react";
 import { useAppContext } from "@/lib/store";
-import type { MatrixMessage, Embed } from "@/lib/api";
+import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -20,6 +20,7 @@ import {
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
+import { useChromecast } from "@/hooks/useChromecast";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
@@ -331,11 +332,12 @@ function useAuthSrc(url: string): string {
 }
 
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
-function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
+function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand: () => void; onCast?: (url: string) => void; castState?: string }) {
   const [activated, setActivated] = useState(false);
   const isLocal = url.includes("/external/");
   const thumbUrl = `${url}.thumb.jpg`;
   const authSrc = useAuthSrc(url);
+  const showCast = onCast && castState && castState !== "unavailable";
 
   if (!activated) {
     return (
@@ -367,30 +369,50 @@ function LazyVideo({ url, onExpand }: { url: string; onExpand: () => void }) {
             <Play className="w-6 h-6 text-white ml-0.5" />
           </div>
         </div>
+        {showCast && (
+          <button
+            className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            onClick={(e) => { e.stopPropagation(); onCast(url); }}
+            title="Cast to Chromecast"
+          >
+            <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : "text-white")} />
+          </button>
+        )}
       </div>
     );
   }
 
   return (
-    <video
-      ref={(el) => {
-        if (el) {
-          // Must start muted for autoplay to work per browser policy,
-          // then unmute so user hears audio and can toggle via controls
-          el.muted = true;
-          el.play().then(() => { el.muted = false; }).catch(() => {});
-        }
-      }}
-      src={authSrc}
-      controls
-      preload="auto"
-      className="max-w-full max-h-80 rounded-md cursor-pointer"
-      onClick={(e) => {
-        const video = e.currentTarget;
-        video.pause();
-        onExpand();
-      }}
-    />
+    <div className="relative w-fit max-w-full group">
+      <video
+        ref={(el) => {
+          if (el) {
+            // Must start muted for autoplay to work per browser policy,
+            // then unmute so user hears audio and can toggle via controls
+            el.muted = true;
+            el.play().then(() => { el.muted = false; }).catch(() => {});
+          }
+        }}
+        src={authSrc}
+        controls
+        preload="auto"
+        className="max-w-full max-h-80 rounded-md cursor-pointer"
+        onClick={(e) => {
+          const video = e.currentTarget;
+          video.pause();
+          onExpand();
+        }}
+      />
+      {showCast && (
+        <button
+          className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+          onClick={(e) => { e.stopPropagation(); onCast(url); }}
+          title="Cast to Chromecast"
+        >
+          <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : "text-white")} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -427,8 +449,54 @@ function YouTubeEmbed({ id }: { id: string }) {
 }
 
 /** Discord-style embed card for bot/webhook messages */
-function EmbedCard({ embed }: { embed: Embed }) {
+function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
+  const { wsRef, state } = useAppContext();
   const borderColor = embed.color || "#5865F2";
+
+  const sendInteraction = useCallback((componentId: string, componentType: "button" | "select", values?: string[]) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !eventId || !state.currentRoomId) return;
+    ws.send(JSON.stringify({
+      type: "embed_interaction",
+      room_id: state.currentRoomId,
+      event_id: eventId,
+      component_id: componentId,
+      component_type: componentType,
+      values: values || [],
+    }));
+  }, [wsRef, eventId, state.currentRoomId]);
+
+  // Group actions into rows
+  const actionRows = useMemo(() => {
+    if (!embed.actions?.length) return [];
+    const rows: Map<number, EmbedAction[]> = new Map();
+    for (const action of embed.actions) {
+      const row = action.row ?? 0;
+      if (!rows.has(row)) rows.set(row, []);
+      rows.get(row)!.push(action);
+    }
+    return Array.from(rows.entries()).sort((a, b) => a[0] - b[0]).map(([, actions]) => actions);
+  }, [embed.actions]);
+
+  // Group selects into rows
+  const selectRows = useMemo(() => {
+    if (!embed.selects?.length) return [];
+    const rows: Map<number, EmbedSelect[]> = new Map();
+    for (const sel of embed.selects) {
+      const row = sel.row ?? 99;
+      if (!rows.has(row)) rows.set(row, []);
+      rows.get(row)!.push(sel);
+    }
+    return Array.from(rows.entries()).sort((a, b) => a[0] - b[0]).map(([, selects]) => selects);
+  }, [embed.selects]);
+
+  const actionStyleClasses: Record<string, string> = {
+    primary: "bg-indigo-500 hover:bg-indigo-600 text-white",
+    secondary: "bg-zinc-600 hover:bg-zinc-500 text-white",
+    success: "bg-emerald-600 hover:bg-emerald-700 text-white",
+    danger: "bg-red-600 hover:bg-red-700 text-white",
+  };
+
   return (
     <div className="max-w-[520px] rounded overflow-hidden mt-1 flex" style={{ borderLeft: `4px solid ${borderColor}` }}>
       <div className="bg-secondary/50 p-3 flex-1 min-w-0">
@@ -480,6 +548,65 @@ function EmbedCard({ embed }: { embed: Embed }) {
             {embed.timestamp && <span>{new Date(embed.timestamp).toLocaleString()}</span>}
           </div>
         )}
+
+        {/* Action buttons */}
+        {actionRows.length > 0 && (
+          <div className="flex flex-col gap-1 mt-2">
+            {actionRows.map((row, ri) => (
+              <div key={ri} className="flex flex-wrap gap-1">
+                {row.map((action) => (
+                  <button
+                    key={action.id}
+                    disabled={action.disabled}
+                    onClick={() => sendInteraction(action.id, "button")}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer",
+                      actionStyleClasses[action.style || "secondary"] || actionStyleClasses.secondary,
+                      action.disabled && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    {action.emoji && <span>{action.emoji}</span>}
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Select menus */}
+        {selectRows.length > 0 && (
+          <div className="flex flex-col gap-1 mt-2">
+            {selectRows.map((row, ri) => (
+              <div key={ri} className="flex flex-col gap-1">
+                {row.map((sel) => (
+                  <select
+                    key={sel.id}
+                    disabled={sel.disabled}
+                    className={cn(
+                      "w-full rounded border border-border bg-background px-2 py-1.5 text-sm text-foreground",
+                      sel.disabled && "opacity-50 cursor-not-allowed"
+                    )}
+                    defaultValue=""
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        sendInteraction(sel.id, "select", [e.target.value]);
+                        e.target.value = "";
+                      }
+                    }}
+                  >
+                    <option value="" disabled>{sel.placeholder || "Select..."}</option>
+                    {sel.options.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.emoji ? `${opt.emoji} ${opt.label}` : opt.label}
+                      </option>
+                    ))}
+                  </select>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -493,6 +620,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
   const { images, videos, audios, files, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
+  const { castState, castVideo, deviceName } = useChromecast();
 
   /** Return the URL unchanged — the media_session HttpOnly cookie is sent automatically. */
   const withAuth = useCallback((url: string) => url, []);
@@ -556,7 +684,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
         );
       })}
       {videos.map((url) => (
-        <LazyVideo key={url} url={url} onExpand={() => setLightbox({ url, type: "video" })} />
+        <LazyVideo key={url} url={url} onExpand={() => setLightbox({ url, type: "video" })} onCast={(u) => castVideo(u)} castState={castState} />
       ))}
       {audios.map((url) => (
         <audio
@@ -579,17 +707,28 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             <AuthImage src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
           )}
           {lightbox?.type === "video" && (
-            <video
-              ref={(el) => {
-                if (el) {
-                  el.muted = true;
-                  el.play().then(() => { el.muted = false; }).catch(() => {});
-                }
-              }}
-              src={withAuth(lightbox.url)}
-              controls
-              className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
-            />
+            <div className="relative group">
+              <video
+                ref={(el) => {
+                  if (el) {
+                    el.muted = true;
+                    el.play().then(() => { el.muted = false; }).catch(() => {});
+                  }
+                }}
+                src={withAuth(lightbox.url)}
+                controls
+                className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
+              />
+              {castState !== "unavailable" && (
+                <button
+                  className="absolute top-2 right-2 p-2 rounded-md bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  onClick={() => castVideo(lightbox.url)}
+                  title={castState === "connected" ? `Casting to ${deviceName}` : "Cast to Chromecast"}
+                >
+                  <Cast className={cn("h-5 w-5", castState === "connected" ? "text-blue-400" : "text-white")} />
+                </button>
+              )}
+            </div>
           )}
         </DialogContent>
       </Dialog>
@@ -1078,7 +1217,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
 
           {/* Rich embeds */}
           {!isDeleted && message.content.embeds?.map((embed, i) => (
-            <EmbedCard key={i} embed={embed} />
+            <EmbedCard key={i} embed={embed} eventId={message.event_id} />
           ))}
 
           {/* Reactions */}
