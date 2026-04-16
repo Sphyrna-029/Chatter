@@ -338,6 +338,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
   const thumbUrl = `${url}.thumb.jpg`;
   const authSrc = useAuthSrc(url);
   const showCast = onCast && castState && castState !== "unavailable";
+  const didAutoPlay = useRef(false);
 
   if (!activated) {
     return (
@@ -386,7 +387,8 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
     <div className="relative w-fit max-w-full group">
       <video
         ref={(el) => {
-          if (el) {
+          if (el && !didAutoPlay.current) {
+            didAutoPlay.current = true;
             // Must start muted for autoplay to work per browser policy,
             // then unmute so user hears audio and can toggle via controls
             el.muted = true;
@@ -621,6 +623,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
   const { addFavorite, removeFavorite, isFavorite } = useFavoriteGifs();
   const { castState, castVideo, deviceName } = useChromecast();
+  const lightboxDidAutoPlay = useRef(false);
 
   /** Return the URL unchanged — the media_session HttpOnly cookie is sent automatically. */
   const withAuth = useCallback((url: string) => url, []);
@@ -684,7 +687,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
         );
       })}
       {videos.map((url) => (
-        <LazyVideo key={url} url={url} onExpand={() => setLightbox({ url, type: "video" })} onCast={(u) => castVideo(u)} castState={castState} />
+        <LazyVideo key={url} url={url} onExpand={() => { lightboxDidAutoPlay.current = false; setLightbox({ url, type: "video" }); }} onCast={(u) => castVideo(u)} castState={castState} />
       ))}
       {audios.map((url) => (
         <audio
@@ -710,7 +713,8 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             <div className="relative group">
               <video
                 ref={(el) => {
-                  if (el) {
+                  if (el && !lightboxDidAutoPlay.current) {
+                    lightboxDidAutoPlay.current = true;
                     el.muted = true;
                     el.play().then(() => { el.muted = false; }).catch(() => {});
                   }
