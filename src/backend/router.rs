@@ -34,19 +34,37 @@ use super::{
 };
 use axum::{
     extract::DefaultBodyLimit,
+    http::Method,
     middleware,
     routing::{delete, get, post, put},
     Router,
 };
 use std::sync::Arc;
-use tower_http::services::ServeDir;
+use tower_http::{
+    cors::{Any, CorsLayer},
+    services::ServeDir,
+};
 
 pub(crate) fn build_router() -> Router<Arc<AppState>> {
+    // CORS layer for uploaded media — required for Chromecast (Default Media
+    // Receiver) and other external players that fetch media cross-origin.
+    let media_cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::HEAD, Method::OPTIONS])
+        .allow_headers(Any)
+        .expose_headers([
+            axum::http::header::CONTENT_LENGTH,
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::CONTENT_RANGE,
+            axum::http::header::ACCEPT_RANGES,
+        ]);
+
     // ServeDir serves static files with streaming, Range requests, etc.
     // upload_guard middleware handles auth, dangerous extensions, and MKV conversion.
     let external_router = Router::new()
         .fallback_service(ServeDir::new("external"))
-        .layer(middleware::from_fn(upload_guard));
+        .layer(middleware::from_fn(upload_guard))
+        .layer(media_cors);
 
        Router::new()
            // Static / client
