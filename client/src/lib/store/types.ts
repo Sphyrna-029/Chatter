@@ -1,4 +1,4 @@
-import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole } from "../api";
+import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, Embed } from "../api";
 import type { Dispatch } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ export type Action =
   | { type: "SET_LOADING_OLDER"; payload: boolean }
   | { type: "ADD_MESSAGE"; payload: MatrixMessage }
   | { type: "REDACT_MESSAGE"; payload: string }
-  | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string } }
+  | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string; newEmbeds?: Embed[] } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
