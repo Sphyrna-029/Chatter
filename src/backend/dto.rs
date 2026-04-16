@@ -111,6 +111,7 @@ pub(crate) struct AddToDmRequest {
 #[derive(Deserialize)]
 pub(crate) struct EditMessageRequest {
     pub(crate) body: String,
+    pub(crate) embeds: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Deserialize)]

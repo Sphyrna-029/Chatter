@@ -682,8 +682,22 @@ pub(crate) async fn edit_message(
     let _ = txn_id;
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let user_id = get_user_from_token(&state, &token)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Try JWT first, then fall back to bot token
+    let user_id_opt = get_user_from_token(&state, &token);
+    let bot_record = if user_id_opt.is_none() {
+        get_bot_from_token(&state, &token).await
+    } else {
+        None
+    };
+
+    let user_id = if let Some(uid) = user_id_opt {
+        uid
+    } else if let Some(ref bot) = bot_record {
+        format!("bot:{}", bot.bot_id)
+    } else {
+        return Err(error_response(StatusCode::UNAUTHORIZED, "Invalid token"));
+    };
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     if rooms_coll
@@ -747,22 +761,33 @@ pub(crate) async fn edit_message(
         .unwrap_or("")
         .to_string();
 
+    // Build the update document
+    let mut set_doc = doc! {
+        "content.body": &new_body,
+        "edited": true,
+        "edited_at": now_millis()
+    };
+
+    // If embeds are provided, update them too
+    let embeds_json = if let Some(ref embeds) = req.embeds {
+        let bson_embeds = mongodb::bson::to_bson(embeds)
+            .unwrap_or(mongodb::bson::Bson::Array(vec![]));
+        set_doc.insert("content.embeds", bson_embeds);
+        Some(json!(embeds))
+    } else {
+        None
+    };
+
     // Update in MongoDB
     let _ = msg_coll
         .update_one(
             doc! { "event_id": &event_id, "room_id": &room_id },
-            doc! {
-                "$set": {
-                    "content.body": &new_body,
-                    "edited": true,
-                    "edited_at": now_millis()
-                }
-            },
+            doc! { "$set": set_doc },
         )
         .await;
 
     let edit_event_id = generate_id("$");
-    let edit_event = json!({
+    let mut edit_event = json!({
         "type": "m.room.edit",
         "room_id": room_id,
         "sender": user_id,
@@ -772,6 +797,10 @@ pub(crate) async fn edit_message(
         "event_id": edit_event_id,
         "origin_server_ts": now_millis()
     });
+
+    if let Some(embeds) = embeds_json {
+        edit_event["new_embeds"] = embeds;
+    }
 
     broadcast_to_room(&state, &room_id, &edit_event).await;
     Ok(Json(json!({"event_id": edit_event_id})))

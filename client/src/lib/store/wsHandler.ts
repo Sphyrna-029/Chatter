@@ -175,7 +175,7 @@ export function createWsMessageHandler(
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({
           type: "EDIT_MESSAGE",
-          payload: { eventId: msg.edits, newBody: msg.new_body },
+          payload: { eventId: msg.edits, newBody: msg.new_body, newEmbeds: msg.new_embeds },
         });
       }
     } else if (msg.type === "m.reaction") {

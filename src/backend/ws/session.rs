@@ -1601,6 +1601,34 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
         }
         "heartbeat" => {}
+        "embed_interaction" => {
+            // User clicked a button or used a select on a bot embed.
+            // Validate the user is in the room, then broadcast to room so the bot receives it.
+            let event_id = msg.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
+            let component_id = msg.get("component_id").and_then(|v| v.as_str()).unwrap_or("");
+            let component_type = msg.get("component_type").and_then(|v| v.as_str()).unwrap_or("button");
+            let values = msg.get("values").cloned().unwrap_or(json!([]));
+
+            if !event_id.is_empty() && !component_id.is_empty() && !room_id.is_empty() {
+                let in_room = {
+                    let rm = state.room_members.read().await;
+                    rm.get(room_id).map(|m| m.contains(&user_id.to_string())).unwrap_or(false)
+                };
+                if in_room {
+                    let interaction_event = json!({
+                        "type": "m.embed_interaction",
+                        "room_id": room_id,
+                        "event_id": event_id,
+                        "sender": user_id,
+                        "component_id": component_id,
+                        "component_type": component_type,
+                        "values": values,
+                        "origin_server_ts": now_millis(),
+                    });
+                    broadcast_to_room(&state, room_id, &interaction_event).await;
+                }
+            }
+        }
         _ => {}
     }
 }

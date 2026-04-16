@@ -85,7 +85,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         messages: state.messages.map((m) =>
           m.event_id === action.payload.eventId
-            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody } }
+            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
             : m
         ),
       };

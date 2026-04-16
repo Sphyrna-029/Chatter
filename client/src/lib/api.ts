@@ -578,6 +578,30 @@ export interface EmbedField {
   inline?: boolean;
 }
 
+export interface EmbedAction {
+  id: string;
+  label: string;
+  style?: "primary" | "secondary" | "success" | "danger";
+  emoji?: string;
+  disabled?: boolean;
+  row?: number;
+}
+
+export interface EmbedSelectOption {
+  label: string;
+  value: string;
+  emoji?: string;
+  description?: string;
+}
+
+export interface EmbedSelect {
+  id: string;
+  placeholder?: string;
+  options: EmbedSelectOption[];
+  disabled?: boolean;
+  row?: number;
+}
+
 export interface Embed {
   title?: string;
   description?: string;
@@ -589,6 +613,8 @@ export interface Embed {
   footer?: { text: string; icon_url?: string };
   author?: { name: string; url?: string; icon_url?: string };
   timestamp?: string;
+  actions?: EmbedAction[];
+  selects?: EmbedSelect[];
 }
 
 export interface MatrixMessage {
