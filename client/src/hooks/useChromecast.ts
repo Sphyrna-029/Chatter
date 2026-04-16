@@ -109,10 +109,10 @@ declare namespace chrome.cast {
 /*  Hook                                                               */
 /* ------------------------------------------------------------------ */
 
-export type CastState = "unavailable" | "available" | "connecting" | "connected";
+export type CastState = "unavailable" | "no_devices" | "available" | "connecting" | "connected";
 
 const SDK_STATE_MAP: Record<string, CastState> = {
-  NO_DEVICES_AVAILABLE: "unavailable",
+  NO_DEVICES_AVAILABLE: "no_devices",
   NOT_CONNECTED: "available",
   CONNECTING: "connecting",
   CONNECTED: "connected",
@@ -148,6 +148,12 @@ function ensureSdkInit() {
     prev?.(isAvailable);
     if (isAvailable) tryInit();
   };
+
+  // Fallback: poll in case __onGCastApiAvailable already fired before we hooked it
+  let attempts = 0;
+  const poll = setInterval(() => {
+    if (tryInit() || ++attempts > 50) clearInterval(poll);
+  }, 200);
 }
 
 export function useChromecast() {

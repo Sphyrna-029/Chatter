@@ -371,11 +371,11 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
         </div>
         {showCast && (
           <button
-            className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+            className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
             onClick={(e) => { e.stopPropagation(); onCast(url); }}
-            title="Cast to Chromecast"
+            title={castState === "connected" ? "Casting" : castState === "no_devices" ? "Cast — no devices found" : "Cast to Chromecast"}
           >
-            <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : "text-white")} />
+            <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : castState === "no_devices" ? "text-white/50" : "text-white")} />
           </button>
         )}
       </div>
@@ -405,11 +405,11 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
       />
       {showCast && (
         <button
-          className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+          className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
           onClick={(e) => { e.stopPropagation(); onCast(url); }}
-          title="Cast to Chromecast"
+          title={castState === "connected" ? "Casting" : castState === "no_devices" ? "Cast — no devices found" : "Cast to Chromecast"}
         >
-          <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : "text-white")} />
+          <Cast className={cn("h-4 w-4", castState === "connected" ? "text-blue-400" : castState === "no_devices" ? "text-white/50" : "text-white")} />
         </button>
       )}
     </div>
@@ -721,11 +721,11 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
               />
               {castState !== "unavailable" && (
                 <button
-                  className="absolute top-2 right-2 p-2 rounded-md bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                  className="absolute top-2 right-2 p-2 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
                   onClick={() => castVideo(lightbox.url)}
-                  title={castState === "connected" ? `Casting to ${deviceName}` : "Cast to Chromecast"}
+                  title={castState === "connected" ? `Casting to ${deviceName}` : castState === "no_devices" ? "Cast — no devices found" : "Cast to Chromecast"}
                 >
-                  <Cast className={cn("h-5 w-5", castState === "connected" ? "text-blue-400" : "text-white")} />
+                  <Cast className={cn("h-5 w-5", castState === "connected" ? "text-blue-400" : castState === "no_devices" ? "text-white/50" : "text-white")} />
                 </button>
               )}
             </div>
