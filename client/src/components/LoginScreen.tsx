@@ -171,23 +171,26 @@ export function LoginScreen() {
       }
 
       setLoading(true);
-      await runConnectionAnimation();
+      const animationPromise = runConnectionAnimation();
 
       try {
         const result = await login(name, password, needsTotp ? totpCode : undefined);
         if (result.requires_totp) {
+          clearStepTimeouts();
           setNeedsTotp(true);
           setLoading(false);
           setVisibleSteps(0);
           return;
         }
+        await animationPromise;
       } catch (err: any) {
+        clearStepTimeouts();
         setError(err.message || "Could not connect.");
         setLoading(false);
         setVisibleSteps(0);
       }
     },
-    [username, password, totpCode, needsTotp, login, runConnectionAnimation],
+    [username, password, totpCode, needsTotp, login, runConnectionAnimation, clearStepTimeouts],
   );
 
   // ── Register handler ──
