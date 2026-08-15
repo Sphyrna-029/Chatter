@@ -778,6 +778,7 @@ pub(crate) async fn list_all_rooms(
                 "screen_share_active": screen_share_active,
                 "tags": room.tags,
                 "icon_url": room.icon_url,
+                "banner_url": room.banner_url,
                 "has_password": !room.password_hash.is_empty(),
                 "room_type": if room.room_type.is_empty() { "text" } else { &room.room_type }
             }));
