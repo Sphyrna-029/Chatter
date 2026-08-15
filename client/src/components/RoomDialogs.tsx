@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus } from "lucide-react";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 
@@ -228,6 +228,8 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
   const [sortDesc, setSortDesc] = useState(true);
   const [password, setPassword] = useState("");
   const [joinError, setJoinError] = useState("");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 20;
 
   useEffect(() => {
     if (open) {
@@ -235,6 +237,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
       setSortDesc(true);
       setPassword("");
       setJoinError("");
+      setPage(0);
       getAllRooms().then((allRooms) => {
         const filtered = allRooms.filter(
           (r) => !state.joinedRoomIds.includes(r.room_id)
@@ -261,6 +264,14 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
     return result;
   }, [rooms, search, sortDesc]);
 
+  useEffect(() => {
+    setPage(0);
+  }, [search, sortDesc]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredRooms.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const visibleRooms = filteredRooms.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE);
+
   const selectedRoom = rooms.find((r) => r.room_id === selected);
 
   const handleJoin = async () => {
@@ -279,7 +290,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+      <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
           <DialogTitle>Join a Room</DialogTitle>
           <DialogDescription>
@@ -305,54 +316,83 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
             <ArrowUpDown className="h-4 w-4" />
           </Button>
         </div>
-        <div className="max-h-[480px] overflow-y-auto border rounded-md">
-          <div className="space-y-1 p-2">
-            {filteredRooms.length === 0 && (
-              <p className="text-sm text-muted-foreground px-2 py-4 text-center">
-                {rooms.length === 0 ? "No available rooms to join" : "No rooms match your search"}
-              </p>
-            )}
-            {filteredRooms.map((room) => (
-              <button
-                key={room.room_id}
-                className={`w-full text-left rounded-md px-3 py-2 text-sm transition-colors cursor-pointer ${
-                  selected === room.room_id
-                    ? "bg-accent"
-                    : "hover:bg-accent/50"
-                }`}
-                onClick={() => { setSelected(room.room_id); setPassword(""); setJoinError(""); }}
-              >
-                <div className="flex items-center gap-2">
-                  <div className="shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center overflow-hidden text-xs font-medium">
-                    {room.icon_url ? (
-                      <AuthImage src={room.icon_url} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      room.name.charAt(0).toUpperCase()
-                    )}
+        <div className="max-h-[600px] overflow-y-auto border rounded-md">
+          {filteredRooms.length === 0 ? (
+            <p className="text-sm text-muted-foreground px-2 py-4 text-center">
+              {rooms.length === 0 ? "No available rooms to join" : "No rooms match your search"}
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 p-3">
+              {visibleRooms.map((room) => (
+                <button
+                  key={room.room_id}
+                  className={`text-left rounded-md overflow-hidden border bg-card transition-colors cursor-pointer ${
+                    selected === room.room_id
+                      ? "border-primary ring-1 ring-primary"
+                      : "hover:bg-accent/50"
+                  }`}
+                  onClick={() => { setSelected(room.room_id); setPassword(""); setJoinError(""); }}
+                >
+                  <div className="h-20 w-full bg-gradient-to-br from-muted to-secondary overflow-hidden">
+                    {room.banner_url ? (
+                      <AuthImage src={room.banner_url} alt="" className="w-full h-full object-cover" />
+                    ) : null}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium truncate flex items-center gap-1.5">
-                      {room.name}
-                      {room.has_password && <Lock className="w-3 h-3 text-muted-foreground shrink-0" />}
+                  <div className="p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="shrink-0 w-7 h-7 rounded-full bg-muted flex items-center justify-center overflow-hidden text-xs font-medium">
+                        {room.icon_url ? (
+                          <AuthImage src={room.icon_url} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          room.name.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                      <span className="font-medium truncate flex-1">{room.name}</span>
+                      {room.has_password && <Lock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
                     </div>
+                    {room.tags && room.tags.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {room.tags.map((tag) => (
+                          <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
+                            {tag}
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                     <div className="text-xs text-muted-foreground">
                       {room.member_count} member{room.member_count !== 1 ? "s" : ""}
                     </div>
                   </div>
-                </div>
-                {room.tags && room.tags.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1 ml-10">
-                    {room.tags.map((tag) => (
-                      <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
-                        {tag}
-                      </Badge>
-                    ))}
-                  </div>
-                )}
-              </button>
-            ))}
-          </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+        {pageCount > 1 && (
+          <div className="flex items-center justify-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={clampedPage === 0}
+              onClick={() => setPage(clampedPage - 1)}
+            >
+              <ChevronLeft className="w-4 h-4" />
+              Prev
+            </Button>
+            <span className="text-sm text-muted-foreground">
+              Page {clampedPage + 1} of {pageCount}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={clampedPage >= pageCount - 1}
+              onClick={() => setPage(clampedPage + 1)}
+            >
+              Next
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
         {selectedRoom?.has_password && (
           <div className="space-y-2">
             <Label htmlFor="join-password" className="flex items-center gap-1.5">

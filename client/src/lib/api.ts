@@ -380,6 +380,7 @@ export interface RoomSummary {
   screen_share_active?: boolean;
   tags?: string[];
   icon_url?: string;
+  banner_url?: string;
   has_password?: boolean;
   room_type?: string;
 }
