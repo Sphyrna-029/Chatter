@@ -1600,7 +1600,7 @@ export function UserProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
         "transition-all duration-200 p-0 overflow-hidden flex flex-col max-h-[90vh]",
-        isSelf && activeTab === "files" ? "sm:max-w-[480px]" : "sm:max-w-[400px]"
+        isSelf && activeTab === "files" ? "sm:max-w-[640px]" : "sm:max-w-[560px]"
       )}>
         <DialogHeader className="sr-only">
           <DialogTitle>User Profile</DialogTitle>
