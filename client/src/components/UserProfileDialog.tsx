@@ -388,7 +388,7 @@ export function UserProfileDialog({
     <div className="flex flex-col">
       {/* Banner */}
       <div
-        className={cn("relative h-28 w-full overflow-hidden bg-secondary shrink-0", isSelf && "cursor-pointer group")}
+        className={cn("relative h-32 w-full overflow-hidden bg-secondary shrink-0", isSelf && "cursor-pointer group")}
         onClick={handleBannerClick}
       >
         {bannerPreview ? (
