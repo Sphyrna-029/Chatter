@@ -4,7 +4,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, Magnet, UserPlus, Pencil } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, UserPlus, Pencil } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -92,8 +92,6 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const autoScrollRef = useRef(true);
-  const [autoScroll, setAutoScroll] = useState(true);
   const prevScrollHeightRef = useRef<number>(0);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -371,9 +369,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (autoScrollRef.current) {
-      scrollToBottom("smooth");
-    }
+    scrollToBottom("smooth");
   }, [state.messages, scrollToBottom]);
 
   // Scroll to show reactions added to the last message
@@ -385,9 +381,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
   }, [state.messageReactions, state.messages, scrollToBottom]);
 
-  // Scroll to bottom on channel switch when auto-scroll is enabled
+  // Scroll to bottom on channel switch
   useEffect(() => {
-    if (state.currentChannelId && autoScrollRef.current) {
+    if (state.currentChannelId) {
       scrollToBottom();
     }
   }, [state.currentChannelId, scrollToBottom]);
@@ -1220,22 +1216,6 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               title="Add people to DM"
             >
               <UserPlus className="h-4 w-4" />
-            </Button>
-          )}
-          {roomInfo?.room_type === "text" && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`shrink-0 ${autoScroll ? "bg-accent text-primary" : ""}`}
-              onClick={() => {
-                const next = !autoScroll;
-                setAutoScroll(next);
-                autoScrollRef.current = next;
-                if (next) scrollToBottom("smooth");
-              }}
-              title={autoScroll ? "Auto-scroll enabled (click to disable)" : "Auto-scroll disabled (click to enable)"}
-            >
-              <Magnet className="h-4 w-4" />
             </Button>
           )}
           {roomInfo?.room_type === "text" && (
