@@ -16,7 +16,6 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Multi Screen Sharing (requires HTTPS)
 - File Sharing
 - Steam Integration
-- Spotify Integration
 - Forums
 - Collaborative Whiteboard
 - Code Snippets and Syntax Highlighting
@@ -25,11 +24,11 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Room Invite Links
 - 2FA (TOTP)
 - Themes
+- Profile Customization
 - Friend Requests
 - Chat Search
 - Webhooks
 - GIF Search (requires Klipy API key)
-- Tank Scripting Mini Game
 - Server Admin Dashboard
 
 ---
@@ -172,7 +171,6 @@ Uncomment the relevant environment variables in `docker-compose.yml`:
 |----------|---------|
 | `KLIPY_API_KEY` | GIF search |
 | `STEAM_API_KEY` + `SERVER_URL` | Steam integration |
-| `SPOTIFY_CLIENT_ID` + `SPOTIFY_CLIENT_SECRET` | Spotify integration (set redirect URI to `https://yourdomain.com/api/auth/spotify/callback`) |
 
 ---
 
