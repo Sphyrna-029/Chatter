@@ -149,6 +149,35 @@ async fn generate_thumbnail(path: &str) {
         .await;
 }
 
+/// Return true for still-image extensions that benefit from a downscaled WebP
+/// preview. GIFs are excluded (animation must be preserved); SVGs are excluded
+/// because they are blocked as dangerous extensions.
+fn is_previewable_image(ext: &str) -> bool {
+    matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff")
+}
+
+/// Produce a downscaled, re-encoded WebP preview of a still image so clients
+/// can load a lightweight version quickly. Saves to `{path}.preview.webp`
+/// next to the original. Mirrors the video `.thumb.jpg` sidecar convention.
+async fn generate_image_preview(path: &str) {
+    let preview_path = format!("{}.preview.webp", path);
+    if tokio::fs::metadata(&preview_path).await.is_ok() {
+        return; // already exists
+    }
+    let _ = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-y", "-i", path,
+            "-vframes", "1",
+            "-vf", "scale=1024:1024:force_original_aspect_ratio=decrease",
+            "-quality", "80",
+            &preview_path,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+}
+
 pub(crate) async fn upload_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -249,6 +278,12 @@ pub(crate) async fn upload_file(
     let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
+    }
+
+    // Generate a downscaled WebP preview for still images
+    let img_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if is_previewable_image(&img_ext) {
+        generate_image_preview(&path).await;
     }
 
     // Recalculate file size after potential conversion
@@ -556,6 +591,12 @@ pub(crate) async fn upload_complete(
     let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
+    }
+
+    // Generate a downscaled WebP preview for still images
+    let img_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if is_previewable_image(&img_ext) {
+        generate_image_preview(&path).await;
     }
 
     // Recalculate file size after potential conversion
@@ -1331,6 +1372,16 @@ pub(crate) async fn upload_guard(
             // Derive video path by stripping ".thumb.jpg"
             let video_disk = thumb_disk.strip_suffix(".thumb.jpg").unwrap_or(&thumb_disk);
             generate_thumbnail(video_disk).await;
+        }
+    }
+
+    // Generate a WebP preview on demand when the .preview.webp is requested
+    if uri_path.ends_with(".preview.webp") {
+        let relative = uri_path.trim_start_matches('/');
+        let preview_disk = format!("external/{}", relative);
+        if tokio::fs::metadata(&preview_disk).await.is_err() {
+            let source_disk = preview_disk.strip_suffix(".preview.webp").unwrap_or(&preview_disk);
+            generate_image_preview(source_disk).await;
         }
     }
 

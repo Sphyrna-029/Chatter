@@ -657,6 +657,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             <AuthImage
               src={url}
               alt="Image"
+              preview={false}
               className="max-w-full max-h-80 rounded-md cursor-pointer"
               onClick={() => setLightbox({ url, type: "image" })}
             />
@@ -707,7 +708,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
         <DialogContent className="max-w-[90vw] max-h-[90vh] p-0 border-none bg-transparent shadow-none flex items-center justify-center [&>button]:text-white [&>button]:bg-black/50 [&>button]:rounded-full [&>button]:p-1">
           <VisuallyHidden.Root><DialogTitle>Media preview</DialogTitle></VisuallyHidden.Root>
           {lightbox?.type === "image" && (
-            <AuthImage src={lightbox.url} alt="Image preview" className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
+            <AuthImage src={lightbox.url} alt="Image preview" preview={false} className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
           )}
           {lightbox?.type === "video" && (
             <div className="relative group">
