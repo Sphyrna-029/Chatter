@@ -424,7 +424,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
             channel={ch}
             isSelected={isVoice ? state.voiceChannelId === ch.channel_id : state.currentChannelId === ch.channel_id}
             canManage={canManage}
-            hasUnread={!isVoice && (state.channelUnreadCounts[ch.channel_id] || 0) > 0}
+            hasUnread={!isVoice && ((state.channelUnreadCounts[ch.channel_id] || 0) > 0 || (state.channelMentions[ch.channel_id] || 0) > 0)}
             unreadCount={!isVoice ? (state.channelUnreadCounts[ch.channel_id] || 0) : 0}
             mentionCount={!isVoice ? (state.channelMentions[ch.channel_id] || 0) : 0}
             onSelect={() => {
@@ -1188,7 +1188,7 @@ function ChannelItem({
         isSelected
           ? "bg-accent text-accent-foreground"
           : unreadHighlight
-            ? "text-foreground font-medium hover:bg-accent/50"
+            ? "text-white font-bold hover:bg-accent/50"
             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
       }`}
       onClick={onSelect}
@@ -1198,7 +1198,7 @@ function ChannelItem({
         <GripVertical className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-50 cursor-grab" />
       )}
       {unreadHighlight && (unreadCount ?? 0) > 0 && (
-        <span className="text-xs font-bold text-foreground shrink-0">[{unreadCount! > 99 ? "99+" : unreadCount}]</span>
+        <span className="text-xs font-bold text-white shrink-0">[{unreadCount! > 99 ? "99+" : unreadCount}]</span>
       )}
       {icon}
       <span className="truncate text-sm">{channel.name}</span>

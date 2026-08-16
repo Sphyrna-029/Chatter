@@ -88,14 +88,22 @@ export function createWsMessageHandler(
           : !currentChannelId;
         if (isForCurrentChannel) {
           dispatch({ type: "ADD_MESSAGE", payload: msg });
-        } else if (msgChannelId && msg.sender !== stateRef.current.userId && msg.content?.msgtype !== "m.system") {
+        } else if (msg.sender !== stateRef.current.userId && msg.content?.msgtype !== "m.system") {
           // Track per-channel unreads/mentions for messages in a different channel
-          dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
+          // (or messages without a channel_id, which belong to the room's default channel)
+          const unreadChannelId =
+            msgChannelId ||
+            stateRef.current.channels.find((c) => c.channel_type === "text" || !c.channel_type)?.channel_id;
+          if (unreadChannelId) {
+            dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: unreadChannelId });
+          }
           const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
           const bodyText = msg.content?.body || "";
           const hasUserMention = myUsername !== "" && bodyText.includes(`@${myUsername}`);
           if (hasUserMention || hasRoleMention(bodyText, stateRef)) {
-            dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
+            if (unreadChannelId) {
+              dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: unreadChannelId, hasMention: true } });
+            }
             dispatch({ type: "SET_MENTION", payload: { roomId: msg.room_id, hasMention: true } });
             const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
             if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
