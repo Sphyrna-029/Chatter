@@ -269,6 +269,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "video" | "audio" | "document">("all");
   const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [searchThisChannel, setSearchThisChannel] = useState(true);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [scrollToEventId, setScrollToEventId] = useState<string | null>(null);
 
@@ -962,12 +963,28 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   useEffect(() => {
     if (!searchOpen || !state.currentRoomId) return;
 
+    // Resolve the channel scope for the query.
+    let searchChannelId: string | undefined;
+    let searchNoChannelOnly: boolean | undefined;
+    if (searchThisChannel) {
+      if (state.currentChannelId) {
+        searchChannelId = state.currentChannelId;
+      } else {
+        searchNoChannelOnly = true;
+      }
+    }
+
     if (searchFilter === "thread") {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       searchTimerRef.current = setTimeout(async () => {
         setSearchLoading(true);
         try {
-          const results = await apiGetRoomThreads(state.currentRoomId!, searchQuery.trim() || undefined);
+          const results = await apiGetRoomThreads(
+            state.currentRoomId!,
+            searchQuery.trim() || undefined,
+            searchChannelId,
+            searchNoChannelOnly
+          );
           setSearchResults(results);
         } catch {
           setSearchResults([]);
@@ -990,7 +1007,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           state.currentRoomId!,
           searchQuery.trim(),
           searchFilter,
-          fileTypeFilter
+          fileTypeFilter,
+          searchChannelId,
+          searchNoChannelOnly
         );
         setSearchResults(results);
       } catch {
@@ -1002,7 +1021,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     };
-  }, [searchQuery, searchFilter, fileTypeFilter, searchOpen, state.currentRoomId]);
+  }, [searchQuery, searchFilter, fileTypeFilter, searchThisChannel, searchOpen, state.currentRoomId, state.currentChannelId]);
 
   const closeSearch = () => {
     setSearchOpen(false);
@@ -1010,6 +1029,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setSearchResults([]);
     setSearchFilter("all");
     setFileTypeFilter("all");
+    setSearchThisChannel(true);
   };
 
   const closeMentions = () => {
@@ -1309,6 +1329,16 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 {f === "all" ? "All" : f === "user" ? "Users" : f === "file" ? "Files" : "Threads"}
               </Button>
             ))}
+            <div className="flex-1" />
+            <Button
+              variant={searchThisChannel ? "default" : "outline"}
+              size="sm"
+              className="h-6 text-xs px-2"
+              title={searchThisChannel ? "Only search this channel" : "Search all channels in the room"}
+              onClick={() => setSearchThisChannel((v) => !v)}
+            >
+              This channel
+            </Button>
           </div>
           {searchFilter === "file" && (
             <div className="flex gap-1">

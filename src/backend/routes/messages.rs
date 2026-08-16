@@ -1289,6 +1289,15 @@ pub(crate) async fn get_room_threads(
         }
     }
 
+    // Scope thread search to a single channel (or the general/no-channel feed).
+    if let Some(cid) = query.channel_id.as_deref().filter(|c| !c.is_empty()) {
+        root_msgs.retain(|msg| {
+            msg.get("channel_id").and_then(|v| v.as_str()) == Some(cid)
+        });
+    } else if query.no_channel_only.unwrap_or(false) {
+        root_msgs.retain(|msg| msg.get("channel_id").is_none());
+    }
+
     // Filter out threads from channels the user cannot view
     let role = get_user_role(&state, &room_id, &user_id).await;
     let is_privileged = role == "owner" || role == "moderator";
@@ -1397,6 +1406,19 @@ pub(crate) async fn search_messages(
     let filter = query.filter.as_deref().unwrap_or("all");
     let q = &query.q;
 
+    let channel_scope = query.channel_id.filter(|c| !c.is_empty());
+    if let Some(ref cid) = channel_scope {
+        let allowed_ids = get_allowed_channel_ids(&state, &room_id, &user_id).await;
+        if let Some(ids) = &allowed_ids {
+            if !ids.contains(cid) {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "You do not have access to this channel",
+                ));
+            }
+        }
+    }
+
     let mongo_filter = match filter {
         "mention" => {
             doc! {
@@ -1457,6 +1479,15 @@ pub(crate) async fn search_messages(
                 { "channel_id": { "$exists": false } }
             ]}
         ]}
+    } else {
+        mongo_filter
+    };
+
+    // Scope search to a single channel (or to the general/no-channel feed).
+    let mongo_filter = if let Some(ref cid) = channel_scope {
+        doc! { "$and": [mongo_filter, { "channel_id": cid }] }
+    } else if query.no_channel_only.unwrap_or(false) {
+        doc! { "$and": [mongo_filter, { "channel_id": { "$exists": false } }] }
     } else {
         mongo_filter
     };

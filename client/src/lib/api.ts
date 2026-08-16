@@ -495,9 +495,19 @@ export async function apiGetThreadMessages(roomId: string, threadEventId: string
   return res.json() as Promise<{ root: MatrixMessage; messages: MatrixMessage[] }>;
 }
 
-export async function apiGetRoomThreads(roomId: string, query?: string): Promise<MatrixMessage[]> {
+export async function apiGetRoomThreads(
+  roomId: string,
+  query?: string,
+  channelId?: string,
+  noChannelOnly?: boolean
+): Promise<MatrixMessage[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
+  if (channelId) {
+    params.set("channel_id", channelId);
+  } else if (noChannelOnly) {
+    params.set("no_channel_only", "true");
+  }
   const res = await authenticatedFetch(`/api/rooms/${roomId}/threads?${params}`);
   if (!res.ok) throw new Error("Failed to load threads");
   const data = await res.json();
@@ -539,11 +549,18 @@ export async function apiSearchMessages(
   roomId: string,
   query: string,
   filter: string = "all",
-  fileType: string = "all"
+  fileType: string = "all",
+  channelId?: string,
+  noChannelOnly?: boolean
 ): Promise<MatrixMessage[]> {
   const params = new URLSearchParams({ q: query, filter });
   if (filter === "file" && fileType !== "all") {
     params.set("file_type", fileType);
+  }
+  if (channelId) {
+    params.set("channel_id", channelId);
+  } else if (noChannelOnly) {
+    params.set("no_channel_only", "true");
   }
   const res = await authenticatedFetch(`/api/rooms/${roomId}/search?${params}`);
   if (!res.ok) throw new Error("Search failed");

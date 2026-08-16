@@ -151,6 +151,8 @@ pub(crate) struct SearchQuery {
     pub(crate) filter: Option<String>,
     pub(crate) limit: Option<i64>,
     pub(crate) file_type: Option<String>,
+    pub(crate) channel_id: Option<String>,
+    pub(crate) no_channel_only: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -255,6 +257,8 @@ pub(crate) struct SetThreadNameRequest {
 #[derive(Deserialize)]
 pub(crate) struct ThreadListQuery {
     pub(crate) q: Option<String>,
+    pub(crate) channel_id: Option<String>,
+    pub(crate) no_channel_only: Option<bool>,
 }
 
 #[derive(Deserialize)]
