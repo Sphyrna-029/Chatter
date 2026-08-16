@@ -22,7 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { GripVertical, X } from "lucide-react";
+import { GripVertical, X, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "online", label: "Online", color: "bg-green-500" },
@@ -54,6 +54,19 @@ function formatFileSize(bytes: number): string {
 
 function isImageFile(filename: string): boolean {
   return /\.(jpe?g|png|gif|webp|svg|bmp|ico|avif)$/i.test(filename);
+}
+
+const FILE_PAGE_SIZE = 21;
+
+const fileSortLabels: Record<"type" | "recent" | "oldest", string> = {
+  type: "File type",
+  recent: "Most recent",
+  oldest: "Oldest",
+};
+
+function fileExtension(filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  return dot >= 0 ? filename.slice(dot + 1).toLowerCase() : "";
 }
 
 function formatDuration(startSecs: number): string {
@@ -178,6 +191,8 @@ export function UserProfileDialog({
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
   const [loadingUploads, setLoadingUploads] = useState(false);
   const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
+  const [filePage, setFilePage] = useState(1);
+  const [fileSort, setFileSort] = useState<"recent" | "oldest" | "type">("recent");
 
   // Account tab state
   const [newPassword, setNewPassword] = useState("");
@@ -279,6 +294,34 @@ export function UserProfileDialog({
       fetchUploads();
     }
   }, [activeTab, isSelf, fetchUploads]);
+
+  const sortedUploads = useMemo(() => {
+    const list = [...uploads];
+    switch (fileSort) {
+      case "recent":
+        return list.sort((a, b) => b.uploaded_at - a.uploaded_at);
+      case "oldest":
+        return list.sort((a, b) => a.uploaded_at - b.uploaded_at);
+      case "type":
+        return list.sort((a, b) => {
+          const extA = fileExtension(a.filename);
+          const extB = fileExtension(b.filename);
+          if (extA !== extB) return extA.localeCompare(extB);
+          return a.filename.localeCompare(b.filename);
+        });
+    }
+  }, [uploads, fileSort]);
+
+  const filePageCount = Math.max(1, Math.ceil(sortedUploads.length / FILE_PAGE_SIZE));
+  const clampedFilePage = Math.min(filePage, filePageCount - 1);
+  const visibleFiles = sortedUploads.slice(
+    clampedFilePage * FILE_PAGE_SIZE,
+    clampedFilePage * FILE_PAGE_SIZE + FILE_PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setFilePage(1);
+  }, [fileSort]);
 
   useEffect(() => {
     if (activeTab === "account" && isSelf) {
@@ -1030,8 +1073,36 @@ export function UserProfileDialog({
           <p className="text-xs text-muted-foreground/70 mt-1">Files you upload in chat will appear here</p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2 max-h-[360px] overflow-y-auto pr-1">
-          {uploads.map((file) => (
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">
+              {uploads.length} file{uploads.length === 1 ? "" : "s"}
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-1.5 shrink-0 h-8 text-xs">
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  {fileSortLabels[fileSort]}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {Object.keys(fileSortLabels).map((key) => {
+                  const mode = key as "type" | "recent" | "oldest";
+                  return (
+                    <DropdownMenuItem
+                      key={mode}
+                      onClick={() => setFileSort(mode)}
+                      className={fileSort === mode ? "font-semibold" : ""}
+                    >
+                      {fileSortLabels[mode]}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+          {visibleFiles.map((file) => (
             <div
               key={file.url}
               className="group relative border rounded-lg overflow-hidden bg-muted/30"
@@ -1087,6 +1158,34 @@ export function UserProfileDialog({
               </div>
             </div>
           ))}
+          </div>
+          {filePageCount > 1 && (
+            <div className="mt-1 flex items-center justify-between">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1 text-xs"
+                disabled={clampedFilePage === 0}
+                onClick={() => setFilePage(clampedFilePage - 1)}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Page {clampedFilePage + 1} of {filePageCount}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1 text-xs"
+                disabled={clampedFilePage >= filePageCount - 1}
+                onClick={() => setFilePage(clampedFilePage + 1)}
+              >
+                Next
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -1600,7 +1699,7 @@ export function UserProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={cn(
         "transition-all duration-200 p-0 overflow-hidden flex flex-col max-h-[90vh]",
-        isSelf && activeTab === "files" ? "sm:max-w-[640px]" : "sm:max-w-[560px]"
+        isSelf && activeTab === "files" ? "sm:max-w-[820px]" : "sm:max-w-[560px]"
       )}>
         <DialogHeader className="sr-only">
           <DialogTitle>User Profile</DialogTitle>
