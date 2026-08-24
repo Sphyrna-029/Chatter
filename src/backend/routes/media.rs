@@ -128,25 +128,142 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
     (path.to_string(), filename.to_string())
 }
 
-/// Extract the first frame of a video as a JPEG thumbnail.
+/// Extract a representative frame of a video as a JPEG thumbnail.
+/// Frame 0 of many recordings is black, so the sample point is chosen
+/// from the video duration (via ffprobe) before grabbing the frame.
 /// Saves to `{path}.thumb.jpg` next to the video file.
 async fn generate_thumbnail(path: &str) {
     let thumb_path = format!("{}.thumb.jpg", path);
     if tokio::fs::metadata(&thumb_path).await.is_ok() {
         return; // already exists
     }
-    let _ = tokio::process::Command::new("ffmpeg")
+
+    async fn run_ffmpeg(args: &[String]) -> bool {
+        tokio::process::Command::new("ffmpeg")
+            .arg("-y")
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    // Probe duration to pick a sample point that is not the (possibly black)
+    // first frame: >8s → 10% in, shorter → 25% in, unknown → 1s (ffmpeg clamps).
+    let duration: f64 = tokio::process::Command::new("ffprobe")
         .args([
-            "-y", "-i", path,
-            "-vframes", "1",
-            "-vf", "scale=320:-1",
-            "-q:v", "6",
-            &thumb_path,
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path,
         ])
+        .output()
+        .await
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse().ok())
+        .unwrap_or(0.0);
+
+    let seek: f64 = if duration > 8.0 {
+        duration * 0.1
+    } else if duration > 0.0 {
+        duration * 0.25
+    } else {
+        1.0
+    };
+    let seek_str = format!("{:.2}", seek.min(30.0));
+
+    let args: Vec<String> = [
+        "-ss", seek_str.as_str(), "-i", path,
+        "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "6",
+        thumb_path.as_str(),
+    ].iter().map(|s| s.to_string()).collect();
+
+    let ok = run_ffmpeg(&args).await;
+
+    // Fall back to frame 0 if seeking produced no output.
+    if !ok && tokio::fs::metadata(&thumb_path).await.is_err() {
+        let fallback: Vec<String> = [
+            "-i", path, "-vframes", "1", "-vf", "scale=320:-1", "-q:v", "6",
+            thumb_path.as_str(),
+        ].iter().map(|s| s.to_string()).collect();
+        let _ = run_ffmpeg(&fallback).await;
+    }
+}
+
+/// True when the image's mean luma (YAVG) is below ~8/255, i.e. it is
+/// effectively all black. Returns false if it cannot be measured.
+async fn is_image_black(path: &str) -> bool {
+    let out = tokio::process::Command::new("ffmpeg")
+        .args(["-i", path, "-vf", "signalstats,metadata=print", "-f", "null", "-"])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await
+        .ok();
+    let Some(out) = out else { return false };
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    for line in stderr.lines() {
+        if let Some(start) = line.find("YAVG=") {
+            let value: f64 = match line[start + 5..].trim().parse() {
+                Ok(v) => v,
+                Err(_) => return false,
+            };
+            return value < 8.0;
+        }
+    }
+    false
+}
+
+/// One-time startup migration: regenerate any existing video thumbnails that
+/// are effectively black (legacy ones captured from a black first frame).
+/// Idempotent — healthy thumbnails are left untouched, and a regenerated
+/// thumbnail is no longer black, so it is never re-processed on restart.
+pub(crate) async fn fix_black_thumbnails() {
+    let root = "external";
+    let mut stack = vec![std::path::PathBuf::from(root)];
+    let mut fixed = 0u32;
+
+    while let Some(dir) = stack.pop() {
+        let mut rd = match tokio::fs::read_dir(&dir).await {
+            Ok(rd) => rd,
+            Err(_) => continue,
+        };
+        let mut entries = Vec::new();
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            entries.push(entry);
+        }
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".thumb.jpg") {
+                continue;
+            }
+            let thumb_path = path.to_string_lossy().to_string();
+            let video = path
+                .with_file_name(name.trim_end_matches(".thumb.jpg"))
+                .to_string_lossy()
+                .to_string();
+            if tokio::fs::metadata(&video).await.is_err() {
+                continue; // orphan thumbnail; nothing to regenerate
+            }
+            if !is_image_black(&thumb_path).await {
+                continue;
+            }
+            let _ = tokio::fs::remove_file(&thumb_path).await;
+            generate_thumbnail(&video).await;
+            fixed += 1;
+        }
+    }
+
+    if fixed > 0 {
+        println!("Fixed {fixed} black video thumbnail(s) at startup");
+    }
 }
 
 /// Return true for still-image extensions that benefit from a downscaled WebP

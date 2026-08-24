@@ -1,6 +1,7 @@
 use super::{
     helpers::{broadcast_to_room, now_secs},
     router,
+    routes::media,
     state::{AppState, ServerSettings, UserRecord},
     webrtc::build_webrtc_api,
 };
@@ -326,6 +327,9 @@ pub(crate) fn generate_invite_code() -> String {
 
 pub async fn run() {
     let state = build_state().await;
+
+    // Regenerate any legacy all-black video thumbnails in the background.
+    tokio::spawn(media::fix_black_thumbnails());
 
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {

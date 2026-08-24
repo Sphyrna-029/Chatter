@@ -340,6 +340,15 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
   const showCast = onCast && castState && castState !== "unavailable";
   const didAutoPlay = useRef(false);
 
+  let filename = "";
+  try {
+    const decoded = decodeURIComponent(url.split("?")[0].split("/").pop() ?? "");
+    const noExt = decoded.replace(/\.\w+$/, "");
+    if (noExt) filename = noExt.length > 28 ? noExt.slice(0, 27) + "…" : noExt;
+  } catch {
+    filename = "";
+  }
+
   if (!activated) {
     return (
       <div
@@ -365,11 +374,20 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
             className="max-w-full max-h-80 rounded-md pointer-events-none"
           />
         )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/15 to-transparent pointer-events-none" />
         <div className="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/40 transition-colors">
           <div className="w-12 h-12 rounded-full bg-black/60 flex items-center justify-center">
             <Play className="w-6 h-6 text-white ml-0.5" />
           </div>
         </div>
+        {filename && (
+          <span
+            className="absolute top-1.5 left-1.5 max-w-[60%] truncate rounded-md bg-black/60 backdrop-blur px-2 py-0.5 text-[11px] text-white/90 pointer-events-none"
+            title={filename}
+          >
+            {filename}
+          </span>
+        )}
         {showCast && (
           <button
             className="absolute top-1.5 right-1.5 p-1.5 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
