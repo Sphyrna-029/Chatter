@@ -359,19 +359,19 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
           <AuthImage
             src={thumbUrl}
             alt=""
-            className="max-w-full max-h-80 rounded-md object-contain"
+            className="max-w-[640px] max-h-[480px] rounded-md object-contain"
             onError={(e) => {
               const el = e.currentTarget as HTMLImageElement;
               el.style.display = "none";
-              el.parentElement!.style.minWidth = "200px";
-              el.parentElement!.style.minHeight = "120px";
+              el.parentElement!.style.minWidth = "280px";
+              el.parentElement!.style.minHeight = "170px";
             }}
           />
         ) : (
           <video
             src={url}
             preload="metadata"
-            className="max-w-full max-h-80 rounded-md pointer-events-none"
+            className="max-w-[640px] max-h-[480px] rounded-md pointer-events-none"
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/15 to-transparent pointer-events-none" />
@@ -416,7 +416,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
         src={authSrc}
         controls
         preload="auto"
-        className="max-w-full max-h-80 rounded-md cursor-pointer"
+        className="max-w-[640px] max-h-[480px] rounded-md cursor-pointer"
         onClick={(e) => {
           const video = e.currentTarget;
           video.pause();
