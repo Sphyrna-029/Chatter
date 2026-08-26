@@ -10,6 +10,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Play, Pause, Film, RefreshCw, Volume2, VolumeX } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthAvatarImage } from "./AuthImage";
+import { displayUserId } from "@/lib/utils";
 
 function extractYouTubeId(url: string): string | null {
   const m = url.match(
@@ -36,6 +39,7 @@ interface WatchState {
 
 export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const { state, wsRef } = useAppContext();
+  const { voiceMembers, userPresence } = state;
   const roomId = state.currentRoomId!;
   const channelId = state.currentChannelId ?? "";
 
@@ -344,6 +348,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     applyVolume(volumeRef.current, newMuted);
   };
 
+  const MAX_AVATARS = 7;
+  const visibleMembers = voiceMembers.slice(0, MAX_AVATARS);
+  const overflowCount = voiceMembers.length - visibleMembers.length;
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <ResizablePanelGroup orientation="vertical" className="flex-1">
@@ -423,6 +431,37 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     applyVolume(volumeRef.current, isMutedRef.current);
                   }}
                 />
+              )}
+
+              {/* Viewer count + avatar overlay */}
+              {voiceMembers.length > 0 && (
+                <div className="group absolute bottom-2 left-2 z-10 flex items-center gap-2 opacity-60 transition-opacity duration-150 group-hover:opacity-100 select-none">
+                  <div className="flex items-center -space-x-1.5">
+                    {visibleMembers.map((memberId) => {
+                      const presence = userPresence[memberId];
+                      const name = presence?.displayName || displayUserId(memberId);
+                      const initial = (name[0] || "?").toUpperCase();
+                      return (
+                        <div key={memberId} className="opacity-60 transition-opacity duration-150 hover:opacity-100" title={name}>
+                          <Avatar className="h-7 w-7 ring-2 ring-zinc-900">
+                            <AuthAvatarImage src={presence?.avatarUrl} />
+                            <AvatarFallback className="text-[10px] bg-zinc-700">{initial}</AvatarFallback>
+                          </Avatar>
+                        </div>
+                      );
+                    })}
+                    {overflowCount > 0 && (
+                      <div className="opacity-60 transition-opacity duration-150" title={`+${overflowCount} more`}>
+                        <div className="h-7 w-7 rounded-full bg-zinc-800 ring-2 ring-zinc-900 flex items-center justify-center text-[10px] text-zinc-200">
+                          +{overflowCount}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="rounded-full bg-zinc-900/80 backdrop-blur px-2 py-1 text-[11px] text-zinc-200 tabular-nums whitespace-nowrap">
+                    {voiceMembers.length} watching
+                  </span>
+                </div>
               )}
             </div>
 
