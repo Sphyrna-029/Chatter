@@ -38,10 +38,12 @@ interface WatchState {
 }
 
 export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
-  const { state, wsRef } = useAppContext();
-  const { voiceMembers, userPresence } = state;
+  const { state, wsRef, dispatch } = useAppContext();
+  const userPresence = state.userPresence;
   const roomId = state.currentRoomId!;
   const channelId = state.currentChannelId ?? "";
+  const watchViewers = state.watchViewers[roomId] ?? [];
+  const selfId = state.userId;
 
   const [watchState, setWatchState] = useState<WatchState>({
     videoUrl: "",
@@ -112,6 +114,23 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       videoRef.current.muted = muted;
     }
   }, []);
+
+  // Mark self as an active viewer while watching, and unmark on unmount/room change.
+  // The video is considered "receiving" once a URL is loaded.
+  const isActiveViewer = watchState.videoUrl !== "" && selfId !== null;
+  const sendViewerMsg = useCallback((type: string) => {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type, room_id: roomId }));
+    }
+  }, [wsRef, roomId]);
+
+  useEffect(() => {
+    if (!isActiveViewer) return;
+    sendViewerMsg("watchparty_viewer_join");
+    return () => { sendViewerMsg("watchparty_viewer_leave"); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActiveViewer, roomId]);
 
   // Track whether the <video> element is ready to accept commands.
   // Reset when the video URL changes; set when onCanPlay fires.
@@ -199,6 +218,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     displayPositionRef.current = 0;
 
     apiGetWatchPartyState(roomId).then((data) => {
+      dispatch({ type: "SET_WATCH_VIEWERS", payload: { roomId, users: data.viewers ?? [] } });
       if (data.video_url) {
         const now = Date.now() / 1000;
         const compensated = data.playing
@@ -349,8 +369,13 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   };
 
   const MAX_AVATARS = 7;
-  const visibleMembers = voiceMembers.slice(0, MAX_AVATARS);
-  const overflowCount = voiceMembers.length - visibleMembers.length;
+  // Always include self (we are receiving the video), merged ahead of the
+  // server list so it renders immediately without waiting for our own join
+  // broadcast to round-trip back.
+  const activeViewers =
+    selfId && !watchViewers.includes(selfId) ? [selfId, ...watchViewers] : watchViewers;
+  const visibleMembers = activeViewers.slice(0, MAX_AVATARS);
+  const overflowCount = activeViewers.length - visibleMembers.length;
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -434,7 +459,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
               )}
 
               {/* Viewer count + avatar overlay */}
-              {voiceMembers.length > 0 && (
+              {isActiveViewer && (
                 <div className="group absolute bottom-2 left-2 z-10 flex items-center gap-2 opacity-60 transition-opacity duration-150 group-hover:opacity-100 select-none">
                   <div className="flex items-center -space-x-1.5">
                     {visibleMembers.map((memberId) => {
@@ -459,7 +484,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     )}
                   </div>
                   <span className="rounded-full bg-zinc-900/80 backdrop-blur px-2 py-1 text-[11px] text-zinc-200 tabular-nums whitespace-nowrap">
-                    {voiceMembers.length} watching
+                    {activeViewers.length} watching
                   </span>
                 </div>
               )}

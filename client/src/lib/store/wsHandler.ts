@@ -583,6 +583,14 @@ export function createWsMessageHandler(
     else if (msg.type === "watchparty_sync" || msg.type === "watchparty_video_changed") {
       window.dispatchEvent(new CustomEvent(msg.type, { detail: msg }));
     }
+    else if (msg.type === "watchparty_viewer_joined" || msg.type === "watchparty_viewer_left") {
+      if (msg.room_id && Array.isArray(msg.viewers)) {
+        dispatch({
+          type: "SET_WATCH_VIEWERS",
+          payload: { roomId: msg.room_id, users: msg.viewers },
+        });
+      }
+    }
     // Friend events
     else if (msg.type === "friend_request") {
       dispatch({

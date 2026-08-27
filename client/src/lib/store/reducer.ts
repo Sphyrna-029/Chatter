@@ -556,6 +556,11 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_VOICE_CHANNEL_OCCUPIED_SINCE":
       return { ...state, voiceChannelOccupiedSince: action.payload };
+    case "SET_WATCH_VIEWERS":
+      return {
+        ...state,
+        watchViewers: { ...state.watchViewers, [action.payload.roomId]: action.payload.users },
+      };
     case "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE": {
       if (action.payload.since == null) {
         const next = { ...state.voiceChannelOccupiedSince };

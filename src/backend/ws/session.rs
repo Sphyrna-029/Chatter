@@ -1244,6 +1244,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let now = now_secs();
                 {
                     let mut wp = state.watch_party_rooms.write().await;
+                    let previous_viewers = wp
+                        .get(room_id)
+                        .map(|s| s.viewers.clone())
+                        .unwrap_or_default();
                     wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
                         channel_id: channel_id.clone(),
                         video_url: video_url.clone(),
@@ -1251,6 +1255,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         position_secs: 0.0,
                         position_updated_at: now,
                         duration_secs: 0.0,
+                        viewers: previous_viewers,
                     });
                 }
                 let event = json!({
@@ -1392,6 +1397,47 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     drop(wp);
                     send_to_user(&state, user_id, &event).await;
                 }
+            }
+        }
+        "watchparty_viewer_join" => {
+            if !room_id.is_empty() {
+                let viewers = {
+                    let mut wp = state.watch_party_rooms.write().await;
+                    let entry = wp
+                        .entry(room_id.to_string())
+                        .or_insert_with(Default::default);
+                    if !entry.viewers.iter().any(|v| v == user_id) {
+                        entry.viewers.push(user_id.to_string());
+                    }
+                    entry.viewers.clone()
+                };
+                let event = json!({
+                    "type": "watchparty_viewer_joined",
+                    "room_id": room_id,
+                    "user_id": user_id,
+                    "viewers": viewers,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
+            }
+        }
+        "watchparty_viewer_leave" => {
+            if !room_id.is_empty() {
+                let viewers = {
+                    let mut wp = state.watch_party_rooms.write().await;
+                    if let Some(entry) = wp.get_mut(room_id) {
+                        entry.viewers.retain(|v| v != user_id);
+                        entry.viewers.clone()
+                    } else {
+                        Vec::new()
+                    }
+                };
+                let event = json!({
+                    "type": "watchparty_viewer_left",
+                    "room_id": room_id,
+                    "user_id": user_id,
+                    "viewers": viewers,
+                });
+                broadcast_to_room(&state, room_id, &event).await;
             }
         }
         // ─── Tug of War ──────────────────────────────────────────────────────────
@@ -1698,6 +1744,28 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
         }
         results
     };
+
+    // Remove from watch-party viewer lists and broadcast the updated lists
+    let watchparty_viewer_updates: Vec<(String, Vec<String>)> = {
+        let mut wp = state.watch_party_rooms.write().await;
+        let mut results = Vec::new();
+        for (room_id, wp_state) in wp.iter_mut() {
+            if wp_state.viewers.iter().any(|v| v == user_id) {
+                wp_state.viewers.retain(|v| v != user_id);
+                results.push((room_id.clone(), wp_state.viewers.clone()));
+            }
+        }
+        results
+    };
+    for (room_id, viewers) in watchparty_viewer_updates {
+        let event = json!({
+            "type": "watchparty_viewer_left",
+            "room_id": room_id,
+            "user_id": user_id,
+            "viewers": viewers,
+        });
+        broadcast_to_room(state, &room_id, &event).await;
+    }
 
     let mut stopped_screen_rooms = HashSet::new();
 

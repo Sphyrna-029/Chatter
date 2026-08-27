@@ -51,6 +51,8 @@ export interface AppState {
   activeWebcamStreamers: string[];
   // Voice channel occupied-since timestamps (ms epoch), keyed by channel_id
   voiceChannelOccupiedSince: Record<string, number>;
+  // Watch-party viewers: room_id -> list of user_ids currently receiving the video
+  watchViewers: Record<string, string[]>;
   // UI
   roomMentions: Record<string, number>;
   roomUnreadCounts: Record<string, number>;
@@ -173,6 +175,7 @@ export type Action =
   | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[] } }
   | { type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: Record<string, number> }
   | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
+  | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
@@ -216,6 +219,7 @@ export const initialState: AppState = {
   isWebcamActive: false,
   activeWebcamStreamers: [],
   voiceChannelOccupiedSince: {},
+  watchViewers: {},
   roomMentions: {},
   roomUnreadCounts: {},
   channelUnreadCounts: {},

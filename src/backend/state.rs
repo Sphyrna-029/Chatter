@@ -574,6 +574,8 @@ pub(crate) struct WatchPartyState {
     pub(crate) position_secs: f64,
     pub(crate) position_updated_at: f64,
     pub(crate) duration_secs: f64,
+    /// Distinct user_ids currently receiving/playing the watch-party video.
+    pub(crate) viewers: Vec<String>,
 }
 
 #[derive(Clone)]
