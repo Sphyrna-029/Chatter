@@ -987,7 +987,7 @@ mod tests {
 
     #[tokio::test]
     async fn teardown_screen_subscriber_pair_removes_state() {
-        let state = build_state();
+        let state = build_state().await;
         let peer_connection = create_peer_connection(&state).await.unwrap();
         let key = subscriber_key("@viewer:localhost", "@sharer:localhost");
 

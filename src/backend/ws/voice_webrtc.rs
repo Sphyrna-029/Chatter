@@ -797,7 +797,7 @@ mod tests {
 
     #[tokio::test]
     async fn teardown_voice_subscriber_pair_removes_state() {
-        let state = build_state();
+        let state = build_state().await;
         let peer_connection = create_peer_connection(&state).await.unwrap();
         let key = voice_subscriber_key("@listener:localhost", "@speaker:localhost");
 
