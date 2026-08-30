@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
@@ -331,6 +331,151 @@ function useAuthSrc(url: string): string {
   return url;
 }
 
+type SubtitleTrackDef = {
+  src: string;
+  label: string;
+  language?: string;
+};
+
+type Manifest = { tracks: SubtitleTrackDef[] };
+
+/**
+ * Loads the `{url}@subs.json` manifest (if any) for a local video and exposes
+ * the parsed track list plus the currently selected track. The caller passes
+ * a ref to the <video> element and renders the returned `trackEls` as its
+ * children; this hook syncs `track.mode` so the browser displays the selected
+ * caption track and hides the rest.
+ */
+function useVideoSubtitles(
+  videoRef: React.RefObject<HTMLVideoElement | null>,
+  url: string,
+) {
+  const [tracks, setTracks] = useState<SubtitleTrackDef[]>([]);
+  const [selected, setSelected] = useState<number | null>(null);
+
+  // Load the manifest once per URL.
+  useEffect(() => {
+    if (!url.includes("/external/")) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${url}@subs.json`);
+        if (!res.ok) return;
+        const data: Manifest = await res.json();
+        if (cancelled) return;
+        const list = (data.tracks ?? []).filter(
+          (t) => t && typeof t.src === "string",
+        );
+        setTracks(list);
+        setSelected(list.length > 0 ? 0 : null);
+      } catch {
+        setTracks([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
+  const trackEls = useMemo(
+    () =>
+      tracks.map((t, i) => (
+        <track
+          key={i}
+          kind="subtitles"
+          src={t.src}
+          label={t.label}
+          srcLang={t.language}
+          // `default` (re)establishes which track shows on the initial load /
+          // remount; the sync effect below handles runtime switches.
+          default={selected === i}
+        />
+      )),
+    [tracks, selected],
+  );
+
+  // Show the selected caption track and hide the others by driving
+  // HTMLMediaElement.textTracks[].mode. textTracks indices map 1:1 to the
+  // <track> children mounted above.
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    const list = video.textTracks;
+    for (let i = 0; i < list.length; i++) {
+      const tr = list[i];
+      if (tr.kind !== "subtitles") continue;
+      tr.mode = i === selected ? "showing" : "hidden";
+    }
+  });
+
+  return { tracks, selected, setSelected, trackEls };
+}
+
+/** CC button + popover shown when a video has selectable caption tracks */
+function CcControls({
+  tracks,
+  selected,
+  onSelect,
+  right = "0.375rem",
+}: {
+  tracks: SubtitleTrackDef[];
+  selected: number | null;
+  onSelect: (i: number | null) => void;
+  right?: string;
+}) {
+  if (tracks.length === 0) return null;
+  return (
+    <div className="absolute top-1.5 z-10" style={{ right }}>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            className={cn(
+              "p-1.5 rounded-md bg-black/60 hover:bg-black/80 transition-colors",
+              selected != null && "ring-1 ring-white/40",
+            )}
+            title="Subtitles"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Subtitles
+              className={cn("h-4 w-4", selected != null ? "text-white" : "text-white/50")}
+            />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent
+          side="bottom"
+          align="end"
+          className="w-56 p-1"
+        >
+          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Subtitles
+          </div>
+          <button
+            className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
+            onClick={() => onSelect(null)}
+          >
+            <span className={cn("w-4 flex justify-center", selected == null && "opacity-100")}>
+              <Check className="h-3.5 w-3.5" />
+            </span>
+            Off
+          </button>
+          {tracks.map((t, i) => (
+            <button
+              key={i}
+              className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
+              onClick={() => onSelect(i)}
+            >
+              <span className={cn("w-4 flex justify-center", selected === i && "opacity-100")}>
+                <Check className="h-3.5 w-3.5" />
+              </span>
+              {t.label}
+            </button>
+          ))}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
 function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand: () => void; onCast?: (url: string) => void; castState?: string }) {
   const [activated, setActivated] = useState(false);
@@ -339,6 +484,8 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
   const authSrc = useAuthSrc(url);
   const showCast = onCast && castState && castState !== "unavailable";
   const didAutoPlay = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const { tracks, selected, setSelected, trackEls } = useVideoSubtitles(videoRef, url);
 
   let filename = "";
   try {
@@ -405,6 +552,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
     <div className="relative w-fit max-w-full group">
       <video
         ref={(el) => {
+          videoRef.current = el;
           if (el && !didAutoPlay.current) {
             didAutoPlay.current = true;
             // Must start muted for autoplay to work per browser policy,
@@ -422,6 +570,14 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
           video.pause();
           onExpand();
         }}
+      >
+        {trackEls}
+      </video>
+      <CcControls
+        tracks={tracks}
+        selected={selected}
+        onSelect={setSelected}
+        right={showCast ? "1.75rem" : "0.375rem"}
       />
       {showCast && (
         <button
@@ -464,6 +620,58 @@ function YouTubeEmbed({ id }: { id: string }) {
       >
         {copied ? <Check className="h-4 w-4 text-white" /> : <Copy className="h-4 w-4 text-white" />}
       </button>
+    </div>
+  );
+}
+
+/** Full-size lightbox video player with optional CC selector and Cast control */
+function LightboxVideo({
+  url,
+  castState,
+  castVideo,
+  deviceName,
+}: {
+  url: string;
+  castState: string;
+  castVideo: (url: string) => void;
+  deviceName?: string;
+}) {
+  const didAutoPlay = useRef(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const { tracks, selected, setSelected, trackEls } = useVideoSubtitles(videoRef, url);
+  const showCast = castState && castState !== "unavailable";
+  return (
+    <div className="relative group">
+      <video
+        ref={(el) => {
+          videoRef.current = el;
+          if (el && !didAutoPlay.current) {
+            didAutoPlay.current = true;
+            el.muted = true;
+            el.play().then(() => { el.muted = false; }).catch(() => {});
+          }
+        }}
+        src={url}
+        controls
+        className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
+      >
+        {trackEls}
+      </video>
+      <CcControls
+        tracks={tracks}
+        selected={selected}
+        onSelect={setSelected}
+        right={showCast ? "1.75rem" : "0.5rem"}
+      />
+      {showCast && (
+        <button
+          className="absolute top-2 right-2 p-2 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
+          onClick={() => castVideo(url)}
+          title={castState === "connected" ? `Casting to ${deviceName}` : castState === "no_devices" ? "Cast — no devices found" : "Cast to Chromecast"}
+        >
+          <Cast className={cn("h-5 w-5", castState === "connected" ? "text-blue-400" : castState === "no_devices" ? "text-white/50" : "text-white")} />
+        </button>
+      )}
     </div>
   );
 }
@@ -729,29 +937,13 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             <AuthImage src={lightbox.url} alt="Image preview" preview={false} className="max-w-[90vw] max-h-[90vh] object-contain rounded-md" />
           )}
           {lightbox?.type === "video" && (
-            <div className="relative group">
-              <video
-                ref={(el) => {
-                  if (el && !lightboxDidAutoPlay.current) {
-                    lightboxDidAutoPlay.current = true;
-                    el.muted = true;
-                    el.play().then(() => { el.muted = false; }).catch(() => {});
-                  }
-                }}
-                src={withAuth(lightbox.url)}
-                controls
-                className="max-w-[90vw] max-h-[90vh] object-contain rounded-md"
-              />
-              {castState !== "unavailable" && (
-                <button
-                  className="absolute top-2 right-2 p-2 rounded-md bg-black/60 hover:bg-black/80 transition-colors z-10"
-                  onClick={() => castVideo(lightbox.url)}
-                  title={castState === "connected" ? `Casting to ${deviceName}` : castState === "no_devices" ? "Cast — no devices found" : "Cast to Chromecast"}
-                >
-                  <Cast className={cn("h-5 w-5", castState === "connected" ? "text-blue-400" : castState === "no_devices" ? "text-white/50" : "text-white")} />
-                </button>
-              )}
-            </div>
+            <LightboxVideo
+              key={lightbox.url}
+              url={lightbox.url}
+              castState={castState}
+              castVideo={castVideo}
+              deviceName={deviceName ?? undefined}
+            />
           )}
         </DialogContent>
       </Dialog>

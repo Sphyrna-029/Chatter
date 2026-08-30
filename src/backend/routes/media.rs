@@ -73,42 +73,22 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
         .unwrap_or("")
         .to_ascii_lowercase();
 
-    // Convert non-browser formats to MP4
+    // Convert non-browser formats to MP4 (subtitle streams preserved as mov_text)
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
-        let new_filename = format!(
-            "{}.mp4",
-            filename.rsplit_once('.').map(|(base, _)| base).unwrap_or(filename)
-        );
-        let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or(".");
-        let new_path = format!("{}/{}", dir, new_filename);
-        let result = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-y", "-i", path,
-                "-map", "0:v:0",
-                "-map", "0:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-ac", "2",
-                "-movflags", "+faststart",
-                &new_path,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
-        if let Ok(status) = result {
-            if status.success() {
-                let _ = tokio::fs::remove_file(path).await;
-                return (new_path, new_filename);
-            }
+        let new_path = format!("{}.mp4", path.rsplit_once('.').map(|(b, _)| b).unwrap_or(path));
+        if let Some(tmp_path) = remux_with_subs(path).await {
+            let _ = tokio::fs::rename(&tmp_path, &new_path).await;
+            let _ = tokio::fs::remove_file(path).await;
+            let new_filename = new_filename_from_path(&new_path);
+            return (new_path, new_filename);
         }
         // Conversion failed — clean up and keep original
-        let _ = tokio::fs::remove_file(&new_path).await;
+        let _ = tokio::fs::remove_file(&format!("{}.cc.tmp", path)).await;
         return (path.to_string(), filename.to_string());
     }
 
-    // For MP4/MOV, just apply faststart
-    if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "m4a") {
+    // For MP4/MOV, apply faststart
+    if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
         let tmp = format!("{}.faststart.tmp", path);
         let result = tokio::process::Command::new("ffmpeg")
             .args(["-y", "-i", path, "-c", "copy", "-movflags", "+faststart", &tmp])
@@ -126,6 +106,50 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
     }
 
     (path.to_string(), filename.to_string())
+}
+
+fn new_filename_from_path(path: &str) -> String {
+    path.rsplit('/').next().unwrap_or("").to_string()
+}
+
+/// Subtitle codecs that can be exposed as WebVTT (text-based subtitles).
+fn is_text_subtitle_codec(codec: &str) -> bool {
+    matches!(
+        codec,
+        "webvtt" | "mov_text" | "ass" | "ssa" | "srt" | "subrip" | "sbv" | "text"
+    )
+}
+
+/// Remux a video with text-based subtitle streams into an MP4 copy
+/// (video/audio copied, subtitles as mov_text). Output is written to
+/// `{src}.cc.tmp`; the caller renames into place. Returns the tmp path.
+async fn remux_with_subs(src: &str) -> Option<String> {
+    let dst = format!("{}.cc.tmp", src);
+    let _ = tokio::fs::remove_file(&dst).await;
+    let result = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-y", "-i", src,
+            "-map", "0:v:0",
+            "-map", "0:a?",
+            "-map", "0:s?",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-ac", "2",
+            "-c:s", "mov_text",
+            "-movflags", "+faststart",
+            &dst,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    match result {
+        Ok(s) if s.success() && tokio::fs::metadata(&dst).await.is_ok() => Some(dst),
+        _ => {
+            let _ = tokio::fs::remove_file(&dst).await;
+            None
+        }
+    }
 }
 
 /// Extract a representative frame of a video as a JPEG thumbnail.
@@ -222,6 +246,131 @@ async fn is_image_black(path: &str) -> bool {
         }
     }
     false
+}
+
+/// Subtitle streams extracted from a video, in decode order.
+#[derive(Debug)]
+struct SubtitleStream {
+    index: usize,
+    codec: String,
+    language: String,
+    title: String,
+}
+
+/// List text-based subtitle streams of a video (index, codec, language, title).
+async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
+    let Ok(output) = tokio::process::Command::new("ffprobe")
+        .args(["-v", "error", "-show_streams", "-of", "json", video])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return Vec::new();
+    };
+    let Some(streams) = value.get("streams").and_then(|s| s.as_array()) else {
+        return Vec::new();
+    };
+    streams
+        .iter()
+        .enumerate()
+        .filter_map(|(pos, s)| {
+            if s.get("codec_type").and_then(|t| t.as_str()) != Some("subtitle") {
+                return None;
+            }
+            let codec = s.get("codec_name").and_then(|c| c.as_str()).unwrap_or("").to_string();
+            if !is_text_subtitle_codec(&codec) {
+                return None;
+            }
+            let tags = s.get("tags").cloned().unwrap_or(Value::Null);
+            Some(SubtitleStream {
+                index: pos,
+                codec,
+                language: tags.get("language").and_then(|l| l.as_str()).unwrap_or("").to_string(),
+                title: tags.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SubtitleTrack {
+    src: String,
+    label: String,
+    #[serde(rename = "language")]
+    language: String,
+}
+
+fn track_label(track_idx: usize, language: &str, title: &str) -> String {
+    if !title.is_empty() {
+        return title.to_string();
+    }
+    if !language.is_empty() {
+        return language.to_string();
+    }
+    format!("Track {}", track_idx)
+}
+
+/// Extract embedded text-based subtitle tracks from a video into sidecar
+/// WebVTT files (`{video}@{i}.vtt`) plus a `{video}@subs.json` manifest so the
+/// frontend can offer a selectable caption list. The `@subs` / `@N` suffix
+/// convention (mirroring `.thumb.jpg` / `.preview.webp`) is a stable suffix
+/// even when filenames contain spaces or extra dots. No-op when the manifest
+/// already exists or the file has no extractable subtitle streams.
+async fn extract_subtitles(video: &str) {
+    let manifest_path = format!("{}@subs.json", video);
+    if tokio::fs::metadata(&manifest_path).await.is_ok() {
+        return;
+    }
+
+    let streams = probe_subtitles(video).await;
+    if streams.is_empty() {
+        return;
+    }
+
+    let mut tracks: Vec<SubtitleTrack> = Vec::new();
+    for stream in &streams {
+        let vtt_path = format!("{}@{}.vtt", video, stream.index);
+        if tokio::fs::metadata(&vtt_path).await.is_err() {
+            let mut command = tokio::process::Command::new("ffmpeg");
+            command
+                .arg("-y")
+                .arg("-i")
+                .arg(video)
+                .arg("-map")
+                .arg(format!("0:s:{}", stream.index))
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            // Re-mux ASS to WebVTT (the webvtt muxer handles srt / mov_text /
+            // webvtt natively via the `-f webvtt` format).
+            if stream.codec == "ass" || stream.codec == "ssa" {
+                command.args(["-c:s", "webvtt"]);
+            } else {
+                command.args(["-f", "webvtt"]);
+            }
+            command.arg(&vtt_path);
+            if !command.status().await.map(|s| s.success()).unwrap_or(false)
+                || tokio::fs::metadata(&vtt_path).await.is_err()
+            {
+                let _ = tokio::fs::remove_file(&vtt_path).await;
+                continue;
+            }
+        }
+        tracks.push(SubtitleTrack {
+            src: format!("@{}.vtt", stream.index),
+            label: track_label(stream.index, &stream.language, &stream.title),
+            language: stream.language.clone(),
+        });
+    }
+
+    if tracks.is_empty() {
+        return;
+    }
+    let manifest = json!({ "tracks": tracks });
+    if let Ok(text) = serde_json::to_string(&manifest) {
+        let _ = tokio::fs::write(&manifest_path, text).await;
+    }
 }
 
 /// Width of thumbnails generated by the current version of
@@ -435,6 +584,7 @@ pub(crate) async fn upload_file(
     let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
+        extract_subtitles(&path).await;
     }
 
     // Generate a downscaled WebP preview for still images
@@ -748,6 +898,7 @@ pub(crate) async fn upload_complete(
     let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
+        extract_subtitles(&path).await;
     }
 
     // Generate a downscaled WebP preview for still images
@@ -1533,6 +1684,34 @@ pub(crate) async fn upload_guard(
         }
     }
 
+    // Serve subtitle manifests and tracks with explicit, correct
+    // Content-Types — the `@token` suffix can make some servers guess a
+    // text/* content-type that would break `<track>` loading or JSON parsing.
+    if uri_path.ends_with("@subs.json") || uri_path.ends_with(".vtt") {
+        let relative = uri_path.trim_start_matches('/');
+        let disk_path = format!("external/{}", relative);
+        let content_type = if uri_path.ends_with("@subs.json") {
+            "application/json"
+        } else {
+            "text/vtt"
+        };
+        match tokio::fs::read(&disk_path).await {
+            Ok(data) => {
+                return Response::builder()
+                    .status(StatusCode::OK)
+                    .header(header::CONTENT_TYPE, content_type)
+                    .body(Body::from(data))
+                    .unwrap();
+            }
+            Err(_) => {
+                return Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::from("Not found"))
+                    .unwrap();
+            }
+        }
+    }
+
     // Generate a WebP preview on demand when the .preview.webp is requested
     if uri_path.ends_with(".preview.webp") {
         let relative = uri_path.trim_start_matches('/');
@@ -1572,12 +1751,16 @@ pub(crate) async fn upload_guard(
             }
         }
 
-        // Lazily generate thumbnail for existing videos
+        // Lazily generate thumbnail + subtitle sidecars for existing videos
         generate_thumbnail(&disk_path).await;
+        extract_subtitles(&disk_path).await;
     }
 
     // For non-browser video formats, convert to MP4 on first access
-    // then rewrite the request URI so ServeDir serves the MP4
+    // (preserving subtitle streams as mov_text) then rewrite the request URI
+    // so ServeDir serves the MP4. Subtitle sidecars and the manifest are keyed
+    // to the ORIGINAL filename (what the client holds in its URL), stored next
+    // to the source file.
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
         let relative = uri_path.trim_start_matches('/');
         let disk_path = format!("external/{}", relative);
@@ -1585,28 +1768,24 @@ pub(crate) async fn upload_guard(
         let mp4_uri = format!("{}.mp4", base);
         let mp4_disk = format!("external{}.mp4", base);
 
-        // Convert if cached MP4 doesn't exist yet
-        if tokio::fs::metadata(&mp4_disk).await.is_err() {
-            if tokio::fs::metadata(&disk_path).await.is_ok() {
-                let _ = tokio::process::Command::new("ffmpeg")
-                    .args([
-                        "-y", "-i", &disk_path,
-                        "-map", "0:v:0",
-                        "-map", "0:a:0",
-                        "-c:v", "copy", "-c:a", "aac",
-                        "-ac", "2",
-                        "-movflags", "+faststart",
-                        &mp4_disk,
-                    ])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .await;
+        // Extract subtitle sidecars + manifest keyed to the ORIGINAL video.
+        if tokio::fs::metadata(&disk_path).await.is_ok() {
+            extract_subtitles(&disk_path).await;
+        }
+
+        // Convert if the cached MP4 doesn't exist yet
+        if tokio::fs::metadata(&mp4_disk).await.is_err()
+            && tokio::fs::metadata(&disk_path).await.is_ok()
+        {
+            if let Some(tmp_path) = remux_with_subs(&disk_path).await {
+                let _ = tokio::fs::rename(&tmp_path, &mp4_disk).await;
             }
         }
 
-        // If MP4 exists, rewrite request to serve it
+        // Lazily generate a thumbnail for the served MP4, then rewrite the
+        // request to serve it
         if tokio::fs::metadata(&mp4_disk).await.is_ok() {
+            generate_thumbnail(&mp4_disk).await;
             let (mut parts, body) = req.into_parts();
             parts.uri = mp4_uri.parse().unwrap_or(parts.uri);
             let req = axum::http::Request::from_parts(parts, body);
