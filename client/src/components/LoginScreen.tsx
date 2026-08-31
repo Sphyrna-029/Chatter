@@ -473,7 +473,7 @@ export function LoginScreen() {
         spellCheck={false}
         disabled={loading}
         autoFocus={autoFocus}
-        className={`rounded-none border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
+        className={`rounded-md border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
         style={{
           borderColor: nicknameError ? undefined : inputStyle.borderColor,
           color: inputStyle.color,
@@ -513,7 +513,7 @@ export function LoginScreen() {
           if (error) setError(null);
         }}
         disabled={loading}
-        className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.15em]"
+        className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.15em]"
         style={inputStyle}
       />
     </div>
@@ -537,7 +537,7 @@ export function LoginScreen() {
     <Button
       type="submit"
       disabled={loading}
-      className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
+      className="w-full rounded-md h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
       variant="outline"
       style={{
         borderColor: btnHovered ? "rgba(180, 210, 255, 0.4)" : "rgba(180, 210, 255, 0.2)",
@@ -641,7 +641,7 @@ export function LoginScreen() {
                     maxLength={8}
                     autoFocus
                     disabled={loading}
-                    className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                    className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                     style={inputStyle}
                   />
                 ) : (
@@ -657,7 +657,7 @@ export function LoginScreen() {
                     maxLength={6}
                     autoFocus
                     disabled={loading}
-                    className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                    className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                     style={inputStyle}
                   />
                 )}
@@ -739,7 +739,7 @@ export function LoginScreen() {
                 spellCheck={false}
                 disabled={loading}
                 autoFocus
-                className={`rounded-none border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
+                className={`rounded-md border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
                 style={{
                   borderColor: nicknameError ? undefined : inputStyle.borderColor,
                   color: inputStyle.color,
@@ -794,7 +794,7 @@ export function LoginScreen() {
                     if (error) setError(null);
                   }}
                   disabled={loading}
-                  className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.15em] font-mono"
+                  className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.15em] font-mono"
                   style={inputStyle}
                 />
                 <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(180, 210, 255, 0.4)" }}>
@@ -872,7 +872,7 @@ export function LoginScreen() {
                 maxLength={6}
                 autoFocus
                 disabled={loading}
-                className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                 style={inputStyle}
               />
             </div>
@@ -906,7 +906,7 @@ export function LoginScreen() {
                 }}
                 maxLength={8}
                 disabled={loading}
-                className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                 style={inputStyle}
               />
             </div>
@@ -972,7 +972,7 @@ export function LoginScreen() {
               onClick={() => {
                 navigator.clipboard.writeText(recoveryCodes.join("\n"));
               }}
-              className="w-full rounded-none h-8 text-[10px] uppercase tracking-[0.2em] font-normal border-[1px]"
+              className="w-full rounded-md h-8 text-[10px] uppercase tracking-[0.2em] font-normal border-[1px]"
               variant="outline"
               style={{
                 borderColor: "rgba(180, 210, 255, 0.15)",
@@ -995,7 +995,7 @@ export function LoginScreen() {
                   dispatch({ type: "SET_TOTP_VERIFIED", payload: true });
                 }
               }}
-              className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
+              className="w-full rounded-md h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
               variant="outline"
               style={{
                 borderColor: "rgba(120, 230, 160, 0.25)",
@@ -1032,7 +1032,7 @@ export function LoginScreen() {
           <TooltipTrigger asChild>
             <button
               type="button"
-              className="fixed bottom-5 right-5 z-20 flex h-8 w-8 items-center justify-center rounded-none border-[1px] text-xs cursor-pointer"
+              className="fixed bottom-5 right-5 z-20 flex h-8 w-8 items-center justify-center rounded-md border-[1px] text-xs cursor-pointer"
               style={{
                 borderColor: "rgba(180, 210, 255, 0.15)",
                 color: "rgba(180, 210, 255, 0.4)",
@@ -1054,7 +1054,7 @@ export function LoginScreen() {
           <TooltipContent
             side="left"
             sideOffset={8}
-            className="max-w-[240px] rounded-none border-[1px] text-[11px] leading-relaxed tracking-wide"
+            className="max-w-[240px] rounded-md border-[1px] text-[11px] leading-relaxed tracking-wide"
             style={{
               borderColor: "rgba(180, 210, 255, 0.2)",
               background: "rgba(10, 10, 10, 0.95)",
@@ -1074,7 +1074,7 @@ export function LoginScreen() {
       </TooltipProvider>
 
       <Card
-        className="relative z-10 w-full max-w-md p-0 rounded-none border-[1px] shadow-none overflow-hidden"
+        className="relative z-10 w-full max-w-md p-0 rounded-md border-[1px] shadow-none overflow-hidden"
         style={{
           borderColor: loading
             ? `rgba(180, 210, 255, ${0.15 + (visibleSteps / CONNECTION_STEPS.length) * 0.45})`

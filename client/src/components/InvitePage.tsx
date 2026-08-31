@@ -173,7 +173,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
       <div className="relative flex min-h-screen items-center justify-center p-4">
         <HalftoneBackground />
         <Card
-          className="relative z-10 w-full max-w-md p-0 rounded-none border-[1px] shadow-none overflow-hidden"
+          className="relative z-10 w-full max-w-md p-0 rounded-md border-[1px] shadow-none overflow-hidden"
           style={{
             borderColor: "rgba(255, 120, 100, 0.25)",
             background: "rgba(10, 10, 10, 0.92)",
@@ -195,7 +195,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
             </p>
             <Button
               variant="outline"
-              className="rounded-none border-[1px] text-xs uppercase tracking-[0.2em]"
+              className="rounded-md border-[1px] text-xs uppercase tracking-[0.2em]"
               style={{
                 borderColor: "rgba(180, 210, 255, 0.2)",
                 color: "rgba(220, 230, 255, 0.8)",
@@ -235,7 +235,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
       <div className="relative flex min-h-screen items-center justify-center p-4">
         <HalftoneBackground />
         <Card
-          className="relative z-10 w-full max-w-md p-0 rounded-none border-[1px] shadow-none overflow-hidden"
+          className="relative z-10 w-full max-w-md p-0 rounded-md border-[1px] shadow-none overflow-hidden"
           style={{
             borderColor: hovered
               ? "rgba(180, 210, 255, 0.3)"
@@ -372,7 +372,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                     spellCheck={false}
                     disabled={loading}
                     autoFocus
-                    className={`rounded-none border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
+                    className={`rounded-md border-[1px] bg-transparent h-10 text-sm tracking-wide placeholder:tracking-normal ${nicknameError ? "border-destructive" : ""}`}
                     style={{
                       borderColor: nicknameError ? undefined : "rgba(180, 210, 255, 0.12)",
                       color: "rgba(220, 230, 255, 0.85)",
@@ -408,7 +408,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                       if (error) setError(null);
                     }}
                     disabled={loading}
-                    className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.15em]"
+                    className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.15em]"
                     style={{
                       borderColor: "rgba(180, 210, 255, 0.12)",
                       color: "rgba(220, 230, 255, 0.85)",
@@ -438,7 +438,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                         maxLength={8}
                         autoFocus
                         disabled={loading}
-                        className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                        className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                         style={{
                           borderColor: "rgba(180, 210, 255, 0.12)",
                           color: "rgba(220, 230, 255, 0.85)",
@@ -458,7 +458,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                         maxLength={6}
                         autoFocus
                         disabled={loading}
-                        className="rounded-none border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
+                        className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.3em] text-center font-mono"
                         style={{
                           borderColor: "rgba(180, 210, 255, 0.12)",
                           color: "rgba(220, 230, 255, 0.85)",
@@ -499,7 +499,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
+                  className="w-full rounded-md h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
                   variant="outline"
                   style={{
                     borderColor: btnHovered ? "rgba(180, 210, 255, 0.4)" : "rgba(180, 210, 255, 0.2)",
@@ -562,7 +562,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
     <div className="relative flex min-h-screen items-center justify-center p-4">
       <HalftoneBackground />
       <Card
-        className="relative z-10 w-full max-w-md p-0 rounded-none border-[1px] shadow-none overflow-hidden"
+        className="relative z-10 w-full max-w-md p-0 rounded-md border-[1px] shadow-none overflow-hidden"
         style={{
           borderColor: hovered
             ? "rgba(180, 210, 255, 0.3)"
@@ -627,7 +627,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
           <Button
             onClick={handleAccept}
             disabled={accepting}
-            className="w-full rounded-none h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
+            className="w-full rounded-md h-10 text-xs uppercase tracking-[0.2em] font-normal border-[1px]"
             variant="outline"
             style={{
               borderColor: btnHovered ? "rgba(120, 230, 160, 0.5)" : "rgba(120, 230, 160, 0.25)",
