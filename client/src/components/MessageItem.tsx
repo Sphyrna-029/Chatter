@@ -2,7 +2,11 @@ import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
-import { apiGetLinkPreview, type LinkPreview } from "@/lib/api";
+import {
+  apiGetLinkPreview,
+  type LinkPreview,
+  apiGetAuthenticatedBlobUrl,
+} from "@/lib/api";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -352,22 +356,46 @@ function useVideoSubtitles(
 ) {
   const [tracks, setTracks] = useState<SubtitleTrackDef[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  const { state } = useAppContext();
+  const requireAuth = state.requireAuthForUploads;
 
-  // Load the manifest once per URL.
+  // Load the manifest once per URL. When requireAuthForUploads is on,
+  // /external/ resources (including the manifest and VTT sidecars) demand a
+  // bearer token, so fetch them as blobs with auth headers and hand the <track>
+  // element a blob: URL.
   useEffect(() => {
     if (!url.includes("/external/")) return;
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`${url}@subs.json`);
-        if (!res.ok) return;
-        const data: Manifest = await res.json();
+        let json: Manifest;
+        let fetchTrack: (src: string) => Promise<string>;
+        if (requireAuth) {
+          const blob = await apiGetAuthenticatedBlobUrl(`${url}@subs.json`);
+          json = JSON.parse(await (await fetch(blob)).text());
+          URL.revokeObjectURL(blob);
+          fetchTrack = async (src: string) =>
+            apiGetAuthenticatedBlobUrl(url + src);
+        } else {
+          const res = await fetch(`${url}@subs.json`);
+          if (!res.ok) return;
+          json = await res.json();
+          fetchTrack = async (src: string) => url + src;
+        }
         if (cancelled) return;
-        const list = (data.tracks ?? []).filter(
+        const defs = (json.tracks ?? []).filter(
           (t) => t && typeof t.src === "string",
         );
+        if (defs.length === 0) {
+          setTracks([]);
+          return;
+        }
+        const list = await Promise.all(
+          defs.map(async (t) => ({ ...t, src: await fetchTrack(t.src) })),
+        );
+        if (cancelled) return;
         setTracks(list);
-        setSelected(list.length > 0 ? 0 : null);
+        setSelected(0);
       } catch {
         setTracks([]);
       }
@@ -375,7 +403,7 @@ function useVideoSubtitles(
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, requireAuth]);
 
   const trackEls = useMemo(
     () =>
@@ -411,7 +439,7 @@ function useVideoSubtitles(
   return { tracks, selected, setSelected, trackEls };
 }
 
-/** CC button + popover shown when a video has selectable caption tracks */
+/** CC button (always visible) + popover listing the video's caption tracks */
 function CcControls({
   tracks,
   selected,
@@ -423,7 +451,6 @@ function CcControls({
   onSelect: (i: number | null) => void;
   right?: string;
 }) {
-  if (tracks.length === 0) return null;
   return (
     <div className="absolute top-1.5 z-10" style={{ right }}>
       <Popover>
@@ -437,7 +464,7 @@ function CcControls({
             onClick={(e) => e.stopPropagation()}
           >
             <Subtitles
-              className={cn("h-4 w-4", selected != null ? "text-white" : "text-white/50")}
+              className={cn("h-4 w-4", selected != null ? "text-white" : "text-white/70")}
             />
           </button>
         </PopoverTrigger>
@@ -449,27 +476,35 @@ function CcControls({
           <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
             Subtitles
           </div>
-          <button
-            className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
-            onClick={() => onSelect(null)}
-          >
-            <span className={cn("w-4 flex justify-center", selected == null && "opacity-100")}>
-              <Check className="h-3.5 w-3.5" />
-            </span>
-            Off
-          </button>
-          {tracks.map((t, i) => (
-            <button
-              key={i}
-              className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
-              onClick={() => onSelect(i)}
-            >
-              <span className={cn("w-4 flex justify-center", selected === i && "opacity-100")}>
-                <Check className="h-3.5 w-3.5" />
-              </span>
-              {t.label}
-            </button>
-          ))}
+          {tracks.length === 0 ? (
+            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+              No subtitles available for this video
+            </div>
+          ) : (
+            <>
+              <button
+                className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
+                onClick={() => onSelect(null)}
+              >
+                <span className={cn("w-4 flex justify-center", selected == null && "opacity-100")}>
+                  <Check className="h-3.5 w-3.5" />
+                </span>
+                Off
+              </button>
+              {tracks.map((t, i) => (
+                <button
+                  key={i}
+                  className="w-full text-left px-2 py-1.5 rounded-sm hover:bg-muted transition-colors flex items-center gap-2 text-sm"
+                  onClick={() => onSelect(i)}
+                >
+                  <span className={cn("w-4 flex justify-center", selected === i && "opacity-100")}>
+                    <Check className="h-3.5 w-3.5" />
+                  </span>
+                  {t.label}
+                </button>
+              ))}
+            </>
+          )}
         </PopoverContent>
       </Popover>
     </div>
