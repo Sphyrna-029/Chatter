@@ -383,7 +383,7 @@ function useVideoSubtitles(
         <track
           key={i}
           kind="subtitles"
-          src={t.src}
+          src={url + t.src}
           label={t.label}
           srcLang={t.language}
           // `default` (re)establishes which track shows on the initial load /

@@ -257,7 +257,11 @@ struct SubtitleStream {
     title: String,
 }
 
-/// List text-based subtitle streams of a video (index, codec, language, title).
+/// List text-based subtitle streams of a video (ordinal subtitle index,
+/// codec, language, title). `index` is 0-based *within subtitle streams*
+/// (matching ffmpeg's `-map 0:s:N` selector), NOT the global ffprobe
+/// stream position — using the global position here previously made
+/// extraction fail for any file with audio/video streams before the subs.
 async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
     let Ok(output) = tokio::process::Command::new("ffprobe")
         .args(["-v", "error", "-show_streams", "-of", "json", video])
@@ -272,26 +276,24 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
     let Some(streams) = value.get("streams").and_then(|s| s.as_array()) else {
         return Vec::new();
     };
-    streams
-        .iter()
-        .enumerate()
-        .filter_map(|(pos, s)| {
-            if s.get("codec_type").and_then(|t| t.as_str()) != Some("subtitle") {
-                return None;
-            }
-            let codec = s.get("codec_name").and_then(|c| c.as_str()).unwrap_or("").to_string();
-            if !is_text_subtitle_codec(&codec) {
-                return None;
-            }
-            let tags = s.get("tags").cloned().unwrap_or(Value::Null);
-            Some(SubtitleStream {
-                index: pos,
-                codec,
-                language: tags.get("language").and_then(|l| l.as_str()).unwrap_or("").to_string(),
-                title: tags.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
-            })
-        })
-        .collect()
+    let mut result: Vec<SubtitleStream> = Vec::new();
+    for s in streams {
+        if s.get("codec_type").and_then(|t| t.as_str()) != Some("subtitle") {
+            continue;
+        }
+        let codec = s.get("codec_name").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        if !is_text_subtitle_codec(&codec) {
+            continue;
+        }
+        let tags = s.get("tags").cloned().unwrap_or(Value::Null);
+        result.push(SubtitleStream {
+            index: result.len(),
+            codec,
+            language: tags.get("language").and_then(|l| l.as_str()).unwrap_or("").to_string(),
+            title: tags.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+        });
+    }
+    result
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1795,4 +1797,77 @@ pub(crate) async fn upload_guard(
 
     // Pass through to ServeDir
     next.run(req).await.into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a test video (video + audio) with a mov_text subtitle track so
+    /// that the subtitle stream has a GLOBAL index of 2, the case that broke
+    /// the old `-map 0:s:{global_index}` extraction path.
+    async fn build_fixture() -> (String, String) {
+        let dir = std::env::temp_dir().join(format!("chatter_cc_test_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let video = dir.join("fixture.mp4").to_string_lossy().to_string();
+        let vtt = dir.join("fixture_src.vtt").to_string_lossy().to_string();
+        // Drop sidecars from any earlier run so the test is deterministic.
+        for suffix in ["@subs.json", "@0.vtt", "@1.vtt", "@2.vtt"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", video, suffix)).await;
+        }
+        tokio::fs::write(
+            &vtt,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello world\n",
+        )
+        .await
+        .unwrap();
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+                "-i", &vtt,
+                "-c:v", "libx264", "-preset", "ultrafast",
+                "-c:a", "aac", "-c:s", "mov_text",
+                "-shortest", &video,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "fixture build failed");
+        (video.clone(), format!("{}@subs.json", video))
+    }
+
+    #[tokio::test]
+    async fn subtitle_extraction_uses_ordinal_subtitle_index() {
+        let (video, manifest) = build_fixture().await;
+
+        // Regression: the subtitle stream is global index 2 (video=0, audio=1).
+        // probe_subtitles must report ordinal 0; the old code reported 2, which
+        // made `-map 0:s:2` fail and no sidecars/manifest were produced.
+        let streams = probe_subtitles(&video).await;
+        assert_eq!(streams.len(), 1);
+        assert_eq!(streams[0].index, 0);
+        assert_eq!(streams[0].codec, "mov_text");
+
+        extract_subtitles(&video).await;
+
+        let vtt_path = format!("{}@0.vtt", video);
+        let data = tokio::fs::read(&vtt_path).await.expect("vtt sidecar not created");
+        let text = String::from_utf8(data).unwrap();
+        assert!(text.contains("Hello world"));
+
+        let manifest_data =
+            tokio::fs::read(&manifest).await.expect("subs manifest not created");
+        let value: Value = serde_json::from_slice(&manifest_data).unwrap();
+        let tracks = value["tracks"].as_array().expect("manifest should list tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0]["src"], "@0.vtt");
+
+        // Cleanup
+        for p in [&video, &vtt_path, &manifest] {
+            let _ = tokio::fs::remove_file(p).await;
+        }
+    }
 }
