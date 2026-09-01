@@ -348,7 +348,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   }
 
   return (
-    <Sidebar>
+    <Sidebar className="rounded-tl-lg rounded-bl-lg overflow-hidden">
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
           <div

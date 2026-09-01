@@ -347,7 +347,7 @@ export function ChatLayout() {
             onJoinRoom={() => setJoinOpen(true)}
           />
 
-          <SidebarInset className="flex flex-1 flex-col min-w-0">
+          <SidebarInset className="flex flex-1 flex-col min-w-0 rounded-lg overflow-hidden">
             {/* Floating restore button — only visible when left sidebar is collapsed (desktop only) */}
             {!isMobile && <LeftPanelRestoreButton />}
 
