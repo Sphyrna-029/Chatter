@@ -29,6 +29,8 @@ import {
   apiJoinRoom,
   apiLeaveRoom,
   apiGetMessages,
+  apiSearchMessages,
+  apiGetRoomThreads,
   apiSendMessage,
   apiDeleteMessage,
   apiHardDeleteNotification,
@@ -99,6 +101,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep a ref to latest state for WS handler closures
   const stateRef = useRef(state);
@@ -112,6 +115,76 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_SERVER_SETTINGS", payload: { requireAuthForUploads: info.require_auth_for_uploads, uploadLimitBytes: info.upload_limit_bytes ?? 0, storageLimitBytes: info.storage_limit_bytes ?? 0 } });
     }).catch(() => {});
   }, []);
+
+  // Reset search when switching rooms
+  useEffect(() => {
+    dispatch({ type: "CLOSE_SEARCH" });
+  }, [state.currentRoomId]);
+
+  // Debounced message-search execution (state lives in the store so the members
+  // panel and chat area share one source of truth).
+  useEffect(() => {
+    const { open, query, filter, fileTypeFilter, thisChannel } = state.search;
+    if (!open || !state.currentRoomId) return;
+
+    let searchChannelId: string | undefined;
+    let searchNoChannelOnly: boolean | undefined;
+    if (thisChannel) {
+      if (state.currentChannelId) {
+        searchChannelId = state.currentChannelId;
+      } else {
+        searchNoChannelOnly = true;
+      }
+    }
+
+    if (filter === "thread") {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = setTimeout(async () => {
+        dispatch({ type: "SET_SEARCH", payload: { loading: true } });
+        try {
+          const results = await apiGetRoomThreads(
+            state.currentRoomId!,
+            query.trim() || undefined,
+            searchChannelId,
+            searchNoChannelOnly
+          );
+          dispatch({ type: "SET_SEARCH", payload: { results } });
+        } catch {
+          dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+        } finally {
+          dispatch({ type: "SET_SEARCH", payload: { loading: false } });
+        }
+      }, 300);
+      return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+    }
+
+    if (filter !== "file" && !query.trim()) {
+      dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+      return;
+    }
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(async () => {
+      dispatch({ type: "SET_SEARCH", payload: { loading: true } });
+      try {
+        const results = await apiSearchMessages(
+          state.currentRoomId!,
+          query.trim(),
+          filter,
+          fileTypeFilter,
+          searchChannelId,
+          searchNoChannelOnly
+        );
+        dispatch({ type: "SET_SEARCH", payload: { results } });
+      } catch {
+        dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+      } finally {
+        dispatch({ type: "SET_SEARCH", payload: { loading: false } });
+      }
+    }, 300);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    };
+  }, [state.search.open, state.search.query, state.search.filter, state.search.fileTypeFilter, state.search.thisChannel, state.currentRoomId, state.currentChannelId]);
 
   // Rehydrate session on mount via the HttpOnly refresh-token cookie.
   // No tokens are read from localStorage — the cookie is sent automatically

@@ -3,6 +3,16 @@ import type { Dispatch } from "react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export interface SearchState {
+  open: boolean;
+  query: string;
+  filter: "all" | "user" | "file" | "thread";
+  fileTypeFilter: "all" | "image" | "video" | "audio" | "document";
+  thisChannel: boolean;
+  results: MatrixMessage[];
+  loading: boolean;
+}
+
 export interface AppState {
   // Auth
   accessToken: string | null;
@@ -59,6 +69,7 @@ export interface AppState {
   channelUnreadCounts: Record<string, number>;
   channelMentions: Record<string, number>;
   currentView: "chat" | "voice";
+  search: SearchState;
   replyingTo: MatrixMessage | null;
   // Threads
   activeThreadEventId: string | null;
@@ -122,6 +133,8 @@ export type Action =
   | { type: "WEBCAM_SHARE_STOPPED"; payload: string }
   | { type: "SET_ACTIVE_WEBCAM_STREAMERS"; payload: string[] }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
+  | { type: "SET_SEARCH"; payload: Partial<SearchState> }
+  | { type: "CLOSE_SEARCH" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
   | { type: "OPEN_THREAD"; payload: { eventId: string; root: MatrixMessage; messages: MatrixMessage[] } }
@@ -225,6 +238,7 @@ export const initialState: AppState = {
   channelUnreadCounts: {},
   channelMentions: {},
   currentView: "chat",
+  search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false },
   replyingTo: null,
   activeThreadEventId: null,
   threadRootMessage: null,

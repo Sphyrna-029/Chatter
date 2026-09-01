@@ -231,6 +231,10 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, activeWebcamStreamers: action.payload };
     case "SET_VIEW":
       return { ...state, currentView: action.payload };
+    case "SET_SEARCH":
+      return { ...state, search: { ...state.search, ...action.payload } };
+    case "CLOSE_SEARCH":
+      return { ...state, search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false } };
     case "SET_MENTION":
       return {
         ...state,
