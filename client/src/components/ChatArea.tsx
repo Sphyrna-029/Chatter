@@ -986,7 +986,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Scroll to a message after search/mentions closes and messages are rendered
   useEffect(() => {
-    if (!scrollToEventId || searchOpen || mentionsOpen) return;
+    if (!scrollToEventId || search.open || mentionsOpen) return;
     // Use requestAnimationFrame to wait for DOM to render
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
@@ -998,7 +998,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       setScrollToEventId(null);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollToEventId, searchOpen, mentionsOpen, state.messages]);
+  }, [scrollToEventId, search.open, mentionsOpen, state.messages]);
 
   const mentionMatches = useMemo(() => {
     if (!mentionOpen) return [];
@@ -1175,7 +1175,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             variant="ghost"
             size="icon"
             className="shrink-0"
-            onClick={() => searchOpen ? closeSearch() : (closeMentions(), setSearchOpen(true))}
+            onClick={() => search.open ? closeSearch() : (closeMentions(), dispatch({ type: "SET_SEARCH", payload: { open: true } }))}
             title="Search messages"
           >
             <Search className="h-4 w-4" />
@@ -1207,7 +1207,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       )}
 
       {/* Search bar */}
-      {searchOpen && (
+      {search.open && (
         <div className="border-b px-4 py-2 flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
@@ -1215,16 +1215,16 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               <input
                 type="text"
                 placeholder={
-                  searchFilter === "user"
+                  search.filter === "user"
                     ? "Search by username..."
-                    : searchFilter === "file"
+                    : search.filter === "file"
                     ? "Search by filename..."
-                    : searchFilter === "thread"
+                    : search.filter === "thread"
                     ? "Search threads..."
                     : "Search messages..."
                 }
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                value={search.query}
+                onChange={(e) => dispatch({ type: "SET_SEARCH", payload: { query: e.target.value } })}
                 className="w-full rounded-md border border-input bg-transparent pl-8 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 autoFocus
               />
@@ -1240,12 +1240,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             {(["all", "user", "file", "thread"] as const).map((f) => (
               <Button
                 key={f}
-                variant={searchFilter === f ? "default" : "outline"}
+                variant={search.filter === f ? "default" : "outline"}
                 size="sm"
                 className="h-6 text-xs px-2"
                 onClick={() => {
-                  setSearchFilter(f);
-                  if (f !== "file") setFileTypeFilter("all");
+                  dispatch({ type: "SET_SEARCH", payload: { filter: f } });
+                  if (f !== "file") dispatch({ type: "SET_SEARCH", payload: { fileTypeFilter: "all" } });
                 }}
               >
                 {f === "all" ? "All" : f === "user" ? "Users" : f === "file" ? "Files" : "Threads"}
@@ -1253,16 +1253,16 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             ))}
             <div className="flex-1" />
             <Button
-              variant={searchThisChannel ? "default" : "outline"}
+              variant={search.thisChannel ? "default" : "outline"}
               size="sm"
               className="h-6 text-xs px-2"
-              title={searchThisChannel ? "Only search this channel" : "Search all channels in the room"}
-              onClick={() => setSearchThisChannel((v) => !v)}
+              title={search.thisChannel ? "Only search this channel" : "Search all channels in the room"}
+              onClick={() => dispatch({ type: "SET_SEARCH", payload: { thisChannel: !search.thisChannel } })}
             >
               This channel
             </Button>
           </div>
-          {searchFilter === "file" && (
+          {search.filter === "file" && (
             <div className="flex gap-1">
               {([
                 { key: "all", label: "All types", icon: null },
@@ -1273,10 +1273,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               ] as const).map(({ key, label, icon: Icon }) => (
                 <Button
                   key={key}
-                  variant={fileTypeFilter === key ? "default" : "outline"}
+                  variant={search.fileTypeFilter === key ? "default" : "outline"}
                   size="sm"
                   className="h-6 text-xs px-2 gap-1"
-                  onClick={() => setFileTypeFilter(key)}
+                  onClick={() => dispatch({ type: "SET_SEARCH", payload: { fileTypeFilter: key } })}
                 >
                   {Icon && <Icon className="h-3 w-3" />}
                   {label}
@@ -1307,30 +1307,30 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
         <ScrollArea className={`h-full py-2 ${isMobile ? "px-1" : "px-2"}`}>
           <div>
-            {searchOpen ? (
+            {search.open ? (
               <>
-                {searchLoading && (
+                {search.loading && (
                   <div className="text-center text-xs text-muted-foreground py-4">
                     Searching...
                   </div>
                 )}
-                {!searchLoading && searchResults.length === 0 && searchFilter === "thread" && (
+                {!search.loading && search.results.length === 0 && search.filter === "thread" && (
                   <div className="text-center text-xs text-muted-foreground py-4">
-                    {searchQuery.trim() ? "No threads found" : "No threads in this room yet"}
+                    {search.query.trim() ? "No threads found" : "No threads in this room yet"}
                   </div>
                 )}
-                {!searchLoading && searchResults.length === 0 && searchFilter !== "thread" && (searchQuery.trim() || searchFilter === "file") && (
+                {!search.loading && search.results.length === 0 && search.filter !== "thread" && (search.query.trim() || search.filter === "file") && (
                   <div className="text-center text-xs text-muted-foreground py-4">
-                    {searchFilter === "file" ? "No files found" : "No results found"}
+                    {search.filter === "file" ? "No files found" : "No results found"}
                   </div>
                 )}
-                {!searchLoading && searchResults.length === 0 && !searchQuery.trim() && searchFilter !== "file" && searchFilter !== "thread" && (
+                {!search.loading && search.results.length === 0 && !search.query.trim() && search.filter !== "file" && search.filter !== "thread" && (
                   <div className="text-center text-xs text-muted-foreground py-4">
                     Type to search messages
                   </div>
                 )}
-                {searchFilter === "thread"
-                  ? searchResults.map((thread) => {
+                {search.filter === "thread"
+                  ? search.results.map((thread) => {
                       const senderName =
                         state.userPresence[thread.sender]?.displayName ||
                         displayUserId(thread.sender);
@@ -1359,8 +1359,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                         </div>
                       );
                     })
-                  : searchResults.map((msg, i) => {
-                      const prev = searchResults[i - 1];
+                  : search.results.map((msg, i) => {
+                      const prev = search.results[i - 1];
                       const grouped =
                         !!prev &&
                         prev.content.msgtype !== "m.system" &&
