@@ -262,16 +262,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [mentionResults, setMentionResults] = useState<MatrixMessage[]>([]);
   const [mentionsLoading, setMentionsLoading] = useState(false);
 
-  // Search state
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchFilter, setSearchFilter] = useState<"all" | "user" | "file" | "thread">("all");
-  const [fileTypeFilter, setFileTypeFilter] = useState<"all" | "image" | "video" | "audio" | "document">("all");
-  const [searchResults, setSearchResults] = useState<MatrixMessage[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchThisChannel, setSearchThisChannel] = useState(true);
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Search state lives in the shared store (see client/src/lib/store) so the
+  // members panel (input + filters) and this chat area (results) stay in sync.
+  const search = state.search;
   const [scrollToEventId, setScrollToEventId] = useState<string | null>(null);
+
+  const closeSearch = () => dispatch({ type: "CLOSE_SEARCH" });
 
   // Pending file attachments — staged until the user presses Send/Enter
   type PendingFile = { file: File; previewUrl: string | null };
@@ -949,88 +945,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       prev.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
       return [];
     });
-    // Also close search on room switch
-    setSearchOpen(false);
-    setSearchQuery("");
-    setSearchResults([]);
+    // Search is reset on room switch by the provider (see client/src/lib/store/provider.tsx)
     // Clear the input div on room switch
     if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
     setDisplayLength(0);
   }, [state.currentRoomId]);
 
-  // Debounced search execution
-  useEffect(() => {
-    if (!searchOpen || !state.currentRoomId) return;
-
-    // Resolve the channel scope for the query.
-    let searchChannelId: string | undefined;
-    let searchNoChannelOnly: boolean | undefined;
-    if (searchThisChannel) {
-      if (state.currentChannelId) {
-        searchChannelId = state.currentChannelId;
-      } else {
-        searchNoChannelOnly = true;
-      }
-    }
-
-    if (searchFilter === "thread") {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-      searchTimerRef.current = setTimeout(async () => {
-        setSearchLoading(true);
-        try {
-          const results = await apiGetRoomThreads(
-            state.currentRoomId!,
-            searchQuery.trim() || undefined,
-            searchChannelId,
-            searchNoChannelOnly
-          );
-          setSearchResults(results);
-        } catch {
-          setSearchResults([]);
-        } finally {
-          setSearchLoading(false);
-        }
-      }, 300);
-      return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
-    }
-
-    if (searchFilter !== "file" && !searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    searchTimerRef.current = setTimeout(async () => {
-      setSearchLoading(true);
-      try {
-        const results = await apiSearchMessages(
-          state.currentRoomId!,
-          searchQuery.trim(),
-          searchFilter,
-          fileTypeFilter,
-          searchChannelId,
-          searchNoChannelOnly
-        );
-        setSearchResults(results);
-      } catch {
-        setSearchResults([]);
-      } finally {
-        setSearchLoading(false);
-      }
-    }, 300);
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, [searchQuery, searchFilter, fileTypeFilter, searchThisChannel, searchOpen, state.currentRoomId, state.currentChannelId]);
-
-  const closeSearch = () => {
-    setSearchOpen(false);
-    setSearchQuery("");
-    setSearchResults([]);
-    setSearchFilter("all");
-    setFileTypeFilter("all");
-    setSearchThisChannel(true);
-  };
+  // Debounced search execution now lives in the provider (client/src/lib/store/provider.tsx)
 
   const closeMentions = () => {
     setMentionsOpen(false);
@@ -1859,7 +1781,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
                 suppressContentEditableWarning
-                className={`w-full rounded-md border border-input bg-transparent px-3 py-2 pr-10 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+                className={`w-full rounded-lg border border-input bg-transparent px-3 py-2 pr-10 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
                 style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: isMobile ? "24px" : "20px" }}
               />
 
