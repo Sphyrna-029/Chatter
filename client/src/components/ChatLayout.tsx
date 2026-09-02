@@ -341,13 +341,13 @@ export function ChatLayout() {
       />
 
       <SidebarProvider>
-        <div className="flex h-dvh w-full">
+        <div className="flex h-dvh w-full gap-2 p-2 bg-muted">
           <AppSidebar
             onCreateRoom={() => setCreateOpen(true)}
             onJoinRoom={() => setJoinOpen(true)}
           />
 
-          <SidebarInset className="flex flex-1 flex-col min-w-0 rounded-lg overflow-hidden">
+          <SidebarInset className="flex flex-1 flex-col min-w-0 rounded-lg overflow-hidden border border-border">
             {/* Floating restore button — only visible when left sidebar is collapsed (desktop only) */}
             {!isMobile && <LeftPanelRestoreButton />}
 
