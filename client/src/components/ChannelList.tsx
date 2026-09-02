@@ -666,7 +666,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   }, [width]);
 
   return (
-    <div className="border-r flex flex-col h-full shrink-0 bg-sidebar relative transition-[width] duration-200" style={{ width: panelCollapsed ? 40 : width }}>
+    <div className="rounded-lg overflow-hidden border border-border bg-sidebar relative transition-[width] duration-200 mr-2 flex flex-col h-full shrink-0" style={{ width: panelCollapsed ? 40 : width }}>
       {/* Room name header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
         {panelCollapsed ? (
