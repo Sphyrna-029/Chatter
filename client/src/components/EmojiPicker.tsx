@@ -149,7 +149,7 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
       </div>
       {!query && frequentEmojis.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+          <p className="ui-heading font-semibold mb-1">
             Frequently Used
           </p>
           <div className="grid grid-cols-8 gap-0.5">
@@ -171,7 +171,7 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
       )}
       {filteredCustomEmojis.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+          <p className="ui-heading font-semibold mb-1">
             Room
           </p>
           <div className="grid grid-cols-8 gap-0.5">
@@ -193,7 +193,7 @@ export function EmojiPicker({ onSelect, roomCustomEmojis, emojiAliases }: EmojiP
       )}
       {filteredCategories.map(([cat, emojis]) => (
         <div key={cat} className="mb-3">
-          <p className="text-xs uppercase tracking-wider text-muted-foreground font-semibold mb-1">
+          <p className="ui-heading font-semibold mb-1">
             {cat}
           </p>
           <div className="grid grid-cols-8 gap-0.5">

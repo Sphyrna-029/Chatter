@@ -389,13 +389,13 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
                   <MessageItem message={msg} disableReactions hidePinControls />
                 </div>
                 <div className="flex items-center gap-2 px-2 pb-1">
-                  <span className="text-3xs text-muted-foreground">
+                  <span className="ui-meta">
                     Pinned by{" "}
                     {state.userPresence[msg.pinned_by]?.displayName || displayUserId(msg.pinned_by)}
                   </span>
                   {canUnpin && (
                     <button
-                      className="text-3xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1 cursor-pointer"
+                      className="text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1 cursor-pointer"
                       onClick={async () => {
                         try {
                           await unpinMessage(msg.event_id);

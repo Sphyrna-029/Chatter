@@ -1439,7 +1439,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         >
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate">{username}</div>
-                            <div className="text-3xs text-muted-foreground">
+                            <div className="ui-meta">
                               banned by {bannedByName} on {bannedDate}
                             </div>
                           </div>

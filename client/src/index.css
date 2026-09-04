@@ -19,11 +19,16 @@
 }
 
 @theme inline {
-  /* Two defined steps below text-xs. The UI had drifted to four arbitrary
-     sizes (8/9/10/11px) used interchangeably; these give the dense surfaces —
-     badges, timestamps, meta rows — a scale to sit on. */
-  --text-2xs: 0.6875rem; /* 11px */
-  --text-3xs: 0.625rem;  /* 10px */
+  /* Two defined steps below text-xs, for the dense surfaces. Rendered sizes
+     account for the 17.6px root below, so these are 12.1px and 11px — not the
+     12px/10px the raw rem values suggest against a 16px root.
+     The scale, largest to smallest:
+       text-sm  15.4px  message bodies, names, channel and member rows
+       text-xs  13.2px  timestamps, counts, secondary rows
+       text-2xs 12.1px  section headings, hints under a control
+       text-3xs 11px    badges and counters only — never a sentence */
+  --text-2xs: 0.6875rem; /* 12.1px at the root size below */
+  --text-3xs: 0.625rem;  /* 11px at the root size below */
   --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", "Courier New", monospace;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
@@ -73,6 +78,35 @@
 
 html {
   font-size: 17.6px; /* 16px × 1.1 — scales all rem-based sizes without overflowing the viewport */
+}
+
+@layer components {
+  /* Recurring text roles. These existed as ad-hoc class soup: section headings
+     were written at three different sizes across components, and hint text at
+     two sizes and four opacities. Naming the role keeps them from drifting
+     apart again. */
+  .ui-heading {
+    font-size: var(--text-2xs);
+    line-height: 1.4;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted-foreground);
+  }
+
+  /* The explanatory line under a control or beside a setting. */
+  .ui-hint {
+    font-size: var(--text-2xs);
+    line-height: 1.45;
+    color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+  }
+
+  /* Timestamps, counts, and the byline under a row. */
+  .ui-meta {
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    color: var(--muted-foreground);
+  }
 }
 
 :root {

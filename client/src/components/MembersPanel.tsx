@@ -190,7 +190,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     if (items.length === 0) return null;
     return (
       <div>
-        <p className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground px-2 pt-3 pb-1">
+        <p className="text-[0.625rem] ui-heading px-2 pt-3 pb-1">
           {label} — {count ?? items.length}
         </p>
         {items.map(renderMember)}
@@ -201,7 +201,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
   return (
     <div className="w-full md:w-56 md:border-l flex flex-col shrink-0 h-full rounded-lg">
       <div className="flex items-center gap-2 border-b px-3 py-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <h3 className="ui-heading">
           Members
         </h3>
         <span className="inline-flex items-center rounded-full bg-secondary px-2 py-0.5 text-xs font-medium">

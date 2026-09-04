@@ -248,7 +248,7 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
               spellCheck={false}
               autoComplete="off"
             />
-            <kbd className="hidden sm:inline-block text-3xs text-muted-foreground/50 border border-muted-foreground/20 rounded px-1 py-0.5 font-mono">
+            <kbd className="hidden sm:inline-block ui-hint border border-muted-foreground/20 rounded px-1 py-0.5 font-mono">
               Esc
             </kbd>
           </div>

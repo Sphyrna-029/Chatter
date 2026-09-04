@@ -145,7 +145,7 @@ function ViewAsPreview({
         </div>
       )}
       {(!target || !resolved) && !error && (
-        <p className="text-3xs text-muted-foreground/70 italic">
+        <p className="ui-hint">
           Pick a role or member to see what they end up with here.
         </p>
       )}
@@ -196,7 +196,7 @@ export function ChannelOverwrites({
     <div className="space-y-2">
       <div>
         <Label className="text-xs text-muted-foreground">Channel permission overwrites</Label>
-        <p className="text-3xs text-muted-foreground/70">
+        <p className="ui-hint">
           Applied over each member's room permissions: Everyone first, then their roles, then
           them specifically. Owners and moderators are not affected.
         </p>
@@ -205,7 +205,7 @@ export function ChannelOverwrites({
       {header}
 
       {overwrites.length === 0 && !adding && (
-        <p className="text-xs text-muted-foreground/70 italic">
+        <p className="ui-hint">
           No overwrites — everyone follows their room permissions here.
         </p>
       )}
@@ -218,7 +218,7 @@ export function ChannelOverwrites({
               <span className="text-sm font-medium" style={{ color }}>
                 {text}
               </span>
-              <span className="text-3xs uppercase tracking-wider text-muted-foreground">
+              <span className="ui-heading">
                 {ow.target_type}
               </span>
               <button
@@ -232,7 +232,7 @@ export function ChannelOverwrites({
             <div className="space-y-2">
               {CHANNEL_PERMISSION_SECTIONS.map((section) => (
                 <div key={section.title}>
-                  <p className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-0.5">
+                  <p className="ui-heading/70 mb-0.5">
                     {section.title}
                   </p>
                   <div className="space-y-0.5">

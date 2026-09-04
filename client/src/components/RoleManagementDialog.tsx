@@ -202,7 +202,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
         <div className="flex gap-4 min-h-0 h-[26rem] max-h-[60vh] overflow-hidden">
           {/* Role list, strongest first */}
           <div className="w-52 shrink-0 flex flex-col min-h-0 border-r pr-3">
-            <p className="text-3xs uppercase tracking-wider text-muted-foreground mb-1.5">
+            <p className="ui-heading mb-1.5">
               Highest first
             </p>
             <ScrollArea className="flex-1 min-h-0 -mr-2 pr-2">
@@ -325,7 +325,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
                 <div className="space-y-3">
                   {PERMISSION_SECTIONS.map((section) => (
                     <div key={section.title}>
-                      <p className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground mb-0.5 px-2">
+                      <p className="ui-heading mb-0.5 px-2">
                         {section.title}
                       </p>
                       <div className="space-y-0.5">

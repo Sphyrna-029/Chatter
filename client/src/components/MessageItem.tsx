@@ -489,7 +489,7 @@ function CcControls({
           align="end"
           className="w-56 p-1"
         >
-          <div className="px-2 py-1 text-3xs uppercase tracking-wide text-muted-foreground">
+          <div className="px-2 py-1 ui-heading">
             Subtitles
           </div>
           {tracks.length === 0 ? (
@@ -820,7 +820,7 @@ function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
           <img src={embed.image.url} alt="" className="max-w-full rounded mt-2" />
         )}
         {(embed.footer || embed.timestamp) && (
-          <div className="flex items-center gap-1.5 mt-2 text-2xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 mt-2 ui-meta">
             {embed.footer?.icon_url && <img src={embed.footer.icon_url} alt="" className="w-4 h-4 rounded-full" />}
             {embed.footer?.text && <span>{embed.footer.text}</span>}
             {embed.footer?.text && embed.timestamp && <span>&middot;</span>}
@@ -1206,7 +1206,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
         <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-blue-400/80 bg-blue-500/10">
           {message.content.body}
         </span>
-        <span className="text-xs text-muted-foreground/50">{time}</span>
+        <span className="ui-hint">{time}</span>
         {canDeleteNotification && (
           <button
             className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
@@ -1241,7 +1241,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           )}>
             {body}
           </span>
-          <span className="text-xs text-muted-foreground/50">{time}</span>
+          <span className="ui-hint">{time}</span>
           <Popover>
             <PopoverTrigger asChild>
               <button
@@ -1488,7 +1488,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 )
               )}
               {message.edited && (
-                <span className="text-xs text-muted-foreground/60 italic ml-1">(edited)</span>
+                <span className="ui-hint ml-1">(edited)</span>
               )}
               {emojiTip && (
                 <div

@@ -651,7 +651,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             ) : (
               <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
             )}
-            <span className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
+            <span className="ui-heading truncate">
               {cat.name}
             </span>
           </button>
@@ -841,7 +841,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             </div>
           ) : canManage ? (
             <button
-              className="w-full flex items-center justify-center gap-1 py-1.5 text-3xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
+              className="w-full flex items-center justify-center gap-1 py-1.5 ui-hint hover:text-muted-foreground hover:bg-accent/30 transition-colors"
               onClick={() => bannerInputRef.current?.click()}
               title="Set room banner"
             >
@@ -1099,7 +1099,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   <Label>Bitrate</Label>
                   <span className="text-xs font-mono text-muted-foreground">{editVoiceBitrateKbps} kbps</span>
                 </div>
-                <p className="text-3xs text-muted-foreground/70 mb-2">
+                <p className="ui-hint mb-2">
                   Applies to everyone in this channel. Higher sounds better but uses more bandwidth.
                 </p>
                 <Slider
@@ -1109,7 +1109,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   max={VOICE_BITRATE_MAX_BPS / 1000}
                   step={8}
                 />
-                <div className="flex justify-between text-3xs text-muted-foreground/70 mt-1">
+                <div className="flex justify-between ui-hint mt-1">
                   <span>{VOICE_BITRATE_MIN_BPS / 1000} kbps</span>
                   <span>{VOICE_BITRATE_MAX_BPS / 1000} kbps</span>
                 </div>
@@ -1161,7 +1161,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 {editChannelType === "showcase" && (
                   <div>
                     <Label className="text-xs text-muted-foreground">Approved roles for featured pane</Label>
-                    <p className="text-3xs text-muted-foreground/70 mb-1">Roles that can post in the left (featured) pane. If none selected, only owners/moderators can post.</p>
+                    <p className="ui-hint mb-1">Roles that can post in the left (featured) pane. If none selected, only owners/moderators can post.</p>
                     <div className="space-y-1 max-h-28 overflow-y-auto">
                       {state.customRoles.map((r) => (
                         <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
@@ -1237,7 +1237,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               roles={state.customRoles}
               members={state.roomMembers.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
               header={
-                <p className="text-3xs text-muted-foreground/70">
+                <p className="ui-hint">
                   Channels in this category inherit these unless they opt out.
                 </p>
               }

@@ -101,7 +101,7 @@ function SpotifyCard({ track, artist, albumArt }: { track: string; artist?: stri
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-success truncate">{track}</p>
           {artist && <p className="text-3xs text-muted-foreground truncate">{artist}</p>}
-          <p className="text-3xs text-muted-foreground/60">Listening on Spotify</p>
+          <p className="ui-hint">Listening on Spotify</p>
         </div>
       </div>
     </div>
@@ -139,7 +139,7 @@ function SteamGameCard({ game, appId, sessionStart }: { game: string; appId?: st
         </svg>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-blue-400 truncate">{game}</p>
-          {elapsed && <p className="text-3xs text-muted-foreground">Playing for {elapsed}</p>}
+          {elapsed && <p className="ui-meta">Playing for {elapsed}</p>}
         </div>
       </div>
     </div>
@@ -496,7 +496,7 @@ export function UserProfileDialog({
             style={nameFontUrl ? { fontFamily: `'user-font-${CSS.escape(userId)}'` } : undefined}
           >{presence?.displayName || username}</h2>
           {presence?.displayName && (
-            <p className="text-xs text-muted-foreground/70">{username}</p>
+            <p className="ui-hint">{username}</p>
           )}
           <p className="text-sm text-muted-foreground">{userId}</p>
         </div>
@@ -976,7 +976,7 @@ export function UserProfileDialog({
           <div className="w-full space-y-1.5 mt-2">
             {assignedRoles.length > 0 && (
               <div className="space-y-1">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="ui-heading">
                   Roles {canManage && <span className="normal-case font-normal">(drag to reorder)</span>}
                 </p>
                 <div className="flex flex-col gap-0.5">
@@ -1073,7 +1073,7 @@ export function UserProfileDialog({
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
           </svg>
           <p className="text-sm text-muted-foreground">No uploaded files yet</p>
-          <p className="text-xs text-muted-foreground/70 mt-1">Files you upload in chat will appear here</p>
+          <p className="ui-hint mt-1">Files you upload in chat will appear here</p>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
@@ -1134,7 +1134,7 @@ export function UserProfileDialog({
               <div className="px-2 py-1.5 space-y-0.5">
                 <p className="text-xs font-medium truncate" title={file.filename}>{file.filename}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-3xs text-muted-foreground">
+                  <span className="ui-meta">
                     {formatFileSize(file.size)} &middot;{" "}
                     {new Date(file.uploaded_at * 1000).toLocaleDateString(undefined, {
                       month: "short",

@@ -36,7 +36,7 @@ export function PendingAttachments({ files, onRemove, className }: PendingAttach
               <span className="text-xs text-muted-foreground truncate max-w-full">
                 {pf.file.name}
               </span>
-              <span className="text-3xs text-muted-foreground/70">{formatSize(pf.file.size)}</span>
+              <span className="ui-hint">{formatSize(pf.file.size)}</span>
             </div>
           )}
           <button

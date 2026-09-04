@@ -170,7 +170,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
     <div className="w-52 border-r flex flex-col h-full shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="ui-heading">
           Voice Channel
         </span>
         <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-0.5 text-3xs font-medium text-muted-foreground">

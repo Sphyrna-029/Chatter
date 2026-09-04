@@ -893,7 +893,7 @@ export function WhiteboardArea() {
           <div className="absolute top-3 bottom-3 right-3 z-20 w-96 flex flex-col rounded-lg border border-border bg-background/90 backdrop-blur-sm shadow-xl overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2 border-b border-border shrink-0">
-              <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Chat</span>
+              <span className="ui-heading">Chat</span>
               <button
                 className="text-muted-foreground hover:text-foreground transition-colors"
                 onClick={() => setChatOpen(false)}

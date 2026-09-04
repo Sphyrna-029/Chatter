@@ -100,12 +100,12 @@ export function NotificationSettingsPopover({
           </div>
         )}
         {permission === "denied" && (
-          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-2xs text-muted-foreground">
+          <div className="mt-1 border-t pt-1 px-2 py-1.5 ui-meta">
             Desktop notifications are blocked in your browser settings.
           </div>
         )}
         {permission === "unsupported" && (
-          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-2xs text-muted-foreground">
+          <div className="mt-1 border-t pt-1 px-2 py-1.5 ui-meta">
             This browser doesn't support desktop notifications.
           </div>
         )}

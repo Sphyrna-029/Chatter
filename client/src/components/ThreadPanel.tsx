@@ -304,7 +304,7 @@ export function ThreadPanel() {
       {/* Thread participants */}
       {threadRootMessage.thread_participants && threadRootMessage.thread_participants.length > 0 && (
         <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/50 shrink-0">
-          <span className="text-3xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
+          <span className="ui-heading shrink-0">
             Members
           </span>
           <div className="flex items-center -space-x-1.5 flex-wrap">
@@ -321,7 +321,7 @@ export function ThreadPanel() {
               );
             })}
           </div>
-          <span className="text-3xs text-muted-foreground">
+          <span className="ui-meta">
             {threadRootMessage.thread_participants.length}
           </span>
         </div>

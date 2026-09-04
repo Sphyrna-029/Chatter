@@ -540,7 +540,7 @@ function SettingsTab({
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
-            <p className="text-2xs text-muted-foreground">
+            <p className="ui-meta">
               Share this code with people you want to allow to register. Refreshing generates a new code and invalidates the old one.
             </p>
           </div>
@@ -572,7 +572,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-2xs text-muted-foreground">
+        <p className="ui-meta">
           {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB total.`}
         </p>
       </div>
@@ -602,7 +602,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-2xs text-muted-foreground">
+        <p className="ui-meta">
           {localUploadLimit === 0 ? "Currently unlimited." : `Individual files cannot exceed ${localUploadLimit} MB.`}
         </p>
       </div>
@@ -633,7 +633,7 @@ function SettingsTab({
             />
           </button>
         </div>
-        <p className="text-2xs text-muted-foreground">
+        <p className="ui-meta">
           {roomCreationDisabled
             ? "Only server owners/admins can create rooms."
             : "All users can create rooms (subject to the per-user limit below)."}
@@ -665,7 +665,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-2xs text-muted-foreground">
+        <p className="ui-meta">
           {localRoomLimit === 0 ? "Currently unlimited." : `Each user can create up to ${localRoomLimit} room${localRoomLimit !== 1 ? "s" : ""}.`}
         </p>
       </div>
@@ -696,7 +696,7 @@ function SettingsTab({
             />
           </button>
         </div>
-        <p className="text-2xs text-muted-foreground">
+        <p className="ui-meta">
           {requireAuthForUploads
             ? "Only logged-in users can view uploaded images and files."
             : "Uploaded files are publicly accessible to anyone with the link."}

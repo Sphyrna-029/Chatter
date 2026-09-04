@@ -1168,7 +1168,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     {channelTopic}
                   </p>
                 ) : canEditTopic ? (
-                  <p className="text-xs text-muted-foreground/50 italic">
+                  <p className="ui-hint">
                     Click to set a topic
                   </p>
                 ) : null}

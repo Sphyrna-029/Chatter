@@ -294,7 +294,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
         {/* Stats row */}
         {!isDm && (memberCount > 0 || voiceCount > 0 || screenShareActive) && (
-          <div className="flex items-center gap-2 text-3xs text-muted-foreground">
+          <div className="flex items-center gap-2 ui-meta">
             {memberCount > 0 && (
               <span className="flex items-center gap-0.5">
                 <svg
@@ -350,7 +350,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel className="text-3xs uppercase tracking-wide text-muted-foreground">
+              <DropdownMenuLabel className="ui-heading">
                 Notifications
               </DropdownMenuLabel>
               {NOTIFICATION_LEVELS.map(({ value, label }) => (
@@ -490,7 +490,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                         setGroupDialogName(undefined);
                         setGroupDialogOpen(true);
                       }}
-                      className="flex items-center gap-1 text-3xs text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <FolderPlus className="h-3 w-3" />
                       Group
@@ -546,7 +546,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 <span className="text-2xs font-semibold text-muted-foreground truncate">
                                   {group.name}
                                 </span>
-                                <span className="text-3xs text-muted-foreground/60 ml-auto mr-5 shrink-0">
+                                <span className="ui-hint ml-auto mr-5 shrink-0">
                                   {groupRooms.length}
                                 </span>
                                 {/* Hover menu */}
@@ -598,7 +598,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 </div>
                               )}
                               {!group.collapsed && groupRooms.length === 0 && (
-                                <p className="px-3 py-1 text-3xs text-muted-foreground/50 italic">
+                                <p className="px-3 py-1 ui-hint">
                                   No rooms
                                 </p>
                               )}
@@ -694,7 +694,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   <div className="px-2 pb-1">
                     <button
                       onClick={() => setGroupDMDialogOpen(true)}
-                      className="flex items-center gap-1 text-3xs text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <UsersRound className="h-3 w-3" />
                       Group DM

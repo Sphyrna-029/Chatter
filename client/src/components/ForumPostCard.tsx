@@ -75,7 +75,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
         </p>
 
         {post.body && (
-          <div className="text-xs text-muted-foreground/80 line-clamp-2">
+          <div className="ui-hint line-clamp-2">
             <ForumMarkdown content={post.body} />
           </div>
         )}

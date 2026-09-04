@@ -494,7 +494,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
             <div className="flex flex-col gap-1.5 px-3 py-2 bg-card border-t border-border shrink-0">
               {/* Progress bar + volume */}
               {watchState.videoUrl && (
-                <div className="flex items-center gap-2 text-2xs text-muted-foreground">
+                <div className="flex items-center gap-2 ui-meta">
                   <span className="shrink-0 tabular-nums w-10 text-right">
                     {formatTime(Math.max(0, displayPosition))}
                   </span>
