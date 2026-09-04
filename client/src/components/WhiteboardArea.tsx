@@ -775,7 +775,7 @@ export function WhiteboardArea() {
                 style={{
                   backgroundColor: c,
                   transform: color === c ? "scale(1.2)" : "scale(1)",
-                  boxShadow: color === c ? "0 0 0 2px hsl(var(--primary))" : "none",
+                  boxShadow: color === c ? "0 0 0 2px var(--primary)" : "none",
                 }}
                 onClick={() => setColor(c)}
               />

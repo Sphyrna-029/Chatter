@@ -161,9 +161,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           e.preventDefault();
           e.stopPropagation();
           e.dataTransfer.dropEffect = "move";
+          // Rows stack vertically, so the drop side is decided by where the
+          // cursor sits within the row's height, not its width.
           const rect = e.currentTarget.getBoundingClientRect();
-          const midX = rect.left + rect.width / 2;
-          setDragOverSide(e.clientX < midX ? "before" : "after");
+          const midY = rect.top + rect.height / 2;
+          setDragOverSide(e.clientY < midY ? "before" : "after");
           setDragOverRoomId(roomId);
           setDragOverGroupId(null);
         }}
@@ -197,66 +199,53 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           setDragOverGroupId(null);
           setDragOverRoomId(null);
         }}
+        title={
+          !isDm && memberCount > 0
+            ? `${roomName} — ${memberCount} member${memberCount === 1 ? "" : "s"}`
+            : roomName
+        }
         className={cn(
-          "group/card relative flex flex-col items-center justify-center gap-1.5 rounded-md border p-3 text-center transition-colors cursor-pointer",
+          // A row rather than a tile: the name gets the sidebar's full width
+          // instead of truncating inside a half-width square, and a room costs
+          // one line rather than five.
+          "group/card relative flex w-full items-center gap-2 rounded-md py-1 pl-1 pr-1.5 text-left transition-colors cursor-pointer",
+          isActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "hover:bg-sidebar-accent/50",
           draggedRoomId === roomId && "opacity-50",
-          dragOverRoomId === roomId && dragOverSide === "before" && "border-l-primary border-l-2",
-          dragOverRoomId === roomId && dragOverSide === "after" && "border-r-primary border-r-2",
+          dragOverRoomId === roomId && dragOverSide === "before" && "border-t-2 border-t-primary",
+          dragOverRoomId === roomId && dragOverSide === "after" && "border-b-2 border-b-primary",
         )}
-        style={{
-          minHeight: "5.5rem",
-          borderColor: screenShareActive
-            ? "hsl(var(--chart-4))"
-            : isActive
-              ? "hsl(270 60% 70%)"
-              : "hsl(var(--sidebar-border))",
-          background: isActive
-            ? "hsl(var(--sidebar-accent))"
-            : "transparent",
-          boxShadow: screenShareActive
-            ? undefined
-            : isActive
-              ? "0 0 12px 2px hsl(270 60% 60% / 0.45), 0 0 4px 1px hsl(270 60% 70% / 0.3)"
-              : undefined,
-          animation: screenShareActive ? "pulse-border 2s ease-in-out infinite" : undefined,
-        }}
       >
-        {/* Mention count badge (red, highest priority) */}
-        {hasMention && (
-          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-3xs font-bold leading-none text-white shadow-sm">
-            {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
-          </span>
-        )}
-        {/* Unread count badge (purple, shown when no mention badge) */}
-        {!hasMention && unreadCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-purple-600 px-1 text-3xs font-bold leading-none text-white shadow-sm">
-            {unreadCount > 99 ? "99+" : unreadCount}
-          </span>
-        )}
-
+        {/* The active room reads from a bar rather than a glow, so it survives
+            every theme without a hand-picked purple. */}
+        <span
+          aria-hidden
+          className={cn(
+            "absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-r-full transition-all",
+            isActive ? "h-5 bg-sidebar-primary" : "h-0 bg-transparent",
+          )}
+        />
         {/* Room icon / initial */}
         {info?.icon_url ? (
           <AuthImage
             src={info.icon_url}
             alt=""
-            className="h-10 w-10 rounded-md object-cover"
+            className="h-7 w-7 shrink-0 rounded-md object-cover"
           />
         ) : (
           <span
-            className="flex h-10 w-10 items-center justify-center rounded-md text-sm font-bold"
-            style={{
-              background: isActive
-                ? "hsl(var(--sidebar-primary))"
-                : "hsl(var(--sidebar-accent))",
-              color: isActive
-                ? "hsl(var(--sidebar-primary-foreground))"
-                : "hsl(var(--sidebar-foreground))",
-            }}
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-bold",
+              isActive
+                ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                : "bg-sidebar-accent text-sidebar-foreground",
+            )}
           >
             {isDm ? (
               showStreak ? (
-                <span className="flex flex-col items-center leading-none gap-0.5">
-                  <span className="text-base leading-none">{isStreakExpiring ? "⏳" : "🔥"}</span>
+                <span className="flex flex-col items-center leading-none">
+                  <span className="text-xs leading-none">{isStreakExpiring ? "⏳" : "🔥"}</span>
                   <span className="text-3xs font-bold leading-none">{streakCount}</span>
                 </span>
               ) : (
@@ -271,7 +260,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         )}
 
         {/* Room name */}
-        <span className="w-full truncate text-2xs font-medium leading-tight text-sidebar-foreground flex items-center justify-center gap-1">
+        <span className="flex min-w-0 flex-1 items-center gap-1 text-sm leading-tight">
           {isForumRoom && (
             <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 text-muted-foreground">
               <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4.414a1 1 0 0 0-.707.293L1.5 14.5A.5.5 0 0 1 .5 14V2zm3.5 1a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/>
@@ -292,58 +281,49 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           <span className="truncate">{roomName}</span>
         </span>
 
-        {/* Stats row */}
-        {!isDm && (memberCount > 0 || voiceCount > 0 || screenShareActive) && (
-          <div className="flex items-center gap-2 ui-meta">
-            {memberCount > 0 && (
-              <span className="flex items-center gap-0.5">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z" />
-                </svg>
-                {memberCount}
-              </span>
-            )}
-            {voiceCount > 0 && (
-              <span className="flex items-center gap-0.5 text-success">
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                >
-                  <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3zm3-2a2 2 0 0 0-2 2v5a2 2 0 0 0 4 0V3a2 2 0 0 0-2-2z" />
-                  <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z" />
-                </svg>
-                {voiceCount}
-              </span>
-            )}
-            {screenShareActive && (
-              <span className="flex items-center gap-0.5 text-purple-500">
-                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                  <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h13A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 10.5v-7zM1.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-13z" />
-                  <path d="M2 14h12v1H2v-1z" />
-                </svg>
-              </span>
-            )}
-          </div>
-        )}
+        {/* Trailing signals. Only what is live goes here — voice and an active
+            screen share. The member count is static trivia that was competing
+            with them for the same row, so it moved to the row's title. */}
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {!isDm && voiceCount > 0 && (
+            <span className="flex items-center gap-0.5 text-2xs text-success" title={`${voiceCount} in voice`}>
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3zm3-2a2 2 0 0 0-2 2v5a2 2 0 0 0 4 0V3a2 2 0 0 0-2-2z" />
+                <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z" />
+              </svg>
+              {voiceCount}
+            </span>
+          )}
+          {!isDm && screenShareActive && (
+            <span className="text-info" title="Someone is sharing their screen">
+              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h13A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 10.5v-7zM1.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-13z" />
+                <path d="M2 14h12v1H2v-1z" />
+              </svg>
+            </span>
+          )}
+          {hasMention ? (
+            <span className="flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-destructive px-1 text-3xs font-bold leading-none text-white">
+              {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
+            </span>
+          ) : unreadCount > 0 ? (
+            <span className="flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-sidebar-primary px-1 text-3xs font-bold leading-none text-sidebar-primary-foreground">
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          ) : null}
+        </span>
 
         {/* One overflow menu instead of three separate corner affordances —
             on touch every hover control is permanently visible, so three of
             them crowded the card. */}
         <span
-          className="absolute top-0.5 right-0.5 can-hover:opacity-0 can-hover:group-hover/card:opacity-100 transition-opacity"
+          className="shrink-0 -mr-0.5 can-hover:hidden can-hover:group-hover/card:block"
           onClick={(e) => e.stopPropagation()}
         >
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                className="flex p-0.5 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
                 aria-label={`Options for ${info?.name || "room"}`}
               >
                 <MoreVertical className="h-3.5 w-3.5" />
@@ -593,7 +573,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                               </div>
                               {/* Group rooms */}
                               {!group.collapsed && (
-                                <div className="grid grid-cols-2 gap-2 px-2 pb-1">
+                                <div className="space-y-px px-2 pb-1">
                                   {groupRooms.map((roomId) => renderRoomCard(roomId, false))}
                                 </div>
                               )}
@@ -635,7 +615,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 Ungrouped
                               </span>
                             </div>
-                            <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                            <div className="space-y-px px-2 pb-2">
                               {ungroupedRoomIds.map((roomId) => renderRoomCard(roomId, false))}
                             </div>
                           </div>
@@ -680,7 +660,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 No rooms joined yet
                               </p>
                             )}
-                            <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                            <div className="space-y-px px-2 pb-2">
                               {regularRoomIds.map((roomId) => renderRoomCard(roomId, false))}
                             </div>
                           </>
@@ -705,7 +685,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                       No direct messages yet
                     </p>
                   )}
-                  <div className="grid grid-cols-2 gap-2 px-2 pb-2">
+                  <div className="space-y-px px-2 pb-2">
                     {dmRoomIds.map((roomId) => renderRoomCard(roomId, true))}
                   </div>
                 </>
@@ -808,8 +788,8 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
       <style>{`
         @keyframes pulse-border {
-          0%, 100% { box-shadow: 0 0 0 0 hsl(var(--chart-4) / 0.4); }
-          50% { box-shadow: 0 0 8px 2px hsl(var(--chart-4) / 0.6); }
+          0%, 100% { box-shadow: 0 0 0 0 var(--chart-4); }
+          50% { box-shadow: 0 0 8px 2px var(--chart-4); }
         }
       `}</style>
     </Sidebar>
