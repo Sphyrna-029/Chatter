@@ -1,6 +1,8 @@
 use super::super::{
     dto::FriendActionRequest,
-    helpers::{error_response, extract_token, generate_id, get_user_from_token, now_millis, send_to_user},
+    helpers::{
+        error_response, extract_token, generate_id, get_user_from_token, now_millis, send_to_user,
+    },
     state::{AppState, BlockRecord, FriendRequestRecord, FriendshipRecord, UserRecord},
 };
 use axum::{
@@ -47,13 +49,19 @@ pub(crate) async fn get_friends(
         .await
     {
         while let Ok(Some(f)) = cursor.try_next().await {
-            let friend_id = if f.user_a == user_id { f.user_b } else { f.user_a };
+            let friend_id = if f.user_a == user_id {
+                f.user_b
+            } else {
+                f.user_a
+            };
             friends.push(friend_id);
         }
     }
 
     // Incoming requests
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
     let mut incoming = Vec::new();
     if let Ok(mut cursor) = requests_coll.find(doc! { "to_user": &user_id }).await {
         while let Ok(Some(r)) = cursor.try_next().await {
@@ -132,7 +140,9 @@ pub(crate) async fn get_friend_status(
     }
 
     // Check pending requests
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
     if requests_coll
         .find_one(doc! { "from_user": &user_id, "to_user": &target_id })
         .await
@@ -168,7 +178,10 @@ pub(crate) async fn send_friend_request(
     let target_id = &body.user_id;
 
     if user_id == *target_id {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot friend yourself"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot friend yourself",
+        ));
     }
 
     // Target must exist
@@ -192,7 +205,10 @@ pub(crate) async fn send_friend_request(
         .flatten()
         .is_some()
     {
-        return Err(error_response(StatusCode::FORBIDDEN, "Cannot send request to this user"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot send request to this user",
+        ));
     }
     if blocks_coll
         .find_one(doc! { "blocker": &user_id, "blocked": target_id })
@@ -201,7 +217,10 @@ pub(crate) async fn send_friend_request(
         .flatten()
         .is_some()
     {
-        return Err(error_response(StatusCode::BAD_REQUEST, "You have blocked this user"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "You have blocked this user",
+        ));
     }
 
     // Check already friends
@@ -217,7 +236,9 @@ pub(crate) async fn send_friend_request(
         return Err(error_response(StatusCode::BAD_REQUEST, "Already friends"));
     }
 
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
 
     // Check for reverse request (auto-accept)
     if let Some(reverse) = requests_coll
@@ -257,7 +278,10 @@ pub(crate) async fn send_friend_request(
         .flatten()
         .is_some()
     {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Request already sent"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Request already sent",
+        ));
     }
 
     // Create request
@@ -294,13 +318,17 @@ pub(crate) async fn accept_friend_request(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
     let from_user = &body.user_id;
 
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
     let request = requests_coll
         .find_one(doc! { "from_user": from_user, "to_user": &user_id })
         .await
         .ok()
         .flatten()
-        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "No pending request from this user"))?;
+        .ok_or_else(|| {
+            error_response(StatusCode::NOT_FOUND, "No pending request from this user")
+        })?;
 
     // Delete request
     let _ = requests_coll
@@ -341,13 +369,18 @@ pub(crate) async fn reject_friend_request(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
     let from_user = &body.user_id;
 
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
     let result = requests_coll
         .delete_one(doc! { "from_user": from_user, "to_user": &user_id })
         .await;
 
     if result.as_ref().map(|r| r.deleted_count).unwrap_or(0) == 0 {
-        return Err(error_response(StatusCode::NOT_FOUND, "No pending request from this user"));
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            "No pending request from this user",
+        ));
     }
 
     Ok(Json(json!({ "status": "rejected" })))
@@ -370,7 +403,10 @@ pub(crate) async fn remove_friend(
     let result = friendships_coll.delete_one(doc! { "_id": &pair }).await;
 
     if result.as_ref().map(|r| r.deleted_count).unwrap_or(0) == 0 {
-        return Err(error_response(StatusCode::NOT_FOUND, "Not friends with this user"));
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            "Not friends with this user",
+        ));
     }
 
     // Notify the other user
@@ -393,7 +429,10 @@ pub(crate) async fn block_user(
     let target_id = &body.user_id;
 
     if user_id == *target_id {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot block yourself"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot block yourself",
+        ));
     }
 
     let blocks_coll = state.db.collection::<BlockRecord>("blocks");
@@ -406,7 +445,10 @@ pub(crate) async fn block_user(
         .flatten()
         .is_some()
     {
-        return Err(error_response(StatusCode::BAD_REQUEST, "User already blocked"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "User already blocked",
+        ));
     }
 
     // Remove friendship if exists
@@ -419,7 +461,9 @@ pub(crate) async fn block_user(
         .unwrap_or(false);
 
     // Cancel pending requests both directions
-    let requests_coll = state.db.collection::<FriendRequestRecord>("friend_requests");
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
     let _ = requests_coll
         .delete_many(doc! { "$or": [
             { "from_user": &user_id, "to_user": target_id },
@@ -465,7 +509,11 @@ pub(crate) async fn get_mutual_friends(
         .await
     {
         while let Ok(Some(f)) = cursor.try_next().await {
-            let fid = if f.user_a == user_id { f.user_b } else { f.user_a };
+            let fid = if f.user_a == user_id {
+                f.user_b
+            } else {
+                f.user_a
+            };
             my_friends.insert(fid);
         }
     }
@@ -477,7 +525,11 @@ pub(crate) async fn get_mutual_friends(
         .await
     {
         while let Ok(Some(f)) = cursor.try_next().await {
-            let fid = if f.user_a == target_id { f.user_b.clone() } else { f.user_a.clone() };
+            let fid = if f.user_a == target_id {
+                f.user_b.clone()
+            } else {
+                f.user_a.clone()
+            };
             target_friends.insert(fid);
         }
     }

@@ -53,10 +53,17 @@ pub(crate) async fn user_in_voice_room(state: &AppState, _room_id: &str, user_id
     vc.values().any(|members| members.contains_key(user_id))
 }
 
-pub(crate) async fn user_is_sharing_screen(state: &AppState, _room_id: &str, user_id: &str) -> bool {
+pub(crate) async fn user_is_sharing_screen(
+    state: &AppState,
+    _room_id: &str,
+    user_id: &str,
+) -> bool {
     let vc = state.voice_channels.read().await;
     vc.values().any(|members| {
-        members.get(user_id).map(|m| m.screen_sharing).unwrap_or(false)
+        members
+            .get(user_id)
+            .map(|m| m.screen_sharing)
+            .unwrap_or(false)
     })
 }
 
@@ -748,8 +755,7 @@ pub(crate) async fn handle_screen_webrtc_subscribe_offer(
                     .write_rtcp(&[Box::new(PictureLossIndication {
                         sender_ssrc: 0,
                         media_ssrc: pli_media_ssrc,
-                    })
-                        as Box<dyn RtcpPacket + Send + Sync>])
+                    }) as Box<dyn RtcpPacket + Send + Sync>])
                     .await;
             }
 

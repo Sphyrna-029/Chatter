@@ -1,11 +1,13 @@
 use super::super::{
     constants::{VOICE_BITRATE_DEFAULT, VOICE_BITRATE_MAX, VOICE_BITRATE_MIN},
-    dto::{CreateChannelRequest, UpdateChannelRequest, CreateCategoryRequest, UpdateCategoryRequest},
-    helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_role,
-        get_user_from_token, now_millis, get_user_custom_role_ids,
+    dto::{
+        CreateCategoryRequest, CreateChannelRequest, UpdateCategoryRequest, UpdateChannelRequest,
     },
-    state::{AppState, ChannelRecord, ChannelCategoryRecord, RoomRecord},
+    helpers::{
+        broadcast_to_room, error_response, extract_token, generate_id, get_user_custom_role_ids,
+        get_user_from_token, get_user_role, now_millis,
+    },
+    state::{AppState, ChannelCategoryRecord, ChannelRecord, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -30,8 +32,15 @@ pub(crate) async fn list_channels(
     // Check membership
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -49,10 +58,12 @@ pub(crate) async fn list_channels(
     let mut channels: Vec<Value> = Vec::new();
     while let Ok(Some(ch)) = cursor.try_next().await {
         // Filter by view_roles: if non-empty, only privileged users or users with a matching role can see it
-        if !ch.view_roles.is_empty() && !is_privileged
-            && !ch.view_roles.iter().any(|r| user_custom_roles.contains(r)) {
-                continue;
-            }
+        if !ch.view_roles.is_empty()
+            && !is_privileged
+            && !ch.view_roles.iter().any(|r| user_custom_roles.contains(r))
+        {
+            continue;
+        }
         channels.push(json!({
             "channel_id": ch.channel_id,
             "room_id": ch.room_id,
@@ -75,7 +86,9 @@ pub(crate) async fn list_channels(
     }
 
     // Also fetch categories
-    let categories_coll = state.db.collection::<ChannelCategoryRecord>("channel_categories");
+    let categories_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
     let mut cat_cursor = categories_coll
         .find(doc! { "room_id": &room_id })
         .sort(doc! { "position": 1, "created_at": 1 })
@@ -90,7 +103,9 @@ pub(crate) async fn list_channels(
         }));
     }
 
-    Ok(Json(json!({ "channels": channels, "categories": categories })))
+    Ok(Json(
+        json!({ "channels": channels, "categories": categories }),
+    ))
 }
 
 pub(crate) async fn create_channel(
@@ -114,47 +129,82 @@ pub(crate) async fn create_channel(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
     if room.is_dm {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot create channels in DMs"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot create channels in DMs",
+        ));
     }
 
     // Membership gate — must precede role check so ex-members cannot act on the room.
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
     // Permission check: owner or moderator
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can create channels"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can create channels",
+        ));
     }
 
     // Validate
     let name: String = req.name.trim().chars().take(30).collect();
     if name.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Channel name cannot be empty"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Channel name cannot be empty",
+        ));
     }
-    let valid_channel_types = ["text", "voice", "theater", "forum", "whiteboard", "showcase", "bot"];
+    let valid_channel_types = [
+        "text",
+        "voice",
+        "theater",
+        "forum",
+        "whiteboard",
+        "showcase",
+        "bot",
+    ];
     if !valid_channel_types.contains(&req.channel_type.as_str()) {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Invalid channel type"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Invalid channel type",
+        ));
     }
 
     // Bot channels require a valid bot_id
     if req.channel_type == "bot" {
         let bid = req.bot_id.as_deref().unwrap_or("");
         if bid.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Bot channels require a bot_id"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Bot channels require a bot_id",
+            ));
         }
-        let bots_coll = state.db.collection::<super::super::state::BotRecord>("bots");
+        let bots_coll = state
+            .db
+            .collection::<super::super::state::BotRecord>("bots");
         let bot = bots_coll
             .find_one(doc! { "_id": bid, "room_id": &room_id })
             .await
             .ok()
             .flatten();
         if bot.is_none() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Bot not found in this room"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Bot not found in this room",
+            ));
         }
     }
 
@@ -230,7 +280,10 @@ pub(crate) async fn update_channel(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can edit channels"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can edit channels",
+        ));
     }
 
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
@@ -248,7 +301,10 @@ pub(crate) async fn update_channel(
     if let Some(ref name) = req.name {
         let sanitized: String = name.trim().chars().take(30).collect();
         if sanitized.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Channel name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Channel name cannot be empty",
+            ));
         }
         set_doc.insert("name", sanitized.as_str());
         content.insert("name".to_string(), json!(sanitized));
@@ -270,22 +326,37 @@ pub(crate) async fn update_channel(
         content.insert("read_only".to_string(), json!(read_only));
     }
     if let Some(ref view_roles) = req.view_roles {
-        let bson_arr: Vec<mongodb::bson::Bson> = view_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let bson_arr: Vec<mongodb::bson::Bson> = view_roles
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
         set_doc.insert("view_roles", bson_arr);
         content.insert("view_roles".to_string(), json!(view_roles));
     }
     if let Some(ref write_roles) = req.write_roles {
-        let bson_arr: Vec<mongodb::bson::Bson> = write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let bson_arr: Vec<mongodb::bson::Bson> = write_roles
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
         set_doc.insert("write_roles", bson_arr);
         content.insert("write_roles".to_string(), json!(write_roles));
     }
     if let Some(ref showcase_write_roles) = req.showcase_write_roles {
-        let bson_arr: Vec<mongodb::bson::Bson> = showcase_write_roles.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let bson_arr: Vec<mongodb::bson::Bson> = showcase_write_roles
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
         set_doc.insert("showcase_write_roles", bson_arr);
-        content.insert("showcase_write_roles".to_string(), json!(showcase_write_roles));
+        content.insert(
+            "showcase_write_roles".to_string(),
+            json!(showcase_write_roles),
+        );
     }
     if let Some(ref showcase_posters) = req.showcase_posters {
-        let bson_arr: Vec<mongodb::bson::Bson> = showcase_posters.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let bson_arr: Vec<mongodb::bson::Bson> = showcase_posters
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
         set_doc.insert("showcase_posters", bson_arr);
         content.insert("showcase_posters".to_string(), json!(showcase_posters));
     }
@@ -346,7 +417,10 @@ pub(crate) async fn delete_channel(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can delete channels"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can delete channels",
+        ));
     }
 
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
@@ -364,7 +438,10 @@ pub(crate) async fn delete_channel(
             .await
             .unwrap_or(0);
         if text_count <= 1 {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Cannot delete the last text channel"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Cannot delete the last text channel",
+            ));
         }
     }
 
@@ -372,7 +449,9 @@ pub(crate) async fn delete_channel(
 
     // Delete all messages belonging to this channel
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
-    let _ = msg_coll.delete_many(doc! { "room_id": &room_id, "channel_id": &channel_id }).await;
+    let _ = msg_coll
+        .delete_many(doc! { "room_id": &room_id, "channel_id": &channel_id })
+        .await;
 
     // Remove voice channel state for this channel
     {
@@ -392,7 +471,11 @@ pub(crate) async fn delete_channel(
 }
 
 /// Ensure a room has at least one text channel.  Returns the default channel_id.
-pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, creator: &str) -> String {
+pub(crate) async fn ensure_default_channels(
+    state: &AppState,
+    room_id: &str,
+    creator: &str,
+) -> String {
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
     let count = channels_coll
         .count_documents(doc! { "room_id": room_id })
@@ -475,15 +558,23 @@ pub(crate) async fn create_category(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can create categories"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can create categories",
+        ));
     }
 
     let name: String = req.name.trim().chars().take(30).collect();
     if name.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Category name cannot be empty"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Category name cannot be empty",
+        ));
     }
 
-    let categories_coll = state.db.collection::<ChannelCategoryRecord>("channel_categories");
+    let categories_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
     let max_pos = categories_coll
         .count_documents(doc! { "room_id": &room_id })
         .await
@@ -529,10 +620,15 @@ pub(crate) async fn update_category(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can edit categories"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can edit categories",
+        ));
     }
 
-    let categories_coll = state.db.collection::<ChannelCategoryRecord>("channel_categories");
+    let categories_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
     let _cat = categories_coll
         .find_one(doc! { "_id": &category_id, "room_id": &room_id })
         .await
@@ -547,7 +643,10 @@ pub(crate) async fn update_category(
     if let Some(ref name) = req.name {
         let sanitized: String = name.trim().chars().take(30).collect();
         if sanitized.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Category name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Category name cannot be empty",
+            ));
         }
         set_doc.insert("name", sanitized.as_str());
         content.insert("name".to_string(), json!(sanitized));
@@ -589,11 +688,18 @@ pub(crate) async fn delete_category(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can delete categories"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can delete categories",
+        ));
     }
 
-    let categories_coll = state.db.collection::<ChannelCategoryRecord>("channel_categories");
-    let _ = categories_coll.delete_one(doc! { "_id": &category_id, "room_id": &room_id }).await;
+    let categories_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
+    let _ = categories_coll
+        .delete_one(doc! { "_id": &category_id, "room_id": &room_id })
+        .await;
 
     // Unset category_id on channels that belonged to this category
     let channels_coll = state.db.collection::<ChannelRecord>("channels");

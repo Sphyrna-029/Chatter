@@ -206,8 +206,12 @@ pub(crate) async fn handle_webcam_webrtc_publish_offer(
             let room_id = room_id.clone();
             let user_id = user_id.clone();
             Box::pin(async move {
-                let Some(candidate) = candidate else { return; };
-                let Ok(candidate_init) = candidate.to_json() else { return; };
+                let Some(candidate) = candidate else {
+                    return;
+                };
+                let Ok(candidate_init) = candidate.to_json() else {
+                    return;
+                };
                 let response = json!({
                     "type": "webcam_webrtc_publish_candidate",
                     "room_id": room_id,
@@ -269,7 +273,8 @@ pub(crate) async fn handle_webcam_webrtc_publish_offer(
                     rtcp_feedback: codec.capability.rtcp_feedback.clone(),
                 };
 
-                let (rtp_sender, _) = broadcast::channel::<rtp::packet::Packet>(WEBCAM_RTP_BUFFER_SIZE);
+                let (rtp_sender, _) =
+                    broadcast::channel::<rtp::packet::Packet>(WEBCAM_RTP_BUFFER_SIZE);
 
                 {
                     let mut publishers = state.webcam_publishers.write().await;
@@ -389,8 +394,12 @@ pub(crate) async fn handle_webcam_webrtc_publish_candidate(
             .map(|publisher| publisher.peer_connection.clone())
     };
 
-    let Some(peer_connection) = peer_connection else { return; };
-    let Some(candidate) = parse_ice_candidate(candidate_value) else { return; };
+    let Some(peer_connection) = peer_connection else {
+        return;
+    };
+    let Some(candidate) = parse_ice_candidate(candidate_value) else {
+        return;
+    };
 
     if let Err(err) = peer_connection.add_ice_candidate(candidate).await {
         let error = json!({
@@ -544,8 +553,12 @@ pub(crate) async fn handle_webcam_webrtc_subscribe_offer(
             let viewer_user_id = viewer_user_id.clone();
             let sharer_user_id = sharer_user_id.clone();
             Box::pin(async move {
-                let Some(candidate) = candidate else { return; };
-                let Ok(candidate_init) = candidate.to_json() else { return; };
+                let Some(candidate) = candidate else {
+                    return;
+                };
+                let Ok(candidate_init) = candidate.to_json() else {
+                    return;
+                };
                 let response = json!({
                     "type": "webcam_webrtc_subscribe_candidate",
                     "room_id": room_id,
@@ -674,7 +687,8 @@ pub(crate) async fn handle_webcam_webrtc_subscribe_offer(
                             .write_rtcp(&[Box::new(PictureLossIndication {
                                 sender_ssrc: 0,
                                 media_ssrc: pli_media_ssrc,
-                            }) as Box<dyn RtcpPacket + Send + Sync>])
+                            })
+                                as Box<dyn RtcpPacket + Send + Sync>])
                             .await;
                     }
                     continue;
@@ -786,12 +800,15 @@ pub(crate) async fn handle_webcam_webrtc_subscribe_candidate(
     let key = subscriber_key(viewer_user_id, sharer_user_id);
     let peer_connection = {
         let subs = state.webcam_subscribers.read().await;
-        subs.get(&key)
-            .map(|sub| sub.peer_connection.clone())
+        subs.get(&key).map(|sub| sub.peer_connection.clone())
     };
 
-    let Some(peer_connection) = peer_connection else { return; };
-    let Some(candidate) = parse_ice_candidate(candidate_value) else { return; };
+    let Some(peer_connection) = peer_connection else {
+        return;
+    };
+    let Some(candidate) = parse_ice_candidate(candidate_value) else {
+        return;
+    };
 
     if let Err(err) = peer_connection.add_ice_candidate(candidate).await {
         let error = json!({

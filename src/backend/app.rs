@@ -6,7 +6,7 @@ use super::{
     webrtc::build_webrtc_api,
 };
 use axum::Router;
-use mongodb::{Client, IndexModel, options::IndexOptions};
+use mongodb::{options::IndexOptions, Client, IndexModel};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
@@ -111,11 +111,7 @@ async fn create_indexes(db: &mongodb::Database) {
     // uploads: index on user_id
     let _ = db
         .collection::<mongodb::bson::Document>("uploads")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "user_id": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
         .await;
 
     // refresh_tokens: unique on token
@@ -147,11 +143,7 @@ async fn create_indexes(db: &mongodb::Database) {
     // invites: index on room_id
     let _ = db
         .collection::<mongodb::bson::Document>("invites")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "room_id": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
 
     // friend_requests: unique compound {from_user, to_user}
@@ -168,41 +160,25 @@ async fn create_indexes(db: &mongodb::Database) {
     // friend_requests: index on to_user (for incoming lookups)
     let _ = db
         .collection::<mongodb::bson::Document>("friend_requests")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "to_user": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "to_user": 1 }).build())
         .await;
 
     // friendships: index on user_a
     let _ = db
         .collection::<mongodb::bson::Document>("friendships")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "user_a": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "user_a": 1 }).build())
         .await;
 
     // friendships: index on user_b
     let _ = db
         .collection::<mongodb::bson::Document>("friendships")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "user_b": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "user_b": 1 }).build())
         .await;
 
     // webhooks: index on room_id
     let _ = db
         .collection::<mongodb::bson::Document>("webhooks")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "room_id": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
 
     // blocks: unique compound {blocker, blocked}
@@ -229,11 +205,7 @@ async fn create_indexes(db: &mongodb::Database) {
 
     let _ = db
         .collection::<mongodb::bson::Document>("bots")
-        .create_index(
-            IndexModel::builder()
-                .keys(doc! { "room_id": 1 })
-                .build(),
-        )
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
 }
 
@@ -297,7 +269,15 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         let room_creation_limit = doc.get_i64("room_creation_limit").unwrap_or(0) as u64;
         let require_auth_for_uploads = doc.get_bool("require_auth_for_uploads").unwrap_or(false);
         let room_creation_disabled = doc.get_bool("room_creation_disabled").unwrap_or(false);
-        return ServerSettings { invite_only, invite_code, storage_limit_bytes, upload_limit_bytes, room_creation_limit, require_auth_for_uploads, room_creation_disabled };
+        return ServerSettings {
+            invite_only,
+            invite_code,
+            storage_limit_bytes,
+            upload_limit_bytes,
+            room_creation_limit,
+            require_auth_for_uploads,
+            room_creation_disabled,
+        };
     }
 
     // Create default settings
@@ -313,14 +293,24 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         "room_creation_disabled": false,
     };
     let _ = coll.insert_one(default_doc).await;
-    ServerSettings { invite_only: false, invite_code: code, storage_limit_bytes: 0, upload_limit_bytes: 0, room_creation_limit: 0, require_auth_for_uploads: false, room_creation_disabled: false }
+    ServerSettings {
+        invite_only: false,
+        invite_code: code,
+        storage_limit_bytes: 0,
+        upload_limit_bytes: 0,
+        room_creation_limit: 0,
+        require_auth_for_uploads: false,
+        room_creation_disabled: false,
+    }
 }
 
 pub(crate) fn generate_invite_code() -> String {
     use rand::Rng;
     let chars: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
-    (0..8).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect()
+    (0..8)
+        .map(|_| chars[rng.gen_range(0..chars.len())] as char)
+        .collect()
 }
 
 pub async fn run() {
@@ -345,7 +335,12 @@ pub async fn run() {
 
     println!("Chatter server running on http://0.0.0.0:8000");
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
-    axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await
+    .unwrap();
 }
 
 async fn steam_presence_poller(state: Arc<AppState>) {
@@ -379,7 +374,9 @@ async fn steam_presence_poller(state: Arc<AppState>) {
         // Find which online users have a steam_id
         let users_coll = state.db.collection::<UserRecord>("users");
         let filter = doc! { "_id": { "$in": &online_user_ids }, "steam_id": { "$ne": null }, "hide_steam_game": { "$ne": true } };
-        let Ok(mut cursor) = users_coll.find(filter).await else { continue };
+        let Ok(mut cursor) = users_coll.find(filter).await else {
+            continue;
+        };
 
         let mut steam_to_user: HashMap<String, String> = HashMap::new();
         while let Ok(Some(user)) = cursor.try_next().await {
@@ -399,10 +396,16 @@ async fn steam_presence_poller(state: Arc<AppState>) {
             "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key={}&steamids={}",
             api_key, steam_ids_str
         );
-        let Ok(resp) = reqwest::get(&url).await else { continue };
-        let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+        let Ok(resp) = reqwest::get(&url).await else {
+            continue;
+        };
+        let Ok(body) = resp.json::<serde_json::Value>().await else {
+            continue;
+        };
 
-        let Some(players) = body["response"]["players"].as_array() else { continue };
+        let Some(players) = body["response"]["players"].as_array() else {
+            continue;
+        };
 
         // Build set of steam IDs that are currently in-game
         let mut in_game: HashMap<String, (String, String)> = HashMap::new(); // steam_id -> (game name, appid)
@@ -422,7 +425,9 @@ async fn steam_presence_poller(state: Arc<AppState>) {
 
             let changed = {
                 let up = state.user_presence.read().await;
-                up.get(user_id).map(|p| p.steam_game != new_game).unwrap_or(false)
+                up.get(user_id)
+                    .map(|p| p.steam_game != new_game)
+                    .unwrap_or(false)
             };
             if !changed {
                 continue;
@@ -463,7 +468,12 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                         } else {
                             "idle".to_string()
                         };
-                        (st, p.custom_status.clone(), p.is_mobile, p.game_session_start)
+                        (
+                            st,
+                            p.custom_status.clone(),
+                            p.is_mobile,
+                            p.game_session_start,
+                        )
                     })
                     .unwrap_or_else(|| ("offline".to_string(), String::new(), false, None))
             };
@@ -485,7 +495,11 @@ async fn steam_presence_poller(state: Arc<AppState>) {
     }
 }
 
-async fn get_spotify_access_token(state: &AppState, user_id: &str, refresh_token: &str) -> Option<String> {
+async fn get_spotify_access_token(
+    state: &AppState,
+    user_id: &str,
+    refresh_token: &str,
+) -> Option<String> {
     // Check cache first
     {
         let tokens = state.spotify_tokens.read().await;
@@ -520,7 +534,10 @@ async fn get_spotify_access_token(state: &AppState, user_id: &str, refresh_token
 
     {
         let mut tokens = state.spotify_tokens.write().await;
-        tokens.insert(user_id.to_string(), (access_token.clone(), now_secs() + expires_in));
+        tokens.insert(
+            user_id.to_string(),
+            (access_token.clone(), now_secs() + expires_in),
+        );
     }
 
     // Persist new refresh token if Spotify rotated it
@@ -571,7 +588,9 @@ async fn spotify_presence_poller(state: Arc<AppState>) {
             "spotify_refresh_token": { "$ne": null },
             "hide_spotify": { "$ne": true }
         };
-        let Ok(mut cursor) = users_coll.find(filter).await else { continue };
+        let Ok(mut cursor) = users_coll.find(filter).await else {
+            continue;
+        };
 
         let mut user_tokens: Vec<(String, String)> = Vec::new();
         while let Ok(Some(user)) = cursor.try_next().await {
@@ -588,7 +607,10 @@ async fn spotify_presence_poller(state: Arc<AppState>) {
         let http_client = reqwest::Client::new();
 
         for (user_id, refresh_token) in &user_tokens {
-            let Some(access_token) = get_spotify_access_token(&state, user_id, refresh_token).await else { continue };
+            let Some(access_token) = get_spotify_access_token(&state, user_id, refresh_token).await
+            else {
+                continue;
+            };
 
             let resp = match http_client
                 .get("https://api.spotify.com/v1/me/player/currently-playing")
@@ -612,7 +634,9 @@ async fn spotify_presence_poller(state: Arc<AppState>) {
                 if resp.status() == reqwest::StatusCode::NO_CONTENT {
                     (None, None, None)
                 } else {
-                    let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+                    let Ok(body) = resp.json::<serde_json::Value>().await else {
+                        continue;
+                    };
                     if !body["is_playing"].as_bool().unwrap_or(false) {
                         (None, None, None)
                     } else {
@@ -674,9 +698,25 @@ async fn spotify_presence_poller(state: Arc<AppState>) {
                         } else {
                             "idle".to_string()
                         };
-                        (st, p.custom_status.clone(), p.is_mobile, p.steam_game.clone(), p.steam_appid.clone(), p.game_session_start)
+                        (
+                            st,
+                            p.custom_status.clone(),
+                            p.is_mobile,
+                            p.steam_game.clone(),
+                            p.steam_appid.clone(),
+                            p.game_session_start,
+                        )
                     })
-                    .unwrap_or_else(|| ("offline".to_string(), String::new(), false, None, None, None))
+                    .unwrap_or_else(|| {
+                        (
+                            "offline".to_string(),
+                            String::new(),
+                            false,
+                            None,
+                            None,
+                            None,
+                        )
+                    })
             };
 
             let event = json!({

@@ -409,19 +409,19 @@ pub(crate) struct ChannelRecord {
     #[serde(default)]
     pub(crate) read_only: bool,
     #[serde(default)]
-    pub(crate) view_roles: Vec<String>,   // role_ids that can see this channel (empty = everyone)
+    pub(crate) view_roles: Vec<String>, // role_ids that can see this channel (empty = everyone)
     #[serde(default)]
-    pub(crate) write_roles: Vec<String>,  // role_ids that can send messages (empty = normal rules)
+    pub(crate) write_roles: Vec<String>, // role_ids that can send messages (empty = normal rules)
     #[serde(default)]
     pub(crate) showcase_write_roles: Vec<String>, // role_ids that can post in the featured (left) pane of showcase channels
     #[serde(default)]
-    pub(crate) showcase_posters: Vec<String>,     // user_ids explicitly approved to post in the featured pane
+    pub(crate) showcase_posters: Vec<String>, // user_ids explicitly approved to post in the featured pane
     #[serde(default)]
-    pub(crate) system_channel: bool,      // if true, join/leave/kick/ban messages go here
+    pub(crate) system_channel: bool, // if true, join/leave/kick/ban messages go here
     #[serde(default)]
-    pub(crate) bot_id: String,            // non-empty only for channel_type == "bot"
+    pub(crate) bot_id: String, // non-empty only for channel_type == "bot"
     #[serde(default = "default_voice_bitrate")]
-    pub(crate) voice_bitrate: i32,        // Opus target bitrate in bps, voice channels only
+    pub(crate) voice_bitrate: i32, // Opus target bitrate in bps, voice channels only
     pub(crate) created_by: String,
     pub(crate) created_at: i64,
 }
@@ -450,7 +450,9 @@ pub(crate) struct RolePermissions {
     pub(crate) mention_everyone: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 impl Default for RolePermissions {
     fn default() -> Self {

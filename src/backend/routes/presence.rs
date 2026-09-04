@@ -33,7 +33,9 @@ pub(crate) async fn get_voice_channel_status(
     }
 
     // Fetch channels for this room to know which channel_ids belong to it
-    let channels_coll = state.db.collection::<super::super::state::ChannelRecord>("channels");
+    let channels_coll = state
+        .db
+        .collection::<super::super::state::ChannelRecord>("channels");
     let mut channel_ids: Vec<String> = Vec::new();
     if let Ok(mut cursor) = channels_coll
         .find(mongodb::bson::doc! { "room_id": &room_id, "channel_type": "voice" })
@@ -132,10 +134,7 @@ pub(crate) async fn get_room_presence(
                 .as_ref()
                 .map(|u| u.avatar_url.as_str())
                 .unwrap_or("");
-            let about = user_record
-                .as_ref()
-                .map(|u| u.about.as_str())
-                .unwrap_or("");
+            let about = user_record.as_ref().map(|u| u.about.as_str()).unwrap_or("");
             let banner_url = user_record
                 .as_ref()
                 .map(|u| u.banner_url.as_str())

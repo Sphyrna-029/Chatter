@@ -5,10 +5,10 @@ use super::super::{
     state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
-    extract::{Multipart, Query, State},
-    http::{HeaderMap, StatusCode, header},
-    response::{IntoResponse, Json, Response},
     body::Body,
+    extract::{Multipart, Query, State},
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Json, Response},
 };
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
@@ -76,7 +76,10 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
 
     // Convert non-browser formats to MP4 (subtitle streams preserved as mov_text)
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
-        let new_path = format!("{}.mp4", path.rsplit_once('.').map(|(b, _)| b).unwrap_or(path));
+        let new_path = format!(
+            "{}.mp4",
+            path.rsplit_once('.').map(|(b, _)| b).unwrap_or(path)
+        );
         if let Some(tmp_path) = remux_with_subs(path).await {
             let _ = tokio::fs::rename(&tmp_path, &new_path).await;
             let _ = tokio::fs::remove_file(path).await;
@@ -92,7 +95,16 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
     if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
         let tmp = format!("{}.faststart.tmp", path);
         let result = tokio::process::Command::new("ffmpeg")
-            .args(["-y", "-i", path, "-c", "copy", "-movflags", "+faststart", &tmp])
+            .args([
+                "-y",
+                "-i",
+                path,
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                &tmp,
+            ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .status()
@@ -129,15 +141,25 @@ async fn remux_with_subs(src: &str) -> Option<String> {
     let _ = tokio::fs::remove_file(&dst).await;
     let result = tokio::process::Command::new("ffmpeg")
         .args([
-            "-y", "-i", src,
-            "-map", "0:v:0",
-            "-map", "0:a?",
-            "-map", "0:s?",
-            "-c:v", "copy",
-            "-c:a", "aac",
-            "-ac", "2",
-            "-c:s", "mov_text",
-            "-movflags", "+faststart",
+            "-y",
+            "-i",
+            src,
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-map",
+            "0:s?",
+            "-c:v",
+            "copy",
+            "-c:a",
+            "aac",
+            "-ac",
+            "2",
+            "-c:s",
+            "mov_text",
+            "-movflags",
+            "+faststart",
             &dst,
         ])
         .stdout(std::process::Stdio::null())
@@ -178,9 +200,12 @@ async fn generate_thumbnail(path: &str) {
     // Probe duration to pick candidate sample points across the video.
     let duration: f64 = tokio::process::Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             path,
         ])
         .output()
@@ -201,10 +226,21 @@ async fn generate_thumbnail(path: &str) {
     for seek in probes {
         let seek_str = format!("{:.2}", seek);
         let arg_list: Vec<String> = [
-            "-ss", seek_str.as_str(), "-i", path,
-            "-vframes", "1", "-vf", "scale=640:-1", "-q:v", "5",
+            "-ss",
+            seek_str.as_str(),
+            "-i",
+            path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=640:-1",
+            "-q:v",
+            "5",
             thumb_path.as_str(),
-        ].iter().map(|s| s.to_string()).collect();
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         if !run_ffmpeg(&arg_list).await || tokio::fs::metadata(&thumb_path).await.is_err() {
             continue; // this probe did not produce a frame
         }
@@ -218,9 +254,19 @@ async fn generate_thumbnail(path: &str) {
     // Fall back to frame 0 so corrupted/very short streams still get a thumb.
     if !done && tokio::fs::metadata(&thumb_path).await.is_err() {
         let fallback: Vec<String> = [
-            "-i", path, "-vframes", "1", "-vf", "scale=640:-1", "-q:v", "5",
+            "-i",
+            path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=640:-1",
+            "-q:v",
+            "5",
             thumb_path.as_str(),
-        ].iter().map(|s| s.to_string()).collect();
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let _ = run_ffmpeg(&fallback).await;
     }
 }
@@ -229,7 +275,15 @@ async fn generate_thumbnail(path: &str) {
 /// effectively all black. Returns false if it cannot be measured.
 async fn is_image_black(path: &str) -> bool {
     let out = tokio::process::Command::new("ffmpeg")
-        .args(["-i", path, "-vf", "signalstats,metadata=print", "-f", "null", "-"])
+        .args([
+            "-i",
+            path,
+            "-vf",
+            "signalstats,metadata=print",
+            "-f",
+            "null",
+            "-",
+        ])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())
         .output()
@@ -291,7 +345,11 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
         }
         let ordinal = subtitle_ordinal;
         subtitle_ordinal += 1;
-        let codec = s.get("codec_name").and_then(|c| c.as_str()).unwrap_or("").to_string();
+        let codec = s
+            .get("codec_name")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
         if !is_text_subtitle_codec(&codec) {
             continue;
         }
@@ -299,8 +357,16 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
         result.push(SubtitleStream {
             index: ordinal,
             codec,
-            language: tags.get("language").and_then(|l| l.as_str()).unwrap_or("").to_string(),
-            title: tags.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            language: tags
+                .get("language")
+                .and_then(|l| l.as_str())
+                .unwrap_or("")
+                .to_string(),
+            title: tags
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
         });
     }
     result
@@ -404,10 +470,14 @@ async fn thumb_needs_update(video: &str) -> bool {
     }
     let width: u32 = tokio::process::Command::new("ffprobe")
         .args([
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             &thumb,
         ])
         .output()
@@ -456,9 +526,7 @@ pub(crate) async fn fix_black_thumbnails() {
             if tokio::fs::metadata(&video).await.is_err() {
                 continue; // orphan thumbnail; nothing to regenerate
             }
-            if !thumb_needs_update(&video).await
-                && !is_image_black(&thumb_path).await
-            {
+            if !thumb_needs_update(&video).await && !is_image_black(&thumb_path).await {
                 continue;
             }
             let _ = tokio::fs::remove_file(&thumb_path).await;
@@ -489,10 +557,15 @@ async fn generate_image_preview(path: &str) {
     }
     let _ = tokio::process::Command::new("ffmpeg")
         .args([
-            "-y", "-i", path,
-            "-vframes", "1",
-            "-vf", "scale=1024:1024:force_original_aspect_ratio=decrease",
-            "-quality", "80",
+            "-y",
+            "-i",
+            path,
+            "-vframes",
+            "1",
+            "-vf",
+            "scale=1024:1024:force_original_aspect_ratio=decrease",
+            "-quality",
+            "80",
             &preview_path,
         ])
         .stdout(std::process::Stdio::null())
@@ -546,7 +619,11 @@ pub(crate) async fn upload_file(
     }
 
     // Validate and enforce limits for font files
-    let ext_lower = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let ext_lower = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if ext_lower == "ttf" || ext_lower == "otf" || ext_lower == "woff" || ext_lower == "woff2" {
         if data.len() > 2 * 1024 * 1024 {
             return error_response(StatusCode::BAD_REQUEST, "Font file too large (max 2MB)");
@@ -563,13 +640,19 @@ pub(crate) async fn upload_file(
             | 0x774F4632 // WOFF2 (wOF2)
         );
         if !valid {
-            return error_response(StatusCode::BAD_REQUEST, "File does not appear to be a valid font");
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                "File does not appear to be a valid font",
+            );
         }
     }
 
     let upload_limit = state.server_settings.read().await.upload_limit_bytes;
     if upload_limit > 0 && data.len() as u64 > upload_limit {
-        return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("File too large (max {})", format_bytes_short(upload_limit)),
+        );
     }
 
     if let Err(e) = check_storage_quota(&state, &user_id, data.len() as u64).await {
@@ -598,14 +681,22 @@ pub(crate) async fn upload_file(
     let (path, filename) = postprocess_video(&path, &filename).await;
 
     // Generate first-frame thumbnail for video files
-    let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let vid_ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
         extract_subtitles(&path).await;
     }
 
     // Generate a downscaled WebP preview for still images
-    let img_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let img_ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if is_previewable_image(&img_ext) {
         generate_image_preview(&path).await;
     }
@@ -693,7 +784,10 @@ pub(crate) async fn upload_init(
     }
     let upload_limit = state.server_settings.read().await.upload_limit_bytes;
     if upload_limit > 0 && body.file_size > upload_limit {
-        return error_response(StatusCode::BAD_REQUEST, &format!("File too large (max {})", format_bytes_short(upload_limit)));
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("File too large (max {})", format_bytes_short(upload_limit)),
+        );
     }
 
     if let Err(e) = check_storage_quota(&state, &user_id, body.file_size).await {
@@ -714,7 +808,10 @@ pub(crate) async fn upload_init(
 
     let chunk_dir = format!("external/.chunks/{}", upload_id);
     if tokio::fs::create_dir_all(&chunk_dir).await.is_err() {
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create chunk dir");
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create chunk dir",
+        );
     }
 
     // Write metadata sidecar
@@ -729,7 +826,10 @@ pub(crate) async fn upload_init(
         .await
         .is_err()
     {
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write metadata");
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to write metadata",
+        );
     }
 
     (
@@ -772,17 +872,18 @@ pub(crate) async fn upload_chunk(
                     chunk_index = text.parse().ok();
                 }
             }
-            "file" => {
-                match field.bytes().await {
-                    Ok(b) => chunk_data = Some(b),
-                    Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read chunk"),
-                }
-            }
+            "file" => match field.bytes().await {
+                Ok(b) => chunk_data = Some(b),
+                Err(_) => return error_response(StatusCode::BAD_REQUEST, "Failed to read chunk"),
+            },
             _ => {}
         }
     }
 
-    if upload_id.is_empty() || upload_id.len() != 32 || !upload_id.chars().all(|c| c.is_ascii_hexdigit()) {
+    if upload_id.is_empty()
+        || upload_id.len() != 32
+        || !upload_id.chars().all(|c| c.is_ascii_hexdigit())
+    {
         return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
     }
     let chunk_index = match chunk_index {
@@ -841,7 +942,10 @@ pub(crate) async fn upload_complete(
     };
 
     let upload_id = &body.upload_id;
-    if upload_id.is_empty() || upload_id.len() != 32 || !upload_id.chars().all(|c| c.is_ascii_hexdigit()) {
+    if upload_id.is_empty()
+        || upload_id.len() != 32
+        || !upload_id.chars().all(|c| c.is_ascii_hexdigit())
+    {
         return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
     }
 
@@ -875,7 +979,10 @@ pub(crate) async fn upload_complete(
 
     let dir = format!("external/{}", folder);
     if tokio::fs::create_dir_all(&dir).await.is_err() {
-        return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create directory");
+        return error_response(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create directory",
+        );
     }
 
     let filename = &meta.filename;
@@ -884,7 +991,9 @@ pub(crate) async fn upload_complete(
     // Concatenate chunks into final file
     let mut file = match tokio::fs::File::create(&path).await {
         Ok(f) => f,
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create file"),
+        Err(_) => {
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create file")
+        }
     };
 
     use tokio::io::AsyncWriteExt;
@@ -915,14 +1024,22 @@ pub(crate) async fn upload_complete(
     let (path, filename) = postprocess_video(&path, filename).await;
 
     // Generate first-frame thumbnail for video files
-    let vid_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let vid_ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         generate_thumbnail(&path).await;
         extract_subtitles(&path).await;
     }
 
     // Generate a downscaled WebP preview for still images
-    let img_ext = filename.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let img_ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if is_previewable_image(&img_ext) {
         generate_image_preview(&path).await;
     }
@@ -989,7 +1106,8 @@ fn is_private_ip(ip: &IpAddr) -> bool {
             || v4.is_unspecified()    // 0.0.0.0
             || v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64  // 100.64/10 (CGNAT)
             || v4.octets()[0] == 192 && v4.octets()[1] == 0 && v4.octets()[2] == 0 // 192.0.0/24 (IETF)
-            || v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19) // 198.18/15 (benchmark)
+            || v4.octets()[0] == 198 && (v4.octets()[1] == 18 || v4.octets()[1] == 19)
+            // 198.18/15 (benchmark)
         }
         IpAddr::V6(v6) => {
             v6.is_loopback()          // ::1
@@ -1066,18 +1184,20 @@ fn decode_html_entities(s: &str) -> String {
 
     // Decode numeric entities: &#1234; and &#xABCD;
     let numeric_re = regex::Regex::new(r"&#(x?)([0-9a-fA-F]+);").unwrap();
-    result = numeric_re.replace_all(&result, |caps: &regex::Captures| {
-        let is_hex = !caps[1].is_empty();
-        let num_str = &caps[2];
-        let code = if is_hex {
-            u32::from_str_radix(num_str, 16).ok()
-        } else {
-            num_str.parse::<u32>().ok()
-        };
-        code.and_then(char::from_u32)
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| caps[0].to_string())
-    }).to_string();
+    result = numeric_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let is_hex = !caps[1].is_empty();
+            let num_str = &caps[2];
+            let code = if is_hex {
+                u32::from_str_radix(num_str, 16).ok()
+            } else {
+                num_str.parse::<u32>().ok()
+            };
+            code.and_then(char::from_u32)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .to_string();
 
     result
 }
@@ -1086,7 +1206,11 @@ fn decode_html_entities(s: &str) -> String {
 /// Uses a regex to avoid byte-offset mismatches from case-folding multi-byte chars.
 fn extract_head_section(html: &str) -> &str {
     // Clamp scan to 128KB
-    let haystack = if html.len() > 128 * 1024 { &html[..128 * 1024] } else { html };
+    let haystack = if html.len() > 128 * 1024 {
+        &html[..128 * 1024]
+    } else {
+        html
+    };
     let head_re = regex::Regex::new(r"(?is)<head[\s>].*?</head>").unwrap();
     if let Some(m) = head_re.find(haystack) {
         return m.as_str();
@@ -1107,12 +1231,15 @@ fn extract_attr_value(tag: &str, attr_name: &str) -> Option<String> {
     let re = regex::Regex::new(&pattern).ok()?;
     let caps = re.captures(tag)?;
 
-    let val = caps.get(1)
+    let val = caps
+        .get(1)
         .or_else(|| caps.get(2))
         .or_else(|| caps.get(3))
         .map(|m| m.as_str().trim().to_string())?;
 
-    if val.is_empty() { return None; }
+    if val.is_empty() {
+        return None;
+    }
     Some(decode_html_entities(&val))
 }
 
@@ -1121,7 +1248,10 @@ fn extract_attr_value(tag: &str, attr_name: &str) -> Option<String> {
 fn find_meta_tags(html: &str) -> Vec<String> {
     let head = extract_head_section(html);
     let meta_re = regex::Regex::new(r"(?is)<meta\s[^>]*>").unwrap();
-    meta_re.find_iter(head).map(|m| m.as_str().to_string()).collect()
+    meta_re
+        .find_iter(head)
+        .map(|m| m.as_str().to_string())
+        .collect()
 }
 
 /// Check if a meta tag has a matching property, name, or itemprop attribute.
@@ -1163,7 +1293,9 @@ pub(crate) fn extract_title_tag(html: &str) -> Option<String> {
     let title_re = regex::Regex::new(r"(?is)<title[^>]*>(.*?)</title>").unwrap();
     let caps = title_re.captures(head)?;
     let title = decode_html_entities(caps[1].trim());
-    if title.is_empty() { return None; }
+    if title.is_empty() {
+        return None;
+    }
     Some(title)
 }
 
@@ -1182,8 +1314,15 @@ fn detect_html_charset(html: &str) -> Option<String> {
                 if let Some(content) = extract_attr_value(tag, "content") {
                     let lower = content.to_lowercase();
                     if let Some(pos) = lower.find("charset=") {
-                        let cs = lower[pos + 8..].split(';').next().unwrap_or("").trim().to_string();
-                        if !cs.is_empty() { return Some(cs); }
+                        let cs = lower[pos + 8..]
+                            .split(';')
+                            .next()
+                            .unwrap_or("")
+                            .trim()
+                            .to_string();
+                        if !cs.is_empty() {
+                            return Some(cs);
+                        }
                     }
                 }
             }
@@ -1197,7 +1336,11 @@ fn resolve_url(base: &str, href: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") || href.starts_with("//") {
         if href.starts_with("//") {
             // Protocol-relative URL
-            let scheme = if base.starts_with("https") { "https:" } else { "http:" };
+            let scheme = if base.starts_with("https") {
+                "https:"
+            } else {
+                "http:"
+            };
             return format!("{}{}", scheme, href);
         }
         return href.to_string();
@@ -1213,7 +1356,10 @@ fn resolve_url(base: &str, href: &str) -> String {
 
 /// Build a reqwest client with DNS pinned to the validated addresses, preventing
 /// DNS rebinding attacks (the client will connect to the exact IPs we already checked).
-fn build_pinned_client(url: &str, validated_addrs: &[SocketAddr]) -> Result<reqwest::Client, String> {
+fn build_pinned_client(
+    url: &str,
+    validated_addrs: &[SocketAddr],
+) -> Result<reqwest::Client, String> {
     let parsed = url::Url::parse(url).map_err(|e| e.to_string())?;
     let host = parsed.host_str().ok_or("URL has no host")?;
 
@@ -1325,22 +1471,20 @@ pub(crate) async fn link_preview(
                 if let Ok(json) = resp.json::<serde_json::Value>().await {
                     CachedPreview {
                         title: json["author_name"].as_str().map(|a| format!("@{}", a)),
-                        description: json["html"]
-                            .as_str()
-                            .map(|h| {
-                                let stripped = h
-                                    .replace("<br>", "\n")
-                                    .replace("&amp;", "&")
-                                    .replace("&lt;", "<")
-                                    .replace("&gt;", ">");
-                                let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
-                                let text = tag_re.replace_all(&stripped, "").to_string();
-                                if text.len() > 280 {
-                                    format!("{}...", &text[..277])
-                                } else {
-                                    text
-                                }
-                            }),
+                        description: json["html"].as_str().map(|h| {
+                            let stripped = h
+                                .replace("<br>", "\n")
+                                .replace("&amp;", "&")
+                                .replace("&lt;", "<")
+                                .replace("&gt;", ">");
+                            let tag_re = regex::Regex::new(r"<[^>]+>").unwrap();
+                            let text = tag_re.replace_all(&stripped, "").to_string();
+                            if text.len() > 280 {
+                                format!("{}...", &text[..277])
+                            } else {
+                                text
+                            }
+                        }),
                         image: None,
                         site_name: Some("Twitter".to_string()),
                     }
@@ -1367,9 +1511,18 @@ pub(crate) async fn link_preview(
                 match safe_fetch(&url, &validated_addrs, fallback_ua, accept_html).await {
                     Ok(r) if r.status().is_success() => r,
                     _ => {
-                        return (StatusCode::OK, Json(serde_json::to_value(&CachedPreview {
-                            title: None, description: None, image: None, site_name: None,
-                        }).unwrap()));
+                        return (
+                            StatusCode::OK,
+                            Json(
+                                serde_json::to_value(&CachedPreview {
+                                    title: None,
+                                    description: None,
+                                    image: None,
+                                    site_name: None,
+                                })
+                                .unwrap(),
+                            ),
+                        );
                     }
                 }
             }
@@ -1388,9 +1541,18 @@ pub(crate) async fn link_preview(
             || content_type.contains("text/html")
             || content_type.contains("application/xhtml");
         if !is_html {
-            return (StatusCode::OK, Json(serde_json::to_value(&CachedPreview {
-                title: None, description: None, image: None, site_name: None,
-            }).unwrap()));
+            return (
+                StatusCode::OK,
+                Json(
+                    serde_json::to_value(&CachedPreview {
+                        title: None,
+                        description: None,
+                        image: None,
+                        site_name: None,
+                    })
+                    .unwrap(),
+                ),
+            );
         }
 
         let body_bytes = match response.bytes().await {
@@ -1413,11 +1575,17 @@ pub(crate) async fn link_preview(
         let is_latin = content_type.contains("iso-8859-1")
             || content_type.contains("latin1")
             || content_type.contains("windows-1252")
-            || matches!(html_charset.as_deref(), Some("iso-8859-1" | "latin1" | "latin-1" | "windows-1252"));
+            || matches!(
+                html_charset.as_deref(),
+                Some("iso-8859-1" | "latin1" | "latin-1" | "windows-1252")
+            );
 
         let body = if is_latin {
             // Decode as Latin-1 (each byte maps directly to a Unicode code point)
-            bytes_to_parse.iter().map(|&b| b as char).collect::<String>()
+            bytes_to_parse
+                .iter()
+                .map(|&b| b as char)
+                .collect::<String>()
         } else {
             lossy.into_owned()
         };
@@ -1450,11 +1618,12 @@ pub(crate) async fn link_preview(
             .or_else(|| extract_meta_name(&body, "al:ios:app_name"))
             .or_else(|| {
                 // Fall back to extracting domain name from URL
-                url::Url::parse(&url).ok()
-                    .and_then(|u| u.host_str().map(|h| {
+                url::Url::parse(&url).ok().and_then(|u| {
+                    u.host_str().map(|h| {
                         // Strip www. prefix
                         h.strip_prefix("www.").unwrap_or(h).to_string()
-                    }))
+                    })
+                })
             });
 
         CachedPreview {
@@ -1466,9 +1635,8 @@ pub(crate) async fn link_preview(
     };
 
     // Only cache if there's actual content — don't cache empty results forever
-    let has_content = preview.title.is_some()
-        || preview.description.is_some()
-        || preview.image.is_some();
+    let has_content =
+        preview.title.is_some() || preview.description.is_some() || preview.image.is_some();
 
     if has_content {
         let mut cache = state.link_previews.write().await;
@@ -1561,9 +1729,21 @@ pub(crate) async fn delete_upload(
 fn is_dangerous_extension(ext: &str) -> bool {
     matches!(
         ext,
-        "html" | "htm" | "xhtml" | "js" | "mjs" | "cjs" | "ts"
-            | "css" | "svg" | "xml" | "xsl" | "xslt"
-            | "wasm" | "crx" | "swf"
+        "html"
+            | "htm"
+            | "xhtml"
+            | "js"
+            | "mjs"
+            | "cjs"
+            | "ts"
+            | "css"
+            | "svg"
+            | "xml"
+            | "xsl"
+            | "xslt"
+            | "wasm"
+            | "crx"
+            | "swf"
     )
 }
 
@@ -1781,7 +1961,9 @@ pub(crate) async fn upload_guard(
     if uri_path.ends_with(".preview.webp") {
         let preview_disk = external_disk_path(&uri_path).unwrap_or_default();
         if !preview_disk.is_empty() && tokio::fs::metadata(&preview_disk).await.is_err() {
-            let source_disk = preview_disk.strip_suffix(".preview.webp").unwrap_or(&preview_disk);
+            let source_disk = preview_disk
+                .strip_suffix(".preview.webp")
+                .unwrap_or(&preview_disk);
             generate_image_preview(source_disk).await;
         }
     }
@@ -1795,22 +1977,32 @@ pub(crate) async fn upload_guard(
         if !disk_path.is_empty() && matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
             let marker = format!("{}.faststarted", disk_path);
             if tokio::fs::metadata(&marker).await.is_err()
-                && tokio::fs::metadata(&disk_path).await.is_ok() {
-                    let tmp = format!("{}.faststart.tmp", disk_path);
-                    let result = tokio::process::Command::new("ffmpeg")
-                        .args(["-y", "-i", &disk_path, "-c", "copy", "-movflags", "+faststart", &tmp])
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status()
-                        .await;
-                    if let Ok(status) = result {
-                        if status.success() {
-                            let _ = tokio::fs::rename(&tmp, &disk_path).await;
-                        }
+                && tokio::fs::metadata(&disk_path).await.is_ok()
+            {
+                let tmp = format!("{}.faststart.tmp", disk_path);
+                let result = tokio::process::Command::new("ffmpeg")
+                    .args([
+                        "-y",
+                        "-i",
+                        &disk_path,
+                        "-c",
+                        "copy",
+                        "-movflags",
+                        "+faststart",
+                        &tmp,
+                    ])
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status()
+                    .await;
+                if let Ok(status) = result {
+                    if status.success() {
+                        let _ = tokio::fs::rename(&tmp, &disk_path).await;
                     }
-                    let _ = tokio::fs::remove_file(&tmp).await;
-                    let _ = tokio::fs::write(&marker, b"").await;
                 }
+                let _ = tokio::fs::remove_file(&tmp).await;
+                let _ = tokio::fs::write(&marker, b"").await;
+            }
         }
 
         // Lazily generate thumbnail + subtitle sidecars for existing videos
@@ -1827,7 +2019,10 @@ pub(crate) async fn upload_guard(
     // to the source file.
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
         let disk_path = external_disk_path(&uri_path).unwrap_or_default();
-        let base = uri_path.rsplit_once('.').map(|(b, _)| b).unwrap_or(&uri_path);
+        let base = uri_path
+            .rsplit_once('.')
+            .map(|(b, _)| b)
+            .unwrap_or(&uri_path);
         let mp4_uri = format!("{}.mp4", base);
         let mp4_disk = external_disk_path(&mp4_uri).unwrap_or_default();
         if disk_path.is_empty() || mp4_disk.is_empty() {
@@ -1887,12 +2082,27 @@ mod tests {
         .unwrap();
         let status = tokio::process::Command::new("ffmpeg")
             .args([
-                "-y", "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=10",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
-                "-i", &vtt,
-                "-c:v", "libx264", "-preset", "ultrafast",
-                "-c:a", "aac", "-c:s", "mov_text",
-                "-shortest", &video,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=5:size=320x240:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=5",
+                "-i",
+                &vtt,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-c:a",
+                "aac",
+                "-c:s",
+                "mov_text",
+                "-shortest",
+                &video,
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1918,14 +2128,19 @@ mod tests {
         extract_subtitles(&video).await;
 
         let vtt_path = format!("{}@0.vtt", video);
-        let data = tokio::fs::read(&vtt_path).await.expect("vtt sidecar not created");
+        let data = tokio::fs::read(&vtt_path)
+            .await
+            .expect("vtt sidecar not created");
         let text = String::from_utf8(data).unwrap();
         assert!(text.contains("Hello world"));
 
-        let manifest_data =
-            tokio::fs::read(&manifest).await.expect("subs manifest not created");
+        let manifest_data = tokio::fs::read(&manifest)
+            .await
+            .expect("subs manifest not created");
         let value: Value = serde_json::from_slice(&manifest_data).unwrap();
-        let tracks = value["tracks"].as_array().expect("manifest should list tracks");
+        let tracks = value["tracks"]
+            .as_array()
+            .expect("manifest should list tracks");
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0]["src"], "@0.vtt");
 
@@ -1947,21 +2162,53 @@ mod tests {
         for suffix in ["@subs.json", "@0.vtt", "@1.vtt"] {
             let _ = tokio::fs::remove_file(format!("{}{}", video, suffix)).await;
         }
-        tokio::fs::write(&first, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nFIRST STREAM\n")
-            .await
-            .unwrap();
-        tokio::fs::write(&second, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nSECOND STREAM\n")
-            .await
-            .unwrap();
+        tokio::fs::write(
+            &first,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nFIRST STREAM\n",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            &second,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nSECOND STREAM\n",
+        )
+        .await
+        .unwrap();
         let status = tokio::process::Command::new("ffmpeg")
             .args([
-                "-y", "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=10",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
-                "-i", &first, "-i", &second,
-                "-map", "0:v", "-map", "1:a", "-map", "2:s", "-map", "3:s",
-                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
-                "-c:s:0", "ttml", "-c:s:1", "mov_text",
-                "-shortest", &video,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=5:size=320x240:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=5",
+                "-i",
+                &first,
+                "-i",
+                &second,
+                "-map",
+                "0:v",
+                "-map",
+                "1:a",
+                "-map",
+                "2:s",
+                "-map",
+                "3:s",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-c:a",
+                "aac",
+                "-c:s:0",
+                "ttml",
+                "-c:s:1",
+                "mov_text",
+                "-shortest",
+                &video,
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -1989,14 +2236,23 @@ mod tests {
 
         let vtt_path = format!("{}@1.vtt", video);
         let text = String::from_utf8(
-            tokio::fs::read(&vtt_path).await.expect("vtt sidecar not created"),
+            tokio::fs::read(&vtt_path)
+                .await
+                .expect("vtt sidecar not created"),
         )
         .unwrap();
-        assert!(text.contains("SECOND STREAM"), "extracted the wrong stream: {text}");
+        assert!(
+            text.contains("SECOND STREAM"),
+            "extracted the wrong stream: {text}"
+        );
 
-        let manifest_data = tokio::fs::read(&manifest).await.expect("subs manifest not created");
+        let manifest_data = tokio::fs::read(&manifest)
+            .await
+            .expect("subs manifest not created");
         let value: Value = serde_json::from_slice(&manifest_data).unwrap();
-        let tracks = value["tracks"].as_array().expect("manifest should list tracks");
+        let tracks = value["tracks"]
+            .as_array()
+            .expect("manifest should list tracks");
         assert_eq!(tracks.len(), 1);
         assert_eq!(tracks[0]["src"], "@1.vtt");
         // Fallback label numbers from the offered list, not the stream ordinal.
@@ -2021,6 +2277,9 @@ mod tests {
             Some("external/uploads/u1/plain.mp4"),
         );
         assert_eq!(external_disk_path("/uploads/../../etc/passwd"), None);
-        assert_eq!(external_disk_path("/uploads/%2e%2e/%2e%2e/etc/passwd"), None);
+        assert_eq!(
+            external_disk_path("/uploads/%2e%2e/%2e%2e/etc/passwd"),
+            None
+        );
     }
 }

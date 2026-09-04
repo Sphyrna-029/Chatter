@@ -1,5 +1,8 @@
 use super::super::{
-    dto::{CreateRoomGroupRequest, SetGroupCollapsedRequest, SetGroupRoomsRequest, UpdateRoomGroupRequest},
+    dto::{
+        CreateRoomGroupRequest, SetGroupCollapsedRequest, SetGroupRoomsRequest,
+        UpdateRoomGroupRequest,
+    },
     helpers::{error_response, extract_token, generate_id, get_user_from_token},
     state::{AppState, RoomGroupEntry, UserRoomGroupsRecord},
 };
@@ -26,7 +29,10 @@ async fn load_groups(state: &AppState, user_id: &str) -> UserRoomGroupsRecord {
 }
 
 /// Helper: save (upsert) the user's room groups document.
-async fn save_groups(state: &AppState, rec: &UserRoomGroupsRecord) -> Result<(), (StatusCode, Json<Value>)> {
+async fn save_groups(
+    state: &AppState,
+    rec: &UserRoomGroupsRecord,
+) -> Result<(), (StatusCode, Json<Value>)> {
     let coll = state.db.collection::<UserRoomGroupsRecord>("room_groups");
     coll.replace_one(doc! { "_id": &rec.user_id }, rec)
         .with_options(ReplaceOptions::builder().upsert(true).build())
@@ -46,15 +52,19 @@ pub(crate) async fn get_room_groups(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rec = load_groups(&state, &user_id).await;
-    let groups: Vec<Value> = rec.groups.iter().map(|g| {
-        json!({
-            "group_id": g.group_id,
-            "name": g.name,
-            "position": g.position,
-            "collapsed": g.collapsed,
-            "room_ids": g.room_ids,
+    let groups: Vec<Value> = rec
+        .groups
+        .iter()
+        .map(|g| {
+            json!({
+                "group_id": g.group_id,
+                "name": g.name,
+                "position": g.position,
+                "collapsed": g.collapsed,
+                "room_ids": g.room_ids,
+            })
         })
-    }).collect();
+        .collect();
     Ok(Json(json!({ "groups": groups })))
 }
 
@@ -71,7 +81,10 @@ pub(crate) async fn create_room_group(
 
     let name = body.name.trim().to_string();
     if name.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Group name cannot be empty"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Group name cannot be empty",
+        ));
     }
 
     let mut rec = load_groups(&state, &user_id).await;
@@ -101,13 +114,19 @@ pub(crate) async fn update_room_group(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let mut rec = load_groups(&state, &user_id).await;
-    let group = rec.groups.iter_mut().find(|g| g.group_id == group_id)
+    let group = rec
+        .groups
+        .iter_mut()
+        .find(|g| g.group_id == group_id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Group not found"))?;
 
     if let Some(name) = body.name {
         let name = name.trim().to_string();
         if name.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Group name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Group name cannot be empty",
+            ));
         }
         group.name = name;
     }
@@ -154,14 +173,18 @@ pub(crate) async fn set_group_rooms(
     let mut rec = load_groups(&state, &user_id).await;
 
     // Remove these room_ids from all other groups first (a room can only be in one group)
-    let new_ids_set: std::collections::HashSet<&str> = body.room_ids.iter().map(|s| s.as_str()).collect();
+    let new_ids_set: std::collections::HashSet<&str> =
+        body.room_ids.iter().map(|s| s.as_str()).collect();
     for g in rec.groups.iter_mut() {
         if g.group_id != group_id {
             g.room_ids.retain(|rid| !new_ids_set.contains(rid.as_str()));
         }
     }
 
-    let group = rec.groups.iter_mut().find(|g| g.group_id == group_id)
+    let group = rec
+        .groups
+        .iter_mut()
+        .find(|g| g.group_id == group_id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Group not found"))?;
     group.room_ids = body.room_ids;
     save_groups(&state, &rec).await?;
@@ -181,7 +204,10 @@ pub(crate) async fn set_group_collapsed(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let mut rec = load_groups(&state, &user_id).await;
-    let group = rec.groups.iter_mut().find(|g| g.group_id == group_id)
+    let group = rec
+        .groups
+        .iter_mut()
+        .find(|g| g.group_id == group_id)
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Group not found"))?;
     group.collapsed = body.collapsed;
     save_groups(&state, &rec).await?;

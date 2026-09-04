@@ -227,7 +227,10 @@ pub(crate) async fn accept_invite(
         .flatten()
         .is_none()
     {
-        return Err(error_response(StatusCode::NOT_FOUND, "Room no longer exists"));
+        return Err(error_response(
+            StatusCode::NOT_FOUND,
+            "Room no longer exists",
+        ));
     }
 
     if let Err(msg) = do_join_room(&state, &invite.room_id, &user_id).await {

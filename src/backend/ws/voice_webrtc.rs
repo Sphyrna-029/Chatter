@@ -111,7 +111,11 @@ pub(crate) async fn teardown_voice_publisher(
     };
 
     // Clear any queued subscribe offers waiting on this publisher's track
-    state.pending_voice_subscribes.write().await.remove(speaker_user_id);
+    state
+        .pending_voice_subscribes
+        .write()
+        .await
+        .remove(speaker_user_id);
 
     let publisher = match publisher {
         Some(p) => p,
@@ -227,8 +231,7 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
             Box::pin(async move {
                 if matches!(
                     pc_state,
-                    RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Closed
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) {
                     // Guard: if a newer publisher has replaced this one, don't tear it down.
                     // This prevents a race where the old PC's Closed callback fires after
@@ -280,7 +283,9 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                 // in other voice channels to subscribe, leaking audio across channels.
                 let room_channel = {
                     let publishers = state.voice_publishers.read().await;
-                    publishers.get(&user_id).map(|p| (p.room_id.clone(), p.channel_id.clone()))
+                    publishers
+                        .get(&user_id)
+                        .map(|p| (p.room_id.clone(), p.channel_id.clone()))
                 };
                 if let Some((ref room_id, ref channel_id)) = room_channel {
                     let event = json!({
@@ -308,7 +313,8 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                             room_id,
                             &user_id,
                             &sub.sdp,
-                        ).await;
+                        )
+                        .await;
                     }
                 }
 
@@ -317,9 +323,13 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                 tokio::spawn(async move {
                     loop {
                         match track.read_rtp().await {
-                            Ok((rtp_packet, _)) => { let _ = rtp_sender.send(rtp_packet); }
+                            Ok((rtp_packet, _)) => {
+                                let _ = rtp_sender.send(rtp_packet);
+                            }
                             Err(e) => {
-                                eprintln!("[voice] RTP read ended for publisher {rtp_user_id}: {e}");
+                                eprintln!(
+                                    "[voice] RTP read ended for publisher {rtp_user_id}: {e}"
+                                );
                                 break;
                             }
                         }
@@ -514,12 +524,13 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
             // automatically when the publisher's on_track fires. No error sent to
             // client, no backoff retry needed.
             let mut pending = state.pending_voice_subscribes.write().await;
-            pending.entry(speaker_user_id.to_string()).or_default().push(
-                PendingVoiceSubscribe {
+            pending
+                .entry(speaker_user_id.to_string())
+                .or_default()
+                .push(PendingVoiceSubscribe {
                     listener_user_id: listener_user_id.to_string(),
                     sdp: sdp.to_string(),
-                },
-            );
+                });
             return;
         }
     };
@@ -584,8 +595,7 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
             Box::pin(async move {
                 if matches!(
                     pc_state,
-                    RTCPeerConnectionState::Failed
-                        | RTCPeerConnectionState::Closed
+                    RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed
                 ) {
                     // Guard: if a newer subscriber has replaced this one, don't tear it down.
                     {

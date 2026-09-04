@@ -1,5 +1,8 @@
 use super::super::{
-    helpers::{auth_cookie_headers, create_access_token, create_refresh_token, decode_token, error_response, extract_token, get_user_from_token, now_secs},
+    helpers::{
+        auth_cookie_headers, create_access_token, create_refresh_token, decode_token,
+        error_response, extract_token, get_user_from_token, now_secs,
+    },
     state::{AppState, RefreshTokenRecord, SteamLoginCode, UserRecord},
 };
 use axum::{
@@ -32,8 +35,14 @@ fn build_steam_openid_url(return_to: &str, realm: &str) -> String {
         ("openid.mode", "checkid_setup"),
         ("openid.return_to", return_to),
         ("openid.realm", realm),
-        ("openid.identity", "http://specs.openid.net/auth/2.0/identifier_select"),
-        ("openid.claimed_id", "http://specs.openid.net/auth/2.0/identifier_select"),
+        (
+            "openid.identity",
+            "http://specs.openid.net/auth/2.0/identifier_select",
+        ),
+        (
+            "openid.claimed_id",
+            "http://specs.openid.net/auth/2.0/identifier_select",
+        ),
     ];
     let query: String = params
         .iter()
@@ -46,10 +55,8 @@ fn build_steam_openid_url(return_to: &str, realm: &str) -> String {
 /// Verify OpenID response with Steam's check_authentication endpoint.
 /// Returns the Steam64 ID on success.
 async fn verify_steam_openid(params: &HashMap<String, String>) -> Result<String, ()> {
-    let mut verify_params: Vec<(String, String)> = params
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let mut verify_params: Vec<(String, String)> =
+        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
 
     // Replace openid.mode with check_authentication
     for (k, v) in verify_params.iter_mut() {
@@ -120,7 +127,10 @@ pub(crate) async fn steam_link_url(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if state.steam_api_key.is_empty() {
-        return Err(error_response(StatusCode::SERVICE_UNAVAILABLE, "Steam integration not configured"));
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Steam integration not configured",
+        ));
     }
 
     // Use a 15-minute JWT as the state token to carry the user_id through the redirect
@@ -205,11 +215,8 @@ pub(crate) async fn steam_callback(
             };
 
             if user.disabled {
-                return Redirect::temporary(&format!(
-                    "{}/?steam_error=account_disabled",
-                    base_url
-                ))
-                .into_response();
+                return Redirect::temporary(&format!("{}/?steam_error=account_disabled", base_url))
+                    .into_response();
             }
 
             let user_id = &user.user_id;
@@ -222,14 +229,17 @@ pub(crate) async fn steam_callback(
             let code = hex::encode(rand::thread_rng().gen::<[u8; 32]>());
             {
                 let mut codes = state.steam_login_codes.write().await;
-                codes.insert(code.clone(), SteamLoginCode {
-                    access_token,
-                    refresh_token,
-                    user_id: user_id.clone(),
-                    is_admin: user.is_admin,
-                    totp_verified: user.totp_verified,
-                    expires_at: now_secs() + 60.0,
-                });
+                codes.insert(
+                    code.clone(),
+                    SteamLoginCode {
+                        access_token,
+                        refresh_token,
+                        user_id: user_id.clone(),
+                        is_admin: user.is_admin,
+                        totp_verified: user.totp_verified,
+                        expires_at: now_secs() + 60.0,
+                    },
+                );
             }
 
             Redirect::temporary(&format!("{}/?steam_code={}", base_url, code)).into_response()
@@ -255,7 +265,8 @@ pub(crate) async fn steam_exchange(
 
     // Remove atomically — prevents replay even under concurrent requests.
     let record = state.steam_login_codes.write().await.remove(code);
-    let record = record.ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invalid or expired code"))?;
+    let record =
+        record.ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Invalid or expired code"))?;
 
     if now_secs() > record.expires_at {
         return Err(error_response(StatusCode::GONE, "Code has expired"));
@@ -292,7 +303,9 @@ pub(crate) async fn steam_status(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
-    Ok(Json(json!({ "steam_id": user.steam_id, "hide_game": user.hide_steam_game })))
+    Ok(Json(
+        json!({ "steam_id": user.steam_id, "hide_game": user.hide_steam_game }),
+    ))
 }
 
 /// PUT /api/steam/hide-game (auth required)

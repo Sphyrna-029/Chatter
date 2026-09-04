@@ -1,10 +1,17 @@
 use super::super::{
-    dto::{AddToDmRequest, CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest, UpdateRoomSettingsRequest, UpdateTopicRequest},
+    dto::{
+        AddToDmRequest, CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest,
+        UpdateRoomSettingsRequest, UpdateTopicRequest,
+    },
     helpers::{
         broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis, send_to_user, verify_password,
+        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis,
+        send_to_user, verify_password,
     },
-    state::{AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord, UserRecord},
+    state::{
+        AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
+        UserRecord,
+    },
 };
 use super::channels::ensure_default_channels;
 use axum::{
@@ -32,22 +39,36 @@ pub(crate) async fn create_room(
     if is_dm {
         if let Some(invite_list) = &req.invite {
             if invite_list.is_empty() {
-                return Err(error_response(StatusCode::BAD_REQUEST, "Cannot create DM with no users"));
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Cannot create DM with no users",
+                ));
             }
             if invite_list.len() > 19 {
-                return Err(error_response(StatusCode::BAD_REQUEST, "Group DMs support at most 20 members"));
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Group DMs support at most 20 members",
+                ));
             }
 
             if invite_list.len() >= 2 {
                 // Group DM creation (2–19 invitees, 20 members total including creator)
                 if invite_list.contains(&user_id) {
-                    return Err(error_response(StatusCode::BAD_REQUEST, "Cannot DM yourself"));
+                    return Err(error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Cannot DM yourself",
+                    ));
                 }
 
                 let users_coll = state.db.collection::<UserRecord>("users");
                 let mut valid_invites: Vec<String> = Vec::new();
                 for invited in invite_list {
-                    if users_coll.find_one(doc! { "_id": invited }).await.ok().flatten().is_some()
+                    if users_coll
+                        .find_one(doc! { "_id": invited })
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some()
                         && !valid_invites.contains(invited)
                     {
                         valid_invites.push(invited.clone());
@@ -83,7 +104,11 @@ pub(crate) async fn create_room(
                 all_members.extend(valid_invites);
 
                 for member in &all_members {
-                    let role = if *member == user_id { "owner" } else { "member" };
+                    let role = if *member == user_id {
+                        "owner"
+                    } else {
+                        "member"
+                    };
                     let _ = members_coll
                         .insert_one(RoomMemberRecord {
                             room_id: room_id.clone(),
@@ -102,7 +127,11 @@ pub(crate) async fn create_room(
                     let mut roles = state.room_roles.write().await;
                     let room_roles = roles.entry(room_id.clone()).or_default();
                     for member in &all_members {
-                        let role = if *member == user_id { "owner" } else { "member" };
+                        let role = if *member == user_id {
+                            "owner"
+                        } else {
+                            "member"
+                        };
                         room_roles.insert(member.clone(), role.to_string());
                     }
                 }
@@ -327,16 +356,21 @@ pub(crate) async fn create_room(
             .count_documents(doc! {})
             .await
             .unwrap_or(0);
-        let raw_name = req.name
+        let raw_name = req
+            .name
             .unwrap_or_else(|| format!("Room {}", room_count + 1));
         let sanitized: String = raw_name.trim().chars().take(64).collect();
         if sanitized.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Room name cannot be empty",
+            ));
         }
         sanitized
     };
 
-    let password_hash = req.password
+    let password_hash = req
+        .password
         .filter(|p| !p.is_empty())
         .map(|p| hash_password(&p))
         .unwrap_or_default();
@@ -403,7 +437,11 @@ pub(crate) async fn create_room(
         let mut roles = state.room_roles.write().await;
         let room_roles = roles.entry(room_id.clone()).or_default();
         for member in &members {
-            let role = if *member == user_id { "owner" } else { "member" };
+            let role = if *member == user_id {
+                "owner"
+            } else {
+                "member"
+            };
             room_roles.insert(member.clone(), role.to_string());
         }
     }
@@ -438,7 +476,10 @@ pub(crate) async fn join_room(
 
     // Check password if room is password-protected
     if !room.password_hash.is_empty() {
-        let provided = body.as_ref().and_then(|b| b.password.as_deref()).unwrap_or("");
+        let provided = body
+            .as_ref()
+            .and_then(|b| b.password.as_deref())
+            .unwrap_or("");
         if !verify_password(provided, &room.password_hash) {
             return Err(error_response(StatusCode::FORBIDDEN, "Incorrect password"));
         }
@@ -564,9 +605,7 @@ pub(crate) async fn leave_room(
         .delete_one(doc! { "room_id": &room_id, "user_id": &user_id })
         .await;
 
-    let was_member = delete_result
-        .map(|r| r.deleted_count > 0)
-        .unwrap_or(false);
+    let was_member = delete_result.map(|r| r.deleted_count > 0).unwrap_or(false);
 
     // Update caches
     if was_member {
@@ -704,21 +743,29 @@ pub(crate) async fn delete_room(
     let forum_posts_coll = state
         .db
         .collection::<super::super::state::ForumPostRecord>("forum_posts");
-    let _ = forum_posts_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let _ = forum_posts_coll
+        .delete_many(doc! { "room_id": &room_id })
+        .await;
     let forum_comments_coll = state
         .db
         .collection::<super::super::state::ForumCommentRecord>("forum_comments");
-    let _ = forum_comments_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let _ = forum_comments_coll
+        .delete_many(doc! { "room_id": &room_id })
+        .await;
 
     // Remove whiteboard data
     let whiteboard_coll = state
         .db
         .collection::<super::super::state::WhiteboardStrokeRecord>("whiteboard_strokes");
-    let _ = whiteboard_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let _ = whiteboard_coll
+        .delete_many(doc! { "room_id": &room_id })
+        .await;
 
     // Remove channels
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
-    let _ = channels_coll.delete_many(doc! { "room_id": &room_id }).await;
+    let _ = channels_coll
+        .delete_many(doc! { "room_id": &room_id })
+        .await;
 
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
@@ -762,7 +809,10 @@ pub(crate) async fn list_all_rooms(
 
     let mut room_list: Vec<Value> = Vec::new();
 
-    if let Ok(mut cursor) = rooms_coll.find(doc! { "is_dm": false, "unlisted": { "$ne": true } }).await {
+    if let Ok(mut cursor) = rooms_coll
+        .find(doc! { "is_dm": false, "unlisted": { "$ne": true } })
+        .await
+    {
         while let Ok(Some(room)) = cursor.try_next().await {
             let voice_members = vc.get(&room.room_id);
             let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
@@ -867,8 +917,15 @@ pub(crate) async fn update_room_settings(
         // For DMs: any member may rename; no other settings are editable
         {
             let rm = state.room_members.read().await;
-            if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-                return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+            if !rm
+                .get(&room_id)
+                .map(|m| m.contains(&user_id))
+                .unwrap_or(false)
+            {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "Not a member of this room",
+                ));
             }
         }
         let has_non_name = req.icon_url.is_some()
@@ -881,7 +938,10 @@ pub(crate) async fn update_room_settings(
             || req.read_only.is_some()
             || req.banner_url.is_some();
         if has_non_name {
-            return Err(error_response(StatusCode::FORBIDDEN, "Only the name can be changed for DM rooms"));
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Only the name can be changed for DM rooms",
+            ));
         }
     } else {
         // SECURITY: use get_user_role (which gates on membership) rather than checking
@@ -938,7 +998,10 @@ pub(crate) async fn update_room_settings(
     if let Some(ref name) = req.name {
         let sanitized: String = name.trim().chars().take(64).collect();
         if sanitized.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Room name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Room name cannot be empty",
+            ));
         }
         set_doc.insert("name", sanitized.as_str());
         content.insert("name".to_string(), json!(sanitized));
@@ -1026,8 +1089,15 @@ pub(crate) async fn kick_member(
     // Require the caller to be an active room member before checking their role.
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -1035,13 +1105,22 @@ pub(crate) async fn kick_member(
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
 
     if caller_role == "member" {
-        return Err(error_response(StatusCode::FORBIDDEN, "No permission to kick"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "No permission to kick",
+        ));
     }
     if target_role == "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Cannot kick the owner"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot kick the owner",
+        ));
     }
     if caller_role == "moderator" && target_role == "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Moderators cannot kick other moderators"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Moderators cannot kick other moderators",
+        ));
     }
 
     let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
@@ -1127,8 +1206,15 @@ pub(crate) async fn ban_member(
     // Require the caller to be an active room member before checking their role.
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -1136,13 +1222,22 @@ pub(crate) async fn ban_member(
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
 
     if caller_role == "member" {
-        return Err(error_response(StatusCode::FORBIDDEN, "No permission to ban"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "No permission to ban",
+        ));
     }
     if target_role == "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Cannot ban the owner"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot ban the owner",
+        ));
     }
     if caller_role == "moderator" && target_role == "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Moderators cannot ban other moderators"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Moderators cannot ban other moderators",
+        ));
     }
 
     let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
@@ -1244,7 +1339,10 @@ pub(crate) async fn unban_member(
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     if caller_role != "owner" && caller_role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can unban"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can unban",
+        ));
     }
 
     let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
@@ -1275,16 +1373,25 @@ pub(crate) async fn set_member_role(
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     if caller_role != "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can change roles"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only the owner can change roles",
+        ));
     }
 
     if req.role != "moderator" && req.role != "member" {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Role must be 'moderator' or 'member'"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Role must be 'moderator' or 'member'",
+        ));
     }
 
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
     if target_role == "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Cannot change the owner's role"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Cannot change the owner's role",
+        ));
     }
 
     {
@@ -1294,7 +1401,10 @@ pub(crate) async fn set_member_role(
             .map(|m| m.contains(&target_user_id))
             .unwrap_or(false)
         {
-            return Err(error_response(StatusCode::NOT_FOUND, "User is not a member"));
+            return Err(error_response(
+                StatusCode::NOT_FOUND,
+                "User is not a member",
+            ));
         }
     }
 
@@ -1369,7 +1479,10 @@ pub(crate) async fn set_name_colors(
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     if caller_role != "owner" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only the owner can set name colors"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only the owner can set name colors",
+        ));
     }
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
@@ -1419,7 +1532,10 @@ pub(crate) async fn list_banned_users(
 
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     if caller_role != "owner" && caller_role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can view bans"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can view bans",
+        ));
     }
 
     let ban_coll = state.db.collection::<BannedUserRecord>("banned_users");
@@ -1469,10 +1585,15 @@ pub(crate) async fn add_to_dm(
     // Requester must be a member
     let is_member = {
         let rm = state.room_members.read().await;
-        rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false)
+        rm.get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
     };
     if !is_member {
-        return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Not a member of this room",
+        ));
     }
 
     // Enforce 20-member cap
@@ -1481,18 +1602,32 @@ pub(crate) async fn add_to_dm(
         rm.get(&room_id).map(|m| m.len()).unwrap_or(0)
     };
     if current_count >= 20 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Group DMs support at most 20 members"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Group DMs support at most 20 members",
+        ));
     }
 
     // Target user must exist
     let users_coll = state.db.collection::<UserRecord>("users");
-    if users_coll.find_one(doc! { "_id": &req.user_id }).await.ok().flatten().is_none() {
+    if users_coll
+        .find_one(doc! { "_id": &req.user_id })
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return Err(error_response(StatusCode::NOT_FOUND, "User not found"));
     }
 
     // Add user (do_join_room handles already-member and broadcasts m.room.member)
     match do_join_room(&state, &room_id, &req.user_id).await {
-        Ok(false) => return Err(error_response(StatusCode::BAD_REQUEST, "User is already a member")),
+        Ok(false) => {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "User is already a member",
+            ))
+        }
         Err(msg) => return Err(error_response(StatusCode::FORBIDDEN, msg)),
         Ok(true) => {}
     }

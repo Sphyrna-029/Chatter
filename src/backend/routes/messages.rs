@@ -1,9 +1,12 @@
 use super::super::{
-    dto::{EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest, ThreadListQuery},
+    dto::{
+        EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest,
+        ThreadListQuery,
+    },
     helpers::{
-        broadcast_to_room, error_response,
-        extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token, get_reactions_for_events, get_thread_counts_for_events,
-        get_user_from_token, get_user_role, get_user_custom_role_ids, is_moderator_or_owner,
+        broadcast_to_room, error_response, extract_token, generate_id, get_allowed_channel_ids,
+        get_bot_from_token, get_reactions_for_events, get_thread_counts_for_events,
+        get_user_custom_role_ids, get_user_from_token, get_user_role, is_moderator_or_owner,
         now_millis, send_to_user,
     },
     state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord},
@@ -120,7 +123,10 @@ pub(crate) async fn send_message(
     // Check per-channel permissions
     if !channel_id.is_empty() {
         let channels_coll = state.db.collection::<ChannelRecord>("channels");
-        if let Ok(Some(ch)) = channels_coll.find_one(mongodb::bson::doc! { "_id": &channel_id }).await {
+        if let Ok(Some(ch)) = channels_coll
+            .find_one(mongodb::bson::doc! { "_id": &channel_id })
+            .await
+        {
             if is_bot {
                 // Bots can only send in their own bot channels
                 let bot = bot_record.as_ref().unwrap();
@@ -165,21 +171,27 @@ pub(crate) async fn send_message(
 
                 // For showcase channels, enforce featured pane write restrictions
                 if ch.channel_type == "showcase"
-                    && req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
-                        if ch.showcase_write_roles.is_empty() {
-                            return Err(error_response(
-                                StatusCode::FORBIDDEN,
-                                "Only owners and moderators can post in the featured pane",
-                            ));
-                        }
-                        let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
-                        if !ch.showcase_write_roles.iter().any(|r| user_roles.contains(r)) {
-                            return Err(error_response(
-                                StatusCode::FORBIDDEN,
-                                "You do not have permission to post in the featured pane",
-                            ));
-                        }
+                    && req.showcase_pane.as_deref() == Some("featured")
+                    && !is_privileged
+                {
+                    if ch.showcase_write_roles.is_empty() {
+                        return Err(error_response(
+                            StatusCode::FORBIDDEN,
+                            "Only owners and moderators can post in the featured pane",
+                        ));
                     }
+                    let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
+                    if !ch
+                        .showcase_write_roles
+                        .iter()
+                        .any(|r| user_roles.contains(r))
+                    {
+                        return Err(error_response(
+                            StatusCode::FORBIDDEN,
+                            "You do not have permission to post in the featured pane",
+                        ));
+                    }
+                }
             }
         }
     }
@@ -290,39 +302,52 @@ pub(crate) async fn send_message(
             let today_str = today_naive.format("%Y-%m-%d").to_string();
 
             let new_count: u32;
-            if let Ok(Some(existing)) = streak_coll.find_one(doc! { "_id": &dm_record.user_pair }).await {
-                let last_naive = chrono::NaiveDate::parse_from_str(&existing.last_streak_date, "%Y-%m-%d")
-                    .unwrap_or(today_naive);
+            if let Ok(Some(existing)) = streak_coll
+                .find_one(doc! { "_id": &dm_record.user_pair })
+                .await
+            {
+                let last_naive =
+                    chrono::NaiveDate::parse_from_str(&existing.last_streak_date, "%Y-%m-%d")
+                        .unwrap_or(today_naive);
                 let diff = today_naive.signed_duration_since(last_naive).num_days();
                 if diff == 0 {
                     // Same day: just update last_message_ts, streak count unchanged
                     new_count = existing.streak_count;
-                    streak_coll.update_one(
-                        doc! { "_id": &dm_record.user_pair },
-                        doc! { "$set": { "last_message_ts": timestamp } },
-                    ).await.ok();
+                    streak_coll
+                        .update_one(
+                            doc! { "_id": &dm_record.user_pair },
+                            doc! { "$set": { "last_message_ts": timestamp } },
+                        )
+                        .await
+                        .ok();
                 } else if diff == 1 {
                     // Next consecutive day: increment streak
                     new_count = existing.streak_count + 1;
-                    streak_coll.update_one(
-                        doc! { "_id": &dm_record.user_pair },
-                        doc! { "$set": {
-                            "streak_count": new_count,
-                            "last_message_ts": timestamp,
-                            "last_streak_date": &today_str
-                        }},
-                    ).await.ok();
+                    streak_coll
+                        .update_one(
+                            doc! { "_id": &dm_record.user_pair },
+                            doc! { "$set": {
+                                "streak_count": new_count,
+                                "last_message_ts": timestamp,
+                                "last_streak_date": &today_str
+                            }},
+                        )
+                        .await
+                        .ok();
                 } else {
                     // Streak broken: reset to 1
                     new_count = 1;
-                    streak_coll.update_one(
-                        doc! { "_id": &dm_record.user_pair },
-                        doc! { "$set": {
-                            "streak_count": 1u32,
-                            "last_message_ts": timestamp,
-                            "last_streak_date": &today_str
-                        }},
-                    ).await.ok();
+                    streak_coll
+                        .update_one(
+                            doc! { "_id": &dm_record.user_pair },
+                            doc! { "$set": {
+                                "streak_count": 1u32,
+                                "last_message_ts": timestamp,
+                                "last_streak_date": &today_str
+                            }},
+                        )
+                        .await
+                        .ok();
                 }
             } else {
                 // No existing streak: start at 1
@@ -457,10 +482,7 @@ pub(crate) async fn get_room_messages(
         } else {
             doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts } }
         };
-        let pos = msg_coll
-            .count_documents(around_filter)
-            .await
-            .unwrap_or(0) as usize;
+        let pos = msg_coll.count_documents(around_filter).await.unwrap_or(0) as usize;
         let half = (limit as usize) / 2;
         let s = pos.saturating_sub(half);
         let e = (s + limit as usize).min(total);
@@ -501,7 +523,10 @@ pub(crate) async fn get_room_messages(
 
     // Attach reactions and thread reply counts to each message
     for msg in chunk.iter_mut() {
-        let eid = msg.get("event_id").and_then(|v| v.as_str()).map(String::from);
+        let eid = msg
+            .get("event_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         if let Some(eid) = eid {
             if let Some(reactions) = reactions_map.get(&eid) {
                 if !reactions.is_empty() {
@@ -641,7 +666,10 @@ pub(crate) async fn delete_notification(
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can delete notifications"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can delete notifications",
+        ));
     }
 
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
@@ -653,14 +681,20 @@ pub(crate) async fn delete_notification(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Message not found"))?;
 
     let msgtype = msg
-        .get_document("content").ok()
+        .get_document("content")
+        .ok()
         .and_then(|c| c.get_str("msgtype").ok())
         .unwrap_or("");
     if msgtype != "m.system" && msgtype != "m.watchparty" {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Only notification messages can be hard-deleted"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Only notification messages can be hard-deleted",
+        ));
     }
 
-    let _ = msg_coll.delete_one(doc! { "event_id": &event_id, "room_id": &room_id }).await;
+    let _ = msg_coll
+        .delete_one(doc! { "event_id": &event_id, "room_id": &room_id })
+        .await;
 
     let removal_event = json!({
         "type": "m.room.message_removed",
@@ -769,8 +803,8 @@ pub(crate) async fn edit_message(
 
     // If embeds are provided, update them too
     let embeds_json = if let Some(ref embeds) = req.embeds {
-        let bson_embeds = mongodb::bson::to_bson(embeds)
-            .unwrap_or(mongodb::bson::Bson::Array(vec![]));
+        let bson_embeds =
+            mongodb::bson::to_bson(embeds).unwrap_or(mongodb::bson::Bson::Array(vec![]));
         set_doc.insert("content.embeds", bson_embeds);
         Some(json!(embeds))
     } else {
@@ -840,7 +874,11 @@ pub(crate) async fn get_thread_messages(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread root message not found"))?;
 
     // Check channel-level view permissions on the root message
-    if let Some(ch_id) = root_doc.get_str("channel_id").ok().filter(|s| !s.is_empty()) {
+    if let Some(ch_id) = root_doc
+        .get_str("channel_id")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
         let role = get_user_role(&state, &room_id, &user_id).await;
         if role != "owner" && role != "moderator" {
             let channels_coll = state.db.collection::<ChannelRecord>("channels");
@@ -961,7 +999,8 @@ pub(crate) async fn send_thread_message(
                     let is_privileged = role == "owner" || role == "moderator";
                     if !is_privileged {
                         if !ch.view_roles.is_empty() {
-                            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                            let user_roles =
+                                get_user_custom_role_ids(&state, &room_id, &user_id).await;
                             if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
                                 return Err(error_response(
                                     StatusCode::FORBIDDEN,
@@ -970,7 +1009,8 @@ pub(crate) async fn send_thread_message(
                             }
                         }
                         if !ch.write_roles.is_empty() {
-                            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
+                            let user_roles =
+                                get_user_custom_role_ids(&state, &room_id, &user_id).await;
                             if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
                                 return Err(error_response(
                                     StatusCode::FORBIDDEN,
@@ -1195,9 +1235,8 @@ pub(crate) async fn delete_thread(
     let sender_role = get_user_role(&state, &room_id, &sender).await;
 
     let is_thread_owner = sender == user_id;
-    let can_delete_others =
-        (my_role == "owner" && sender_role != "owner") ||
-        (my_role == "moderator" && sender_role == "member");
+    let can_delete_others = (my_role == "owner" && sender_role != "owner")
+        || (my_role == "moderator" && sender_role == "member");
 
     if !is_thread_owner && !can_delete_others {
         return Err(error_response(
@@ -1290,9 +1329,7 @@ pub(crate) async fn get_room_threads(
 
     // Scope thread search to a single channel (or the general/no-channel feed).
     if let Some(cid) = query.channel_id.as_deref().filter(|c| !c.is_empty()) {
-        root_msgs.retain(|msg| {
-            msg.get("channel_id").and_then(|v| v.as_str()) == Some(cid)
-        });
+        root_msgs.retain(|msg| msg.get("channel_id").and_then(|v| v.as_str()) == Some(cid));
     } else if query.no_channel_only.unwrap_or(false) {
         root_msgs.retain(|msg| msg.get("channel_id").is_none());
     }
@@ -1305,12 +1342,17 @@ pub(crate) async fn get_room_threads(
         // Collect channel_ids referenced by root messages
         let channel_ids: Vec<String> = root_msgs
             .iter()
-            .filter_map(|m| m.get("channel_id").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|m| {
+                m.get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
         // Fetch channels with view_roles restrictions
-        let mut restricted_channels: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        let mut restricted_channels: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
         if !channel_ids.is_empty() {
             let mut ch_cursor = channels_coll
                 .find(doc! { "_id": { "$in": &channel_ids }, "view_roles": { "$ne": [] } })
@@ -1440,7 +1482,9 @@ pub(crate) async fn search_messages(
                 "video" => r"\.(mp4|webm|ogg|mov)(\?|$|\s)",
                 "audio" => r"\.(mp3|wav|flac|aac|m4a)(\?|$|\s)",
                 "document" => r"\.(pdf|doc|docx|xls|xlsx|txt|zip|tar|gz|rar|7z|csv)(\?|$|\s)",
-                _ => r"\.(jpg|jpeg|png|gif|webp|bmp|svg|mp4|webm|ogg|mov|mp3|wav|flac|aac|m4a|pdf|doc|docx|xls|xlsx|txt|zip|tar|gz|rar|7z|csv)(\?|$|\s)",
+                _ => {
+                    r"\.(jpg|jpeg|png|gif|webp|bmp|svg|mp4|webm|ogg|mov|mp3|wav|flac|aac|m4a|pdf|doc|docx|xls|xlsx|txt|zip|tar|gz|rar|7z|csv)(\?|$|\s)"
+                }
             };
 
             let mut conditions = vec![
@@ -1466,21 +1510,22 @@ pub(crate) async fn search_messages(
     };
 
     // Restrict search results to channels the user is allowed to see.
-    let mongo_filter = if let Some(allowed) = get_allowed_channel_ids(&state, &room_id, &user_id).await {
-        let bson_ids: Vec<mongodb::bson::Bson> = allowed
-            .iter()
-            .map(|s| mongodb::bson::Bson::String(s.clone()))
-            .collect();
-        doc! { "$and": [
-            mongo_filter,
-            { "$or": [
-                { "channel_id": { "$in": bson_ids } },
-                { "channel_id": { "$exists": false } }
+    let mongo_filter =
+        if let Some(allowed) = get_allowed_channel_ids(&state, &room_id, &user_id).await {
+            let bson_ids: Vec<mongodb::bson::Bson> = allowed
+                .iter()
+                .map(|s| mongodb::bson::Bson::String(s.clone()))
+                .collect();
+            doc! { "$and": [
+                mongo_filter,
+                { "$or": [
+                    { "channel_id": { "$in": bson_ids } },
+                    { "channel_id": { "$exists": false } }
+                ]}
             ]}
-        ]}
-    } else {
-        mongo_filter
-    };
+        } else {
+            mongo_filter
+        };
 
     // Scope search to a single channel (or to the general/no-channel feed).
     let mongo_filter = if let Some(ref cid) = channel_scope {

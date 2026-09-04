@@ -6,9 +6,8 @@ use super::super::{
     },
     helpers::{
         auth_cookie_headers, clear_cookie_headers, create_access_token, create_refresh_token,
-        decode_token, error_response, extract_refresh_cookie, extract_token,
-        format_user_id, generate_id, get_user_from_token, hash_password, validate_username,
-        verify_password,
+        decode_token, error_response, extract_refresh_cookie, extract_token, format_user_id,
+        generate_id, get_user_from_token, hash_password, validate_username, verify_password,
     },
     state::{AppState, PendingRegistration, RefreshTokenRecord, UserRecord},
 };
@@ -17,10 +16,10 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
-use std::net::SocketAddr;
 use mongodb::bson::doc;
 use serde_json::{json, Value};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
 
@@ -28,8 +27,16 @@ fn build_totp(secret_base32: &str, username: &str) -> Result<TOTP, String> {
     let secret_bytes = Secret::Encoded(secret_base32.to_string())
         .to_bytes()
         .map_err(|e| format!("Invalid TOTP secret: {}", e))?;
-    TOTP::new(Algorithm::SHA1, 6, 1, 30, secret_bytes, Some("Chatter".to_string()), username.to_string())
-        .map_err(|e| format!("TOTP error: {}", e))
+    TOTP::new(
+        Algorithm::SHA1,
+        6,
+        1,
+        30,
+        secret_bytes,
+        Some("Chatter".to_string()),
+        username.to_string(),
+    )
+    .map_err(|e| format!("TOTP error: {}", e))
 }
 
 fn hash_recovery_code(code: &str) -> String {
@@ -45,7 +52,9 @@ fn generate_recovery_codes(count: usize) -> (Vec<String>, Vec<String>) {
     let mut plaintext = Vec::with_capacity(count);
     let mut hashed = Vec::with_capacity(count);
     for _ in 0..count {
-        let code: String = (0..8).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect();
+        let code: String = (0..8)
+            .map(|_| chars[rng.gen_range(0..chars.len())] as char)
+            .collect();
         let hash = hash_recovery_code(&code);
         plaintext.push(code);
         hashed.push(hash);
@@ -74,7 +83,10 @@ async fn verify_totp_or_recovery(
         let mut remaining = user.recovery_codes.clone();
         remaining.remove(pos);
         let users = state.db.collection::<UserRecord>("users");
-        let bson_codes: Vec<mongodb::bson::Bson> = remaining.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+        let bson_codes: Vec<mongodb::bson::Bson> = remaining
+            .iter()
+            .map(|s| mongodb::bson::Bson::String(s.clone()))
+            .collect();
         let _ = users
             .update_one(
                 doc! { "_id": &user.user_id },
@@ -112,15 +124,17 @@ pub(crate) async fn check_username(
         pending.contains_key(&user_id)
     };
 
-    Ok(Json(json!({ "available": !exists_in_db && !exists_pending })))
+    Ok(Json(
+        json!({ "available": !exists_in_db && !exists_pending }),
+    ))
 }
 
 /// GET /api/server/info
-pub(crate) async fn server_info(
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+pub(crate) async fn server_info(State(state): State<Arc<AppState>>) -> Json<Value> {
     let settings = state.server_settings.read().await;
-    Json(json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads, "storage_limit_bytes": settings.storage_limit_bytes, "upload_limit_bytes": settings.upload_limit_bytes }))
+    Json(
+        json!({ "invite_only": settings.invite_only, "require_auth_for_uploads": settings.require_auth_for_uploads, "storage_limit_bytes": settings.storage_limit_bytes, "upload_limit_bytes": settings.upload_limit_bytes }),
+    )
 }
 
 /// GET /api/ice-servers — returns ICE server config (STUN + TURN) for client WebRTC
@@ -165,7 +179,12 @@ pub(crate) async fn register(
         if settings.invite_only {
             match &req.invite_code {
                 Some(code) if code == &settings.invite_code => {}
-                _ => return Err(error_response(StatusCode::FORBIDDEN, "Valid invite code required")),
+                _ => {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "Valid invite code required",
+                    ))
+                }
             }
         }
     }
@@ -178,15 +197,24 @@ pub(crate) async fn register(
     // Validate password confirmation if provided
     if let Some(ref confirm) = req.password_confirm {
         if confirm != &req.password {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Passwords do not match"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Passwords do not match",
+            ));
         }
     }
 
     if req.password.len() < 6 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at least 6 characters",
+        ));
     }
     if req.password.len() > 64 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at most 64 characters",
+        ));
     }
 
     let user_id = format_user_id(username);
@@ -228,12 +256,15 @@ pub(crate) async fn register(
         let now = now_secs();
         pending.retain(|_, p| now - p.created_at < 600.0);
 
-        pending.insert(user_id.clone(), PendingRegistration {
-            password_hash,
-            totp_secret: totp_secret.clone(),
-            is_admin,
-            created_at: now,
-        });
+        pending.insert(
+            user_id.clone(),
+            PendingRegistration {
+                password_hash,
+                totp_secret: totp_secret.clone(),
+                is_admin,
+                created_at: now,
+            },
+        );
     }
 
     // Build TOTP URI for QR code
@@ -269,10 +300,12 @@ pub(crate) async fn totp_verify(
         let max_attempts = 5u32;
 
         let mut attempts = state.totp_attempts.write().await;
-        let entry = attempts.entry(user_id.clone()).or_insert(TotpAttemptRecord {
-            count: 0,
-            window_start: now,
-        });
+        let entry = attempts
+            .entry(user_id.clone())
+            .or_insert(TotpAttemptRecord {
+                count: 0,
+                window_start: now,
+            });
 
         if now - entry.window_start > window {
             // Reset window
@@ -301,7 +334,11 @@ pub(crate) async fn totp_verify(
 
     if let Some(pending_reg) = pending {
         // Verify TOTP against the pending registration's secret
-        let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+        let username = user_id
+            .split(':')
+            .next()
+            .unwrap_or(&user_id)
+            .trim_start_matches('@');
         let totp = build_totp(&pending_reg.totp_secret, username)
             .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
 
@@ -367,7 +404,8 @@ pub(crate) async fn totp_verify(
                 "is_admin": pending_reg.is_admin,
                 "totp_verified": true
             })),
-        ).into_response());
+        )
+            .into_response());
     }
 
     // Existing user flow (e.g. TOTP setup for existing accounts)
@@ -380,10 +418,17 @@ pub(crate) async fn totp_verify(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     if user.totp_secret.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "TOTP not configured"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "TOTP not configured",
+        ));
     }
 
-    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let username = user_id
+        .split(':')
+        .next()
+        .unwrap_or(&user_id)
+        .trim_start_matches('@');
     let totp = build_totp(&user.totp_secret, username)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
 
@@ -399,7 +444,10 @@ pub(crate) async fn totp_verify(
 
     // Mark TOTP as verified and generate recovery codes
     let (plaintext_codes, hashed_codes) = generate_recovery_codes(5);
-    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes
+        .iter()
+        .map(|s| mongodb::bson::Bson::String(s.clone()))
+        .collect();
     let _ = users
         .update_one(
             doc! { "_id": &user_id },
@@ -423,7 +471,8 @@ pub(crate) async fn totp_verify(
             "is_admin": user.is_admin,
             "totp_verified": true
         })),
-    ).into_response())
+    )
+        .into_response())
 }
 
 pub(crate) async fn login(
@@ -495,7 +544,10 @@ pub(crate) async fn login(
             .unwrap_or(1);
         if admin_count == 0 {
             let _ = users
-                .update_one(doc! { "_id": &user_id }, doc! { "$set": { "is_admin": true } })
+                .update_one(
+                    doc! { "_id": &user_id },
+                    doc! { "$set": { "is_admin": true } },
+                )
                 .await;
             is_admin = true;
         }
@@ -505,7 +557,9 @@ pub(crate) async fn login(
     if user.totp_verified && !user.totp_secret.is_empty() {
         match &req.totp_code {
             None => {
-                return Ok((HeaderMap::new(), Json(json!({ "requires_totp": true }))).into_response());
+                return Ok(
+                    (HeaderMap::new(), Json(json!({ "requires_totp": true }))).into_response()
+                );
             }
             Some(code) => {
                 verify_totp_or_recovery(code, &user, username, &state).await?;
@@ -531,7 +585,8 @@ pub(crate) async fn login(
             "is_admin": is_admin,
             "totp_verified": user.totp_verified
         })),
-    ).into_response())
+    )
+        .into_response())
 }
 
 pub(crate) async fn recovery_login(
@@ -589,13 +644,19 @@ pub(crate) async fn recovery_login(
 
     // Verify recovery code
     let code_hash = hash_recovery_code(&req.recovery_code.to_uppercase());
-    let pos = user.recovery_codes.iter().position(|h| h == &code_hash)
+    let pos = user
+        .recovery_codes
+        .iter()
+        .position(|h| h == &code_hash)
         .ok_or_else(|| error_response(StatusCode::FORBIDDEN, "Invalid recovery code"))?;
 
     // Remove used recovery code from DB
     let mut remaining = user.recovery_codes.clone();
     remaining.remove(pos);
-    let bson_codes: Vec<mongodb::bson::Bson> = remaining.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+    let bson_codes: Vec<mongodb::bson::Bson> = remaining
+        .iter()
+        .map(|s| mongodb::bson::Bson::String(s.clone()))
+        .collect();
     // Remove used code and flag for forced password reset
     let _ = users
         .update_one(
@@ -628,7 +689,8 @@ pub(crate) async fn recovery_login(
             "must_reset_password": true,
             "recovery_codes_remaining": remaining.len()
         })),
-    ).into_response())
+    )
+        .into_response())
 }
 
 /// Reset password after recovery login. Only works when must_reset_password is true.
@@ -644,10 +706,16 @@ pub(crate) async fn force_reset_password(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if req.new_password.len() < 6 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at least 6 characters",
+        ));
     }
     if req.new_password.len() > 64 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at most 64 characters",
+        ));
     }
 
     let users = state.db.collection::<UserRecord>("users");
@@ -659,7 +727,10 @@ pub(crate) async fn force_reset_password(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     if !user.must_reset_password {
-        return Err(error_response(StatusCode::FORBIDDEN, "Password reset not required"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Password reset not required",
+        ));
     }
 
     let new_hash = hash_password(&req.new_password);
@@ -684,10 +755,16 @@ pub(crate) async fn change_password(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if req.new_password.len() < 6 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at least 6 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at least 6 characters",
+        ));
     }
     if req.new_password.len() > 64 {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Password must be at most 64 characters"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Password must be at most 64 characters",
+        ));
     }
 
     let users = state.db.collection::<UserRecord>("users");
@@ -699,7 +776,11 @@ pub(crate) async fn change_password(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     // Verify TOTP or recovery code
-    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let username = user_id
+        .split(':')
+        .next()
+        .unwrap_or(&user_id)
+        .trim_start_matches('@');
     verify_totp_or_recovery(&req.totp_code, &user, username, &state).await?;
 
     let new_hash = hash_password(&req.new_password);
@@ -732,11 +813,17 @@ pub(crate) async fn delete_account(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     // Verify TOTP or recovery code
-    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let username = user_id
+        .split(':')
+        .next()
+        .unwrap_or(&user_id)
+        .trim_start_matches('@');
     verify_totp_or_recovery(&req.totp_code, &user, username, &state).await?;
 
     // Remove user from all rooms (room_members collection)
-    let room_members = state.db.collection::<mongodb::bson::Document>("room_members");
+    let room_members = state
+        .db
+        .collection::<mongodb::bson::Document>("room_members");
     let _ = room_members.delete_many(doc! { "user_id": &user_id }).await;
 
     // Update room_members cache
@@ -757,7 +844,9 @@ pub(crate) async fn delete_account(
 
     // Delete refresh tokens
     let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
-    let _ = refresh_tokens.delete_many(doc! { "user_id": &user_id }).await;
+    let _ = refresh_tokens
+        .delete_many(doc! { "user_id": &user_id })
+        .await;
 
     // Close active WebSocket
     state.active_websockets.write().await.remove(&user_id);
@@ -785,7 +874,9 @@ pub(crate) async fn logout(
     // Also revoke the cookie-based refresh token if present
     if let Some(cookie_rt) = extract_refresh_cookie(&headers) {
         let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
-        let _ = refresh_tokens.delete_one(doc! { "token": &cookie_rt }).await;
+        let _ = refresh_tokens
+            .delete_one(doc! { "token": &cookie_rt })
+            .await;
     }
 
     (clear_cookie_headers(), Json(json!({})))
@@ -798,20 +889,20 @@ pub(crate) async fn refresh(
     Json(req): Json<RefreshTokenRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     // Accept refresh token from JSON body (backward compat) or HttpOnly cookie
-    let token_str = req.refresh_token
+    let token_str = req
+        .refresh_token
         .or_else(|| extract_refresh_cookie(&headers))
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "No refresh token provided"))?;
 
     // Decode the refresh token JWT
-    let claims = decode_token(&token_str, &state.jwt_secret)
-        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token"))?;
+    let claims = decode_token(&token_str, &state.jwt_secret).ok_or_else(|| {
+        error_response(StatusCode::UNAUTHORIZED, "Invalid or expired refresh token")
+    })?;
 
     let user_id = claims.sub;
 
     // Check if refresh token exists in MongoDB (not revoked)
-    let refresh_tokens = state
-        .db
-        .collection::<RefreshTokenRecord>("refresh_tokens");
+    let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
     let found = refresh_tokens
         .find_one_and_delete(doc! { "token": &token_str })
         .await
@@ -837,12 +928,14 @@ pub(crate) async fn refresh(
 
     // Issue new token pair, preserving the IP/UA from the consumed token.
     // If the old token has no IP (pre-feature record), capture it from the current request.
-    let ip = found.as_ref()
+    let ip = found
+        .as_ref()
         .map(|r| r.ip_address.as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| extract_ip(&headers, Some(peer)));
-    let ua = found.as_ref()
+    let ua = found
+        .as_ref()
         .map(|r| r.user_agent.as_str())
         .filter(|s| !s.is_empty())
         .map(str::to_string)
@@ -859,7 +952,8 @@ pub(crate) async fn refresh(
             "is_admin": is_admin,
             "totp_verified": totp_verified
         })),
-    ).into_response())
+    )
+        .into_response())
 }
 
 pub(crate) async fn get_recovery_codes(
@@ -881,7 +975,11 @@ pub(crate) async fn get_recovery_codes(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     // Verify TOTP code (not recovery code - must use real TOTP)
-    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let username = user_id
+        .split(':')
+        .next()
+        .unwrap_or(&user_id)
+        .trim_start_matches('@');
     let totp = build_totp(&user.totp_secret, username)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     if !totp.check_current(&req.totp_code).unwrap_or(false) {
@@ -890,7 +988,10 @@ pub(crate) async fn get_recovery_codes(
 
     // Generate new recovery codes (replaces old ones)
     let (plaintext_codes, hashed_codes) = generate_recovery_codes(5);
-    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
+    let bson_codes: Vec<mongodb::bson::Bson> = hashed_codes
+        .iter()
+        .map(|s| mongodb::bson::Bson::String(s.clone()))
+        .collect();
     let _ = users
         .update_one(
             doc! { "_id": &user_id },
@@ -919,7 +1020,10 @@ pub(crate) async fn totp_setup(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     if user.totp_verified {
-        return Err(error_response(StatusCode::BAD_REQUEST, "2FA is already set up"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "2FA is already set up",
+        ));
     }
 
     // Generate a new 20-byte TOTP secret
@@ -935,7 +1039,11 @@ pub(crate) async fn totp_setup(
         )
         .await;
 
-    let username = user_id.split(':').next().unwrap_or(&user_id).trim_start_matches('@');
+    let username = user_id
+        .split(':')
+        .next()
+        .unwrap_or(&user_id)
+        .trim_start_matches('@');
     let totp = build_totp(&totp_secret, username)
         .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e))?;
     let totp_uri = totp.get_url();
@@ -970,12 +1078,16 @@ pub(crate) async fn account_status(
     })))
 }
 
-async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_address: &str, user_agent: &str) {
+async fn store_refresh_token(
+    state: &AppState,
+    token: &str,
+    user_id: &str,
+    ip_address: &str,
+    user_agent: &str,
+) {
     use rand::Rng;
     let session_id = hex::encode(rand::thread_rng().gen::<[u8; 16]>());
-    let collection = state
-        .db
-        .collection::<RefreshTokenRecord>("refresh_tokens");
+    let collection = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
     let record = RefreshTokenRecord {
         token: token.to_string(),
         user_id: user_id.to_string(),
@@ -990,18 +1102,25 @@ async fn store_refresh_token(state: &AppState, token: &str, user_id: &str, ip_ad
 
 /// Extract the best available client IP from request headers, falling back to the peer address.
 fn extract_ip(headers: &HeaderMap, peer: Option<SocketAddr>) -> String {
-    headers.get("x-forwarded-for")
+    headers
+        .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string())
-        .or_else(|| headers.get("x-real-ip").and_then(|v| v.to_str().ok()).map(str::to_string))
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+        })
         .or_else(|| peer.map(|a| a.ip().to_string()))
         .unwrap_or_else(|| "Unknown".to_string())
 }
 
 /// Extract User-Agent from request headers.
 fn extract_ua(headers: &HeaderMap) -> String {
-    headers.get("user-agent")
+    headers
+        .get("user-agent")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("Unknown")
         .to_string()

@@ -1,10 +1,15 @@
 use super::super::{
-    dto::{CreateForumCommentRequest, CreateForumPostRequest, EditForumCommentRequest, EditForumPostRequest, ForumPostsQuery, ForumSearchQuery},
+    dto::{
+        CreateForumCommentRequest, CreateForumPostRequest, EditForumCommentRequest,
+        EditForumPostRequest, ForumPostsQuery, ForumSearchQuery,
+    },
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
         is_moderator_or_owner, now_millis,
     },
-    state::{AppState, ChannelRecord, ForumCommentRecord, ForumPostRecord, ReactionRecord, RoomRecord},
+    state::{
+        AppState, ChannelRecord, ForumCommentRecord, ForumPostRecord, ReactionRecord, RoomRecord,
+    },
 };
 use axum::{
     extract::{Path, Query, State},
@@ -100,10 +105,7 @@ fn comment_to_json(comment: &ForumCommentRecord) -> Value {
     })
 }
 
-async fn get_reactions_for_event(
-    state: &AppState,
-    event_id: &str,
-) -> HashMap<String, Vec<String>> {
+async fn get_reactions_for_event(state: &AppState, event_id: &str) -> HashMap<String, Vec<String>> {
     let react_coll = state.db.collection::<ReactionRecord>("reactions");
     let mut reactions: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -479,10 +481,7 @@ pub(crate) async fn edit_post(
     }
 
     if set_doc.is_empty() {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "Nothing to update",
-        ));
+        return Err(error_response(StatusCode::BAD_REQUEST, "Nothing to update"));
     }
 
     let now = now_millis();
@@ -490,10 +489,7 @@ pub(crate) async fn edit_post(
     set_doc.insert("edited_at", now);
 
     let _ = coll
-        .update_one(
-            doc! { "_id": &post_id },
-            doc! { "$set": set_doc },
-        )
+        .update_one(doc! { "_id": &post_id }, doc! { "$set": set_doc })
         .await;
 
     let broadcast_msg = json!({
@@ -583,18 +579,12 @@ pub(crate) async fn search_posts(
     let filter = doc! { "room_id": &room_id, "deleted": false };
     let mut results: Vec<Value> = Vec::new();
 
-    if let Ok(mut cursor) = coll
-        .find(filter)
-        .sort(doc! { "last_activity": -1 })
-        .await
-    {
+    if let Ok(mut cursor) = coll.find(filter).sort(doc! { "last_activity": -1 }).await {
         while let Ok(Some(post)) = cursor.try_next().await {
             if results.len() >= limit {
                 break;
             }
-            if post.title.to_lowercase().contains(&q)
-                || post.body.to_lowercase().contains(&q)
-            {
+            if post.title.to_lowercase().contains(&q) || post.body.to_lowercase().contains(&q) {
                 let reactions = get_reactions_for_event(&state, &post.post_id).await;
                 results.push(post_to_json(&post, &reactions));
             }

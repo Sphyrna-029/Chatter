@@ -1,5 +1,7 @@
 use super::super::{
-    helpers::{create_access_token, decode_token, error_response, extract_token, get_user_from_token},
+    helpers::{
+        create_access_token, decode_token, error_response, extract_token, get_user_from_token,
+    },
     state::{AppState, UserRecord},
 };
 use axum::{
@@ -37,7 +39,10 @@ pub(crate) async fn spotify_link_url(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     if state.spotify_client_id.is_empty() {
-        return Err(error_response(StatusCode::SERVICE_UNAVAILABLE, "Spotify integration not configured"));
+        return Err(error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Spotify integration not configured",
+        ));
     }
 
     let state_token = create_access_token(&user_id, &state.jwt_secret);
@@ -48,7 +53,10 @@ pub(crate) async fn spotify_link_url(
         ("client_id", state.spotify_client_id.as_str()),
         ("response_type", "code"),
         ("redirect_uri", redirect_uri.as_str()),
-        ("scope", "user-read-currently-playing user-read-playback-state"),
+        (
+            "scope",
+            "user-read-currently-playing user-read-playback-state",
+        ),
         ("state", state_token.as_str()),
     ];
     let query: String = params
@@ -139,11 +147,8 @@ pub(crate) async fn spotify_callback(
     let refresh_token = match body["refresh_token"].as_str() {
         Some(rt) => rt.to_string(),
         None => {
-            return Redirect::temporary(&format!(
-                "{}/?spotify_error=no_refresh_token",
-                base_url
-            ))
-            .into_response()
+            return Redirect::temporary(&format!("{}/?spotify_error=no_refresh_token", base_url))
+                .into_response()
         }
     };
 

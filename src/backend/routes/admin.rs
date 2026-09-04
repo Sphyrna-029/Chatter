@@ -49,9 +49,10 @@ pub(crate) async fn admin_stats(
     let total_size: u64 = {
         use futures_util::TryStreamExt;
         let coll = state.db.collection::<UploadRecord>("uploads");
-        let mut cursor = coll.find(doc! {}).await.map_err(|_| {
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error")
-        })?;
+        let mut cursor = coll
+            .find(doc! {})
+            .await
+            .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
         let mut total = 0u64;
         while let Some(upload) = cursor.try_next().await.unwrap_or(None) {
             total += upload.size;
@@ -84,9 +85,10 @@ pub(crate) async fn admin_list_users(
 
     use futures_util::TryStreamExt;
     let users_coll = state.db.collection::<UserRecord>("users");
-    let mut cursor = users_coll.find(doc! {}).await.map_err(|_| {
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error")
-    })?;
+    let mut cursor = users_coll
+        .find(doc! {})
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
 
     let presence = state.user_presence.read().await;
     let room_members = state.room_members.read().await;
@@ -129,7 +131,10 @@ pub(crate) async fn admin_disable_user(
 
     let target_id = format!("@{}:localhost", user_id);
     if target_id == admin_id {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot disable yourself"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot disable yourself",
+        ));
     }
 
     let users = state.db.collection::<UserRecord>("users");
@@ -186,7 +191,10 @@ pub(crate) async fn admin_delete_user(
 
     let target_id = format!("@{}:localhost", user_id);
     if target_id == admin_id {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Cannot delete yourself"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Cannot delete yourself",
+        ));
     }
 
     let users = state.db.collection::<UserRecord>("users");
@@ -293,9 +301,10 @@ pub(crate) async fn admin_list_rooms(
     use futures_util::TryStreamExt;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    let mut cursor = rooms_coll.find(doc! {}).await.map_err(|_| {
-        error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error")
-    })?;
+    let mut cursor = rooms_coll
+        .find(doc! {})
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
 
     let room_members = state.room_members.read().await;
 
@@ -429,25 +438,32 @@ pub(crate) async fn admin_update_settings(
     if let Some(room_limit) = body.get("room_creation_limit").and_then(|v| v.as_u64()) {
         set_doc.insert("room_creation_limit", room_limit as i64);
     }
-    if let Some(require_auth) = body.get("require_auth_for_uploads").and_then(|v| v.as_bool()) {
+    if let Some(require_auth) = body
+        .get("require_auth_for_uploads")
+        .and_then(|v| v.as_bool())
+    {
         set_doc.insert("require_auth_for_uploads", require_auth);
     }
-    if let Some(room_creation_disabled) = body.get("room_creation_disabled").and_then(|v| v.as_bool()) {
+    if let Some(room_creation_disabled) =
+        body.get("room_creation_disabled").and_then(|v| v.as_bool())
+    {
         set_doc.insert("room_creation_disabled", room_creation_disabled);
     }
 
     if set_doc.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "No valid fields to update"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "No valid fields to update",
+        ));
     }
 
     // Update DB
-    let coll = state.db.collection::<mongodb::bson::Document>("server_settings");
-    coll.update_one(
-        doc! { "_id": "global" },
-        doc! { "$set": set_doc.clone() },
-    )
-    .await
-    .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
+    let coll = state
+        .db
+        .collection::<mongodb::bson::Document>("server_settings");
+    coll.update_one(doc! { "_id": "global" }, doc! { "$set": set_doc.clone() })
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
 
     // Update cache
     {
@@ -485,7 +501,9 @@ pub(crate) async fn admin_refresh_invite(
     let new_code = generate_invite_code();
 
     // Update DB
-    let coll = state.db.collection::<mongodb::bson::Document>("server_settings");
+    let coll = state
+        .db
+        .collection::<mongodb::bson::Document>("server_settings");
     coll.update_one(
         doc! { "_id": "global" },
         doc! { "$set": { "invite_code": &new_code } },

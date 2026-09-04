@@ -1,8 +1,8 @@
 use super::super::{
-    dto::{CreateCustomRoleRequest, UpdateCustomRoleRequest, AssignMemberRolesRequest},
+    dto::{AssignMemberRolesRequest, CreateCustomRoleRequest, UpdateCustomRoleRequest},
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_role,
-        get_user_from_token, now_millis,
+        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
+        get_user_role, now_millis,
     },
     state::{AppState, CustomRoleRecord, MemberCustomRoleRecord},
 };
@@ -51,8 +51,15 @@ pub(crate) async fn list_roles(
     // Check membership
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
@@ -86,19 +93,32 @@ pub(crate) async fn create_role(
     // Membership gate — must precede role check so ex-members cannot act on the room.
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
     let role = get_user_role(&state, &room_id, &user_id).await;
     if role != "owner" && role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can create roles"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can create roles",
+        ));
     }
 
     let name: String = req.name.trim().chars().take(30).collect();
     if name.is_empty() {
-        return Err(error_response(StatusCode::BAD_REQUEST, "Role name cannot be empty"));
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Role name cannot be empty",
+        ));
     }
 
     let coll = state.db.collection::<CustomRoleRecord>("custom_roles");
@@ -146,7 +166,10 @@ pub(crate) async fn update_role(
 
     let user_role = get_user_role(&state, &room_id, &user_id).await;
     if user_role != "owner" && user_role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can edit roles"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can edit roles",
+        ));
     }
 
     let coll = state.db.collection::<CustomRoleRecord>("custom_roles");
@@ -164,7 +187,10 @@ pub(crate) async fn update_role(
     if let Some(ref name) = req.name {
         let sanitized: String = name.trim().chars().take(30).collect();
         if sanitized.is_empty() {
-            return Err(error_response(StatusCode::BAD_REQUEST, "Role name cannot be empty"));
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Role name cannot be empty",
+            ));
         }
         set_doc.insert("name", sanitized.as_str());
         content.insert("name".to_string(), json!(sanitized));
@@ -181,15 +207,18 @@ pub(crate) async fn update_role(
         let perms_doc = mongodb::bson::to_bson(perms)
             .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid permissions"))?;
         set_doc.insert("permissions", perms_doc.clone());
-        content.insert("permissions".to_string(), json!({
-            "send_messages": perms.send_messages,
-            "manage_channels": perms.manage_channels,
-            "manage_roles": perms.manage_roles,
-            "manage_messages": perms.manage_messages,
-            "kick_members": perms.kick_members,
-            "ban_members": perms.ban_members,
-            "mention_everyone": perms.mention_everyone,
-        }));
+        content.insert(
+            "permissions".to_string(),
+            json!({
+                "send_messages": perms.send_messages,
+                "manage_channels": perms.manage_channels,
+                "manage_roles": perms.manage_roles,
+                "manage_messages": perms.manage_messages,
+                "kick_members": perms.kick_members,
+                "ban_members": perms.ban_members,
+                "mention_everyone": perms.mention_everyone,
+            }),
+        );
     }
 
     if !set_doc.is_empty() {
@@ -225,15 +254,24 @@ pub(crate) async fn delete_role(
 
     let user_role = get_user_role(&state, &room_id, &user_id).await;
     if user_role != "owner" && user_role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can delete roles"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can delete roles",
+        ));
     }
 
     let coll = state.db.collection::<CustomRoleRecord>("custom_roles");
-    let _ = coll.delete_one(doc! { "_id": &role_id, "room_id": &room_id }).await;
+    let _ = coll
+        .delete_one(doc! { "_id": &role_id, "room_id": &room_id })
+        .await;
 
     // Remove all member assignments for this role
-    let assign_coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
-    let _ = assign_coll.delete_many(doc! { "room_id": &room_id, "role_id": &role_id }).await;
+    let assign_coll = state
+        .db
+        .collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let _ = assign_coll
+        .delete_many(doc! { "room_id": &room_id, "role_id": &role_id })
+        .await;
 
     // Remove this role from channel view_roles and write_roles
     let channels_coll = state.db.collection::<mongodb::bson::Document>("channels");
@@ -268,12 +306,21 @@ pub(crate) async fn get_member_roles(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
-    let coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let coll = state
+        .db
+        .collection::<MemberCustomRoleRecord>("member_custom_roles");
     let mut cursor = coll
         .find(doc! { "room_id": &room_id, "user_id": &target_user_id })
         .await
@@ -301,21 +348,30 @@ pub(crate) async fn assign_member_roles(
 
     let user_role = get_user_role(&state, &room_id, &user_id).await;
     if user_role != "owner" && user_role != "moderator" {
-        return Err(error_response(StatusCode::FORBIDDEN, "Only owners and moderators can assign roles"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Only owners and moderators can assign roles",
+        ));
     }
 
-    let coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let coll = state
+        .db
+        .collection::<MemberCustomRoleRecord>("member_custom_roles");
 
     // Remove all existing assignments for this user in this room
-    let _ = coll.delete_many(doc! { "room_id": &room_id, "user_id": &target_user_id }).await;
+    let _ = coll
+        .delete_many(doc! { "room_id": &room_id, "user_id": &target_user_id })
+        .await;
 
     // Insert new assignments
     for role_id in &req.role_ids {
-        let _ = coll.insert_one(MemberCustomRoleRecord {
-            room_id: room_id.clone(),
-            user_id: target_user_id.clone(),
-            role_id: role_id.clone(),
-        }).await;
+        let _ = coll
+            .insert_one(MemberCustomRoleRecord {
+                room_id: room_id.clone(),
+                user_id: target_user_id.clone(),
+                role_id: role_id.clone(),
+            })
+            .await;
     }
 
     let event = json!({
@@ -343,12 +399,21 @@ pub(crate) async fn list_all_member_roles(
 
     {
         let rm = state.room_members.read().await;
-        if !rm.get(&room_id).map(|m| m.contains(&user_id)).unwrap_or(false) {
-            return Err(error_response(StatusCode::FORBIDDEN, "Not a member of this room"));
+        if !rm
+            .get(&room_id)
+            .map(|m| m.contains(&user_id))
+            .unwrap_or(false)
+        {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
         }
     }
 
-    let coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let coll = state
+        .db
+        .collection::<MemberCustomRoleRecord>("member_custom_roles");
     let mut cursor = coll
         .find(doc! { "room_id": &room_id })
         .await

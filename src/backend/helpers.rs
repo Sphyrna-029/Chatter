@@ -158,9 +158,7 @@ pub(crate) async fn get_bot_from_token(
 ) -> Option<super::state::BotRecord> {
     use super::routes::bots::hash_bot_token;
     let token_hash = hash_bot_token(token);
-    let coll = state
-        .db
-        .collection::<super::state::BotRecord>("bots");
+    let coll = state.db.collection::<super::state::BotRecord>("bots");
     coll.find_one(mongodb::bson::doc! { "token_hash": &token_hash })
         .await
         .ok()
@@ -192,7 +190,10 @@ pub(crate) async fn require_admin(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
     if !user.is_admin {
-        return Err(error_response(StatusCode::FORBIDDEN, "Admin access required"));
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "Admin access required",
+        ));
     }
     Ok(user_id)
 }
@@ -242,8 +243,9 @@ pub(crate) async fn get_user_role(state: &AppState, room_id: &str, user_id: &str
                     .insert(user_id.to_string(), "owner".to_string());
 
                 // Also update MongoDB so the record is consistent
-                let members_coll =
-                    state.db.collection::<super::state::RoomMemberRecord>("room_members");
+                let members_coll = state
+                    .db
+                    .collection::<super::state::RoomMemberRecord>("room_members");
                 let _ = members_coll
                     .update_one(
                         doc! { "room_id": room_id, "user_id": user_id },
@@ -265,14 +267,23 @@ pub(crate) async fn is_moderator_or_owner(state: &AppState, room_id: &str, user_
 }
 
 /// Get the custom role IDs assigned to a user in a room.
-pub(crate) async fn get_user_custom_role_ids(state: &AppState, room_id: &str, user_id: &str) -> Vec<String> {
+pub(crate) async fn get_user_custom_role_ids(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+) -> Vec<String> {
     use super::state::MemberCustomRoleRecord;
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
-    let coll = state.db.collection::<MemberCustomRoleRecord>("member_custom_roles");
+    let coll = state
+        .db
+        .collection::<MemberCustomRoleRecord>("member_custom_roles");
     let mut role_ids = Vec::new();
-    if let Ok(mut cursor) = coll.find(doc! { "room_id": room_id, "user_id": user_id }).await {
+    if let Ok(mut cursor) = coll
+        .find(doc! { "room_id": room_id, "user_id": user_id })
+        .await
+    {
         while let Ok(Some(r)) = cursor.try_next().await {
             role_ids.push(r.role_id);
         }
@@ -346,9 +357,7 @@ pub(crate) fn clear_cookie_headers() -> HeaderMap {
     let mut m = HeaderMap::new();
     m.append(
         header::SET_COOKIE,
-        HeaderValue::from_static(
-            "refresh_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0",
-        ),
+        HeaderValue::from_static("refresh_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"),
     );
     m.append(
         header::SET_COOKIE,
@@ -527,9 +536,7 @@ pub(crate) async fn do_join_room(
     }
 
     // Store system message in MongoDB
-    let msg_collection = state
-        .db
-        .collection::<mongodb::bson::Document>("messages");
+    let msg_collection = state.db.collection::<mongodb::bson::Document>("messages");
     if let Ok(doc) = mongodb::bson::to_document(&sys_event) {
         let _ = msg_collection.insert_one(doc).await;
     }
@@ -593,8 +600,10 @@ pub(crate) async fn get_reactions_for_events(
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
-    let mut result: std::collections::HashMap<String, std::collections::HashMap<String, Vec<String>>> =
-        std::collections::HashMap::new();
+    let mut result: std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, Vec<String>>,
+    > = std::collections::HashMap::new();
 
     if event_ids.is_empty() {
         return result;

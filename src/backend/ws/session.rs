@@ -18,7 +18,9 @@ use super::{
     },
 };
 use crate::backend::{
-    helpers::{broadcast_to_room, generate_id, get_user_from_token, now_millis, now_secs, send_to_user},
+    helpers::{
+        broadcast_to_room, generate_id, get_user_from_token, now_millis, now_secs, send_to_user,
+    },
     state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
 use axum::{
@@ -171,7 +173,16 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 .map(|(rid, _)| rid.clone())
                 .collect();
             drop(rm);
-            let (custom_status, presence_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
+            let (
+                custom_status,
+                presence_is_mobile,
+                steam_game,
+                steam_appid,
+                game_session_start,
+                spotify_track,
+                spotify_artist,
+                spotify_album_art,
+            ) = {
                 let up = state.user_presence.read().await;
                 let p = up.get(&user_id);
                 (
@@ -189,8 +200,20 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
             let (avatar_url, about, banner_url, display_name, name_font_url) = {
                 let users_coll = state.db.collection::<UserRecord>("users");
                 match users_coll.find_one(doc! { "_id": &user_id }).await {
-                    Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
-                    _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
+                    Ok(Some(u)) => (
+                        u.avatar_url,
+                        u.about,
+                        u.banner_url,
+                        u.display_name,
+                        u.name_font_url,
+                    ),
+                    _ => (
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ),
                 }
             };
             let event = json!({
@@ -243,7 +266,10 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         loop {
             interval.tick().await;
             if let Some(ref tx) = ping_tx {
-                if tx.send(Message::Ping(Vec::from(b"ping" as &[u8]).into())).is_err() {
+                if tx
+                    .send(Message::Ping(Vec::from(b"ping" as &[u8]).into()))
+                    .is_err()
+                {
                     break;
                 }
             } else {
@@ -319,17 +345,29 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_join" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
 
             // Reject if this user is already in the target channel from another device.
             {
                 let vc = state.voice_channels.read().await;
-                if vc.get(channel_id).map(|ch| ch.contains_key(user_id)).unwrap_or(false) {
-                    send_to_user(&state, user_id, &json!({
-                        "type": "error",
-                        "error": "already_in_channel",
-                        "message": "You are already in this voice channel on another device"
-                    })).await;
+                if vc
+                    .get(channel_id)
+                    .map(|ch| ch.contains_key(user_id))
+                    .unwrap_or(false)
+                {
+                    send_to_user(
+                        &state,
+                        user_id,
+                        &json!({
+                            "type": "error",
+                            "error": "already_in_channel",
+                            "message": "You are already in this voice channel on another device"
+                        }),
+                    )
+                    .await;
                     return;
                 }
             }
@@ -349,7 +387,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         }
                     }
                 }
-                let chan_vc = vc.entry(channel_id.to_string()).or_insert_with(HashMap::new);
+                let chan_vc = vc
+                    .entry(channel_id.to_string())
+                    .or_insert_with(HashMap::new);
                 let channel_was_empty = chan_vc.is_empty();
                 chan_vc.insert(
                     user_id.to_string(),
@@ -369,10 +409,20 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as u64;
-                state.voice_channel_occupied_since.write().await.insert(channel_id.to_string(), now_ms);
+                state
+                    .voice_channel_occupied_since
+                    .write()
+                    .await
+                    .insert(channel_id.to_string(), now_ms);
                 now_ms
             } else {
-                state.voice_channel_occupied_since.read().await.get(channel_id).copied().unwrap_or(0)
+                state
+                    .voice_channel_occupied_since
+                    .read()
+                    .await
+                    .get(channel_id)
+                    .copied()
+                    .unwrap_or(0)
             };
 
             // Teardowns and broadcasts happen after the lock is released
@@ -461,12 +511,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
         }
         "voice_leave" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             let result = {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
                     chan_vc.remove(user_id).map(|member| {
-                        (chan_vc.keys().cloned().collect::<Vec<_>>(), member.screen_sharing)
+                        (
+                            chan_vc.keys().cloned().collect::<Vec<_>>(),
+                            member.screen_sharing,
+                        )
                     })
                 } else {
                     None
@@ -486,10 +542,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 
                 // Clear occupied_since when channel empties
                 let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
-                    state.voice_channel_occupied_since.write().await.remove(channel_id);
+                    state
+                        .voice_channel_occupied_since
+                        .write()
+                        .await
+                        .remove(channel_id);
                     None
                 } else {
-                    state.voice_channel_occupied_since.read().await.get(channel_id).copied()
+                    state
+                        .voice_channel_occupied_since
+                        .read()
+                        .await
+                        .get(channel_id)
+                        .copied()
                 };
 
                 let event = json!({
@@ -529,7 +594,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_mute" => {
             let muted = msg.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
@@ -548,8 +616,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_deafen" => {
-            let deafened = msg.get("deafened").and_then(|v| v.as_bool()).unwrap_or(false);
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let deafened = msg
+                .get("deafened")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
@@ -568,7 +642,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_start" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
@@ -586,7 +663,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "screen_share_stop" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
@@ -606,7 +686,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "screen_webrtc_publish_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let ch_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             handle_screen_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
         }
         "screen_webrtc_publish_candidate" => {
@@ -654,7 +737,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
         }
         "webcam_share_start" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             let event = json!({
                 "type": "webcam_share_started",
                 "room_id": room_id,
@@ -664,7 +750,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             broadcast_to_room(&state, room_id, &event).await;
         }
         "webcam_share_stop" => {
-            let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             let _ = teardown_webcam_publisher(&state, user_id).await;
             let event = json!({
                 "type": "webcam_share_stopped",
@@ -676,7 +765,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "webcam_webrtc_publish_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let ch_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             handle_webcam_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
         }
         "webcam_webrtc_publish_candidate" => {
@@ -725,7 +817,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "voice_webrtc_publish_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or(room_id);
+            let ch_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
             handle_voice_webrtc_publish_offer(state.clone(), user_id, room_id, ch_id, sdp).await;
         }
         "voice_webrtc_publish_candidate" => {
@@ -771,22 +866,60 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .to_string();
             // Persist to MongoDB
             let users_coll = state.db.collection::<UserRecord>("users");
-            let _ = users_coll.update_one(
-                doc! { "_id": user_id },
-                doc! { "$set": { "custom_status": &custom_status } },
-            ).await;
-            let (effective_status, p_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
+            let _ = users_coll
+                .update_one(
+                    doc! { "_id": user_id },
+                    doc! { "$set": { "custom_status": &custom_status } },
+                )
+                .await;
+            let (
+                effective_status,
+                p_is_mobile,
+                steam_game,
+                steam_appid,
+                game_session_start,
+                spotify_track,
+                spotify_artist,
+                spotify_album_art,
+            ) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = custom_status.clone();
                     let eff = match &p.manual_status {
                         Some(ms) => ms.clone(),
-                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                        None => {
+                            if now_secs() - p.last_active < 300.0 {
+                                "active".to_string()
+                            } else {
+                                "idle".to_string()
+                            }
+                        }
                     };
-                    (eff, p.is_mobile, p.steam_game.clone(), p.steam_appid.clone(), p.game_session_start, p.spotify_track.clone(), p.spotify_artist.clone(), p.spotify_album_art.clone())
-                } else { ("active".to_string(), false, None, None, None, None, None, None) }
+                    (
+                        eff,
+                        p.is_mobile,
+                        p.steam_game.clone(),
+                        p.steam_appid.clone(),
+                        p.game_session_start,
+                        p.spotify_track.clone(),
+                        p.spotify_artist.clone(),
+                        p.spotify_album_art.clone(),
+                    )
+                } else {
+                    (
+                        "active".to_string(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
             };
-            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
+            let (avatar_url, about, banner_url, display_name, name_font_url) =
+                get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -817,35 +950,81 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
         }
         "set_status" => {
-            let manual_status = msg.get("status").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let manual_status = msg
+                .get("status")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             // Persist to MongoDB
             let users_coll = state.db.collection::<UserRecord>("users");
             match &manual_status {
                 Some(ms) => {
-                    let _ = users_coll.update_one(
-                        doc! { "_id": user_id },
-                        doc! { "$set": { "manual_status": ms } },
-                    ).await;
+                    let _ = users_coll
+                        .update_one(
+                            doc! { "_id": user_id },
+                            doc! { "$set": { "manual_status": ms } },
+                        )
+                        .await;
                 }
                 None => {
-                    let _ = users_coll.update_one(
-                        doc! { "_id": user_id },
-                        doc! { "$unset": { "manual_status": "" } },
-                    ).await;
+                    let _ = users_coll
+                        .update_one(
+                            doc! { "_id": user_id },
+                            doc! { "$unset": { "manual_status": "" } },
+                        )
+                        .await;
                 }
             }
-            let (effective_status, custom_status, p_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
+            let (
+                effective_status,
+                custom_status,
+                p_is_mobile,
+                steam_game,
+                steam_appid,
+                game_session_start,
+                spotify_track,
+                spotify_artist,
+                spotify_album_art,
+            ) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.manual_status = manual_status;
                     let eff = match &p.manual_status {
                         Some(ms) => ms.clone(),
-                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                        None => {
+                            if now_secs() - p.last_active < 300.0 {
+                                "active".to_string()
+                            } else {
+                                "idle".to_string()
+                            }
+                        }
                     };
-                    (eff, p.custom_status.clone(), p.is_mobile, p.steam_game.clone(), p.steam_appid.clone(), p.game_session_start, p.spotify_track.clone(), p.spotify_artist.clone(), p.spotify_album_art.clone())
-                } else { ("active".to_string(), String::new(), false, None, None, None, None, None, None) }
+                    (
+                        eff,
+                        p.custom_status.clone(),
+                        p.is_mobile,
+                        p.steam_game.clone(),
+                        p.steam_appid.clone(),
+                        p.game_session_start,
+                        p.spotify_track.clone(),
+                        p.spotify_artist.clone(),
+                        p.spotify_album_art.clone(),
+                    )
+                } else {
+                    (
+                        "active".to_string(),
+                        String::new(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
             };
-            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
+            let (avatar_url, about, banner_url, display_name, name_font_url) =
+                get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -896,20 +1075,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             if !update_doc.is_empty() {
                 let users_coll = state.db.collection::<UserRecord>("users");
                 let _ = users_coll
-                    .update_one(
-                        doc! { "_id": user_id },
-                        doc! { "$set": update_doc },
-                    )
+                    .update_one(doc! { "_id": user_id }, doc! { "$set": update_doc })
                     .await;
             }
 
             // Update custom_status in PresenceRecord and MongoDB if provided
             if let Some(cs) = msg.get("custom_status").and_then(|v| v.as_str()) {
                 let users_coll2 = state.db.collection::<UserRecord>("users");
-                let _ = users_coll2.update_one(
-                    doc! { "_id": user_id },
-                    doc! { "$set": { "custom_status": cs } },
-                ).await;
+                let _ = users_coll2
+                    .update_one(
+                        doc! { "_id": user_id },
+                        doc! { "$set": { "custom_status": cs } },
+                    )
+                    .await;
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = cs.to_string();
@@ -917,16 +1095,55 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             }
 
             // Read current values for broadcast
-            let (avatar_url, about, banner_url, display_name, name_font_url) = get_user_profile(&state, user_id).await;
-            let (custom_status, effective_status, p_is_mobile, steam_game, steam_appid, game_session_start, spotify_track, spotify_artist, spotify_album_art) = {
+            let (avatar_url, about, banner_url, display_name, name_font_url) =
+                get_user_profile(&state, user_id).await;
+            let (
+                custom_status,
+                effective_status,
+                p_is_mobile,
+                steam_game,
+                steam_appid,
+                game_session_start,
+                spotify_track,
+                spotify_artist,
+                spotify_album_art,
+            ) = {
                 let up = state.user_presence.read().await;
                 if let Some(p) = up.get(user_id) {
                     let eff = match &p.manual_status {
                         Some(ms) => ms.clone(),
-                        None => if now_secs() - p.last_active < 300.0 { "active".to_string() } else { "idle".to_string() },
+                        None => {
+                            if now_secs() - p.last_active < 300.0 {
+                                "active".to_string()
+                            } else {
+                                "idle".to_string()
+                            }
+                        }
                     };
-                    (p.custom_status.clone(), eff, p.is_mobile, p.steam_game.clone(), p.steam_appid.clone(), p.game_session_start, p.spotify_track.clone(), p.spotify_artist.clone(), p.spotify_album_art.clone())
-                } else { (String::new(), "active".to_string(), false, None, None, None, None, None, None) }
+                    (
+                        p.custom_status.clone(),
+                        eff,
+                        p.is_mobile,
+                        p.steam_game.clone(),
+                        p.steam_appid.clone(),
+                        p.game_session_start,
+                        p.spotify_track.clone(),
+                        p.spotify_artist.clone(),
+                        p.spotify_album_art.clone(),
+                    )
+                } else {
+                    (
+                        String::new(),
+                        "active".to_string(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    )
+                }
             };
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
@@ -959,12 +1176,25 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_stroke" => {
             if !room_id.is_empty() {
-                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let tool = msg.get("tool").and_then(|v| v.as_str()).unwrap_or("pen").to_string();
-                let color = msg.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
+                let channel_id = msg
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let tool = msg
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("pen")
+                    .to_string();
+                let color = msg
+                    .get("color")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("#000000")
+                    .to_string();
                 let width = msg.get("width").and_then(|v| v.as_f64()).unwrap_or(2.0);
                 let fill = msg.get("fill").and_then(|v| v.as_bool()).unwrap_or(false);
-                let points: Vec<Vec<f64>> = msg.get("points")
+                let points: Vec<Vec<f64>> = msg
+                    .get("points")
                     .and_then(|v| serde_json::from_value(v.clone()).ok())
                     .unwrap_or_default();
 
@@ -984,7 +1214,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                     timestamp: now,
                 };
 
-                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                let coll = state
+                    .db
+                    .collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
                 let _ = coll.insert_one(&stroke).await;
 
                 let event = json!({
@@ -1007,7 +1239,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_cursor" => {
             if !room_id.is_empty() {
-                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let channel_id = msg
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let x = msg.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let y = msg.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let event = json!({
@@ -1023,9 +1259,17 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_clear" => {
             if !room_id.is_empty() {
-                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
-                let _ = coll.delete_many(doc! { "room_id": room_id, "channel_id": &channel_id }).await;
+                let channel_id = msg
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let coll = state
+                    .db
+                    .collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                let _ = coll
+                    .delete_many(doc! { "room_id": room_id, "channel_id": &channel_id })
+                    .await;
                 let event = json!({
                     "type": "whiteboard_clear",
                     "room_id": room_id,
@@ -1036,12 +1280,24 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "whiteboard_undo" => {
             if !room_id.is_empty() {
-                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let stroke_id = msg.get("stroke_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let channel_id = msg
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let stroke_id = msg
+                    .get("stroke_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if !stroke_id.is_empty() {
-                    let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+                    let coll = state
+                        .db
+                        .collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
                     // Delete by _id + user_id to prevent deleting other users' strokes
-                    let result = coll.delete_one(doc! { "_id": &stroke_id, "user_id": user_id }).await;
+                    let result = coll
+                        .delete_one(doc! { "_id": &stroke_id, "user_id": user_id })
+                        .await;
                     if result.map(|r| r.deleted_count).unwrap_or(0) > 0 {
                         let event = json!({
                             "type": "whiteboard_undo",
@@ -1057,8 +1313,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
         }
         "watchparty_set_video" => {
             if !room_id.is_empty() {
-                let video_url = msg.get("video_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let channel_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let video_url = msg
+                    .get("video_url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let channel_id = msg
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let now = now_secs();
                 {
                     let mut wp = state.watch_party_rooms.write().await;
@@ -1066,15 +1330,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         .get(room_id)
                         .map(|s| s.viewers.clone())
                         .unwrap_or_default();
-                    wp.insert(room_id.to_string(), crate::backend::state::WatchPartyState {
-                        channel_id: channel_id.clone(),
-                        video_url: video_url.clone(),
-                        playing: false,
-                        position_secs: 0.0,
-                        position_updated_at: now,
-                        duration_secs: 0.0,
-                        viewers: previous_viewers,
-                    });
+                    wp.insert(
+                        room_id.to_string(),
+                        crate::backend::state::WatchPartyState {
+                            channel_id: channel_id.clone(),
+                            video_url: video_url.clone(),
+                            playing: false,
+                            position_secs: 0.0,
+                            position_updated_at: now,
+                            duration_secs: 0.0,
+                            viewers: previous_viewers,
+                        },
+                    );
                 }
                 let event = json!({
                     "type": "watchparty_video_changed",
@@ -1088,7 +1355,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 });
                 broadcast_to_room(&state, room_id, &event).await;
 
-                let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
+                let display = user_id
+                    .split(':')
+                    .next()
+                    .unwrap_or(user_id)
+                    .trim_start_matches('@');
                 let body = format!("{} changed the video", display);
                 let mut sys_event = json!({
                     "type": "m.room.message",
@@ -1116,17 +1387,28 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 let (stored_channel_id, prev_playing, prev_pos, prev_updated_at) = {
                     let wp = state.watch_party_rooms.read().await;
                     wp.get(room_id)
-                        .map(|s| (
-                            s.channel_id.clone(),
-                            s.playing,
-                            s.position_secs,
-                            s.position_updated_at,
-                        ))
+                        .map(|s| {
+                            (
+                                s.channel_id.clone(),
+                                s.playing,
+                                s.position_secs,
+                                s.position_updated_at,
+                            )
+                        })
                         .unwrap_or_default()
                 };
-                let playing = msg.get("playing").and_then(|v| v.as_bool()).unwrap_or(false);
-                let position_secs = msg.get("position_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let duration_secs = msg.get("duration_secs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let playing = msg
+                    .get("playing")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let position_secs = msg
+                    .get("position_secs")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let duration_secs = msg
+                    .get("duration_secs")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
                 let now = now_secs();
                 {
                     let mut wp = state.watch_party_rooms.write().await;
@@ -1156,26 +1438,42 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 
                 // Determine action type to send a chat notification
                 let play_state_changed = playing != prev_playing;
-                let expected_pos = if prev_playing { prev_pos + (now - prev_updated_at) } else { prev_pos };
+                let expected_pos = if prev_playing {
+                    prev_pos + (now - prev_updated_at)
+                } else {
+                    prev_pos
+                };
                 let pos_jumped = (position_secs - expected_pos).abs() > 3.0;
                 let is_seek = !play_state_changed && pos_jumped;
                 let is_heartbeat = !play_state_changed && !pos_jumped;
 
                 if !is_heartbeat {
-                    let display = user_id.split(':').next().unwrap_or(user_id).trim_start_matches('@');
+                    let display = user_id
+                        .split(':')
+                        .next()
+                        .unwrap_or(user_id)
+                        .trim_start_matches('@');
                     let fmt_time = |secs: f64| -> String {
                         let total = secs as u64;
                         let h = total / 3600;
                         let m = (total % 3600) / 60;
                         let s = total % 60;
-                        if h > 0 { format!("{}:{:02}:{:02}", h, m, s) } else { format!("{}:{:02}", m, s) }
+                        if h > 0 {
+                            format!("{}:{:02}:{:02}", h, m, s)
+                        } else {
+                            format!("{}:{:02}", m, s)
+                        }
                     };
                     let body = if is_seek {
                         format!("{} skipped to {}", display, fmt_time(position_secs))
                     } else if playing {
                         format!("{} resumed the video", display)
                     } else {
-                        format!("{} paused the video at {}", display, fmt_time(position_secs))
+                        format!(
+                            "{} paused the video at {}",
+                            display,
+                            fmt_time(position_secs)
+                        )
                     };
                     let mut sys_event = json!({
                         "type": "m.room.message",
@@ -1263,14 +1561,22 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             // User clicked a button or used a select on a bot embed.
             // Validate the user is in the room, then broadcast to room so the bot receives it.
             let event_id = msg.get("event_id").and_then(|v| v.as_str()).unwrap_or("");
-            let component_id = msg.get("component_id").and_then(|v| v.as_str()).unwrap_or("");
-            let component_type = msg.get("component_type").and_then(|v| v.as_str()).unwrap_or("button");
+            let component_id = msg
+                .get("component_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let component_type = msg
+                .get("component_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("button");
             let values = msg.get("values").cloned().unwrap_or(json!([]));
 
             if !event_id.is_empty() && !component_id.is_empty() && !room_id.is_empty() {
                 let in_room = {
                     let rm = state.room_members.read().await;
-                    rm.get(room_id).map(|m| m.contains(&user_id.to_string())).unwrap_or(false)
+                    rm.get(room_id)
+                        .map(|m| m.contains(&user_id.to_string()))
+                        .unwrap_or(false)
                 };
                 if in_room {
                     let interaction_event = json!({
@@ -1292,11 +1598,26 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 }
 
 /// Helper to get user avatar_url, about, banner_url, and display_name from MongoDB.
-async fn get_user_profile(state: &AppState, user_id: &str) -> (String, String, String, String, String) {
+async fn get_user_profile(
+    state: &AppState,
+    user_id: &str,
+) -> (String, String, String, String, String) {
     let users_coll = state.db.collection::<UserRecord>("users");
     match users_coll.find_one(doc! { "_id": user_id }).await {
-        Ok(Some(u)) => (u.avatar_url, u.about, u.banner_url, u.display_name, u.name_font_url),
-        _ => (String::new(), String::new(), String::new(), String::new(), String::new()),
+        Ok(Some(u)) => (
+            u.avatar_url,
+            u.about,
+            u.banner_url,
+            u.display_name,
+            u.name_font_url,
+        ),
+        _ => (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        ),
     }
 }
 
@@ -1382,10 +1703,19 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
     for (room_or_channel_id, was_screen_sharing, voice_members) in voice_rooms {
         // Clear occupied_since if channel is now empty
         let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
-            state.voice_channel_occupied_since.write().await.remove(&room_or_channel_id);
+            state
+                .voice_channel_occupied_since
+                .write()
+                .await
+                .remove(&room_or_channel_id);
             None
         } else {
-            state.voice_channel_occupied_since.read().await.get(&room_or_channel_id).copied()
+            state
+                .voice_channel_occupied_since
+                .read()
+                .await
+                .get(&room_or_channel_id)
+                .copied()
         };
 
         let event = json!({

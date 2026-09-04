@@ -117,10 +117,7 @@ pub(crate) async fn get_reactions(
     })))
 }
 
-async fn get_reactions_for_event(
-    state: &AppState,
-    event_id: &str,
-) -> HashMap<String, Vec<String>> {
+async fn get_reactions_for_event(state: &AppState, event_id: &str) -> HashMap<String, Vec<String>> {
     let react_coll = state.db.collection::<ReactionRecord>("reactions");
     let mut reactions: HashMap<String, Vec<String>> = HashMap::new();
 

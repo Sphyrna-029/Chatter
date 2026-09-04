@@ -58,7 +58,9 @@ pub(crate) async fn get_strokes(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let _user_id = validate_whiteboard_member(&state, &headers, &room_id).await?;
 
-    let coll = state.db.collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
+    let coll = state
+        .db
+        .collection::<WhiteboardStrokeRecord>("whiteboard_strokes");
     let mut strokes: Vec<Value> = Vec::new();
 
     if let Ok(mut cursor) = coll

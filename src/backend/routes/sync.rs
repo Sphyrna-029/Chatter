@@ -1,7 +1,13 @@
 use super::super::{
     dto::SyncQuery,
-    helpers::{error_response, extract_token, get_allowed_channel_ids, get_reactions_for_events, get_user_from_token},
-    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomMemberRecord, RoomRecord, UserRecord},
+    helpers::{
+        error_response, extract_token, get_allowed_channel_ids, get_reactions_for_events,
+        get_user_from_token,
+    },
+    state::{
+        AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomMemberRecord, RoomRecord,
+        UserRecord,
+    },
 };
 use axum::{
     extract::{Query, State},
@@ -101,7 +107,8 @@ pub(crate) async fn sync(
         }
 
         // Build a map of display_names for members in this room
-        let mut member_display_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut member_display_names: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for mid in members {
             if let Ok(Some(u)) = users_coll.find_one(doc! { "_id": mid }).await {
                 if !u.display_name.is_empty() {
@@ -112,11 +119,9 @@ pub(crate) async fn sync(
 
         // Fetch joined_at timestamps from MongoDB
         let member_records_coll = state.db.collection::<RoomMemberRecord>("room_members");
-        let mut joined_at_map: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
-        if let Ok(mut cursor) = member_records_coll
-            .find(doc! { "room_id": room_id })
-            .await
-        {
+        let mut joined_at_map: std::collections::HashMap<String, i64> =
+            std::collections::HashMap::new();
+        if let Ok(mut cursor) = member_records_coll.find(doc! { "room_id": room_id }).await {
             while let Ok(Some(rec)) = cursor.try_next().await {
                 if rec.joined_at != 0 {
                     joined_at_map.insert(rec.user_id, rec.joined_at);
@@ -127,7 +132,8 @@ pub(crate) async fn sync(
         let member_events: Vec<Value> = members
             .iter()
             .map(|mid| {
-                let display = member_display_names.get(mid)
+                let display = member_display_names
+                    .get(mid)
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| {
                         mid.split(':').next().unwrap_or(mid).trim_start_matches('@')
@@ -275,7 +281,10 @@ pub(crate) async fn sync(
             let dm_rooms_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
             if let Ok(Some(dm_record)) = dm_rooms_coll.find_one(doc! { "room_id": room_id }).await {
                 let streak_coll = state.db.collection::<DmStreakRecord>("dm_streaks");
-                if let Ok(Some(streak)) = streak_coll.find_one(doc! { "_id": &dm_record.user_pair }).await {
+                if let Ok(Some(streak)) = streak_coll
+                    .find_one(doc! { "_id": &dm_record.user_pair })
+                    .await
+                {
                     state_events.push(json!({
                         "type": "m.room.dm_streak",
                         "state_key": "",

@@ -1,6 +1,9 @@
 use super::super::{
     dto::CreateWebhookRequest,
-    helpers::{broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token, now_millis},
+    helpers::{
+        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
+        now_millis,
+    },
     state::{AppState, RoomRecord, WebhookRecord},
 };
 use axum::{
@@ -332,9 +335,16 @@ pub(crate) async fn execute_webhook(
     if !webhook.secret.is_empty() {
         if let Some(sig_header) = headers.get("X-Hub-Signature-256") {
             // GitHub-style: X-Hub-Signature-256: sha256=<hex>
-            let sig = sig_header.to_str().unwrap_or("").strip_prefix("sha256=").unwrap_or("");
+            let sig = sig_header
+                .to_str()
+                .unwrap_or("")
+                .strip_prefix("sha256=")
+                .unwrap_or("");
             if !verify_webhook_signature(&webhook.secret, body.as_bytes(), sig) {
-                return Err(error_response(StatusCode::UNAUTHORIZED, "Invalid signature"));
+                return Err(error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid signature",
+                ));
             }
         } else {
             // Generic webhook: require X-Webhook-Secret header
