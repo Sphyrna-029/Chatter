@@ -1032,6 +1032,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
 
   const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
   const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
 
   // Reverse map of custom emoji URL → alias for hover tooltips
   const urlToAlias = useMemo(() => {
@@ -1606,44 +1607,60 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           )}
         </div>
 
-        {/* Action buttons (shown on hover) */}
+        {/* Floating action bubble, revealed on hover over the message */}
         {!isDeleted && (
-          <div className={cn("absolute right-2 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex gap-1", grouped ? "top-0" : "top-1")}>
+          <div
+            className={cn(
+              "absolute right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-md transition-opacity",
+              // Hidden until hover only where hovering is possible; on touch the
+              // bubble stays put inside the message instead of overlapping it.
+              "can-hover:opacity-0 can-hover:group-hover:opacity-100 focus-within:opacity-100",
+              // Overlap the top edge the way Discord does — but only with a real
+              // pointer. A permanently visible bubble on touch must not cover the
+              // message above it. Uses translate, not top, so it cannot collide
+              // with the base offset below.
+              "can-hover:-translate-y-1/2",
+              grouped ? "top-0" : "top-1",
+              // Keep the bubble up while the emoji picker is open — the popover
+              // portals outside the message, so hover would otherwise drop.
+              emojiPickerOpen && "can-hover:opacity-100",
+            )}
+          >
             <Button
               variant="ghost"
               size="icon"
-              className="h-6 w-6"
+              className="h-7 w-7"
               onClick={handleReply}
               title="Reply"
             >
-              <Reply className="h-3.5 w-3.5" />
+              <Reply className="h-4 w-4" />
             </Button>
             {!inThread && !isExternal && message.content.msgtype !== "m.system" && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-7 w-7"
                 onClick={() => openThread(message.event_id)}
                 title="Open thread"
               >
-                <MessagesSquare className="h-3.5 w-3.5" />
+                <MessagesSquare className="h-4 w-4" />
               </Button>
             )}
             {canPin && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-7 w-7"
                 onClick={togglePin}
                 title={isPinned ? "Unpin message" : "Pin message"}
               >
-                {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
               </Button>
             )}
-            {!disableReactions && <Popover>
+            {!disableReactions && <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
               <PopoverTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6">
-                  <SmilePlus className="h-3.5 w-3.5" />
+                <Button variant="ghost" size="icon" className="h-7 w-7" title="Add reaction">
+                  <SmilePlus className="h-4 w-4" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
@@ -1671,25 +1688,26 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6"
+                className="h-7 w-7"
                 onClick={() => setIsEditing(true)}
                 title="Edit"
               >
-                <Pencil className="h-3.5 w-3.5" />
+                <Pencil className="h-4 w-4" />
               </Button>
             )}
             {(isOwn || canDeleteOthers) && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 text-destructive hover:text-destructive"
+                className="h-7 w-7 text-destructive hover:text-destructive"
+                title="Delete"
                 onClick={async () => {
                   if (await confirm({ title: "Delete this message?", confirmLabel: "Delete", destructive: true })) {
                     deleteMessage(message.event_id);
                   }
                 }}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-4 w-4" />
               </Button>
             )}
           </div>
