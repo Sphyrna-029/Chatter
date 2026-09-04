@@ -96,6 +96,8 @@ pub(crate) struct MessagesQuery {
 #[derive(Deserialize)]
 pub(crate) struct PinsQuery {
     pub(crate) channel_id: Option<String>,
+    pub(crate) limit: Option<i64>,
+    pub(crate) offset: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -155,6 +157,7 @@ pub(crate) struct SearchQuery {
     pub(crate) q: String,
     pub(crate) filter: Option<String>,
     pub(crate) limit: Option<i64>,
+    pub(crate) offset: Option<u64>,
     pub(crate) file_type: Option<String>,
     pub(crate) channel_id: Option<String>,
     pub(crate) no_channel_only: Option<bool>,
@@ -264,6 +267,8 @@ pub(crate) struct ThreadListQuery {
     pub(crate) q: Option<String>,
     pub(crate) channel_id: Option<String>,
     pub(crate) no_channel_only: Option<bool>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) offset: Option<usize>,
 }
 
 #[derive(Deserialize)]

@@ -143,15 +143,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       searchTimerRef.current = setTimeout(async () => {
         dispatch({ type: "SET_SEARCH", payload: { loading: true } });
         try {
-          const results = await apiGetRoomThreads(
+          const page = await apiGetRoomThreads(
             state.currentRoomId!,
             query.trim() || undefined,
             searchChannelId,
             searchNoChannelOnly
           );
-          dispatch({ type: "SET_SEARCH", payload: { results } });
+          dispatch({
+            type: "SET_SEARCH",
+            payload: { results: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+          });
         } catch {
-          dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+          dispatch({ type: "SET_SEARCH", payload: { results: [], hasMore: false, nextOffset: 0 } });
         } finally {
           dispatch({ type: "SET_SEARCH", payload: { loading: false } });
         }
@@ -160,14 +163,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     if (filter !== "file" && !query.trim()) {
-      dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+      dispatch({ type: "SET_SEARCH", payload: { results: [], hasMore: false, nextOffset: 0 } });
       return;
     }
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     searchTimerRef.current = setTimeout(async () => {
       dispatch({ type: "SET_SEARCH", payload: { loading: true } });
       try {
-        const results = await apiSearchMessages(
+        const page = await apiSearchMessages(
           state.currentRoomId!,
           query.trim(),
           filter,
@@ -175,9 +178,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           searchChannelId,
           searchNoChannelOnly
         );
-        dispatch({ type: "SET_SEARCH", payload: { results } });
+        dispatch({
+          type: "SET_SEARCH",
+          payload: { results: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+        });
       } catch {
-        dispatch({ type: "SET_SEARCH", payload: { results: [] } });
+        dispatch({ type: "SET_SEARCH", payload: { results: [], hasMore: false, nextOffset: 0 } });
       } finally {
         dispatch({ type: "SET_SEARCH", payload: { loading: false } });
       }
@@ -616,10 +622,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       // Load pinned messages for the channel we landed on
       try {
-        const pinData = await apiGetPins(roomId, selectedChannelId);
-        dispatch({ type: "SET_PINNED_MESSAGES", payload: pinData.pins || [] });
+        const page = await apiGetPins(roomId, selectedChannelId);
+        dispatch({
+          type: "SET_PINNED_MESSAGES",
+          payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+        });
       } catch {
-        dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
+        dispatch({
+          type: "SET_PINNED_MESSAGES",
+          payload: { pins: [], hasMore: false, nextOffset: 0 },
+        });
       }
       // Load members
       const syncData = await apiSync();
@@ -768,10 +780,80 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const cur = stateRef.current;
     if (!cur.currentRoomId) return;
     try {
-      const data = await apiGetPins(cur.currentRoomId, cur.currentChannelId || undefined);
-      dispatch({ type: "SET_PINNED_MESSAGES", payload: data.pins || [] });
+      const page = await apiGetPins(cur.currentRoomId, cur.currentChannelId || undefined);
+      dispatch({
+        type: "SET_PINNED_MESSAGES",
+        payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+      });
     } catch {
-      dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
+      dispatch({
+        type: "SET_PINNED_MESSAGES",
+        payload: { pins: [], hasMore: false, nextOffset: 0 },
+      });
+    }
+  }, []);
+
+  const loadMorePins = useCallback(async () => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId || !cur.pinsHasMore || cur.loadingMorePins) return;
+    dispatch({ type: "SET_LOADING_MORE_PINS", payload: true });
+    try {
+      const page = await apiGetPins(
+        cur.currentRoomId,
+        cur.currentChannelId || undefined,
+        cur.pinsNextOffset,
+      );
+      dispatch({
+        type: "APPEND_PINNED_MESSAGES",
+        payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+      });
+    } catch {
+      dispatch({ type: "SET_LOADING_MORE_PINS", payload: false });
+    }
+  }, []);
+
+  const loadMoreSearchResults = useCallback(async () => {
+    const cur = stateRef.current;
+    const { open, query, filter, fileTypeFilter, thisChannel, hasMore, loadingMore, nextOffset } =
+      cur.search;
+    if (!open || !cur.currentRoomId || !hasMore || loadingMore) return;
+
+    let searchChannelId: string | undefined;
+    let searchNoChannelOnly: boolean | undefined;
+    if (thisChannel) {
+      if (cur.currentChannelId) {
+        searchChannelId = cur.currentChannelId;
+      } else {
+        searchNoChannelOnly = true;
+      }
+    }
+
+    dispatch({ type: "SET_SEARCH", payload: { loadingMore: true } });
+    try {
+      const page =
+        filter === "thread"
+          ? await apiGetRoomThreads(
+              cur.currentRoomId,
+              query.trim() || undefined,
+              searchChannelId,
+              searchNoChannelOnly,
+              nextOffset,
+            )
+          : await apiSearchMessages(
+              cur.currentRoomId,
+              query.trim(),
+              filter,
+              fileTypeFilter,
+              searchChannelId,
+              searchNoChannelOnly,
+              nextOffset,
+            );
+      dispatch({
+        type: "APPEND_SEARCH_RESULTS",
+        payload: { results: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+      });
+    } catch {
+      dispatch({ type: "SET_SEARCH", payload: { loadingMore: false } });
     }
   }, []);
 
@@ -946,10 +1028,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
     try {
-      const pinData = await apiGetPins(cur.currentRoomId, channelId);
-      dispatch({ type: "SET_PINNED_MESSAGES", payload: pinData.pins || [] });
+      const page = await apiGetPins(cur.currentRoomId, channelId);
+      dispatch({
+        type: "SET_PINNED_MESSAGES",
+        payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+      });
     } catch {
-      dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
+      dispatch({
+        type: "SET_PINNED_MESSAGES",
+        payload: { pins: [], hasMore: false, nextOffset: 0 },
+      });
     }
   }, []);
 
@@ -1206,6 +1294,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       addReaction,
       loadPins,
+      loadMorePins,
+      loadMoreSearchResults,
       pinMessage,
       unpinMessage,
       createRoom,
@@ -1254,7 +1344,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

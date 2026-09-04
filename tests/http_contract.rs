@@ -620,3 +620,156 @@ async fn pin_contract_permissions_broadcast_and_redaction_cleanup() {
         .unwrap();
     assert_eq!(unpin_missing.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn pin_and_search_pagination_contract() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Paging",
+        None,
+        false,
+    )
+    .await;
+
+    // Five messages, all pinned, all matching the same search term.
+    let mut event_ids = Vec::new();
+    for i in 0..5 {
+        let send = client
+            .put(format!(
+                "{}/_matrix/client/r0/rooms/{}/send/m.room.message/page-txn{}",
+                server.base_url, room_id, i
+            ))
+            .header("authorization", bearer(&alice_token))
+            .json(&json!({"msgtype": "m.text", "body": format!("needle {}", i)}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(send.status(), StatusCode::OK);
+        let event_id = send.json::<Value>().await.unwrap()["event_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let pinned = client
+            .post(format!(
+                "{}/api/rooms/{}/pins/{}",
+                server.base_url, room_id, event_id
+            ))
+            .header("authorization", bearer(&alice_token))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(pinned.status(), StatusCode::OK);
+        event_ids.push(event_id);
+    }
+
+    let channel_id = client
+        .get(format!(
+            "{}/_matrix/client/r0/rooms/{}/messages?limit=20",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["chunk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["event_id"].as_str() == Some(event_ids[0].as_str()))
+        .and_then(|event| event["channel_id"].as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // ── Pins page through, newest pin first, without repeating a row ──
+    let fetch_pins = |offset: u64| {
+        let client = client.clone();
+        let base_url = server.base_url.clone();
+        let room_id = room_id.clone();
+        let channel_id = channel_id.clone();
+        let token = alice_token.clone();
+        async move {
+            client
+                .get(format!(
+                    "{}/api/rooms/{}/pins?channel_id={}&limit=2&offset={}",
+                    base_url, room_id, channel_id, offset
+                ))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+
+    let first = fetch_pins(0).await;
+    assert_eq!(first["pins"].as_array().unwrap().len(), 2);
+    assert_eq!(first["has_more"], true);
+    assert_eq!(first["next_offset"], 2);
+    // Newest pin first: the last message pinned leads the list.
+    assert_eq!(first["pins"][0]["event_id"], event_ids[4]);
+
+    let second = fetch_pins(first["next_offset"].as_u64().unwrap()).await;
+    assert_eq!(second["pins"].as_array().unwrap().len(), 2);
+    assert_eq!(second["has_more"], true);
+    assert_eq!(second["pins"][0]["event_id"], event_ids[2]);
+
+    let third = fetch_pins(second["next_offset"].as_u64().unwrap()).await;
+    assert_eq!(third["pins"].as_array().unwrap().len(), 1);
+    assert_eq!(third["has_more"], false);
+    assert_eq!(third["pins"][0]["event_id"], event_ids[0]);
+
+    // ── Search pages the same way ──
+    let search_page = |offset: u64| {
+        let client = client.clone();
+        let base_url = server.base_url.clone();
+        let room_id = room_id.clone();
+        let token = alice_token.clone();
+        async move {
+            client
+                .get(format!(
+                    "{}/api/rooms/{}/search?q=needle&filter=all&limit=3&offset={}",
+                    base_url, room_id, offset
+                ))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()
+        }
+    };
+
+    let page_one = search_page(0).await;
+    assert_eq!(page_one["results"].as_array().unwrap().len(), 3);
+    assert_eq!(page_one["has_more"], true);
+    assert_eq!(page_one["next_offset"], 3);
+
+    let page_two = search_page(3).await;
+    assert_eq!(page_two["results"].as_array().unwrap().len(), 2);
+    assert_eq!(page_two["has_more"], false);
+
+    // The two pages must not overlap.
+    let ids_one: Vec<&str> = page_one["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["event_id"].as_str().unwrap())
+        .collect();
+    for msg in page_two["results"].as_array().unwrap() {
+        assert!(!ids_one.contains(&msg["event_id"].as_str().unwrap()));
+    }
+}

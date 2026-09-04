@@ -1313,7 +1313,9 @@ pub(crate) async fn get_room_threads(
         .collect();
 
     if thread_ids.is_empty() {
-        return Ok(Json(json!({ "threads": [] })));
+        return Ok(Json(
+            json!({ "threads": [], "has_more": false, "next_offset": 0 }),
+        ));
     }
 
     // Fetch the root messages for those thread ids
@@ -1420,7 +1422,19 @@ pub(crate) async fn get_room_threads(
         }
     }
 
-    Ok(Json(json!({ "threads": root_msgs })))
+    // Threads are filtered in memory above, so the page is taken at the end.
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
+    let total = root_msgs.len();
+    let page: Vec<Value> = root_msgs.into_iter().skip(offset).take(limit).collect();
+    let next_offset = offset.saturating_add(page.len());
+    let has_more = next_offset < total;
+
+    Ok(Json(json!({
+        "threads": page,
+        "has_more": has_more,
+        "next_offset": next_offset
+    })))
 }
 
 pub(crate) async fn search_messages(
@@ -1448,7 +1462,8 @@ pub(crate) async fn search_messages(
         }
     }
 
-    let limit = query.limit.unwrap_or(50).min(100);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = query.offset.unwrap_or(0);
     let filter = query.filter.as_deref().unwrap_or("all");
     let q = &query.q;
 
@@ -1542,10 +1557,12 @@ pub(crate) async fn search_messages(
     };
 
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    // Fetch one past the page so `has_more` costs no extra count query.
     let mut cursor = msg_coll
         .find(mongo_filter)
         .sort(doc! { "origin_server_ts": -1 })
-        .limit(limit)
+        .skip(offset)
+        .limit(limit + 1)
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
 
@@ -1558,5 +1575,13 @@ pub(crate) async fn search_messages(
         }
     }
 
-    Ok(Json(json!({ "results": results })))
+    let has_more = results.len() as i64 > limit;
+    results.truncate(limit as usize);
+    let next_offset = offset + results.len() as u64;
+
+    Ok(Json(json!({
+        "results": results,
+        "has_more": has_more,
+        "next_offset": next_offset
+    })))
 }

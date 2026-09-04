@@ -46,6 +46,9 @@ export function reducer(state: AppState, action: Action): AppState {
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
         pinnedMessages: [],
+        pinsHasMore: false,
+        pinsNextOffset: 0,
+        loadingMorePins: false,
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
@@ -84,15 +87,42 @@ export function reducer(state: AppState, action: Action): AppState {
         pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
       };
     case "SET_PINNED_MESSAGES":
-      return { ...state, pinnedMessages: action.payload };
+      return {
+        ...state,
+        pinnedMessages: action.payload.pins,
+        pinsHasMore: action.payload.hasMore,
+        pinsNextOffset: action.payload.nextOffset,
+        loadingMorePins: false,
+      };
+    case "APPEND_PINNED_MESSAGES": {
+      const seen = new Set(state.pinnedMessages.map((m) => m.event_id));
+      const fresh = action.payload.pins.filter((m) => !seen.has(m.event_id));
+      return {
+        ...state,
+        pinnedMessages: [...state.pinnedMessages, ...fresh],
+        pinsHasMore: action.payload.hasMore,
+        pinsNextOffset: action.payload.nextOffset,
+        loadingMorePins: false,
+      };
+    }
+    case "SET_LOADING_MORE_PINS":
+      return { ...state, loadingMorePins: action.payload };
     case "ADD_PINNED_MESSAGE":
       if (state.pinnedMessages.some((m) => m.event_id === action.payload.event_id)) return state;
-      return { ...state, pinnedMessages: [action.payload, ...state.pinnedMessages] };
-    case "REMOVE_PINNED_MESSAGE":
+      return {
+        ...state,
+        pinnedMessages: [action.payload, ...state.pinnedMessages],
+        // The new pin sorts above the loaded page, pushing everything down one.
+        pinsNextOffset: state.pinsNextOffset + 1,
+      };
+    case "REMOVE_PINNED_MESSAGE": {
+      if (!state.pinnedMessages.some((m) => m.event_id === action.payload)) return state;
       return {
         ...state,
         pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
+        pinsNextOffset: Math.max(0, state.pinsNextOffset - 1),
       };
+    }
     case "EDIT_MESSAGE":
       return {
         ...state,
@@ -252,7 +282,22 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_SEARCH":
       return { ...state, search: { ...state.search, ...action.payload } };
     case "CLOSE_SEARCH":
-      return { ...state, search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false } };
+      return { ...state, search: { ...initialState.search } };
+    case "APPEND_SEARCH_RESULTS": {
+      // Dedupe: a message pinned or posted between pages can shift the window.
+      const seen = new Set(state.search.results.map((m) => m.event_id));
+      const fresh = action.payload.results.filter((m) => !seen.has(m.event_id));
+      return {
+        ...state,
+        search: {
+          ...state.search,
+          results: [...state.search.results, ...fresh],
+          hasMore: action.payload.hasMore,
+          nextOffset: action.payload.nextOffset,
+          loadingMore: false,
+        },
+      };
+    }
     case "SET_MENTION":
       return {
         ...state,
@@ -547,6 +592,9 @@ export function reducer(state: AppState, action: Action): AppState {
         oldestMessageIndex: null,
         loadingOlderMessages: false,
         pinnedMessages: [],
+        pinsHasMore: false,
+        pinsNextOffset: 0,
+        loadingMorePins: false,
       };
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;

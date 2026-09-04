@@ -20,10 +20,10 @@ use std::sync::Arc;
 /// scannable and the list query cheap.
 const MAX_PINS_PER_CHANNEL: u64 = 50;
 
-/// GET /api/rooms/{room_id}/pins?channel_id=...
+/// GET /api/rooms/{room_id}/pins?channel_id=&limit=&offset=
 ///
-/// Returns the pinned messages of one channel (or of the room's channel-less
-/// feed when `channel_id` is omitted), newest pin first.
+/// Returns a page of the pinned messages of one channel (or of the room's
+/// channel-less feed when `channel_id` is omitted), newest pin first.
 pub(crate) async fn list_pins(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
@@ -40,10 +40,19 @@ pub(crate) async fn list_pins(
     let channel_id = query.channel_id.unwrap_or_default();
     require_channel_access(&state, &room_id, &user_id, &channel_id).await?;
 
+    let limit = query
+        .limit
+        .unwrap_or(25)
+        .clamp(1, MAX_PINS_PER_CHANNEL as i64);
+    let offset = query.offset.unwrap_or(0);
+
     let pins_coll = state.db.collection::<PinRecord>("pins");
+    // One past the page tells us whether another page exists without a count.
     let mut cursor = pins_coll
         .find(doc! { "room_id": &room_id, "channel_id": &channel_id })
         .sort(doc! { "pinned_at": -1 })
+        .skip(offset)
+        .limit(limit + 1)
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
 
@@ -52,6 +61,12 @@ pub(crate) async fn list_pins(
         records.push(record);
     }
 
+    let has_more = records.len() as i64 > limit;
+    records.truncate(limit as usize);
+    // Hydration drops pins whose message is gone, so the next page has to
+    // resume from the records consumed, not from the rows returned.
+    let next_offset = offset + records.len() as u64;
+
     let mut pins: Vec<Value> = Vec::new();
     for record in records {
         if let Some(message) = load_pinned_message(&state, &room_id, &record).await {
@@ -59,7 +74,11 @@ pub(crate) async fn list_pins(
         }
     }
 
-    Ok(Json(json!({ "pins": pins })))
+    Ok(Json(json!({
+        "pins": pins,
+        "has_more": has_more,
+        "next_offset": next_offset
+    })))
 }
 
 /// POST /api/rooms/{room_id}/pins/{event_id}

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Search, X, Image, Film, Music, FileText, MessageSquare, AtSign, Pin, PinOff } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { apiSearchMessages, type MatrixMessage } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 import { MessageItem } from "./MessageItem";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,20 +46,59 @@ function isGrouped(msg: MatrixMessage, prev: MatrixMessage | undefined) {
   );
 }
 
+/** Footer control for a paged list: a load-more button, or nothing when the
+ *  list is complete. */
+function LoadMore({
+  hasMore,
+  loading,
+  onLoadMore,
+}: {
+  hasMore: boolean;
+  loading: boolean;
+  onLoadMore: () => void;
+}) {
+  if (!hasMore) return null;
+  return (
+    <div className="flex justify-center px-2 py-3">
+      <Button variant="outline" size="sm" className="h-7 text-xs" disabled={loading} onClick={onLoadMore}>
+        {loading ? (
+          <>
+            <Loader2 className="h-3 w-3 animate-spin" />
+            Loading...
+          </>
+        ) : (
+          "Load more"
+        )}
+      </Button>
+    </div>
+  );
+}
+
 /**
  * The right-hand companion panel for search, mentions, and pins. It sits beside
  * the timeline rather than replacing it, so a pinned message or search hit can
  * be read while the conversation stays on screen.
  */
 export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
-  const { state, dispatch, loadPins, unpinMessage, openThread } = useAppContext();
+  const {
+    state,
+    dispatch,
+    loadPins,
+    loadMorePins,
+    loadMoreSearchResults,
+    unpinMessage,
+    openThread,
+  } = useAppContext();
   const isMobile = useIsMobile();
   const { search } = state;
 
   // The panel is remounted per mode/room (see the key in ChatArea), so the
-  // initial value is correct without a synchronous setState in the effect.
+  // initial values are correct without a synchronous setState in the effect.
   const [mentions, setMentions] = useState<MatrixMessage[]>([]);
   const [mentionsLoading, setMentionsLoading] = useState(mode === "mentions");
+  const [mentionsHasMore, setMentionsHasMore] = useState(false);
+  const [mentionsOffset, setMentionsOffset] = useState(0);
+  const [mentionsLoadingMore, setMentionsLoadingMore] = useState(false);
 
   const roomId = state.currentRoomId;
   const canUnpin = canManageMessages(state);
@@ -70,8 +110,11 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
     let cancelled = false;
     const username = state.userId.replace(/^@/, "").replace(/:.*$/, "");
     apiSearchMessages(roomId, username, "mention")
-      .then((results) => {
-        if (!cancelled) setMentions(results);
+      .then((page) => {
+        if (cancelled) return;
+        setMentions(page.items);
+        setMentionsHasMore(page.hasMore);
+        setMentionsOffset(page.nextOffset);
       })
       .catch(() => {
         if (!cancelled) setMentions([]);
@@ -83,6 +126,34 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
       cancelled = true;
     };
   }, [mode, roomId, state.userId]);
+
+  const loadMoreMentions = useCallback(async () => {
+    if (!roomId || !state.userId || !mentionsHasMore || mentionsLoadingMore) return;
+    setMentionsLoadingMore(true);
+    const username = state.userId.replace(/^@/, "").replace(/:.*$/, "");
+    try {
+      const page = await apiSearchMessages(
+        roomId,
+        username,
+        "mention",
+        "all",
+        undefined,
+        undefined,
+        mentionsOffset,
+      );
+      // Dedupe in case a new mention arrived and shifted the window.
+      setMentions((prev) => {
+        const seen = new Set(prev.map((m) => m.event_id));
+        return [...prev, ...page.items.filter((m) => !seen.has(m.event_id))];
+      });
+      setMentionsHasMore(page.hasMore);
+      setMentionsOffset(page.nextOffset);
+    } catch {
+      // Leave the list as-is; the button stays available for a retry.
+    } finally {
+      setMentionsLoadingMore(false);
+    }
+  }, [roomId, state.userId, mentionsHasMore, mentionsLoadingMore, mentionsOffset]);
 
   // Catch up on anything pinned or unpinned while this client was disconnected.
   useEffect(() => {
@@ -252,6 +323,11 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
                     <MessageItem message={msg} grouped={isGrouped(msg, search.results[i - 1])} disableReactions />
                   </div>
                 ))}
+            <LoadMore
+              hasMore={search.hasMore}
+              loading={search.loadingMore}
+              onLoadMore={loadMoreSearchResults}
+            />
           </>
         )}
 
@@ -277,6 +353,11 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
                 <MessageItem message={msg} grouped={isGrouped(msg, mentions[i - 1])} disableReactions />
               </div>
             ))}
+            <LoadMore
+              hasMore={mentionsHasMore}
+              loading={mentionsLoadingMore}
+              onLoadMore={loadMoreMentions}
+            />
           </>
         )}
 
@@ -321,6 +402,11 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
                 </div>
               </div>
             ))}
+            <LoadMore
+              hasMore={state.pinsHasMore}
+              loading={state.loadingMorePins}
+              onLoadMore={loadMorePins}
+            />
           </>
         )}
       </ScrollArea>

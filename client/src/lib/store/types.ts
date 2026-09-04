@@ -12,6 +12,13 @@ export interface SearchState {
   thisChannel: boolean;
   results: MatrixMessage[];
   loading: boolean;
+  /** Another page of results is available from the server. */
+  hasMore: boolean;
+  /** Offset to request for the next page. */
+  nextOffset: number;
+  /** A "load more" request is in flight; distinct from `loading`, which
+   *  covers the first page and blanks the list. */
+  loadingMore: boolean;
 }
 
 export interface AppState {
@@ -76,6 +83,9 @@ export interface AppState {
   replyingTo: MatrixMessage | null;
   // Pinned messages of the current room/channel, newest pin first
   pinnedMessages: PinnedMessage[];
+  pinsHasMore: boolean;
+  pinsNextOffset: number;
+  loadingMorePins: boolean;
   // Threads
   activeThreadEventId: string | null;
   threadRootMessage: MatrixMessage | null;
@@ -142,9 +152,12 @@ export type Action =
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
-  | { type: "SET_PINNED_MESSAGES"; payload: PinnedMessage[] }
+  | { type: "SET_PINNED_MESSAGES"; payload: { pins: PinnedMessage[]; hasMore: boolean; nextOffset: number } }
+  | { type: "APPEND_PINNED_MESSAGES"; payload: { pins: PinnedMessage[]; hasMore: boolean; nextOffset: number } }
+  | { type: "SET_LOADING_MORE_PINS"; payload: boolean }
   | { type: "ADD_PINNED_MESSAGE"; payload: PinnedMessage }
   | { type: "REMOVE_PINNED_MESSAGE"; payload: string }
+  | { type: "APPEND_SEARCH_RESULTS"; payload: { results: MatrixMessage[]; hasMore: boolean; nextOffset: number } }
   | { type: "OPEN_THREAD"; payload: { eventId: string; root: MatrixMessage; messages: MatrixMessage[] } }
   | { type: "CLOSE_THREAD" }
   | { type: "ADD_THREAD_MESSAGE"; payload: MatrixMessage }
@@ -250,9 +263,12 @@ export const initialState: AppState = {
   channelUnreadCounts: {},
   channelMentions: {},
   currentView: "chat",
-  search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false },
+  search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false, hasMore: false, nextOffset: 0, loadingMore: false },
   replyingTo: null,
   pinnedMessages: [],
+  pinsHasMore: false,
+  pinsNextOffset: 0,
+  loadingMorePins: false,
   activeThreadEventId: null,
   threadRootMessage: null,
   threadMessages: [],
@@ -293,8 +309,12 @@ export interface AppContextValue {
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
-  /** Refresh the pin list for the room/channel currently open. */
+  /** Refresh the pin list for the room/channel currently open (first page). */
   loadPins: () => Promise<void>;
+  /** Append the next page of pins. */
+  loadMorePins: () => Promise<void>;
+  /** Append the next page of search results. */
+  loadMoreSearchResults: () => Promise<void>;
   pinMessage: (eventId: string) => Promise<void>;
   unpinMessage: (eventId: string) => Promise<void>;
   createRoom: (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string, roomType?: string) => Promise<void>;

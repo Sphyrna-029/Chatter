@@ -488,6 +488,9 @@ export async function apiAddReaction(
   return res.json();
 }
 
+/** Rows fetched per page in the search / mentions / pins panel. */
+export const PAGE_SIZE = 25;
+
 // ─── Pinned messages ─────────────────────────────────────────────────────────
 
 /** A pinned message: the message itself plus who pinned it and when. */
@@ -496,14 +499,31 @@ export interface PinnedMessage extends MatrixMessage {
   pinned_at: number;
 }
 
-export async function apiGetPins(roomId: string, channelId?: string) {
-  const params = new URLSearchParams();
+/** One page of results plus the cursor for the next one. */
+export interface Page<T> {
+  items: T[];
+  hasMore: boolean;
+  nextOffset: number;
+}
+
+export async function apiGetPins(
+  roomId: string,
+  channelId?: string,
+  offset = 0,
+  limit = PAGE_SIZE
+): Promise<Page<PinnedMessage>> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
   if (channelId) params.set("channel_id", channelId);
   const res = await authenticatedFetch(
     `/api/rooms/${encodeURIComponent(roomId)}/pins?${params}`
   );
   if (!res.ok) throw new Error("Failed to load pinned messages");
-  return res.json() as Promise<{ pins: PinnedMessage[] }>;
+  const data = await res.json();
+  return {
+    items: (data.pins ?? []) as PinnedMessage[],
+    hasMore: !!data.has_more,
+    nextOffset: data.next_offset ?? offset,
+  };
 }
 
 export async function apiPinMessage(roomId: string, eventId: string) {
@@ -542,9 +562,11 @@ export async function apiGetRoomThreads(
   roomId: string,
   query?: string,
   channelId?: string,
-  noChannelOnly?: boolean
-): Promise<MatrixMessage[]> {
-  const params = new URLSearchParams();
+  noChannelOnly?: boolean,
+  offset = 0,
+  limit = PAGE_SIZE
+): Promise<Page<MatrixMessage>> {
+  const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
   if (query) params.set("q", query);
   if (channelId) {
     params.set("channel_id", channelId);
@@ -554,7 +576,11 @@ export async function apiGetRoomThreads(
   const res = await authenticatedFetch(`/api/rooms/${roomId}/threads?${params}`);
   if (!res.ok) throw new Error("Failed to load threads");
   const data = await res.json();
-  return data.threads as MatrixMessage[];
+  return {
+    items: (data.threads ?? []) as MatrixMessage[],
+    hasMore: !!data.has_more,
+    nextOffset: data.next_offset ?? offset,
+  };
 }
 
 export async function apiSetThreadName(roomId: string, threadEventId: string, name: string) {
@@ -594,9 +620,16 @@ export async function apiSearchMessages(
   filter: string = "all",
   fileType: string = "all",
   channelId?: string,
-  noChannelOnly?: boolean
-): Promise<MatrixMessage[]> {
-  const params = new URLSearchParams({ q: query, filter });
+  noChannelOnly?: boolean,
+  offset = 0,
+  limit = PAGE_SIZE
+): Promise<Page<MatrixMessage>> {
+  const params = new URLSearchParams({
+    q: query,
+    filter,
+    offset: String(offset),
+    limit: String(limit),
+  });
   if (filter === "file" && fileType !== "all") {
     params.set("file_type", fileType);
   }
@@ -608,7 +641,11 @@ export async function apiSearchMessages(
   const res = await authenticatedFetch(`/api/rooms/${roomId}/search?${params}`);
   if (!res.ok) throw new Error("Search failed");
   const data = await res.json();
-  return data.results as MatrixMessage[];
+  return {
+    items: (data.results ?? []) as MatrixMessage[],
+    hasMore: !!data.has_more,
+    nextOffset: data.next_offset ?? offset,
+  };
 }
 
 // ─── Voice & Presence ───────────────────────────────────────────────────────
