@@ -49,11 +49,10 @@ pub(crate) async fn list_channels(
     let mut channels: Vec<Value> = Vec::new();
     while let Ok(Some(ch)) = cursor.try_next().await {
         // Filter by view_roles: if non-empty, only privileged users or users with a matching role can see it
-        if !ch.view_roles.is_empty() && !is_privileged {
-            if !ch.view_roles.iter().any(|r| user_custom_roles.contains(r)) {
+        if !ch.view_roles.is_empty() && !is_privileged
+            && !ch.view_roles.iter().any(|r| user_custom_roles.contains(r)) {
                 continue;
             }
-        }
         channels.push(json!({
             "channel_id": ch.channel_id,
             "room_id": ch.room_id,

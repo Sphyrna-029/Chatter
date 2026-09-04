@@ -164,8 +164,8 @@ pub(crate) async fn send_message(
                 }
 
                 // For showcase channels, enforce featured pane write restrictions
-                if ch.channel_type == "showcase" {
-                    if req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
+                if ch.channel_type == "showcase"
+                    && req.showcase_pane.as_deref() == Some("featured") && !is_privileged {
                         if ch.showcase_write_roles.is_empty() {
                             return Err(error_response(
                                 StatusCode::FORBIDDEN,
@@ -180,7 +180,6 @@ pub(crate) async fn send_message(
                             ));
                         }
                     }
-                }
             }
         }
     }
@@ -230,12 +229,12 @@ pub(crate) async fn send_message(
             .find_one(doc! { "event_id": parent_event_id, "room_id": &room_id })
             .await
         {
-            if let Some(sender) = parent.get_str("sender").ok() {
+            if let Ok(sender) = parent.get_str("sender") {
                 content["reply_to_sender"] = json!(sender);
                 reply_to_user = Some(sender.to_string());
             }
-            if let Some(parent_content) = parent.get_document("content").ok() {
-                if let Some(body) = parent_content.get_str("body").ok() {
+            if let Ok(parent_content) = parent.get_document("content") {
+                if let Ok(body) = parent_content.get_str("body") {
                     let preview: String = body.chars().take(100).collect();
                     content["reply_to_body"] = json!(preview);
                 }

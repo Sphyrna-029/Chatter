@@ -65,6 +65,7 @@ fn format_bytes_short(bytes: u64) -> String {
 /// Post-process uploaded video files for browser compatibility:
 /// - MKV/AVI/WMV → remux to MP4 (copies video, transcodes audio to AAC)
 /// - MP4/MOV → apply faststart (move moov atom to front for instant playback)
+///
 /// Returns the (possibly new) file path and filename if the file was converted.
 async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
     let ext = filename
@@ -704,7 +705,7 @@ pub(crate) async fn upload_init(
         return error_response(StatusCode::BAD_REQUEST, "No filename provided");
     }
 
-    let chunk_count = (body.file_size + CHUNK_SIZE as u64 - 1) / CHUNK_SIZE as u64;
+    let chunk_count = body.file_size.div_ceil(CHUNK_SIZE as u64);
 
     // Generate upload ID
     use rand::Rng;
@@ -724,7 +725,10 @@ pub(crate) async fn upload_init(
         chunk_count,
     };
     let meta_path = format!("{}/meta.json", chunk_dir);
-    if let Err(_) = tokio::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).await {
+    if tokio::fs::write(&meta_path, serde_json::to_string(&meta).unwrap())
+        .await
+        .is_err()
+    {
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write metadata");
     }
 
@@ -1790,8 +1794,8 @@ pub(crate) async fn upload_guard(
 
         if !disk_path.is_empty() && matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
             let marker = format!("{}.faststarted", disk_path);
-            if tokio::fs::metadata(&marker).await.is_err() {
-                if tokio::fs::metadata(&disk_path).await.is_ok() {
+            if tokio::fs::metadata(&marker).await.is_err()
+                && tokio::fs::metadata(&disk_path).await.is_ok() {
                     let tmp = format!("{}.faststart.tmp", disk_path);
                     let result = tokio::process::Command::new("ffmpeg")
                         .args(["-y", "-i", &disk_path, "-c", "copy", "-movflags", "+faststart", &tmp])
@@ -1807,7 +1811,6 @@ pub(crate) async fn upload_guard(
                     let _ = tokio::fs::remove_file(&tmp).await;
                     let _ = tokio::fs::write(&marker, b"").await;
                 }
-            }
         }
 
         // Lazily generate thumbnail + subtitle sidecars for existing videos

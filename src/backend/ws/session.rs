@@ -442,7 +442,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                             uid.as_str() != user_id
                                 && publishers
                                     .get(*uid)
-                                    .map_or(false, |p| p.audio_codec.is_some())
+                                    .is_some_and(|p| p.audio_codec.is_some())
                         })
                         .cloned()
                         .collect()
@@ -1301,11 +1301,9 @@ async fn get_user_profile(state: &AppState, user_id: &str) -> (String, String, S
 }
 
 pub(crate) async fn handle_ws_binary(state: &AppState, user_id: &str, data: &[u8]) {
-    if data.len() >= 6 && &data[..6] == b"AUDIO:" {
-        relay_audio(state, user_id, data).await;
-    } else {
-        relay_audio(state, user_id, data).await;
-    }
+    // Every binary frame is relayed verbatim; relay_audio does not inspect any
+    // prefix, so there is nothing to branch on.
+    relay_audio(state, user_id, data).await;
 }
 pub(crate) async fn relay_audio(state: &AppState, user_id: &str, data: &[u8]) {
     let vc = state.voice_channels.read().await;

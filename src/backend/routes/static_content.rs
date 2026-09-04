@@ -16,7 +16,8 @@ fn html_escape(s: &str) -> String {
 }
 
 pub(crate) async fn serve_client() -> Html<String> {
-    let html = std::fs::read_to_string("client/dist/index.html")
+    let html = tokio::fs::read_to_string("client/dist/index.html")
+        .await
         .unwrap_or_else(|_| "<h1>No client found.</h1>".to_string());
     Html(html)
 }
@@ -26,7 +27,8 @@ pub(crate) async fn serve_invite_page(
     Path(code): Path<String>,
     headers: HeaderMap,
 ) -> Html<String> {
-    let html = std::fs::read_to_string("client/dist/index.html")
+    let html = tokio::fs::read_to_string("client/dist/index.html")
+        .await
         .unwrap_or_else(|_| "<h1>No client found.</h1>".to_string());
 
     // Build base URL from request headers so relative icon_url paths become absolute

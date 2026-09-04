@@ -306,7 +306,7 @@ pub(crate) async fn execute_webhook(
     };
 
     // Allow empty text if embeds are present
-    let has_embeds = embeds.as_ref().map_or(false, |e| !e.is_empty());
+    let has_embeds = embeds.as_ref().is_some_and(|e| !e.is_empty());
     if text.is_empty() && !has_embeds {
         return Err(error_response(
             StatusCode::BAD_REQUEST,

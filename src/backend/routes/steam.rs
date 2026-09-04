@@ -73,7 +73,7 @@ async fn verify_steam_openid(params: &HashMap<String, String>) -> Result<String,
 
     // Extract Steam64 ID from claimed_id URL
     let claimed_id = params.get("openid.claimed_id").ok_or(())?;
-    let steam64 = claimed_id.split('/').last().ok_or(())?.to_string();
+    let steam64 = claimed_id.split('/').next_back().ok_or(())?.to_string();
     steam64.parse::<u64>().map_err(|_| ())?;
     Ok(steam64)
 }

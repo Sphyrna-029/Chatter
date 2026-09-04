@@ -105,7 +105,6 @@ fn default_webrtc_config() -> RTCConfiguration {
                 username,
                 credential,
                 credential_type: RTCIceCredentialType::Password,
-                ..Default::default()
             });
         }
     }
