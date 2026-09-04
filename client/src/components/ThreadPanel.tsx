@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2 } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2, Smile } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { apiUploadFile } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -408,10 +408,10 @@ export function ThreadPanel() {
           <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
             <PopoverTrigger asChild>
               <button
-                className="text-base leading-none hover:scale-110 transition-transform cursor-pointer shrink-0"
+                className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
                 title="Emoji"
               >
-                😊
+                <Smile className="h-4 w-4" />
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" align="end" className="w-auto p-0">

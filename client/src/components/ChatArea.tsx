@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
+import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, UserPlus, Pencil, Pin, PinOff } from "lucide-react";
+import { MessagePanel, type PanelMode } from "./MessagePanel";
+import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,6 @@ import {
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
-import { canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -71,7 +71,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel, markChannelRead, unpinMessage, loadPins } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -262,17 +262,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return walk(div) ? range : null;
   };
 
-  // Pinned-messages panel state
-  const [pinsOpen, setPinsOpen] = useState(false);
+  // Which companion panel is open beside the timeline, if any. Search is
+  // derived from the store too, so the provider closing search on a room
+  // switch also closes the panel.
+  const [openPanel, setPanel] = useState<PanelMode | null>(null);
+  const panel = openPanel === "search" && !state.search.open ? null : openPanel;
 
-  // Mentions state
-  const [mentionsOpen, setMentionsOpen] = useState(false);
-  const [mentionResults, setMentionResults] = useState<MatrixMessage[]>([]);
-  const [mentionsLoading, setMentionsLoading] = useState(false);
-
-  // Search state lives in the shared store (see client/src/lib/store) so the
-  // members panel (input + filters) and this chat area (results) stay in sync.
-  const search = state.search;
+  // Search query/results live in the shared store (see client/src/lib/store) so
+  // the provider can run the debounced query while MessagePanel renders it.
   const [scrollToEventId, setScrollToEventId] = useState<string | null>(null);
 
   const closeSearch = () => dispatch({ type: "CLOSE_SEARCH" });
@@ -976,50 +973,44 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Debounced search execution now lives in the provider (client/src/lib/store/provider.tsx)
 
-  const closeMentions = () => {
-    setMentionsOpen(false);
-    setMentionResults([]);
-  };
+  // Stable identity so memoized MessageItems don't re-render on every keystroke.
+  const clearEditingEvent = useCallback(() => setEditingEventId(null), []);
 
-  const canUnpin = canManageMessages(state);
-
-  const openPins = () => {
-    closeSearch();
-    closeMentions();
-    setPinsOpen(true);
-    // Refresh in case a pin changed while this client was disconnected.
-    void loadPins();
-  };
-
-  const openMentions = async () => {
-    if (!state.currentRoomId || !state.userId) return;
-    closeSearch();
-    setPinsOpen(false);
-    setMentionsOpen(true);
-    setMentionsLoading(true);
-    const username = state.userId.replace(/^@/, "").replace(/:.*$/, "");
-    try {
-      const results = await apiSearchMessages(state.currentRoomId, username, "mention");
-      setMentionResults(results);
-    } finally {
-      setMentionsLoading(false);
+  /** Toggle a companion panel; opening one closes whichever was open. */
+  const togglePanel = (mode: PanelMode) => {
+    const next = panel === mode ? null : mode;
+    // Search keeps its query and results in the store, so keep that in step.
+    if (next === "search") {
+      dispatch({ type: "SET_SEARCH", payload: { open: true } });
+    } else if (panel === "search") {
+      closeSearch();
     }
+    setPanel(next);
   };
 
-  // Format relative time for thread list
-  const formatThreadTime = (ts: number) => {
-    const date = new Date(ts);
-    const now = Date.now();
-    const diff = now - ts;
-    if (diff < 60_000) return "just now";
-    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-    return date.toLocaleDateString([], { month: "short", day: "numeric" });
+  const closePanel = () => {
+    if (panel === "search") closeSearch();
+    setPanel(null);
+  };
+
+  /** Load the message into the timeline (switching channel if needed) and
+   *  highlight it, leaving the panel open beside it. */
+  const jumpToMessage = async (msg: MatrixMessage) => {
+    const roomId = state.currentRoomId;
+    if (!roomId) return;
+    const msgChannelId = msg.channel_id;
+    if (msgChannelId && msgChannelId !== state.currentChannelId) {
+      await selectChannel(msgChannelId);
+      await loadMessagesAround(roomId, msg.origin_server_ts);
+    } else if (!state.messages.some((m) => m.event_id === msg.event_id)) {
+      await loadMessagesAround(roomId, msg.origin_server_ts);
+    }
+    setScrollToEventId(msg.event_id);
   };
 
   // Scroll to a message after search/mentions closes and messages are rendered
   useEffect(() => {
-    if (!scrollToEventId || search.open || mentionsOpen || pinsOpen) return;
+    if (!scrollToEventId) return;
     // Use requestAnimationFrame to wait for DOM to render
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
@@ -1031,7 +1022,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       setScrollToEventId(null);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollToEventId, search.open, mentionsOpen, pinsOpen, state.messages]);
+  }, [scrollToEventId, state.messages]);
 
   const mentionMatches = useMemo(() => {
     if (!mentionOpen) return [];
@@ -1194,11 +1185,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </Button>
           )}
           <Button
-            variant="ghost"
+            variant={panel === "pins" ? "secondary" : "ghost"}
             size="icon"
             className="shrink-0 relative"
-            onClick={() => pinsOpen ? setPinsOpen(false) : openPins()}
+            onClick={() => togglePanel("pins")}
             title="Pinned messages"
+            aria-pressed={panel === "pins"}
           >
             <Pin className="h-4 w-4" />
             {state.pinnedMessages.length > 0 && (
@@ -1207,21 +1199,23 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           </Button>
           {roomInfo?.room_type === "text" && (
             <Button
-              variant="ghost"
+              variant={panel === "mentions" ? "secondary" : "ghost"}
               size="icon"
               className="shrink-0"
-              onClick={() => mentionsOpen ? closeMentions() : openMentions()}
+              onClick={() => togglePanel("mentions")}
               title="Your mentions"
+              aria-pressed={panel === "mentions"}
             >
               <AtSign className="h-4 w-4" />
             </Button>
           )}
           <Button
-            variant="ghost"
+            variant={panel === "search" ? "secondary" : "ghost"}
             size="icon"
             className="shrink-0"
-            onClick={() => search.open ? closeSearch() : (closeMentions(), setPinsOpen(false), dispatch({ type: "SET_SEARCH", payload: { open: true } }))}
+            onClick={() => togglePanel("search")}
             title="Search messages"
+            aria-pressed={panel === "search"}
           >
             <Search className="h-4 w-4" />
           </Button>
@@ -1233,122 +1227,6 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           onOpenChange={setAddToDMOpen}
           roomId={state.currentRoomId}
         />
-      )}
-
-      {/* Pinned messages bar */}
-      {pinsOpen && (
-        <div className="border-b px-4 py-2 flex items-center justify-between">
-          <span className="text-sm font-medium flex items-center gap-1.5">
-            <Pin className="h-3.5 w-3.5 text-muted-foreground" />
-            Pinned messages
-            {state.pinnedMessages.length > 0 && (
-              <span className="text-xs text-muted-foreground">({state.pinnedMessages.length})</span>
-            )}
-          </span>
-          <button
-            onClick={() => setPinsOpen(false)}
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Mentions bar */}
-      {mentionsOpen && (
-        <div className="border-b px-4 py-2 flex items-center justify-between">
-          <span className="text-sm font-medium flex items-center gap-1.5">
-            <AtSign className="h-3.5 w-3.5 text-muted-foreground" />
-            Your mentions
-          </span>
-          <button
-            onClick={closeMentions}
-            className="text-muted-foreground hover:text-foreground cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Search bar */}
-      {search.open && (
-        <div className="border-b px-4 py-2 flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <div className="relative flex-1">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder={
-                  search.filter === "user"
-                    ? "Search by username..."
-                    : search.filter === "file"
-                    ? "Search by filename..."
-                    : search.filter === "thread"
-                    ? "Search threads..."
-                    : "Search messages..."
-                }
-                value={search.query}
-                onChange={(e) => dispatch({ type: "SET_SEARCH", payload: { query: e.target.value } })}
-                className="w-full rounded-md border border-input bg-transparent pl-8 pr-3 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                autoFocus
-              />
-            </div>
-            <button
-              onClick={closeSearch}
-              className="text-muted-foreground hover:text-foreground cursor-pointer"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <div className="flex gap-1">
-            {(["all", "user", "file", "thread"] as const).map((f) => (
-              <Button
-                key={f}
-                variant={search.filter === f ? "default" : "outline"}
-                size="sm"
-                className="h-6 text-xs px-2"
-                onClick={() => {
-                  dispatch({ type: "SET_SEARCH", payload: { filter: f } });
-                  if (f !== "file") dispatch({ type: "SET_SEARCH", payload: { fileTypeFilter: "all" } });
-                }}
-              >
-                {f === "all" ? "All" : f === "user" ? "Users" : f === "file" ? "Files" : "Threads"}
-              </Button>
-            ))}
-            <div className="flex-1" />
-            <Button
-              variant={search.thisChannel ? "default" : "outline"}
-              size="sm"
-              className="h-6 text-xs px-2"
-              title={search.thisChannel ? "Only search this channel" : "Search all channels in the room"}
-              onClick={() => dispatch({ type: "SET_SEARCH", payload: { thisChannel: !search.thisChannel } })}
-            >
-              This channel
-            </Button>
-          </div>
-          {search.filter === "file" && (
-            <div className="flex gap-1">
-              {([
-                { key: "all", label: "All types", icon: null },
-                { key: "image", label: "Images", icon: Image },
-                { key: "video", label: "Videos", icon: Film },
-                { key: "audio", label: "Audio", icon: Music },
-                { key: "document", label: "Docs", icon: FileText },
-              ] as const).map(({ key, label, icon: Icon }) => (
-                <Button
-                  key={key}
-                  variant={search.fileTypeFilter === key ? "default" : "outline"}
-                  size="sm"
-                  className="h-6 text-xs px-2 gap-1"
-                  onClick={() => dispatch({ type: "SET_SEARCH", payload: { fileTypeFilter: key } })}
-                >
-                  {Icon && <Icon className="h-3 w-3" />}
-                  {label}
-                </Button>
-              ))}
-            </div>
-          )}
-        </div>
       )}
 
       {/* Unread messages banner */}
@@ -1367,261 +1245,80 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         </div>
       )}
 
+      {/* Timeline + companion panel sit side by side so search, mentions, and
+          pins can be read without losing sight of the conversation. */}
+      <div className="flex flex-1 min-h-0 min-w-0 relative">
+      <div className="flex flex-1 flex-col min-w-0 min-h-0">
+
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
         <ScrollArea className={`h-full py-2 ${isMobile ? "px-1" : "px-2"}`}>
           <div>
-            {search.open ? (
-              <>
-                {search.loading && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    Searching...
-                  </div>
-                )}
-                {!search.loading && search.results.length === 0 && search.filter === "thread" && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    {search.query.trim() ? "No threads found" : "No threads in this room yet"}
-                  </div>
-                )}
-                {!search.loading && search.results.length === 0 && search.filter !== "thread" && (search.query.trim() || search.filter === "file") && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    {search.filter === "file" ? "No files found" : "No results found"}
-                  </div>
-                )}
-                {!search.loading && search.results.length === 0 && !search.query.trim() && search.filter !== "file" && search.filter !== "thread" && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    Type to search messages
-                  </div>
-                )}
-                {search.filter === "thread"
-                  ? search.results.map((thread) => {
-                      const senderName =
-                        state.userPresence[thread.sender]?.displayName ||
-                        displayUserId(thread.sender);
-                      const replyCount = thread.thread_reply_count ?? 0;
-                      return (
-                        <div
-                          key={thread.event_id}
-                          className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
-                          onClick={() => {
-                            closeSearch();
-                            openThread(thread.event_id);
-                          }}
-                        >
-                          <MessageSquare className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">
-                              {thread.thread_name || thread.content.body}
-                            </p>
-                            {thread.thread_name && (
-                              <p className="text-xs text-muted-foreground truncate">{thread.content.body}</p>
-                            )}
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {replyCount} {replyCount === 1 ? "reply" : "replies"} · by {senderName} · {formatThreadTime(thread.origin_server_ts)}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })
-                  : search.results.map((msg, i) => {
-                      const prev = search.results[i - 1];
-                      const grouped =
-                        !!prev &&
-                        prev.content.msgtype !== "m.system" &&
-                        msg.content.msgtype !== "m.system" &&
-                        prev.sender === msg.sender &&
-                        msg.origin_server_ts - prev.origin_server_ts < 60000;
-                      return (
-                        <div
-                          key={msg.event_id}
-                          className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
-                          onClick={async () => {
-                            const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
-                            if (!alreadyLoaded && state.currentRoomId) {
-                              await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
-                            }
-                            closeSearch();
-                            setScrollToEventId(msg.event_id);
-                          }}
-                        >
-                          <MessageItem message={msg} grouped={grouped} />
-                        </div>
-                      );
-                    })}
-              </>
-            ) : pinsOpen ? (
-              <>
-                {state.pinnedMessages.length === 0 && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    No pinned messages in this channel yet
-                  </div>
-                )}
-                {state.pinnedMessages.map((msg) => (
-                  <div key={msg.event_id}>
-                    <div
-                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
-                      onClick={async () => {
-                        if (!state.currentRoomId) return;
-                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
-                        if (!alreadyLoaded) {
-                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
-                        }
-                        setPinsOpen(false);
-                        setScrollToEventId(msg.event_id);
-                      }}
-                    >
-                      <MessageItem message={msg} disableReactions hidePinControls />
-                    </div>
-                    <div className="px-2 pb-1 flex items-center gap-2">
-                      <span className="text-3xs text-muted-foreground">
-                        Pinned by {state.userPresence[msg.pinned_by]?.displayName || displayUserId(msg.pinned_by)}
-                      </span>
-                      {canUnpin && (
-                        <button
-                          className="text-3xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1 cursor-pointer"
-                          onClick={async () => {
-                            try {
-                              await unpinMessage(msg.event_id);
-                            } catch (e) {
-                              toast.error(e instanceof Error ? e.message : "Failed to unpin message");
-                            }
-                          }}
-                        >
-                          <PinOff className="h-2.5 w-2.5" />
-                          Unpin
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </>
-            ) : mentionsOpen ? (
-              <>
-                {mentionsLoading && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    Loading mentions...
-                  </div>
-                )}
-                {!mentionsLoading && mentionResults.length === 0 && (
-                  <div className="text-center text-xs text-muted-foreground py-4">
-                    No mentions found in this room
-                  </div>
-                )}
-                {mentionResults.map((msg, i) => {
-                  const prev = mentionResults[i - 1];
-                  const grouped =
-                    !!prev &&
-                    prev.content.msgtype !== "m.system" &&
-                    msg.content.msgtype !== "m.system" &&
-                    prev.sender === msg.sender &&
-                    msg.origin_server_ts - prev.origin_server_ts < 60000;
-                  return (
-                    <div
-                      key={msg.event_id}
-                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
-                      role="button"
-                      tabIndex={0}
-                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
-                      onClick={async () => {
-                        if (!state.currentRoomId) return;
-                        const msgChannelId = msg.channel_id;
-                        if (msgChannelId && msgChannelId !== state.currentChannelId) {
-                          // Switch to the mention's channel, then load messages around the timestamp
-                          await selectChannel(msgChannelId);
-                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
-                        } else {
-                          const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
-                          if (!alreadyLoaded) {
-                            await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
-                          }
-                        }
-                        closeMentions();
-                        setScrollToEventId(msg.event_id);
-                      }}
-                    >
-                      <MessageItem message={msg} grouped={grouped} />
-                    </div>
-                  );
-                })}
-              </>
-            ) : (
-              <>
-                {state.loadingOlderMessages && (
-                  <div className="text-center text-xs text-muted-foreground py-2">
-                    Loading older messages...
-                  </div>
-                )}
-                {!state.hasMoreMessages && state.messages.length > 0 && (
-                  <div className="text-center text-xs text-muted-foreground py-2">
-                    Beginning of conversation
-                  </div>
-                )}
-                {state.messages.map((msg, i) => {
-                  const prev = state.messages[i - 1];
-                  const grouped =
-                    !!prev &&
-                    prev.content.msgtype !== "m.system" &&
-                    msg.content.msgtype !== "m.system" &&
-                    prev.sender === msg.sender &&
-                    msg.origin_server_ts - prev.origin_server_ts < 60000;
-                  const msgDate = new Date(msg.origin_server_ts);
-                  const prevDate = prev ? new Date(prev.origin_server_ts) : null;
-                  const showDateDivider =
-                    !prevDate ||
-                    msgDate.getFullYear() !== prevDate.getFullYear() ||
-                    msgDate.getMonth() !== prevDate.getMonth() ||
-                    msgDate.getDate() !== prevDate.getDate();
-                  const dateLabel = msgDate.toLocaleDateString(undefined, {
-                    weekday: "long",
-                    month: "long",
-                    day: "numeric",
-                    year:
-                      msgDate.getFullYear() !== new Date().getFullYear()
-                        ? "numeric"
-                        : undefined,
-                  });
-                  const showUnreadDivider = showNewDivider && msg.event_id === firstUnreadEventId;
-                  return (
-                    <div key={msg.event_id}>
-                      {showUnreadDivider && (
-                        <div ref={newDividerRef} className="flex items-center gap-2 py-1.5 px-2">
-                          <div className="h-px flex-1 bg-red-500" />
-                          <span className="text-xs font-semibold text-red-500 whitespace-nowrap">
-                            New
-                          </span>
-                          <div className="h-px flex-1 bg-red-500" />
-                        </div>
-                      )}
-                      {showDateDivider && (
-                        <div className="flex items-center justify-center gap-2 py-1.5 px-2">
-                          <div className="h-px flex-1 bg-border" />
-                          <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-muted-foreground/70 bg-muted/40">
-                            {dateLabel}
-                          </span>
-                          <div className="h-px flex-1 bg-border" />
-                        </div>
-                      )}
-                      <MessageItem
-                        message={msg}
-                        grouped={grouped}
-                        triggerEdit={editingEventId === msg.event_id}
-                        onEditDone={() => setEditingEventId(null)}
-                      />
-                    </div>
-                  );
-                })}
-                <div ref={messagesEndRef} />
-              </>
+            {state.loadingOlderMessages && (
+              <div className="text-center text-xs text-muted-foreground py-2">
+                Loading older messages...
+              </div>
             )}
+            {!state.hasMoreMessages && state.messages.length > 0 && (
+              <div className="text-center text-xs text-muted-foreground py-2">
+                Beginning of conversation
+              </div>
+            )}
+            {state.messages.map((msg, i) => {
+              const prev = state.messages[i - 1];
+              const grouped =
+                !!prev &&
+                prev.content.msgtype !== "m.system" &&
+                msg.content.msgtype !== "m.system" &&
+                prev.sender === msg.sender &&
+                msg.origin_server_ts - prev.origin_server_ts < 60000;
+              const msgDate = new Date(msg.origin_server_ts);
+              const prevDate = prev ? new Date(prev.origin_server_ts) : null;
+              const showDateDivider =
+                !prevDate ||
+                msgDate.getFullYear() !== prevDate.getFullYear() ||
+                msgDate.getMonth() !== prevDate.getMonth() ||
+                msgDate.getDate() !== prevDate.getDate();
+              const dateLabel = msgDate.toLocaleDateString(undefined, {
+                weekday: "long",
+                month: "long",
+                day: "numeric",
+                year:
+                  msgDate.getFullYear() !== new Date().getFullYear()
+                    ? "numeric"
+                    : undefined,
+              });
+              const showUnreadDivider = showNewDivider && msg.event_id === firstUnreadEventId;
+              return (
+                <div key={msg.event_id}>
+                  {showUnreadDivider && (
+                    <div ref={newDividerRef} className="flex items-center gap-2 py-1.5 px-2">
+                      <div className="h-px flex-1 bg-red-500" />
+                      <span className="text-xs font-semibold text-red-500 whitespace-nowrap">
+                        New
+                      </span>
+                      <div className="h-px flex-1 bg-red-500" />
+                    </div>
+                  )}
+                  {showDateDivider && (
+                    <div className="flex items-center justify-center gap-2 py-1.5 px-2">
+                      <div className="h-px flex-1 bg-border" />
+                      <span className="text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap text-muted-foreground/70 bg-muted/40">
+                        {dateLabel}
+                      </span>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  <MessageItem
+                    message={msg}
+                    grouped={grouped}
+                    triggerEdit={editingEventId === msg.event_id}
+                    onEditDone={clearEditingEvent}
+                  />
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
         {showScrollToBottom && (
@@ -1650,10 +1347,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </p>
           </div>
           <button
-            className="text-muted-foreground hover:text-foreground text-sm flex-shrink-0 cursor-pointer"
+            className="text-muted-foreground hover:text-foreground flex-shrink-0 cursor-pointer"
             onClick={() => dispatch({ type: "SET_REPLYING_TO", payload: null })}
+            title="Cancel reply"
           >
-            ✕
+            <X className="h-4 w-4" />
           </button>
         </div>
       )}
@@ -1711,7 +1409,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-xs font-medium">
               <EyeOff className="h-3 w-3 shrink-0" />
               <span>Spoiler — message will be hidden until clicked</span>
-              <button className="ml-auto hover:text-amber-400 cursor-pointer" onClick={() => setIsSpoiler(false)} title="Disable spoiler">✕</button>
+              <button className="ml-auto hover:text-amber-400 cursor-pointer" onClick={() => setIsSpoiler(false)} title="Disable spoiler"><X className="h-3 w-3" /></button>
             </div>
           )}
           {/* Staged file previews */}
@@ -1737,7 +1435,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     onClick={() => removePendingFile(i)}
                     title="Remove"
                   >
-                    ✕
+                    <X className="h-2.5 w-2.5" />
                   </button>
                 </div>
               ))}
@@ -1763,7 +1461,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     onClick={() => removeMediaUrl(m.url)}
                     title="Remove"
                   >
-                    ✕
+                    <X className="h-2.5 w-2.5" />
                   </button>
                 </div>
               ))}
@@ -1947,8 +1645,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               {/* Emoji picker */}
               <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
                 <PopoverTrigger asChild>
-                  <button className="absolute right-2 top-1/2 -translate-y-1/2 text-lg hover:scale-110 transition-transform cursor-pointer">
-                    😊
+                  <button
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                    title="Emoji"
+                  >
+                    <Smile className="h-5 w-5" />
                   </button>
                 </PopoverTrigger>
                 <PopoverContent
@@ -1985,6 +1686,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         </div>
         );
       })()}
+
+      </div>
+      {panel && (
+        <MessagePanel
+          key={`${panel}:${state.currentRoomId}`}
+          mode={panel}
+          onClose={closePanel}
+          onJump={jumpToMessage}
+        />
+      )}
+      </div>
+
       <Dialog open={exifDialogOpen} onOpenChange={setExifDialogOpen}>
         <DialogContent className="sm:max-w-[360px]">
           <DialogHeader>

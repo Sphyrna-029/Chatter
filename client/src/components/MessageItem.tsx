@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import {
@@ -1014,7 +1014,7 @@ interface MessageItemProps {
   hidePinControls?: boolean;
 }
 
-export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
+function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
   const confirm = useConfirm();
   const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
   const isMobile = useIsMobile();
@@ -1211,7 +1211,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
             title="Delete notification"
             onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
           >
-            <span className="text-xs">✕</span>
+            <X className="h-3 w-3" />
           </button>
         )}
         <div className="h-px flex-1 bg-border" />
@@ -1243,10 +1243,10 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           <Popover>
             <PopoverTrigger asChild>
               <button
-                className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-foreground text-xs"
+                className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-foreground"
                 title="Add reaction"
               >
-                😊
+                <SmilePlus className="h-3.5 w-3.5" />
               </button>
             </PopoverTrigger>
             <PopoverContent side="top" className="w-auto p-0" align="center">
@@ -1263,7 +1263,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
               title="Delete notification"
               onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
             >
-              <span className="text-xs">✕</span>
+              <X className="h-3 w-3" />
             </button>
           )}
           <div className="h-px flex-1 bg-border" />
@@ -1505,7 +1505,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
               className="flex items-center gap-1.5 mt-1 text-xs text-primary hover:underline cursor-pointer"
               onClick={() => openThread(message.event_id)}
             >
-              <span>⋮</span>
+              <MessagesSquare className="h-3.5 w-3.5" />
               <span>{message.thread_reply_count} {message.thread_reply_count === 1 ? "reply" : "replies"}</span>
             </button>
           )}
@@ -1616,7 +1616,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
               onClick={handleReply}
               title="Reply"
             >
-              <span className="text-xs">↩</span>
+              <Reply className="h-3.5 w-3.5" />
             </Button>
             {!inThread && !isExternal && message.content.msgtype !== "m.system" && (
               <Button
@@ -1626,7 +1626,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 onClick={() => openThread(message.event_id)}
                 title="Open thread"
               >
-                <span className="text-xs">⋮</span>
+                <MessagesSquare className="h-3.5 w-3.5" />
               </Button>
             )}
             {canPin && (
@@ -1643,7 +1643,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
             {!disableReactions && <Popover>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-6 w-6">
-                  <span className="text-xs">😊</span>
+                  <SmilePlus className="h-3.5 w-3.5" />
                 </Button>
               </PopoverTrigger>
               <PopoverContent
@@ -1675,7 +1675,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 onClick={() => setIsEditing(true)}
                 title="Edit"
               >
-                <span className="text-xs">✎</span>
+                <Pencil className="h-3.5 w-3.5" />
               </Button>
             )}
             {(isOwn || canDeleteOthers) && (
@@ -1689,7 +1689,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                   }
                 }}
               >
-                <span className="text-xs">✕</span>
+                <Trash2 className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>
@@ -1699,3 +1699,8 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
     </div>
   );
 }
+
+/** Memoized: the composer, emoji picker, and mention autocomplete all live in
+ *  ChatArea's local state, so without this every keystroke re-renders every
+ *  message in the timeline. Context changes still re-render as usual. */
+export const MessageItem = memo(MessageItemInner);
