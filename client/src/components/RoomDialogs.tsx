@@ -996,7 +996,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             }}
                           >
                             {copiedCode === inv.code ? (
-                              <span className="text-3xs text-green-400">ok</span>
+                              <span className="text-3xs text-success">ok</span>
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
                             )}
@@ -1128,8 +1128,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               </div>
 
               {newBotToken && (
-                <div className="p-3 rounded-md border border-yellow-500/50 bg-yellow-500/10 space-y-2">
-                  <p className="text-sm font-semibold text-yellow-400">Save this token - it cannot be shown again!</p>
+                <div className="p-3 rounded-md border border-yellow-500/50 bg-warning/10 space-y-2">
+                  <p className="text-sm font-semibold text-warning">Save this token - it cannot be shown again!</p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 text-xs bg-background p-2 rounded border font-mono break-all select-all">{newBotToken}</code>
                     <Button
@@ -1143,7 +1143,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         setTimeout(() => setCopiedBotToken(false), 2000);
                       }}
                     >
-                      {copiedBotToken ? <Eye className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      {copiedBotToken ? <Eye className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
                     </Button>
                   </div>
                 </div>
@@ -1378,7 +1378,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             }}
                           >
                             {copiedWebhookId === wh.webhook_id ? (
-                              <span className="text-3xs text-green-400">ok</span>
+                              <span className="text-3xs text-success">ok</span>
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
                             )}

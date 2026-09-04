@@ -177,8 +177,8 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
 
   const typeColor = (type: CommandResult["type"]) => {
     switch (type) {
-      case "success": return "text-green-400";
-      case "error": return "text-red-400";
+      case "success": return "text-success";
+      case "error": return "text-destructive";
       case "info": return "text-amber-300";
     }
   };
@@ -194,7 +194,7 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
           {outputs.map((entry, i) => (
             <div key={i}>
               <div className="text-muted-foreground">
-                <span className="text-green-500">{">"}</span> {entry.command}
+                <span className="text-success">{">"}</span> {entry.command}
               </div>
               {entry.result.output && (
                 <pre className={`whitespace-pre-wrap break-words mt-0.5 ${typeColor(entry.result.type)}`}>
@@ -219,7 +219,7 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
                 <button
                   key={cmd.name}
                   className={`flex w-full items-center gap-3 rounded-sm px-2 py-1.5 cursor-pointer transition-colors ${
-                    i === selectedSuggestion ? "bg-green-900/30 text-green-400" : "hover:bg-accent/50 text-foreground"
+                    i === selectedSuggestion ? "bg-green-900/30 text-success" : "hover:bg-accent/50 text-foreground"
                   }`}
                   onMouseDown={(e) => {
                     e.preventDefault();
@@ -228,7 +228,7 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
                     inputRef.current?.focus();
                   }}
                 >
-                  <span className="text-green-500 font-semibold">/{cmd.name}</span>
+                  <span className="text-success font-semibold">/{cmd.name}</span>
                   <span className="text-muted-foreground truncate">{cmd.description}</span>
                 </button>
               ))}
@@ -236,7 +236,7 @@ export function CommandBar({ onClose, initialValue = "" }: CommandBarProps) {
           )}
 
           <div className="flex items-center gap-2">
-            <span className="text-green-500 font-mono text-sm font-bold select-none">{">_"}</span>
+            <span className="text-success font-mono text-sm font-bold select-none">{">_"}</span>
             <input
               ref={inputRef}
               type="text"

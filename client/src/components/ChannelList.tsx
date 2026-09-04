@@ -59,7 +59,7 @@ interface ChannelListProps {
 }
 
 function SignalBars({ quality, pingMs }: { quality: ConnectionQuality; pingMs: number | null }) {
-  const colors = ["text-muted-foreground", "text-red-400", "text-orange-400", "text-green-400", "text-green-400"];
+  const colors = ["text-muted-foreground", "text-destructive", "text-orange-400", "text-success", "text-success"];
   const color = colors[quality];
   const tooltip = pingMs != null ? `${pingMs} ms` : "Connecting...";
   return (
@@ -86,7 +86,7 @@ function VoiceTimer({ since }: { since: number }) {
   const str = h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
-  return <span className="text-green-400 text-3xs font-mono ml-1 shrink-0">{str}</span>;
+  return <span className="text-success text-3xs font-mono ml-1 shrink-0">{str}</span>;
 }
 
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
@@ -471,7 +471,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             onEdit={() => openEditDialog(ch)}
             onDelete={() => handleDelete(ch.channel_id)}
             icon={(ch.view_roles?.length ?? 0) > 0
-              ? <Lock className="h-4 w-4 shrink-0 text-yellow-500" />
+              ? <Lock className="h-4 w-4 shrink-0 text-warning" />
               : ch.channel_type === "voice"
                 ? <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                 : ch.channel_type === "theater"
@@ -501,20 +501,20 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               return (
                 <div key={m.userId}>
                   <div
-                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm rounded transition-colors ${isSpeaking ? "text-green-400 bg-green-500/10 shadow-[0_0_6px_1px_rgba(74,222,128,0.35)]" : "text-muted-foreground"} ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
+                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm rounded transition-colors ${isSpeaking ? "text-success bg-success/10 shadow-[0_0_6px_1px_var(--success)]" : "text-muted-foreground"} ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
                     onClick={() => !isMe && setExpandedUser(isExpanded ? null : m.userId)}
                   >
                     {isLocalMuted && !isMe
-                      ? <MicOff className="h-3 w-3 shrink-0 text-yellow-400" />
+                      ? <MicOff className="h-3 w-3 shrink-0 text-warning" />
                       : m.muted || m.deafened
-                        ? <MicOff className="h-3 w-3 shrink-0 text-red-400" />
-                        : <Mic className="h-3 w-3 shrink-0 text-green-400" />
+                        ? <MicOff className="h-3 w-3 shrink-0 text-destructive" />
+                        : <Mic className="h-3 w-3 shrink-0 text-success" />
                     }
                     {m.deafened && (
-                      <HeadphoneOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Deafened" />
+                      <HeadphoneOff className="h-3 w-3 shrink-0 text-destructive" aria-label="Deafened" />
                     )}
                     {m.force_muted && (
-                      <ShieldOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Muted by a moderator" />
+                      <ShieldOff className="h-3 w-3 shrink-0 text-destructive" aria-label="Muted by a moderator" />
                     )}
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
@@ -602,7 +602,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                         title={isLocalMuted ? "Unmute for me" : "Mute for me"}
                       >
                         {isLocalMuted
-                          ? <VolumeX className="h-3.5 w-3.5 text-red-400" />
+                          ? <VolumeX className="h-3.5 w-3.5 text-destructive" />
                           : localVol < 0.5
                             ? <Volume1 className="h-3.5 w-3.5 text-muted-foreground" />
                             : <Volume2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -658,7 +658,8 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
           {canManage && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity text-muted-foreground">
+                <button className="p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity text-muted-foreground"
+            aria-label="Rename">
                   <Pencil className="h-3 w-3" />
                 </button>
               </DropdownMenuTrigger>
@@ -898,10 +899,10 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               return (
                 <>
                   <div className={`h-2 w-2 rounded-full ${
-                    isOk ? "bg-green-500" : isBad ? "bg-red-500" : "bg-yellow-500"
+                    isOk ? "bg-success" : isBad ? "bg-destructive" : "bg-warning"
                   } animate-pulse`} />
                   <span className={`text-xs font-medium truncate ${
-                    isOk ? "text-green-400" : isBad ? "text-red-400" : "text-yellow-400"
+                    isOk ? "text-success" : isBad ? "text-destructive" : "text-warning"
                   }`}>
                     {isOk ? "Voice Connected" :
                      s === "connecting" || s === "new" ? "Connecting..." :
@@ -920,7 +921,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               disabled={state.isDeafened}
               className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
                 state.isMuted || state.isDeafened
-                  ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                  ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
               }`}
               title={state.isDeafened ? "Undeafen to unmute" : state.isMuted ? "Unmute" : "Mute"}
@@ -931,7 +932,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               onClick={onToggleDeafen}
               className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
                 state.isDeafened
-                  ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                  ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
               }`}
               title={state.isDeafened ? "Undeafen" : "Deafen"}
@@ -943,7 +944,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 onClick={onToggleWebcam}
                 className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
                   isWebcamActive
-                    ? "bg-green-500/20 text-green-400 hover:bg-green-500/30"
+                    ? "bg-success/20 text-success hover:bg-success/30"
                     : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 }`}
                 title={isWebcamActive ? "Stop camera" : "Share camera"}
@@ -966,7 +967,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             )}
             <button
               onClick={onLeaveVoice}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
               title="Disconnect"
             >
               <PhoneOff className="h-3.5 w-3.5" />
@@ -1317,7 +1318,7 @@ function ChannelItem({
       <span className="truncate text-sm">{channel.name}</span>
       {badge}
       {(mentionCount ?? 0) > 0 && (
-        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-3xs font-bold leading-none text-white shrink-0">
+        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-3xs font-bold leading-none text-white shrink-0">
           {mentionCount! > 99 ? "99+" : mentionCount}
         </span>
       )}

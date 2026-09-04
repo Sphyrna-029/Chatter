@@ -160,6 +160,15 @@ export function MessagePanel({ mode, onClose, onJump }: MessagePanelProps) {
     if (mode === "pins") void loadPins();
   }, [mode, roomId, state.currentChannelId, loadPins]);
 
+  // A panel you open from a header button should close on Escape.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
   const Icon = mode === "search" ? Search : mode === "mentions" ? AtSign : Pin;
 
   return (

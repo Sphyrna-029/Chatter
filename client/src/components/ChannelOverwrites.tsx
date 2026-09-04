@@ -128,7 +128,7 @@ function ViewAsPreview({
           {CHANNEL_PERMISSIONS.map((meta) => (
             <div key={meta.key} className="flex items-center gap-1.5">
               {resolved[meta.key] ? (
-                <Check className="h-3 w-3 text-green-500 shrink-0" />
+                <Check className="h-3 w-3 text-success shrink-0" />
               ) : (
                 <X className="h-3 w-3 text-destructive shrink-0" />
               )}
@@ -268,7 +268,7 @@ export function ChannelOverwrites({
                                     ? value === "deny"
                                       ? "bg-destructive/20 text-destructive"
                                       : value === "allow"
-                                        ? "bg-green-500/20 text-green-500"
+                                        ? "bg-success/20 text-success"
                                         : "bg-accent text-foreground"
                                     : "text-muted-foreground/50 hover:text-foreground hover:bg-accent/50",
                                 )}

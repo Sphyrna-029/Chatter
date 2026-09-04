@@ -50,6 +50,9 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -89,6 +92,12 @@ html {
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  /* Status colours. Presence dots, connection quality and voice state were all
+     hardcoded Tailwind palette values tuned for the dark theme, which left them
+     washed out or garish on a light one. */
+  --success: oklch(0.58 0.16 150);
+  --warning: oklch(0.68 0.15 75);
+  --info: oklch(0.55 0.18 250);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -123,6 +132,9 @@ html {
   --accent: oklch(0.371 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.75 0.17 152);
+  --warning: oklch(0.82 0.15 85);
+  --info: oklch(0.72 0.15 250);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

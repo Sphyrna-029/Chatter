@@ -155,7 +155,7 @@ export function AdminDashboard() {
           <Shield className="h-5 w-5 text-primary" />
           <h1 className="text-lg font-semibold">Server Dashboard</h1>
         </div>
-        <Button variant="ghost" size="icon" onClick={close} className="h-8 w-8">
+        <Button variant="ghost" size="icon" onClick={close} className="h-8 w-8" aria-label="Close dashboard">
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -281,7 +281,7 @@ export function AdminDashboard() {
             <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2 mb-3">
               <code className="flex-1 text-sm font-mono select-all">{tempPassword}</code>
               <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={copyPassword}>
-                {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground mb-3">TOTP has also been reset. The user will need to set up 2FA again.</p>
@@ -362,7 +362,7 @@ function UsersTab({
                 <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-destructive/20 text-destructive">Disabled</span>
               )}
               {user.online && (
-                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-green-500/20 text-green-500">Online</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-success/20 text-success">Online</span>
               )}
               {user.totp_verified && (
                 <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-blue-500/20 text-blue-500">2FA</span>
@@ -533,9 +533,10 @@ function SettingsTab({
                 {inviteCode}
               </code>
               <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onCopyInvite}>
-                {inviteCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                {inviteCopied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
               </Button>
-              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onRefreshInvite}>
+              <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={onRefreshInvite}
+            aria-label="Refresh">
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>

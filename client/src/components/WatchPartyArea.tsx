@@ -538,6 +538,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                 {watchState.videoUrl && (
                   <button
                     onClick={handlePlayPause}
+                    aria-label={watchState.playing ? "Pause" : "Play"}
                     className="p-1.5 rounded hover:bg-white/10 text-white transition-colors cursor-pointer shrink-0"
                   >
                     {watchState.playing ? (

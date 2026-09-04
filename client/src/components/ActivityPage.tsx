@@ -45,9 +45,9 @@ function formatFileSize(bytes: number): string {
 }
 
 function statusColor(status: string) {
-  if (status === "active" || status === "online") return "bg-green-500";
-  if (status === "idle" || status === "away") return "bg-yellow-500";
-  if (status === "dnd") return "bg-red-500";
+  if (status === "active" || status === "online") return "bg-success";
+  if (status === "idle" || status === "away") return "bg-warning";
+  if (status === "dnd") return "bg-destructive";
   return "bg-muted-foreground";
 }
 

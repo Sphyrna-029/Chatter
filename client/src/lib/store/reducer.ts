@@ -46,6 +46,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
         myPermissions: null,
+        companionPanel: null,
         pinnedMessages: [],
         pinsHasMore: false,
         pinsNextOffset: 0,
@@ -280,6 +281,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, activeWebcamStreamers: action.payload };
     case "SET_VIEW":
       return { ...state, currentView: action.payload };
+    case "SET_COMPANION_PANEL":
+      return { ...state, companionPanel: action.payload };
     case "SET_SEARCH":
       return { ...state, search: { ...state.search, ...action.payload } };
     case "CLOSE_SEARCH":

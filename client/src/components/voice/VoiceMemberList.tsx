@@ -59,11 +59,11 @@ export function VoiceMemberList({
           return (
             <div key={memberId} className={cn(
               "flex flex-col rounded-md px-2 py-1.5 transition-shadow duration-150 min-w-0 overflow-hidden",
-              isSpeaking && "shadow-[0_0_8px_2px_rgba(34,197,94,0.5)]"
+              isSpeaking && "shadow-[0_0_8px_2px_var(--success)]"
             )}>
               {/* Name row: mute icon, latency dot, name */}
               <div className="flex items-center gap-1 text-sm min-w-0">
-                <span className={cn("text-xs flex-shrink-0", isMutedMember ? "text-destructive" : isSpeaking ? "text-green-500" : "")}>
+                <span className={cn("text-xs flex-shrink-0", isMutedMember ? "text-destructive" : isSpeaking ? "text-success" : "")}>
                   {isMutedMember ? "🔇" : "🎤"}
                 </span>
                 {(() => {
@@ -73,10 +73,10 @@ export function VoiceMemberList({
                   const dotColor = rttMs == null
                     ? "text-muted-foreground"
                     : rttMs < 100
-                      ? "text-green-500"
+                      ? "text-success"
                       : rttMs <= 300
                         ? "text-orange-500"
-                        : "text-red-500";
+                        : "text-destructive";
                   return (
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
@@ -90,7 +90,7 @@ export function VoiceMemberList({
                     </TooltipProvider>
                   );
                 })()}
-                <span className={cn("truncate", isSpeaking && "text-green-400 font-semibold")}>
+                <span className={cn("truncate", isSpeaking && "text-success font-semibold")}>
                   {name}{isSelf && " (You)"}
                 </span>
                 {isWebcamStreaming && (

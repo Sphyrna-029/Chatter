@@ -115,9 +115,9 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           <span
             className={cn(
               "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background",
-              (status === "active" || status === "online") && "bg-green-500",
-              (status === "idle" || status === "away") && "bg-yellow-500",
-              status === "dnd" && "bg-red-500",
+              (status === "active" || status === "online") && "bg-success",
+              (status === "idle" || status === "away") && "bg-warning",
+              status === "dnd" && "bg-destructive",
               status === "offline" && "bg-muted-foreground"
             )}
           />
@@ -137,13 +137,13 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
               {effectiveName}
             </span>
             {member.role === "owner" && (
-              <Crown className="h-3 w-3 text-yellow-500 shrink-0" />
+              <Crown className="h-3 w-3 text-warning shrink-0" />
             )}
             {member.role === "moderator" && (
               <Shield className="h-3 w-3 text-blue-400 shrink-0" />
             )}
             {presence?.isMobile && status !== "offline" && (
-              <Smartphone className="h-3 w-3 text-green-500 shrink-0" />
+              <Smartphone className="h-3 w-3 text-success shrink-0" />
             )}
           </span>
           {customStatus && (
@@ -165,7 +165,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             </span>
           )}
           {presence?.spotifyTrack && status !== "offline" && (
-            <span className="flex items-center gap-1 text-[0.625rem] leading-tight text-green-400 overflow-hidden">
+            <span className="flex items-center gap-1 text-[0.625rem] leading-tight text-success overflow-hidden">
               <Music2 className="h-3 w-3 shrink-0" />
               <span className="overflow-hidden">
                 <span

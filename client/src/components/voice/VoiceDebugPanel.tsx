@@ -20,23 +20,23 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
           else if (key.startsWith("screen-sub:")) label = `Screen Sub: ${displayUserId(key.replace("screen-sub:", ""))}`;
 
           const stateColor =
-            s.connectionState === "connected" ? "text-green-500" :
-            s.connectionState === "connecting" || s.connectionState === "new" ? "text-yellow-500" :
-            "text-red-500";
+            s.connectionState === "connected" ? "text-success" :
+            s.connectionState === "connecting" || s.connectionState === "new" ? "text-warning" :
+            "text-destructive";
 
           const jitterMs = s.audioJitter != null ? Math.round(s.audioJitter * 1000) : null;
           const jitterColor =
             jitterMs == null ? "text-muted-foreground" :
-            jitterMs < 10 ? "text-green-500" :
-            jitterMs < 30 ? "text-yellow-500" :
-            "text-red-500";
+            jitterMs < 10 ? "text-success" :
+            jitterMs < 30 ? "text-warning" :
+            "text-destructive";
 
           const concealPct = s.concealmentRatio != null ? (s.concealmentRatio * 100) : null;
           const concealColor =
             concealPct == null ? "text-muted-foreground" :
-            concealPct < 1 ? "text-green-500" :
-            concealPct < 5 ? "text-yellow-500" :
-            "text-red-500";
+            concealPct < 1 ? "text-success" :
+            concealPct < 5 ? "text-warning" :
+            "text-destructive";
 
           // 5-block level meter for audioLevel (0-1)
           const levelBlocks = s.audioLevel != null
@@ -65,7 +65,7 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
                   <span className="text-blue-400">{s.resolution}</span>
                 )}
                 {hasVideo && s.packetsLost != null && s.packetsLost > 0 && (
-                  <span className="text-red-400">vid lost: {s.packetsLost}</span>
+                  <span className="text-destructive">vid lost: {s.packetsLost}</span>
                 )}
                 {/* For voice-only connections show total bitrate */}
                 {!hasVideo && s.bitrate != null && (
@@ -88,7 +88,7 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
                     <span className={jitterColor}>jitter: {jitterMs}ms</span>
                   )}
                   {s.audioPacketsLost != null && s.audioPacketsLost > 0 && (
-                    <span className="text-red-400">lost: {s.audioPacketsLost}</span>
+                    <span className="text-destructive">lost: {s.audioPacketsLost}</span>
                   )}
                   {concealPct != null && (
                     <span className={concealColor}>
@@ -98,7 +98,7 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
                   {levelBlocks != null && (
                     <span className="text-muted-foreground" title={`Audio level: ${(s.audioLevel! * 100).toFixed(1)}%`}>
                       lvl:{" "}
-                      <span className="text-green-400">{"█".repeat(levelBlocks)}</span>
+                      <span className="text-success">{"█".repeat(levelBlocks)}</span>
                       <span className="text-muted-foreground/30">{"█".repeat(5 - levelBlocks)}</span>
                     </span>
                   )}

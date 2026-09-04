@@ -550,7 +550,8 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               className="shrink-0"
               onClick={handleSubmitComment}
               disabled={submitting || (!commentBody.trim() && !commentImageFile)}
-            >
+            
+            aria-label="Post comment">
               <Send className="w-4 h-4" />
             </Button>
           </div>

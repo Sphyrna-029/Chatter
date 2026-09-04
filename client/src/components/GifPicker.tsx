@@ -169,7 +169,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
                       <Star
                         className={cn(
                           "h-3.5 w-3.5",
-                          fav ? "fill-yellow-400 text-yellow-400" : "text-white"
+                          fav ? "fill-yellow-400 text-warning" : "text-white"
                         )}
                       />
                     </button>
@@ -221,7 +221,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
                     }}
                     title="Remove from favorites"
                   >
-                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                    <Star className="h-3.5 w-3.5 fill-yellow-400 text-warning" />
                   </button>
                 </div>
               ))}

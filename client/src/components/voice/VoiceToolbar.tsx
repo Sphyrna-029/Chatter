@@ -135,7 +135,7 @@ export function VoiceToolbar({
       </div>
 
       {voiceInputMode === "ptt" && !isMuted && (
-        <span className="text-xs text-green-500 font-semibold animate-pulse text-center">
+        <span className="text-xs text-success font-semibold animate-pulse text-center">
           🔊 Transmitting
         </span>
       )}

@@ -814,7 +814,8 @@ export function WhiteboardArea() {
           {/* Undo */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={handleUndo}>
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={handleUndo}
+            aria-label="Undo last stroke">
                 <Undo2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
@@ -824,7 +825,8 @@ export function WhiteboardArea() {
           {/* Clear canvas */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={handleClear}>
+              <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={handleClear}
+            aria-label="Clear whiteboard">
                 <Trash2 className="h-4 w-4" />
               </Button>
             </TooltipTrigger>

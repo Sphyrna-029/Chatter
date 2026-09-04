@@ -79,6 +79,9 @@ export interface AppState {
   channelUnreadCounts: Record<string, number>;
   channelMentions: Record<string, number>;
   currentView: "chat" | "voice";
+  /** Which companion panel is open beside the timeline, if any. Lives here so
+   *  the layout can give it room on a narrow screen. */
+  companionPanel: "search" | "mentions" | "pins" | null;
   search: SearchState;
   replyingTo: MatrixMessage | null;
   // Pinned messages of the current room/channel, newest pin first
@@ -152,6 +155,7 @@ export type Action =
   | { type: "SET_ACTIVE_WEBCAM_STREAMERS"; payload: string[] }
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_SEARCH"; payload: Partial<SearchState> }
+  | { type: "SET_COMPANION_PANEL"; payload: AppState["companionPanel"] }
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
@@ -267,6 +271,7 @@ export const initialState: AppState = {
   channelUnreadCounts: {},
   channelMentions: {},
   currentView: "chat",
+  companionPanel: null,
   search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false, hasMore: false, nextOffset: 0, loadingMore: false },
   replyingTo: null,
   pinnedMessages: [],

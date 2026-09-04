@@ -265,10 +265,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return walk(div) ? range : null;
   };
 
-  // Which companion panel is open beside the timeline, if any. Search is
-  // derived from the store too, so the provider closing search on a room
-  // switch also closes the panel.
-  const [openPanel, setPanel] = useState<PanelMode | null>(null);
+  // The open panel lives in the store so the layout can make room for it; the
+  // search case also folds in the store flag, since the provider closes search
+  // on a room switch.
+  const openPanel = state.companionPanel;
+  const setPanel = (next: PanelMode | null) =>
+    dispatch({ type: "SET_COMPANION_PANEL", payload: next });
   const panel = openPanel === "search" && !state.search.open ? null : openPanel;
 
   // Search query/results live in the shared store (see client/src/lib/store) so
@@ -970,6 +972,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const clearEditingEvent = useCallback(() => setEditingEventId(null), []);
 
   /** Toggle a companion panel; opening one closes whichever was open. */
+  // The server refuses a topic edit without manage_channels, so don't offer it.
+  const canEditTopic = can(state, "manage_channels");
+
   const togglePanel = (mode: PanelMode) => {
     const next = panel === mode ? null : mode;
     // Search keeps its query and results in the store, so keep that in step.
@@ -1135,32 +1140,38 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 }}
                 onBlur={async () => {
                   const trimmed = topicDraft.trim();
-                  if (trimmed !== channelTopic && state.currentRoomId && state.currentChannelId) {
+                  setEditingTopic(false);
+                  if (trimmed === channelTopic || !state.currentRoomId || !state.currentChannelId) return;
+                  try {
                     await apiUpdateChannel(state.currentRoomId, state.currentChannelId, { topic: trimmed });
                     dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: state.currentChannelId, topic: trimmed } });
+                  } catch (err) {
+                    // Previously an unhandled rejection: the topic silently
+                    // reverted with no explanation.
+                    toast.error(err instanceof Error ? err.message : "Failed to update the topic");
                   }
-                  setEditingTopic(false);
                 }}
                 autoFocus
               />
             ) : (
               <div
-                className="overflow-hidden max-w-xs mx-auto cursor-pointer"
+                className={`overflow-hidden max-w-xs mx-auto ${canEditTopic ? "cursor-pointer" : ""}`}
                 onClick={() => {
+                  if (!canEditTopic) return;
                   setTopicDraft(channelTopic);
                   setEditingTopic(true);
                 }}
-                title="Click to edit channel topic"
+                title={canEditTopic ? "Click to edit channel topic" : undefined}
               >
                 {channelTopic ? (
                   <p className="text-xs text-muted-foreground whitespace-nowrap animate-marquee">
                     {channelTopic}
                   </p>
-                ) : (
+                ) : canEditTopic ? (
                   <p className="text-xs text-muted-foreground/50 italic">
                     Click to set a topic
                   </p>
-                )}
+                ) : null}
               </div>
             );
           })()}
@@ -1286,11 +1297,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 <div key={msg.event_id}>
                   {showUnreadDivider && (
                     <div ref={newDividerRef} className="flex items-center gap-2 py-1.5 px-2">
-                      <div className="h-px flex-1 bg-red-500" />
-                      <span className="text-xs font-semibold text-red-500 whitespace-nowrap">
+                      <div className="h-px flex-1 bg-destructive" />
+                      <span className="text-xs font-semibold text-destructive whitespace-nowrap">
                         New
                       </span>
-                      <div className="h-px flex-1 bg-red-500" />
+                      <div className="h-px flex-1 bg-destructive" />
                     </div>
                   )}
                   {showDateDivider && (

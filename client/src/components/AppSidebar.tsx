@@ -223,7 +223,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       >
         {/* Mention count badge (red, highest priority) */}
         {hasMention && (
-          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-3xs font-bold leading-none text-white shadow-sm">
+          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-destructive px-1 text-3xs font-bold leading-none text-white shadow-sm">
             {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
           </span>
         )}
@@ -309,7 +309,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               </span>
             )}
             {voiceCount > 0 && (
-              <span className="flex items-center gap-0.5 text-green-500">
+              <span className="flex items-center gap-0.5 text-success">
                 <svg
                   width="10"
                   height="10"
@@ -407,9 +407,9 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                 return (
                   <span className={cn(
                     "absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background",
-                    (st === "active" || st === "online") && "bg-green-500",
-                    (st === "idle" || st === "away") && "bg-yellow-500",
-                    st === "dnd" && "bg-red-500",
+                    (st === "active" || st === "online") && "bg-success",
+                    (st === "idle" || st === "away") && "bg-warning",
+                    st === "dnd" && "bg-destructive",
                     st === "offline" && "bg-muted-foreground",
                   )} />
                 );

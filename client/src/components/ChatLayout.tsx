@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { WifiOff, ChevronRight, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
@@ -128,6 +129,10 @@ export function ChatLayout() {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
+  // Sidebar + channels + members + a 22rem companion panel leaves the timeline
+  // around 300px on a 1366px laptop. Below this width the members list folds to
+  // its collapsed strip while a panel is open; the user can still reopen it.
+  const roomForBothPanels = useMediaQuery("(min-width: 1280px)");
   // Which mobile drawer is open, and the room it was opened for — a room switch
   // then closes it by derivation rather than by an effect.
   const [mobileDrawer, setMobileDrawer] = useState<{ kind: "channels" | "members"; roomId: string | null } | null>(null);
@@ -582,7 +587,9 @@ export function ChatLayout() {
                 )}
                 {!isMobile && (
                   <MembersPanel
-                    collapsed={membersCollapsed}
+                    collapsed={
+                      membersCollapsed || (!!state.companionPanel && !roomForBothPanels)
+                    }
                     onToggle={() => setMembersCollapsed((v) => !v)}
                   />
                 )}
@@ -686,7 +693,7 @@ function VoiceBarTimer({ since }: { since: number }) {
   const str = h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
-  return <span className="text-green-400 text-xs font-mono">{str}</span>;
+  return <span className="text-success text-xs font-mono">{str}</span>;
 }
 
 interface VoiceBarProps {
@@ -715,7 +722,7 @@ function VoiceBar({
       {/* Channel name link + timer */}
       <button
         onClick={onNavigate}
-        className="flex items-center gap-2 min-w-0 hover:underline text-green-400 font-medium text-sm truncate"
+        className="flex items-center gap-2 min-w-0 hover:underline text-success font-medium text-sm truncate"
       >
         <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
@@ -735,35 +742,35 @@ function VoiceBar({
       <div className="flex items-center gap-1">
         <button
           onClick={onToggleMute}
-          className={`p-1.5 rounded-md transition-colors ${isMuted || isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+          className={`p-1.5 rounded-md transition-colors ${isMuted || isDeafened ? "text-destructive bg-destructive/10 hover:bg-destructive/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
         >
           {isMuted || isDeafened ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
         <button
           onClick={onToggleDeafen}
-          className={`p-1.5 rounded-md transition-colors ${isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+          className={`p-1.5 rounded-md transition-colors ${isDeafened ? "text-destructive bg-destructive/10 hover:bg-destructive/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isDeafened ? "Undeafen" : "Deafen"}
         >
           {isDeafened ? <HeadphoneOff className="w-4 h-4" /> : <Headphones className="w-4 h-4" />}
         </button>
         <button
           onClick={onToggleWebcam}
-          className={`p-1.5 rounded-md transition-colors ${isWebcamActive ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+          className={`p-1.5 rounded-md transition-colors ${isWebcamActive ? "text-success bg-success/10 hover:bg-success/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isWebcamActive ? "Stop camera" : "Share camera"}
         >
           <Camera className="w-4 h-4" />
         </button>
         <button
           onClick={onToggleScreenShare}
-          className={`p-1.5 rounded-md transition-colors ${isScreenSharing ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
+          className={`p-1.5 rounded-md transition-colors ${isScreenSharing ? "text-success bg-success/10 hover:bg-success/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isScreenSharing ? "Stop sharing" : "Share screen"}
         >
           <MonitorUp className="w-4 h-4" />
         </button>
         <button
           onClick={onHangUp}
-          className="p-1.5 rounded-md text-red-400 bg-red-500/10 hover:bg-red-500/20 transition-colors"
+          className="p-1.5 rounded-md text-destructive bg-destructive/10 hover:bg-destructive/20 transition-colors"
           title="Leave voice"
         >
           <PhoneOff className="w-4 h-4" />

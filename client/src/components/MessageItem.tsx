@@ -949,7 +949,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
               <Star
                 className={cn(
                   "h-4 w-4",
-                  fav ? "fill-yellow-400 text-yellow-400" : "text-white"
+                  fav ? "fill-yellow-400 text-warning" : "text-white"
                 )}
               />
             </button>
@@ -1236,8 +1236,8 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
             isWatchparty
               ? "text-blue-400/80 bg-blue-500/10"
               : isLeave
-                ? "text-red-400/80 bg-red-500/10"
-                : "text-green-400/80 bg-green-500/10"
+                ? "text-destructive/80 bg-destructive/10"
+                : "text-success/80 bg-success/10"
           )}>
             {body}
           </span>

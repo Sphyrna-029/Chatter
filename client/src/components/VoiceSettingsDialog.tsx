@@ -225,7 +225,7 @@ export function VoiceSettingsDialog({
               <div className="flex items-center gap-2">
                 <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
                   <div
-                    className="h-full bg-green-500 transition-all duration-75"
+                    className="h-full bg-success transition-all duration-75"
                     style={{ width: `${micLevel}%` }}
                   />
                 </div>
@@ -248,7 +248,7 @@ export function VoiceSettingsDialog({
                 )}
               </div>
               {isMonitoring && (
-                <p className="text-xs text-yellow-500">
+                <p className="text-xs text-warning">
                   ⚠ Move away from speakers to avoid feedback loop
                 </p>
               )}
@@ -459,7 +459,7 @@ export function VoiceSettingsDialog({
                           {copiedThemeId === theme.id ? "Copied!" : "Copy"}
                         </button>
                         <button
-                          className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-red-400 hover:bg-black/80"
+                          className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-destructive hover:bg-black/80"
                           onClick={() => deleteCustomTheme(theme.id)}
                         >
                           Del
