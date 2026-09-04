@@ -20,6 +20,8 @@ import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-rea
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -37,6 +39,7 @@ interface ForumPostViewProps {
 }
 
 export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
+  const confirm = useConfirm();
   const { state } = useAppContext();
   const [post, setPost] = useState<ForumPost | null>(null);
   const [comments, setComments] = useState<ForumComment[]>([]);
@@ -170,18 +173,18 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       setCommentImage(null);
       setCommentImageFile(null);
     } catch (e: any) {
-      alert(e.message || "Failed to post comment");
+      toast.error(e.message || "Failed to post comment");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDeleteComment = async (commentId: string) => {
-    if (!confirm("Delete this comment?")) return;
+    if (!(await confirm({ title: "Delete this comment?", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await apiDeleteForumComment(roomId, postId, commentId);
     } catch (e: any) {
-      alert(e.message || "Failed to delete comment");
+      toast.error(e.message || "Failed to delete comment");
     }
   };
 
@@ -225,7 +228,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       await apiEditForumPost(roomId, postId, editPostTitle.trim(), editPostBody);
       setEditingPost(false);
     } catch (e: any) {
-      alert(e.message || "Failed to edit post");
+      toast.error(e.message || "Failed to edit post");
     } finally {
       setSavingPost(false);
     }
@@ -250,7 +253,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       setEditingCommentId(null);
       setEditCommentBody("");
     } catch (e: any) {
-      alert(e.message || "Failed to edit comment");
+      toast.error(e.message || "Failed to edit comment");
     } finally {
       setSavingComment(false);
     }

@@ -10,6 +10,7 @@ import {
   mungeScreenAudioSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
+import { toast } from "sonner";
 
 function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
@@ -485,7 +486,7 @@ export function useWebRTCScreen() {
       if (screenPubPcRef.current) { screenPubPcRef.current.close(); screenPubPcRef.current = null; }
       if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
         const message = err instanceof Error ? err.message : "Unknown error";
-        alert("Could not start screen sharing: " + message);
+        toast.error("Could not start screen sharing: " + message);
       }
     } finally {
       screenShareStartingRef.current = false;

@@ -3,6 +3,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { ChatLayout } from "@/components/ChatLayout";
 import { InvitePage } from "@/components/InvitePage";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { useThemeSettings } from "@/hooks/useThemeSettings";
 
 function getInviteCode(): string | null {
@@ -31,7 +32,9 @@ function App() {
   return (
     <AppProvider>
       <TooltipProvider>
-        <AppContent />
+        <ConfirmProvider>
+          <AppContent />
+        </ConfirmProvider>
       </TooltipProvider>
     </AppProvider>
   );

@@ -22,6 +22,8 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "@/components/AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, displayUserId } from "@/lib/utils";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type Tab = "overview" | "users" | "rooms" | "settings";
 
@@ -34,6 +36,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function AdminDashboard() {
+  const confirm = useConfirm();
   const { dispatch } = useAppContext();
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<AdminStats | null>(null);
@@ -84,22 +87,22 @@ export function AdminDashboard() {
   const close = () => dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: false });
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm(`Permanently delete user ${userId}? This will remove them from all rooms and cannot be undone.`)) return;
+    if (!(await confirm({ title: `Permanently delete ${userId}?`, description: "They will be removed from all rooms. This cannot be undone.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await apiAdminDeleteUser(userId);
       setUsers((prev) => prev.filter((u) => u.user_id !== userId));
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
   const handleDisable = async (userId: string) => {
-    if (!confirm(`Disable user ${userId}? They will be disconnected and unable to log in.`)) return;
+    if (!(await confirm({ title: `Disable ${userId}?`, description: "They will be disconnected and unable to log in.", confirmLabel: "Disable", destructive: true }))) return;
     try {
       await apiAdminDisableUser(userId);
       setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, disabled: true, online: false } : u)));
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
@@ -108,12 +111,12 @@ export function AdminDashboard() {
       await apiAdminEnableUser(userId);
       setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, disabled: false } : u)));
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
   const handleResetPassword = async (userId: string) => {
-    if (!confirm(`Reset password and TOTP for ${userId}? This cannot be undone.`)) return;
+    if (!(await confirm({ title: `Reset password and TOTP for ${userId}?`, description: "This cannot be undone.", confirmLabel: "Reset", destructive: true }))) return;
     try {
       const pw = await apiAdminResetPassword(userId);
       setTempPassword(pw);
@@ -121,17 +124,17 @@ export function AdminDashboard() {
       setCopied(false);
       setUsers((prev) => prev.map((u) => (u.user_id === userId ? { ...u, totp_verified: false } : u)));
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
   const handleDeleteRoom = async (roomId: string, roomName: string) => {
-    if (!confirm(`Force-delete room "${roomName}"? All messages, members, and associated data will be permanently removed.`)) return;
+    if (!(await confirm({ title: `Force-delete "${roomName}"?`, description: "All messages, members and associated data are permanently removed.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await apiAdminDeleteRoom(roomId);
       setRooms((prev) => prev.filter((r) => r.room_id !== roomId));
     } catch (e: any) {
-      alert(e.message);
+      toast.error(e.message);
     }
   };
 
@@ -206,7 +209,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ invite_only: val });
                   setInviteOnly(val);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onRefreshInvite={async () => {
@@ -214,7 +217,7 @@ export function AdminDashboard() {
                   const result = await apiAdminRefreshInvite();
                   setInviteCode(result.invite_code);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onCopyInvite={() => {
@@ -227,7 +230,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ storage_limit_bytes: mb * 1024 * 1024 });
                   setStorageLimitMb(mb);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onSaveUploadLimit={async (mb) => {
@@ -235,7 +238,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ upload_limit_bytes: mb * 1024 * 1024 });
                   setUploadLimitMb(mb);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onSaveRoomCreationLimit={async (val) => {
@@ -243,7 +246,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ room_creation_limit: val });
                   setRoomCreationLimit(val);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onToggleRequireAuthForUploads={async (val) => {
@@ -251,7 +254,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ require_auth_for_uploads: val });
                   setRequireAuthForUploads(val);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
               onToggleRoomCreationDisabled={async (val) => {
@@ -259,7 +262,7 @@ export function AdminDashboard() {
                   await apiAdminUpdateSettings({ room_creation_disabled: val });
                   setRoomCreationDisabled(val);
                 } catch (e: any) {
-                  alert(e.message);
+                  toast.error(e.message);
                 }
               }}
             />

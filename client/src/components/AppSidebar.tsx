@@ -27,6 +27,7 @@ import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn, displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface AppSidebarProps {
   onCreateRoom: () => void;
@@ -34,6 +35,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
+  const confirm = useConfirm();
   const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms } = useAppContext();
   const { isMobile, setOpenMobile } = useSidebar();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -320,9 +322,9 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         {/* Leave button on hover */}
         <span
           className="absolute top-1 left-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
-          onClick={(e) => {
+          onClick={async (e) => {
             e.stopPropagation();
-            if (confirm("Leave this room?")) {
+            if (await confirm({ title: "Leave this room?", confirmLabel: "Leave", destructive: true })) {
               leaveRoom(roomId);
             }
           }}
@@ -554,9 +556,9 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                     <Pencil className="h-2.5 w-2.5" />
                                   </button>
                                   <button
-                                    onClick={(e) => {
+                                    onClick={async (e) => {
                                       e.stopPropagation();
-                                      if (confirm(`Delete group "${group.name}"? Rooms will become ungrouped.`)) {
+                                      if (await confirm({ title: `Delete group "${group.name}"?`, description: "Its rooms become ungrouped.", confirmLabel: "Delete", destructive: true })) {
                                         deleteRoomGroup(group.group_id);
                                       }
                                     }}

@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Smile, Image as ImageIcon, Settings, X, UserPlus } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
+import { toast } from "sonner";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -153,7 +154,7 @@ function ShowcaseChatPane({
 
   const uploadFile = async (file: File): Promise<string | null> => {
     if (uploadLimitBytes > 0 && file.size > uploadLimitBytes) {
-      alert(`File too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
+      toast.error(`File too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
       return null;
     }
     setUploading(true);
@@ -167,7 +168,7 @@ function ShowcaseChatPane({
       });
       return url;
     } catch (err: any) {
-      alert(err.message || "Upload failed");
+      toast.error(err.message || "Upload failed");
       return null;
     } finally {
       setUploading(false);
@@ -192,7 +193,7 @@ function ShowcaseChatPane({
     try {
       await apiSendMessage(roomId, resolveShortcodes(body), undefined, undefined, channelId, pane);
     } catch (err: any) {
-      alert(err.message || "Failed to send message");
+      toast.error(err.message || "Failed to send message");
     }
   };
 
@@ -234,7 +235,7 @@ function ShowcaseChatPane({
     try {
       await apiSendMessage(roomId, url, undefined, undefined, channelId, pane);
     } catch (err: any) {
-      alert(err.message || "Failed to send GIF");
+      toast.error(err.message || "Failed to send GIF");
     }
   };
 
@@ -248,7 +249,7 @@ function ShowcaseChatPane({
         try {
           await apiSendMessage(roomId, url, undefined, undefined, channelId, pane);
         } catch (err: any) {
-          alert(err.message || "Failed to send file");
+          toast.error(err.message || "Failed to send file");
         }
       }
     }

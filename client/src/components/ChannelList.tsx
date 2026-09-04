@@ -35,6 +35,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
 import { NotificationSettingsPopover, NotificationBell } from "./NotificationSettingsPopover";
 import { resolveNotificationLevel } from "@/lib/notifications";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface ChannelListProps {
   /** Renders full-bleed inside the mobile drawer instead of as a resizable column. */
@@ -86,6 +88,7 @@ function VoiceTimer({ since }: { since: number }) {
 }
 
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
+  const confirm = useConfirm();
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel, moderateVoice } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -209,7 +212,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       setChannelType("text");
       setCreateCategoryId("");
     } catch (err: any) {
-      alert(err.message || "Failed to create channel");
+      toast.error(err.message || "Failed to create channel");
     }
   };
 
@@ -233,17 +236,17 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       setName("");
       setTopic("");
     } catch (err: any) {
-      alert(err.message || "Failed to update channel");
+      toast.error(err.message || "Failed to update channel");
     }
   };
 
   const handleDelete = async (channelId: string) => {
     if (!roomId) return;
-    if (!confirm("Delete this channel?")) return;
+    if (!(await confirm({ title: "Delete this channel?", description: "Its messages will be deleted too.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await deleteChannel(roomId, channelId);
     } catch (err: any) {
-      alert(err.message || "Failed to delete channel");
+      toast.error(err.message || "Failed to delete channel");
     }
   };
 
@@ -269,7 +272,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       setCategoryCreateOpen(false);
       setCategoryName("");
     } catch (err: any) {
-      alert(err.message || "Failed to create category");
+      toast.error(err.message || "Failed to create category");
     }
   };
 
@@ -281,17 +284,17 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       setEditCategoryId(null);
       setCategoryName("");
     } catch (err: any) {
-      alert(err.message || "Failed to update category");
+      toast.error(err.message || "Failed to update category");
     }
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
     if (!roomId) return;
-    if (!confirm("Delete this category? Channels will become uncategorized.")) return;
+    if (!(await confirm({ title: "Delete this category?", description: "Its channels become uncategorized.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await apiDeleteCategory(roomId, categoryId);
     } catch (err: any) {
-      alert(err.message || "Failed to delete category");
+      toast.error(err.message || "Failed to delete category");
     }
   };
 
@@ -333,7 +336,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         payload: { channel_id: channelId, category_id: categoryId },
       });
     } catch (err: any) {
-      alert(err.message || "Failed to move channel");
+      toast.error(err.message || "Failed to move channel");
     }
   };
 
@@ -402,7 +405,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         });
       }
     } catch (err: any) {
-      alert(err.message || "Failed to reorder channel");
+      toast.error(err.message || "Failed to reorder channel");
     }
 
     setDragChannelId(null);
@@ -846,7 +849,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 await apiUpdateRoomSettings(roomId, { banner_url: url });
                 dispatch({ type: "UPDATE_ROOM_SETTINGS", payload: { roomId, banner_url: url } });
               } catch (err: any) {
-                alert(err.message || "Failed to upload banner");
+                toast.error(err.message || "Failed to upload banner");
               }
             }}
           />

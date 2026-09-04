@@ -23,6 +23,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { GripVertical, X, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const STATUS_OPTIONS = [
   { value: "online", label: "Online", color: "bg-green-500" },
@@ -157,6 +159,7 @@ export function UserProfileDialog({
   userId,
   displayName,
 }: UserProfileDialogProps) {
+  const confirm = useConfirm();
   const { state, dispatch, openDM, updateProfile, setManualStatus, kickMember, banMember, setMemberRole, deleteAccount, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser, assignMemberRoles } = useAppContext();
   const isSelf = userId === state.userId;
   const username = displayUserId(userId) || displayName;
@@ -676,11 +679,11 @@ export function UserProfileDialog({
                 e.target.value = "";
                 const ext = file.name.split(".").pop()?.toLowerCase();
                 if (!ext || !["ttf", "otf", "woff", "woff2"].includes(ext)) {
-                  alert("Only .ttf, .otf, .woff, and .woff2 font files are allowed");
+                  toast.error("Only .ttf, .otf, .woff, and .woff2 font files are allowed");
                   return;
                 }
                 if (file.size > 2 * 1024 * 1024) {
-                  alert("Font file must be under 2 MB");
+                  toast.error("Font file must be under 2 MB");
                   return;
                 }
                 // Validate magic bytes
@@ -692,7 +695,7 @@ export function UserProfileDialog({
                   magic32 === 0x774F4646 || // WOFF
                   magic32 === 0x774F4632;   // WOFF2 (wOF2)
                 if (!isValidFont) {
-                  alert("File does not appear to be a valid font");
+                  toast.error("File does not appear to be a valid font");
                   return;
                 }
                 setPendingFontFile(file);
@@ -874,7 +877,7 @@ export function UserProfileDialog({
                     variant="outline"
                     className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
                     onClick={async () => {
-                      if (confirm(`Block ${displayName}? This will also remove any friendship or pending requests.`)) {
+                      if (await confirm({ title: `Block ${displayName}?`, description: "Any friendship or pending requests are removed too.", confirmLabel: "Block", destructive: true })) {
                         await blockUser(userId);
                         onOpenChange(false);
                       }
@@ -927,7 +930,7 @@ export function UserProfileDialog({
                   variant="outline"
                   className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
                   onClick={async () => {
-                    if (confirm(`Kick ${displayName} from this room?`)) {
+                    if (await confirm({ title: `Kick ${displayName}?`, description: "They can rejoin with a new invite.", confirmLabel: "Kick", destructive: true })) {
                       await kickMember(state.currentRoomId!, userId);
                       onOpenChange(false);
                     }
@@ -939,7 +942,7 @@ export function UserProfileDialog({
                   variant="outline"
                   className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
                   onClick={async () => {
-                    if (confirm(`Ban ${displayName} from this room? They won't be able to rejoin.`)) {
+                    if (await confirm({ title: `Ban ${displayName}?`, description: "They will not be able to rejoin.", confirmLabel: "Ban", destructive: true })) {
                       await banMember(state.currentRoomId!, userId);
                       onOpenChange(false);
                     }

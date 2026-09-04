@@ -33,6 +33,7 @@ import hljs from "highlight.js";
 
 // ─── Custom name font registration ──────────────────────────────────────────
 import { ensureFontFace } from "@/lib/fontFace";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
@@ -1009,6 +1010,7 @@ interface MessageItemProps {
 }
 
 export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions }: MessageItemProps) {
+  const confirm = useConfirm();
   const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
@@ -1180,7 +1182,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           <button
             className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
             title="Delete notification"
-            onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
+            onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
           >
             <span className="text-xs">✕</span>
           </button>
@@ -1232,7 +1234,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
             <button
               className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
               title="Delete notification"
-              onClick={() => { if (confirm("Delete this notification?")) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
+              onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
             >
               <span className="text-xs">✕</span>
             </button>
@@ -1637,8 +1639,8 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 variant="ghost"
                 size="icon"
                 className="h-6 w-6 text-destructive hover:text-destructive"
-                onClick={() => {
-                  if (confirm("Delete this message?")) {
+                onClick={async () => {
+                  if (await confirm({ title: "Delete this message?", confirmLabel: "Delete", destructive: true })) {
                     deleteMessage(message.event_id);
                   }
                 }}

@@ -25,6 +25,7 @@ import {
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
+import { toast } from "sonner";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -795,7 +796,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const uploadFile = async (file: File): Promise<string | null> => {
     if (!state.currentRoomId) return null;
     if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
-      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+      toast.error(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
       return null;
     }
     setUploading(true);
@@ -811,7 +812,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       });
       return url;
     } catch (err: any) {
-      alert(err.message || "Upload failed");
+      toast.error(err.message || "Upload failed");
       return null;
     } finally {
       setUploading(false);
@@ -821,7 +822,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   const addPendingFile = (file: File) => {
     if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
-      alert(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+      toast.error(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
       return;
     }
     setPendingFiles((prev) => {

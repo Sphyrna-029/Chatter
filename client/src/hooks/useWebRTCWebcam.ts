@@ -7,6 +7,7 @@ import {
   VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
 } from "@/lib/webrtc";
+import { toast } from "sonner";
 
 export function useWebRTCWebcam() {
   const { state, dispatch, wsRef } = useAppContext();
@@ -323,7 +324,7 @@ export function useWebRTCWebcam() {
       if (webcamPubPcRef.current) { webcamPubPcRef.current.close(); webcamPubPcRef.current = null; }
       if (!(err instanceof DOMException && err.name === "NotAllowedError")) {
         const message = err instanceof Error ? err.message : "Unknown error";
-        alert("Could not start webcam: " + message);
+        toast.error("Could not start webcam: " + message);
       }
     } finally {
       webcamStartingRef.current = false;

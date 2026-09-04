@@ -13,8 +13,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 export function ThreadPanel() {
+  const confirm = useConfirm();
   const { state, closeThread, sendThreadMessage, setThreadName, deleteThread } = useAppContext();
   const [body, setBody] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -63,7 +66,7 @@ export function ThreadPanel() {
   const handleFilesUpload = useCallback(async (files: File[]) => {
     const valid = files.filter((f) => {
       if (state.uploadLimitBytes > 0 && f.size > state.uploadLimitBytes) {
-        alert(`File "${f.name}" too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+        toast.error(`File "${f.name}" too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
         return false;
       }
       return true;
@@ -85,7 +88,7 @@ export function ThreadPanel() {
         await sendThreadMessage(msg);
       }
     } catch (err: any) {
-      alert(err.message || "Upload failed");
+      toast.error(err.message || "Upload failed");
     } finally {
       setUploading(false);
       setUploadFileName("");
@@ -194,7 +197,7 @@ export function ThreadPanel() {
     (myRole === "moderator" && threadOwnerRole === "member");
 
   const handleDeleteThread = async () => {
-    if (!confirm("Delete this thread and all its replies?")) return;
+    if (!(await confirm({ title: "Delete this thread?", description: "All replies will be deleted too.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await deleteThread();
     } catch {}

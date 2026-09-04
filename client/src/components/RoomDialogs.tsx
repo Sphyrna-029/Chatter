@@ -18,6 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 interface CreateRoomDialogProps {
   open: boolean;
@@ -59,7 +61,7 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
       setPassword("");
       onOpenChange(false);
     } catch {
-      alert("Failed to create room");
+      toast.error("Failed to create room");
     } finally {
       setLoading(false);
     }
@@ -432,6 +434,7 @@ interface RoomSettingsDialogProps {
 }
 
 export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsDialogProps) {
+  const confirm = useConfirm();
   const { state, updateRoomSettings } = useAppContext();
   const info = state.roomInfoMap[roomId];
   const [name, setName] = useState("");
@@ -562,7 +565,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       }
       onOpenChange(false);
     } catch (e: any) {
-      alert(e.message || "Failed to update room settings");
+      toast.error(e.message || "Failed to update room settings");
     } finally {
       setLoading(false);
     }
@@ -603,7 +606,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         setCustomEmojis((prev) => [...prev, url]);
       }
     } catch {
-      alert("Failed to upload emoji image");
+      toast.error("Failed to upload emoji image");
     } finally {
       setEmojiUploading(false);
     }
@@ -775,7 +778,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         try {
                           await updateRoomSettings(roomId, { remove_password: true });
                         } catch (e: any) {
-                          alert(e.message || "Failed to remove password");
+                          toast.error(e.message || "Failed to remove password");
                         }
                       }}
                     >
@@ -956,7 +959,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         const { code } = await apiCreateInvite(roomId);
                         setInvites((prev) => [...prev, { code, click_count: 0, created_at: Date.now() }]);
                       } catch (e: any) {
-                        alert(e.message || "Failed to create invite");
+                        toast.error(e.message || "Failed to create invite");
                       } finally {
                         setInviteLoading(false);
                       }
@@ -1009,7 +1012,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                                 await apiDeleteInvite(inv.code);
                                 setInvites((prev) => prev.filter((i) => i.code !== inv.code));
                               } catch {
-                                alert("Failed to delete invite");
+                                toast.error("Failed to delete invite");
                               }
                             }}
                           >
@@ -1068,7 +1071,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           const { url } = await apiUploadFile(file);
                           setBotAvatarUrl(url);
                         } catch {
-                          alert("Failed to upload image");
+                          toast.error("Failed to upload image");
                         } finally {
                           setBotAvatarUploading(false);
                         }
@@ -1113,7 +1116,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         setBotAvatarUrl("");
                         setBotDescription("");
                       } catch (e: any) {
-                        alert(e.message || "Failed to create bot");
+                        toast.error(e.message || "Failed to create bot");
                       } finally {
                         setBotLoading(false);
                       }
@@ -1176,7 +1179,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             try {
                               await apiCreateChannel(roomId, { name: bot.name, channel_type: "bot", bot_id: bot.bot_id });
                             } catch (e: any) {
-                              alert(e.message || "Failed to create bot channel");
+                              toast.error(e.message || "Failed to create bot channel");
                             }
                           }}
                         >
@@ -1189,13 +1192,13 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           className="h-7 w-7 shrink-0"
                           title="Regenerate token"
                           onClick={async () => {
-                            if (!confirm("Regenerate token? The old token will stop working.")) return;
+                            if (!(await confirm({ title: "Regenerate token?", description: "The old token will stop working.", confirmLabel: "Regenerate", destructive: true }))) return;
                             try {
                               const result = await apiRegenerateBotToken(bot.bot_id);
                               setNewBotToken(result.token);
                               setCopiedBotToken(false);
                             } catch (e: any) {
-                              alert(e.message || "Failed to regenerate token");
+                              toast.error(e.message || "Failed to regenerate token");
                             }
                           }}
                         >
@@ -1208,12 +1211,12 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
                           title="Delete bot"
                           onClick={async () => {
-                            if (!confirm(`Delete bot "${bot.name}"? This will also delete its channels.`)) return;
+                            if (!(await confirm({ title: `Delete bot "${bot.name}"?`, description: "Its channels will be deleted too.", confirmLabel: "Delete", destructive: true }))) return;
                             try {
                               await apiDeleteBot(bot.bot_id);
                               setBots((prev) => prev.filter((b) => b.bot_id !== bot.bot_id));
                             } catch (e: any) {
-                              alert(e.message || "Failed to delete bot");
+                              toast.error(e.message || "Failed to delete bot");
                             }
                           }}
                         >
@@ -1271,7 +1274,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           const { url } = await apiUploadFile(file);
                           setWebhookAvatarUrl(url);
                         } catch {
-                          alert("Failed to upload image");
+                          toast.error("Failed to upload image");
                         } finally {
                           setWebhookAvatarUploading(false);
                         }
@@ -1324,7 +1327,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         setWebhookAvatarUrl("");
                         setWebhookChannelId("");
                       } catch (e: any) {
-                        alert(e.message || "Failed to create webhook");
+                        toast.error(e.message || "Failed to create webhook");
                       } finally {
                         setWebhookLoading(false);
                       }
@@ -1391,7 +1394,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                                 await apiDeleteWebhook(wh.webhook_id);
                                 setWebhooks((prev) => prev.filter((w) => w.webhook_id !== wh.webhook_id));
                               } catch {
-                                alert("Failed to delete webhook");
+                                toast.error("Failed to delete webhook");
                               }
                             }}
                           >
@@ -1452,7 +1455,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                                 await apiUnbanMember(roomId, ban.user_id);
                                 setBannedUsers((prev) => prev.filter((b) => b.user_id !== ban.user_id));
                               } catch (e: any) {
-                                alert(e.message || "Failed to unban user");
+                                toast.error(e.message || "Failed to unban user");
                               } finally {
                                 setUnbanningUser(null);
                               }
@@ -1488,7 +1491,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         await apiDeleteRoom(roomId);
                         onOpenChange(false);
                       } catch (e: any) {
-                        alert(e.message || "Failed to delete room");
+                        toast.error(e.message || "Failed to delete room");
                       } finally {
                         setDeleting(false);
                       }

@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { RolePermissions } from "@/lib/api";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 const DEFAULT_PERMS: RolePermissions = {
   send_messages: true,
@@ -40,6 +42,7 @@ interface RoleManagementDialogProps {
 }
 
 export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialogProps) {
+  const confirm = useConfirm();
   const { state, createRole, updateRole, deleteRole } = useAppContext();
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -64,7 +67,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
       setNewColor("#6366f1");
       setNewPerms({ ...DEFAULT_PERMS });
     } catch (err: any) {
-      alert(err.message || "Failed to create role");
+      toast.error(err.message || "Failed to create role");
     }
   };
 
@@ -83,16 +86,16 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
       await updateRole(roomId, editingId, { name: editName.trim(), color: editColor, permissions: editPerms });
       setEditingId(null);
     } catch (err: any) {
-      alert(err.message || "Failed to update role");
+      toast.error(err.message || "Failed to update role");
     }
   };
 
   const handleDelete = async (roleId: string) => {
-    if (!confirm("Delete this role? It will be removed from all members and channels.")) return;
+    if (!(await confirm({ title: "Delete this role?", description: "It is removed from all members and channels.", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await deleteRole(roomId, roleId);
     } catch (err: any) {
-      alert(err.message || "Failed to delete role");
+      toast.error(err.message || "Failed to delete role");
     }
   };
 

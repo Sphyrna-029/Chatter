@@ -29,6 +29,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
+import { toast } from "sonner";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 type SortMode = "activity" | "newest" | "oldest" | "popular";
 
@@ -40,6 +42,7 @@ const sortLabels: Record<SortMode, string> = {
 };
 
 export function ForumArea() {
+  const confirm = useConfirm();
   const { state } = useAppContext();
   const roomId = state.currentRoomId;
   const roomInfo = roomId ? state.roomInfoMap[roomId] : null;
@@ -218,11 +221,12 @@ export function ForumArea() {
   }, [roomId, selectedPostId, isSearching, sortMode]);
 
   const handleDeletePost = async (postId: string) => {
-    if (!roomId || !confirm("Delete this post?")) return;
+    if (!roomId) return;
+    if (!(await confirm({ title: "Delete this post?", confirmLabel: "Delete", destructive: true }))) return;
     try {
       await apiDeleteForumPost(roomId, postId);
     } catch (e: any) {
-      alert(e.message || "Failed to delete post");
+      toast.error(e.message || "Failed to delete post");
     }
   };
 
@@ -408,7 +412,7 @@ function CreatePostDialog({
       setImagePreview(null);
       onOpenChange(false);
     } catch (e: any) {
-      alert(e.message || "Failed to create post");
+      toast.error(e.message || "Failed to create post");
     } finally {
       setSubmitting(false);
     }
