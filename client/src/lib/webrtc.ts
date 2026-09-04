@@ -59,6 +59,64 @@ export function canSignal(wsRef: React.MutableRefObject<WebSocket | null>) {
   return wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
 }
 
+// ─── Voice channel bitrate ──────────────────────────────────────────────────
+// Per-channel Opus bitrate, configured by room owners/moderators and applied by
+// every publisher in that channel. Keep in sync with VOICE_BITRATE_* in
+// src/backend/constants.rs.
+export const VOICE_BITRATE_MIN_BPS = 8_000;
+export const VOICE_BITRATE_MAX_BPS = 256_000;
+export const VOICE_BITRATE_DEFAULT_BPS = 64_000;
+
+export function clampVoiceBitrate(bps: number | null | undefined): number {
+  if (bps == null || !Number.isFinite(bps)) return VOICE_BITRATE_DEFAULT_BPS;
+  return Math.min(Math.max(Math.round(bps), VOICE_BITRATE_MIN_BPS), VOICE_BITRATE_MAX_BPS);
+}
+
+// Rewrite the opus fmtp line to target the channel bitrate. For Opus it is the
+// *receiver's* SDP that tells our encoder what to send, so this is applied to
+// the SFU's answer before setRemoteDescription — not to our own offer.
+export function mungeVoiceAudioSdp(sdp: string, bitrateBps: number): string {
+  const opusMatch = sdp.match(/a=rtpmap:(\d+) opus\/48000/i);
+  if (!opusMatch) return sdp;
+  const pt = opusMatch[1];
+  const bitrate = clampVoiceBitrate(bitrateBps);
+  const existingFmtp = new RegExp(`a=fmtp:${pt} [^\r\n]+`);
+  const existing = sdp.match(existingFmtp);
+  const params = (existing?.[0].slice(`a=fmtp:${pt} `.length) ?? "minptime=10;useinbandfec=1")
+    .split(";")
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0 && !/^maxaveragebitrate=/i.test(p));
+  params.push(`maxaveragebitrate=${bitrate}`);
+  const line = `a=fmtp:${pt} ${params.join(";")}`;
+  if (existing) return sdp.replace(existingFmtp, line);
+  // No existing fmtp line — insert one after the rtpmap line
+  return sdp.replace(
+    new RegExp(`(a=rtpmap:${pt} opus\\/48000[^\r\n]*\r?\n)`),
+    `$1${line}\r\n`,
+  );
+}
+
+// Cap the publisher's outgoing audio bitrate. Unlike SDP munging this takes
+// effect live, so a mid-call bitrate change needs no renegotiation.
+export async function applyVoiceSenderBitrate(
+  pc: RTCPeerConnection,
+  bitrateBps: number,
+): Promise<void> {
+  const sender = pc.getSenders().find((s) => s.track?.kind === "audio");
+  if (!sender) return;
+  const params = sender.getParameters();
+  if (!params.encodings || params.encodings.length === 0) {
+    params.encodings = [{}];
+  }
+  params.encodings[0].maxBitrate = clampVoiceBitrate(bitrateBps);
+  try {
+    await sender.setParameters(params);
+  } catch {
+    // Some browsers reject setParameters before negotiation completes — the
+    // SDP-level maxaveragebitrate still applies.
+  }
+}
+
 export interface ScreenShareAudioSdpTuning {
   maxAverageBitrate: number;
 }

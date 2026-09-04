@@ -721,6 +721,8 @@ export interface Channel {
   showcase_posters?: string[];
   system_channel?: boolean;
   bot_id?: string;
+  /** Opus target bitrate in bps, voice channels only */
+  voice_bitrate?: number;
   created_by?: string;
   created_at?: number;
 }
@@ -825,7 +827,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

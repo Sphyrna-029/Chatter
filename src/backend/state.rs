@@ -501,8 +501,14 @@ pub(crate) struct ChannelRecord {
     pub(crate) system_channel: bool,      // if true, join/leave/kick/ban messages go here
     #[serde(default)]
     pub(crate) bot_id: String,            // non-empty only for channel_type == "bot"
+    #[serde(default = "default_voice_bitrate")]
+    pub(crate) voice_bitrate: i32,        // Opus target bitrate in bps, voice channels only
     pub(crate) created_by: String,
     pub(crate) created_at: i64,
+}
+
+fn default_voice_bitrate() -> i32 {
+    super::constants::VOICE_BITRATE_DEFAULT
 }
 
 // ─── Custom Roles ────────────────────────────────────────────────────────────

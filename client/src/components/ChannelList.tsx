@@ -13,6 +13,7 @@ import {
   apiUpdateChannel, apiUploadFile, apiUpdateRoomSettings,
 } from "@/lib/api";
 import type { Channel, ChannelCategory } from "@/lib/api";
+import { VOICE_BITRATE_MIN_BPS, VOICE_BITRATE_MAX_BPS, VOICE_BITRATE_DEFAULT_BPS, clampVoiceBitrate } from "@/lib/webrtc";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
 
@@ -88,6 +90,8 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const [editShowcaseWriteRoles, setEditShowcaseWriteRoles] = useState<string[]>([]);
   const [editChannelType, setEditChannelType] = useState<string>("");
   const [editSystemChannel, setEditSystemChannel] = useState(false);
+  // Voice channel bitrate, held in kbps for the slider
+  const [editVoiceBitrateKbps, setEditVoiceBitrateKbps] = useState(VOICE_BITRATE_DEFAULT_BPS / 1000);
   const [name, setName] = useState("");
   const [channelType, setChannelType] = useState<"text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase">("text");
   const [topic, setTopic] = useState("");
@@ -202,6 +206,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
 
   const handleEdit = async () => {
     if (!editChannelId || !roomId) return;
+    const isVoiceChannel = editChannelType === "voice";
     try {
       await apiUpdateChannel(roomId, editChannelId, {
         name: name.trim() || undefined,
@@ -211,8 +216,9 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
         write_roles: editWriteRoles,
         showcase_write_roles: editChannelType === "showcase" ? editShowcaseWriteRoles : undefined,
         system_channel: editSystemChannel,
+        voice_bitrate: isVoiceChannel ? editVoiceBitrateKbps * 1000 : undefined,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -242,6 +248,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
     setEditShowcaseWriteRoles(ch.showcase_write_roles ?? []);
     setEditChannelType(ch.channel_type);
     setEditSystemChannel(ch.system_channel ?? false);
+    setEditVoiceBitrateKbps(clampVoiceBitrate(ch.voice_bitrate) / 1000);
     setEditOpen(true);
   };
 
@@ -1000,6 +1007,28 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
                 placeholder="Channel topic"
               />
             </div>
+            {editChannelType === "voice" && (
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label>Bitrate</Label>
+                  <span className="text-xs font-mono text-muted-foreground">{editVoiceBitrateKbps} kbps</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground/70 mb-2">
+                  Applies to everyone in this channel. Higher sounds better but uses more bandwidth.
+                </p>
+                <Slider
+                  value={[editVoiceBitrateKbps]}
+                  onValueChange={([v]) => setEditVoiceBitrateKbps(v)}
+                  min={VOICE_BITRATE_MIN_BPS / 1000}
+                  max={VOICE_BITRATE_MAX_BPS / 1000}
+                  step={8}
+                />
+                <div className="flex justify-between text-[10px] text-muted-foreground/70 mt-1">
+                  <span>{VOICE_BITRATE_MIN_BPS / 1000} kbps</span>
+                  <span>{VOICE_BITRATE_MAX_BPS / 1000} kbps</span>
+                </div>
+              </div>
+            )}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"

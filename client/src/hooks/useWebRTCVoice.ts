@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, canSignal } from "@/lib/webrtc";
+import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
 const VOICE_PUBLISH_ANSWER_TIMEOUT_MS = 10_000;
@@ -26,6 +26,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voicePublishRetryCountRef = useRef(0);
   const voicePublishAnswerReceivedRef = useRef(false);
   const createVoicePublisherRef = useRef<() => Promise<void>>(async () => {});
+  // Bitrate configured on the voice channel we're publishing into
+  const voiceBitrateRef = useRef(VOICE_BITRATE_DEFAULT_BPS);
 
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
@@ -36,6 +38,19 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
   useEffect(() => { voiceChannelIdRef.current = state.voiceChannelId; }, [state.voiceChannelId]);
+
+  // Track the current voice channel's bitrate. A moderator changing it while
+  // we're connected re-caps the sender live — no renegotiation needed.
+  useEffect(() => {
+    const channel = state.channels.find((c) => c.channel_id === state.voiceChannelId);
+    if (!channel) return;
+    const bitrate = clampVoiceBitrate(channel.voice_bitrate);
+    if (bitrate === voiceBitrateRef.current) return;
+    voiceBitrateRef.current = bitrate;
+    if (voicePublisherPcRef.current) {
+      applyVoiceSenderBitrate(voicePublisherPcRef.current, bitrate);
+    }
+  }, [state.channels, state.voiceChannelId]);
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
   const createVoicePublisher = useCallback(async () => {
@@ -79,6 +94,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    await applyVoiceSenderBitrate(pc, voiceBitrateRef.current);
     if (!canSignal(wsRef)) return;
     voicePublishAnswerReceivedRef.current = false;
     wsRef.current!.send(JSON.stringify({
@@ -261,7 +277,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (msg.type === "voice_webrtc_publish_answer" && voicePublisherPcRef.current) {
         voicePublishAnswerReceivedRef.current = true;
         try {
-          await voicePublisherPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          await voicePublisherPcRef.current.setRemoteDescription({
+            type: "answer",
+            sdp: mungeVoiceAudioSdp(msg.sdp, voiceBitrateRef.current),
+          });
+          await applyVoiceSenderBitrate(voicePublisherPcRef.current, voiceBitrateRef.current);
         } catch {}
       } else if (msg.type === "voice_webrtc_publish_candidate" && voicePublisherPcRef.current) {
         try { await voicePublisherPcRef.current.addIceCandidate(msg.candidate); } catch {}
@@ -391,6 +411,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current = stream;
 
       const resolvedChannelId = channelId || state.voiceChannelId || undefined;
+      const joinedChannel = state.channels.find((c) => c.channel_id === resolvedChannelId);
+      voiceBitrateRef.current = clampVoiceBitrate(joinedChannel?.voice_bitrate);
       dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, isDeafened: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
@@ -413,7 +435,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     } catch {
       alert("Could not access microphone. Please check permissions.");
     }
-  }, [state.currentRoomId, state.voiceChannelId, createVoicePublisher, loadVoiceMembers, dispatch]);
+  }, [state.currentRoomId, state.voiceChannelId, state.channels, createVoicePublisher, loadVoiceMembers, dispatch]);
 
   const leaveVoice = useCallback(async () => {
     // Stop screen sharing via the screen hook cleanup

@@ -1,4 +1,5 @@
 use super::super::{
+    constants::{VOICE_BITRATE_DEFAULT, VOICE_BITRATE_MAX, VOICE_BITRATE_MIN},
     dto::{CreateChannelRequest, UpdateChannelRequest, CreateCategoryRequest, UpdateCategoryRequest},
     helpers::{
         broadcast_to_room, error_response, extract_token, generate_id, get_user_role,
@@ -68,6 +69,7 @@ pub(crate) async fn list_channels(
             "showcase_posters": ch.showcase_posters,
             "system_channel": ch.system_channel,
             "bot_id": ch.bot_id,
+            "voice_bitrate": ch.voice_bitrate,
             "created_by": ch.created_by,
             "created_at": ch.created_at,
         }));
@@ -180,6 +182,7 @@ pub(crate) async fn create_channel(
         showcase_posters: vec![],
         system_channel: false,
         bot_id: req.bot_id.unwrap_or_default(),
+        voice_bitrate: VOICE_BITRATE_DEFAULT,
         created_by: user_id.clone(),
         created_at: now_millis(),
     };
@@ -205,6 +208,7 @@ pub(crate) async fn create_channel(
             "showcase_posters": channel.showcase_posters,
             "system_channel": channel.system_channel,
             "bot_id": channel.bot_id,
+            "voice_bitrate": channel.voice_bitrate,
             "created_by": channel.created_by,
             "created_at": channel.created_at,
         }
@@ -285,6 +289,17 @@ pub(crate) async fn update_channel(
         let bson_arr: Vec<mongodb::bson::Bson> = showcase_posters.iter().map(|s| mongodb::bson::Bson::String(s.clone())).collect();
         set_doc.insert("showcase_posters", bson_arr);
         content.insert("showcase_posters".to_string(), json!(showcase_posters));
+    }
+    if let Some(voice_bitrate) = req.voice_bitrate {
+        if _channel.channel_type != "voice" {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Bitrate can only be set on voice channels",
+            ));
+        }
+        let clamped = voice_bitrate.clamp(VOICE_BITRATE_MIN, VOICE_BITRATE_MAX);
+        set_doc.insert("voice_bitrate", clamped);
+        content.insert("voice_bitrate".to_string(), json!(clamped));
     }
     if let Some(system_channel) = req.system_channel {
         // If enabling, clear any other system channel in this room first
@@ -413,6 +428,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             showcase_posters: vec![],
             system_channel: false,
             bot_id: String::new(),
+            voice_bitrate: VOICE_BITRATE_DEFAULT,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })
@@ -436,6 +452,7 @@ pub(crate) async fn ensure_default_channels(state: &AppState, room_id: &str, cre
             showcase_posters: vec![],
             system_channel: false,
             bot_id: String::new(),
+            voice_bitrate: VOICE_BITRATE_DEFAULT,
             created_by: creator.to_string(),
             created_at: now_millis(),
         })

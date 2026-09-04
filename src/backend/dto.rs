@@ -289,6 +289,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) showcase_write_roles: Option<Vec<String>>,
     pub(crate) showcase_posters: Option<Vec<String>>,
     pub(crate) system_channel: Option<bool>,
+    pub(crate) voice_bitrate: Option<i32>,
 }
 
 #[derive(Deserialize)]
