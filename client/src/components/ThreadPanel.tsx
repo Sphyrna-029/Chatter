@@ -15,6 +15,8 @@ import {
 } from "@/components/ui/popover";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { PendingAttachments } from "./PendingAttachments";
+import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 
 export function ThreadPanel() {
   const confirm = useConfirm();
@@ -24,6 +26,12 @@ export function ThreadPanel() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [uploading, setUploading] = useState(false);
+  const {
+    files: pendingFiles,
+    add: addStagedFile,
+    remove: removePendingFile,
+    clear: clearPendingFiles,
+  } = usePendingFiles();
   const [uploadProgress, setUploadProgress] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -41,12 +49,38 @@ export function ThreadPanel() {
 
   const handleSend = useCallback(async () => {
     const trimmed = body.trim();
-    if (!trimmed) return;
+    const toUpload = pendingFiles.map((pf) => pf.file);
+    if (!trimmed && toUpload.length === 0) return;
     setBody("");
+    clearPendingFiles();
+
+    // Nothing is uploaded until here, so the draft stays editable while files
+    // are staged.
+    const uploadedUrls: string[] = [];
+    if (toUpload.length > 0) {
+      setUploading(true);
+      try {
+        for (const file of toUpload) {
+          setUploadFileName(file.name);
+          setUploadProgress(0);
+          const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
+          uploadedUrls.push(url);
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Upload failed");
+      } finally {
+        setUploading(false);
+        setUploadFileName("");
+      }
+    }
+
+    // Text and attachments go out as one message, matching the main composer.
+    const parts = [trimmed, ...uploadedUrls].filter(Boolean);
+    if (parts.length === 0) return;
     try {
-      await sendThreadMessage(trimmed);
+      await sendThreadMessage(parts.join("\n"));
     } catch {}
-  }, [body, sendThreadMessage]);
+  }, [body, pendingFiles, clearPendingFiles, sendThreadMessage]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -63,43 +97,28 @@ export function ThreadPanel() {
 
   const [uploadFileName, setUploadFileName] = useState("");
 
-  const handleFilesUpload = useCallback(async (files: File[]) => {
-    const valid = files.filter((f) => {
-      if (state.uploadLimitBytes > 0 && f.size > state.uploadLimitBytes) {
-        toast.error(`File "${f.name}" too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
-        return false;
+  /** Stage files on the composer; nothing is uploaded or sent until Send. */
+  const stageFiles = useCallback((files: File[]) => {
+    let staged = pendingFiles.length;
+    for (const file of files) {
+      if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
+        toast.error(`File "${file.name}" too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
+        continue;
       }
-      return true;
-    });
-    if (valid.length === 0) return;
-
-    setUploading(true);
-    const textBody = body.trim();
-    setBody("");
-
-    try {
-      for (let i = 0; i < valid.length; i++) {
-        const file = valid[i];
-        setUploadFileName(file.name);
-        setUploadProgress(0);
-        const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
-        // Attach typed text to the first file only
-        const msg = i === 0 && textBody ? `${textBody} ${url}` : url;
-        await sendThreadMessage(msg);
+      if (staged >= MAX_ATTACHMENTS) {
+        toast.error(`You can attach at most ${MAX_ATTACHMENTS} files per message`);
+        break;
       }
-    } catch (err: any) {
-      toast.error(err.message || "Upload failed");
-    } finally {
-      setUploading(false);
-      setUploadFileName("");
+      addStagedFile(file);
+      staged++;
     }
-  }, [body, sendThreadMessage, state.uploadLimitBytes]);
+  }, [addStagedFile, pendingFiles.length, state.uploadLimitBytes]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const filesList = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (filesList.length > 0) handleFilesUpload(filesList);
-  }, [handleFilesUpload]);
+    if (filesList.length > 0) stageFiles(filesList);
+  }, [stageFiles]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
@@ -113,9 +132,9 @@ export function ThreadPanel() {
     }
     if (files.length > 0) {
       e.preventDefault();
-      handleFilesUpload(files);
+      stageFiles(files);
     }
-  }, [handleFilesUpload]);
+  }, [stageFiles]);
 
   // Drag-and-drop file upload
   const [dragging, setDragging] = useState(false);
@@ -151,9 +170,9 @@ export function ThreadPanel() {
     dragCounter.current = 0;
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
-      handleFilesUpload(files);
+      stageFiles(files);
     }
-  }, [handleFilesUpload]);
+  }, [stageFiles]);
 
   const startEditingName = useCallback(() => {
     setNameDraft(threadRootMessage?.thread_name ?? "");
@@ -375,6 +394,7 @@ export function ThreadPanel() {
             <span className="text-3xs text-muted-foreground shrink-0">{uploadProgress}%</span>
           </div>
         )}
+        <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
           <input
             ref={fileInputRef}
@@ -425,7 +445,7 @@ export function ThreadPanel() {
           <Button
             size="sm"
             className="h-7 px-2 shrink-0"
-            disabled={(!body.trim() && !uploading) || uploading}
+            disabled={uploading || (!body.trim() && pendingFiles.length === 0)}
             onClick={handleSend}
           >
             Send

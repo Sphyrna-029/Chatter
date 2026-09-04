@@ -5,6 +5,8 @@ import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage 
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { MessagePanel, type PanelMode } from "./MessagePanel";
+import { PendingAttachments } from "./PendingAttachments";
+import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
@@ -275,8 +277,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const closeSearch = () => dispatch({ type: "CLOSE_SEARCH" });
 
   // Pending file attachments — staged until the user presses Send/Enter
-  type PendingFile = { file: File; previewUrl: string | null };
-  const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
+  const {
+    files: pendingFiles,
+    add: addStagedFile,
+    remove: removePendingFile,
+    clear: clearPendingFiles,
+  } = usePendingFiles();
   const [isSpoiler, setIsSpoiler] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
@@ -464,8 +470,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     dispatch({ type: "SET_REPLYING_TO", payload: null });
 
     // Grab and clear staged files before any async work
-    const toUpload = [...pendingFiles];
-    setPendingFiles([]);
+    const toUpload = pendingFiles.map((pf) => pf.file);
+    clearPendingFiles();
 
     // Auto-resolve :shortcode: patterns to emoji in body text
     const resolveShortcodes = (raw: string) =>
@@ -480,8 +486,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       // Files + text: upload all files first, then send as one combined message
       // so text and images aren't split into separate spoiler/reply messages.
       const uploadedUrls: string[] = [];
-      for (const { file, previewUrl } of toUpload) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
+      for (const file of toUpload) {
         const url = await uploadFile(file);
         if (url) uploadedUrls.push(url);
       }
@@ -491,8 +496,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       }
     } else {
       // Files only: send each as its own message
-      for (const { file, previewUrl } of toUpload) {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
+      for (const file of toUpload) {
         const url = await uploadFile(file);
         if (url) await sendMessage(url, undefined, spoiler);
       }
@@ -826,11 +830,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       toast.error(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
       return;
     }
-    setPendingFiles((prev) => {
-      if (prev.length >= 4) return prev; // Max 4 attachments per message
-      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
-      return [...prev, { file, previewUrl }];
-    });
+    if (pendingFiles.length >= MAX_ATTACHMENTS) {
+      toast.error(`You can attach at most ${MAX_ATTACHMENTS} files per message`);
+      return;
+    }
+    addStagedFile(file);
   };
 
   const processFiles = (files: File[]) => {
@@ -850,15 +854,6 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       const processed = scrub ? await stripExifData(file) : file;
       addPendingFile(processed);
     }
-  };
-
-  const removePendingFile = (index: number) => {
-    setPendingFiles((prev) => {
-      const next = [...prev];
-      const removed = next.splice(index, 1)[0];
-      if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-      return next;
-    });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -960,10 +955,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Clear staged files (and revoke object URLs) when switching rooms
   useEffect(() => {
-    setPendingFiles((prev) => {
-      prev.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
-      return [];
-    });
+    clearPendingFiles();
     // Search is reset on room switch by the provider (see client/src/lib/store/provider.tsx)
     // Clear the input div on room switch
     if (inputRef.current) inputRef.current.innerHTML = "";
@@ -1413,34 +1405,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </div>
           )}
           {/* Staged file previews */}
-          {pendingFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-2">
-              {pendingFiles.map((pf, i) => (
-                <div key={i} className="relative group">
-                  {pf.previewUrl ? (
-                    <img
-                      src={pf.previewUrl}
-                      alt={pf.file.name}
-                      className="h-16 w-16 object-cover rounded-md border border-border"
-                    />
-                  ) : (
-                    <div className="h-16 w-28 flex flex-col items-center justify-center rounded-md border border-border bg-muted px-2 gap-1">
-                      <span className="text-lg">📄</span>
-                      <span className="text-xs text-muted-foreground truncate max-w-full">{pf.file.name}</span>
-                      <span className="text-3xs text-muted-foreground/70">{pf.file.size < 1024 * 1024 ? `${(pf.file.size / 1024).toFixed(1)} KB` : `${(pf.file.size / (1024 * 1024)).toFixed(1)} MB`}</span>
-                    </div>
-                  )}
-                  <button
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-3xs flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
-                    onClick={() => removePendingFile(i)}
-                    title="Remove"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
           {mediaUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {mediaUrls.map((m, i) => (

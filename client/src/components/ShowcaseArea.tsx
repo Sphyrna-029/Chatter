@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiSendMessage, apiUploadFile, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
+import { PendingAttachments } from "./PendingAttachments";
+import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
@@ -152,6 +154,13 @@ function ShowcaseChatPane({
     return text.replace(/\n$/, "");
   };
 
+  const {
+    files: pendingFiles,
+    add: addStagedFile,
+    remove: removePendingFile,
+    clear: clearPendingFiles,
+  } = usePendingFiles();
+
   const uploadFile = async (file: File): Promise<string | null> => {
     if (uploadLimitBytes > 0 && file.size > uploadLimitBytes) {
       toast.error(`File too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
@@ -186,12 +195,24 @@ function ShowcaseChatPane({
 
   const handleSend = async () => {
     const body = getDivContent().trim();
-    if (!body) return;
+    const toUpload = pendingFiles.map((pf) => pf.file);
+    if (!body && toUpload.length === 0) return;
     if (body.length > MAX_MESSAGE_LENGTH) return;
     if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
+    clearPendingFiles();
+
+    const uploadedUrls: string[] = [];
+    for (const file of toUpload) {
+      const url = await uploadFile(file);
+      if (url) uploadedUrls.push(url);
+    }
+
+    // Text and attachments go out as one message, matching the main composer.
+    const parts = [body ? resolveShortcodes(body) : "", ...uploadedUrls].filter(Boolean);
+    if (parts.length === 0) return;
     try {
-      await apiSendMessage(roomId, resolveShortcodes(body), undefined, undefined, channelId, pane);
+      await apiSendMessage(roomId, parts.join("\n"), undefined, undefined, channelId, pane);
     } catch (err: any) {
       toast.error(err.message || "Failed to send message");
     }
@@ -239,19 +260,24 @@ function ShowcaseChatPane({
     }
   };
 
+  /** Stage files on the composer; the upload happens on Send. */
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
+    let staged = pendingFiles.length;
     for (const file of files) {
-      const processed = file.type.startsWith("image/") ? await stripExifData(file) : file;
-      const url = await uploadFile(processed);
-      if (url) {
-        try {
-          await apiSendMessage(roomId, url, undefined, undefined, channelId, pane);
-        } catch (err: any) {
-          toast.error(err.message || "Failed to send file");
-        }
+      if (uploadLimitBytes > 0 && file.size > uploadLimitBytes) {
+        toast.error(`File "${file.name}" too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
+        continue;
       }
+      if (staged >= MAX_ATTACHMENTS) {
+        toast.error(`You can attach at most ${MAX_ATTACHMENTS} files per message`);
+        break;
+      }
+      // Strip EXIF while staging so the preview matches what will be sent.
+      const processed = file.type.startsWith("image/") ? await stripExifData(file) : file;
+      addStagedFile(processed);
+      staged++;
     }
   };
 
@@ -346,6 +372,7 @@ function ShowcaseChatPane({
       {/* Input area */}
       {canPost ? (
         <div className="border-t p-2 shrink-0">
+          <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
           <div className="flex gap-1.5 items-end">
             {/* File upload */}
             <input
@@ -407,7 +434,7 @@ function ShowcaseChatPane({
               size="sm"
               className="h-8 shrink-0"
               onClick={handleSend}
-              disabled={!input.trim() || uploading}
+              disabled={uploading || (!input.trim() && pendingFiles.length === 0)}
             >
               Send
             </Button>
