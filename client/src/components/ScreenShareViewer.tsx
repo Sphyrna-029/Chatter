@@ -549,7 +549,7 @@ export function ScreenShareViewer() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-purple-300 shrink-0">
                     <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
                   </svg>
-                  <p className="text-[10px] text-purple-300 font-semibold truncate">
+                  <p className="text-3xs text-purple-300 font-semibold truncate">
                     {sharerId === state.userId ? "You" : displayUserId(sharerId)}
                   </p>
                 </div>
@@ -587,7 +587,7 @@ export function ScreenShareViewer() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-blue-300 shrink-0">
                     <path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
                   </svg>
-                  <p className="text-[10px] text-blue-300 font-semibold truncate">
+                  <p className="text-3xs text-blue-300 font-semibold truncate">
                     {userId === state.userId ? "You" : displayUserId(userId)}
                   </p>
                 </div>

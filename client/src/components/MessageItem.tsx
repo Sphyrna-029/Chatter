@@ -487,7 +487,7 @@ function CcControls({
           align="end"
           className="w-56 p-1"
         >
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+          <div className="px-2 py-1 text-3xs uppercase tracking-wide text-muted-foreground">
             Subtitles
           </div>
           {tracks.length === 0 ? (
@@ -578,7 +578,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
         </div>
         {filename && (
           <span
-            className="absolute top-1.5 left-1.5 max-w-[60%] truncate rounded-md bg-black/60 backdrop-blur px-2 py-0.5 text-[11px] text-white/90 pointer-events-none"
+            className="absolute top-1.5 left-1.5 max-w-[60%] truncate rounded-md bg-black/60 backdrop-blur px-2 py-0.5 text-2xs text-white/90 pointer-events-none"
             title={filename}
           >
             {filename}
@@ -818,7 +818,7 @@ function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
           <img src={embed.image.url} alt="" className="max-w-full rounded mt-2" />
         )}
         {(embed.footer || embed.timestamp) && (
-          <div className="flex items-center gap-1.5 mt-2 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1.5 mt-2 text-2xs text-muted-foreground">
             {embed.footer?.icon_url && <img src={embed.footer.icon_url} alt="" className="w-4 h-4 rounded-full" />}
             {embed.footer?.text && <span>{embed.footer.text}</span>}
             {embed.footer?.text && embed.timestamp && <span>&middot;</span>}
@@ -1309,7 +1309,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         ) : (
           <Avatar className={cn("mt-0.5 flex-shrink-0", isMobile ? "h-7 w-7" : "h-10 w-10", !isExternal && "cursor-pointer")} onClick={() => !isExternal && setProfileOpen(true)}>
             <AuthAvatarImage src={avatarUrl} />
-            <AvatarFallback className={cn("font-semibold bg-secondary", isMobile ? "text-[10px]" : "text-xs")}>
+            <AvatarFallback className={cn("font-semibold bg-secondary", isMobile ? "text-3xs" : "text-xs")}>
               {initial}
             </AvatarFallback>
           </Avatar>
@@ -1344,7 +1344,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 {sender}
               </span>
               {isExternal && (
-                <span className="text-[10px] font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">{isBot ? "BOT" : "HOOK"}</span>
+                <span className="text-3xs font-semibold px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-400 leading-none">{isBot ? "BOT" : "HOOK"}</span>
               )}
               <span className="text-xs text-muted-foreground">{time}</span>
             </div>

@@ -356,16 +356,16 @@ function UsersTab({
                 {user.display_name || displayUserId(user.user_id)}
               </span>
               {user.is_admin && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-primary/20 text-primary">Admin</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-primary/20 text-primary">Admin</span>
               )}
               {user.disabled && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-destructive/20 text-destructive">Disabled</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-destructive/20 text-destructive">Disabled</span>
               )}
               {user.online && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-500/20 text-green-500">Online</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-green-500/20 text-green-500">Online</span>
               )}
               {user.totp_verified && (
-                <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-blue-500/20 text-blue-500">2FA</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-blue-500/20 text-blue-500">2FA</span>
               )}
             </div>
             <p className="text-xs text-muted-foreground truncate">{displayUserId(user.user_id)}</p>
@@ -416,7 +416,7 @@ function RoomsTab({
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span className="text-sm font-medium truncate max-w-[200px]">{room.name || "Unnamed"}</span>
-              <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-muted text-muted-foreground">
+              <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-muted text-muted-foreground">
                 {room.is_dm ? "DM" : room.room_type || "text"}
               </span>
             </div>
@@ -539,7 +539,7 @@ function SettingsTab({
                 <RefreshCw className="h-3.5 w-3.5" />
               </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-2xs text-muted-foreground">
               Share this code with people you want to allow to register. Refreshing generates a new code and invalidates the old one.
             </p>
           </div>
@@ -571,7 +571,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {localLimit === 0 ? "Currently unlimited." : `Each user can upload up to ${localLimit} MB total.`}
         </p>
       </div>
@@ -601,7 +601,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {localUploadLimit === 0 ? "Currently unlimited." : `Individual files cannot exceed ${localUploadLimit} MB.`}
         </p>
       </div>
@@ -632,7 +632,7 @@ function SettingsTab({
             />
           </button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {roomCreationDisabled
             ? "Only server owners/admins can create rooms."
             : "All users can create rooms (subject to the per-user limit below)."}
@@ -664,7 +664,7 @@ function SettingsTab({
             Save
           </Button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {localRoomLimit === 0 ? "Currently unlimited." : `Each user can create up to ${localRoomLimit} room${localRoomLimit !== 1 ? "s" : ""}.`}
         </p>
       </div>
@@ -695,7 +695,7 @@ function SettingsTab({
             />
           </button>
         </div>
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-2xs text-muted-foreground">
           {requireAuthForUploads
             ? "Only logged-in users can view uploaded images and files."
             : "Uploaded files are publicly accessible to anyone with the link."}

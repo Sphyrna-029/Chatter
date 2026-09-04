@@ -426,7 +426,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-medium">{cAuthor}</span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-3xs text-muted-foreground">
                           {formatTime(comment.created_at)}
                           {comment.edited && (
                             <span className="ml-1" title={comment.edited_at ? `Edited ${formatTime(comment.edited_at)}` : "Edited"}>

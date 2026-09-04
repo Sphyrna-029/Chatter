@@ -238,7 +238,7 @@ export function ActivityPage() {
                         <div className="relative shrink-0">
                           <Avatar className="h-6 w-6">
                             <AuthAvatarImage src={avatarUrl} />
-                            <AvatarFallback className="text-[10px] bg-secondary">{initial}</AvatarFallback>
+                            <AvatarFallback className="text-3xs bg-secondary">{initial}</AvatarFallback>
                           </Avatar>
                         </div>
                         <span className="text-sm font-medium truncate flex-1">{displayName}</span>
@@ -270,7 +270,7 @@ export function ActivityPage() {
                         className="flex items-center gap-2.5 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
                       >
                         <span className="text-xs text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
-                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-[10px] font-bold shrink-0">
+                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">
                           {info?.icon_url ? (
                             <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
                           ) : (
@@ -314,7 +314,7 @@ export function ActivityPage() {
                         {info?.name || roomId}
                       </span>
                     </div>
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-[11px] font-bold text-white shrink-0">
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-2xs font-bold text-white shrink-0">
                       {count}
                     </span>
                   </button>
@@ -373,10 +373,10 @@ export function ActivityPage() {
                               <span className="h-2 w-2 rounded-full bg-blue-500 shrink-0" />
                             )}
                             {info?.room_type === "forum" && (
-                              <span className="text-[10px] text-muted-foreground border border-border rounded px-1">forum</span>
+                              <span className="text-3xs text-muted-foreground border border-border rounded px-1">forum</span>
                             )}
                             {info?.room_type === "whiteboard" && (
-                              <span className="text-[10px] text-muted-foreground border border-border rounded px-1">whiteboard</span>
+                              <span className="text-3xs text-muted-foreground border border-border rounded px-1">whiteboard</span>
                             )}
                           </div>
 
@@ -438,14 +438,14 @@ export function ActivityPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-6 text-[11px] px-2"
+                          className="h-6 text-2xs px-2"
                           onClick={() => rejectFriendRequest(req.userId)}
                         >
                           Reject
                         </Button>
                         <Button
                           size="sm"
-                          className="h-6 text-[11px] px-2"
+                          className="h-6 text-2xs px-2"
                           onClick={() => acceptFriendRequest(req.userId)}
                         >
                           Accept
@@ -525,7 +525,7 @@ export function ActivityPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-6 text-[11px] px-2"
+                          className="h-6 text-2xs px-2"
                           onClick={() => unblockUser(userId)}
                         >
                           Unblock

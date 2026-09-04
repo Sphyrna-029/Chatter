@@ -223,13 +223,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       >
         {/* Mention count badge (red, highest priority) */}
         {hasMention && (
-          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-3xs font-bold leading-none text-white shadow-sm">
             {state.roomMentions[roomId] > 99 ? "99+" : state.roomMentions[roomId]}
           </span>
         )}
         {/* Unread count badge (purple, shown when no mention badge) */}
         {!hasMention && unreadCount > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-purple-600 px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+          <span className="absolute -top-1.5 -right-1.5 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-purple-600 px-1 text-3xs font-bold leading-none text-white shadow-sm">
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
@@ -257,7 +257,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               showStreak ? (
                 <span className="flex flex-col items-center leading-none gap-0.5">
                   <span className="text-base leading-none">{isStreakExpiring ? "⏳" : "🔥"}</span>
-                  <span className="text-[9px] font-bold leading-none">{streakCount}</span>
+                  <span className="text-3xs font-bold leading-none">{streakCount}</span>
                 </span>
               ) : (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -271,7 +271,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         )}
 
         {/* Room name */}
-        <span className="w-full truncate text-[11px] font-medium leading-tight text-sidebar-foreground flex items-center justify-center gap-1">
+        <span className="w-full truncate text-2xs font-medium leading-tight text-sidebar-foreground flex items-center justify-center gap-1">
           {isForumRoom && (
             <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor" className="shrink-0 text-muted-foreground">
               <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4.414a1 1 0 0 0-.707.293L1.5 14.5A.5.5 0 0 1 .5 14V2zm3.5 1a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h9a.5.5 0 0 0 0-1h-9zm0 2.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1h-5z"/>
@@ -294,7 +294,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
         {/* Stats row */}
         {!isDm && (memberCount > 0 || voiceCount > 0 || screenShareActive) && (
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-3xs text-muted-foreground">
             {memberCount > 0 && (
               <span className="flex items-center gap-0.5">
                 <svg
@@ -350,7 +350,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              <DropdownMenuLabel className="text-3xs uppercase tracking-wide text-muted-foreground">
                 Notifications
               </DropdownMenuLabel>
               {NOTIFICATION_LEVELS.map(({ value, label }) => (
@@ -490,7 +490,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                         setGroupDialogName(undefined);
                         setGroupDialogOpen(true);
                       }}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex items-center gap-1 text-3xs text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <FolderPlus className="h-3 w-3" />
                       Group
@@ -543,10 +543,10 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 ) : (
                                   <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
                                 )}
-                                <span className="text-[11px] font-semibold text-muted-foreground truncate">
+                                <span className="text-2xs font-semibold text-muted-foreground truncate">
                                   {group.name}
                                 </span>
-                                <span className="text-[9px] text-muted-foreground/60 ml-auto mr-5 shrink-0">
+                                <span className="text-3xs text-muted-foreground/60 ml-auto mr-5 shrink-0">
                                   {groupRooms.length}
                                 </span>
                                 {/* Hover menu */}
@@ -598,7 +598,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                 </div>
                               )}
                               {!group.collapsed && groupRooms.length === 0 && (
-                                <p className="px-3 py-1 text-[10px] text-muted-foreground/50 italic">
+                                <p className="px-3 py-1 text-3xs text-muted-foreground/50 italic">
                                   No rooms
                                 </p>
                               )}
@@ -631,7 +631,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                               "px-2 py-1 rounded-sm mx-1",
                               dragOverGroupId === "__ungrouped__" && "ring-2 ring-primary bg-accent/50",
                             )}>
-                              <span className="text-[11px] font-semibold text-muted-foreground/50">
+                              <span className="text-2xs font-semibold text-muted-foreground/50">
                                 Ungrouped
                               </span>
                             </div>
@@ -666,7 +666,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                               "px-2 py-1 rounded-sm mx-1",
                               dragOverGroupId === "__ungrouped__" && "ring-2 ring-primary bg-accent/50",
                             )}>
-                              <span className="text-[11px] font-semibold text-muted-foreground/50">
+                              <span className="text-2xs font-semibold text-muted-foreground/50">
                                 Ungrouped
                               </span>
                             </div>
@@ -694,7 +694,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   <div className="px-2 pb-1">
                     <button
                       onClick={() => setGroupDMDialogOpen(true)}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex items-center gap-1 text-3xs text-muted-foreground hover:text-foreground transition-colors"
                     >
                       <UsersRound className="h-3 w-3" />
                       Group DM
@@ -750,7 +750,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           </span>
           Activity
           {state.incomingFriendRequests.length > 0 && (
-            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-[10px] font-semibold text-white leading-none">
+            <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-500 px-1 text-3xs font-semibold text-white leading-none">
               {state.incomingFriendRequests.length}
             </span>
           )}

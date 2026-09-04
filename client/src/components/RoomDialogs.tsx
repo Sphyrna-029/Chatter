@@ -355,7 +355,7 @@ export function JoinRoomDialog({ open, onOpenChange }: JoinRoomDialogProps) {
                     {room.tags && room.tags.length > 0 && (
                       <div className="flex flex-wrap gap-1">
                         {room.tags.map((tag) => (
-                          <Badge key={tag} variant="outline" className="text-[10px] px-1.5 py-0">
+                          <Badge key={tag} variant="outline" className="text-3xs px-1.5 py-0">
                             {tag}
                           </Badge>
                         ))}
@@ -980,7 +980,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                           <div className="flex-1 min-w-0 truncate font-mono text-xs text-muted-foreground">
                             {url}
                           </div>
-                          <span className="text-[10px] text-muted-foreground shrink-0">
+                          <span className="text-3xs text-muted-foreground shrink-0">
                             {inv.click_count} click{inv.click_count !== 1 ? "s" : ""}
                           </span>
                           <Button
@@ -996,7 +996,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             }}
                           >
                             {copiedCode === inv.code ? (
-                              <span className="text-[10px] text-green-400">ok</span>
+                              <span className="text-3xs text-green-400">ok</span>
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
                             )}
@@ -1360,10 +1360,10 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             {wh.channel_id && (() => {
                               const ch = state.channels.find((c) => c.channel_id === wh.channel_id);
                               return ch ? (
-                                <div className="text-[10px] text-muted-foreground truncate">→ #{ch.name}</div>
+                                <div className="text-3xs text-muted-foreground truncate">→ #{ch.name}</div>
                               ) : null;
                             })()}
-                            <div className="font-mono text-[10px] text-muted-foreground truncate">{fullUrl}</div>
+                            <div className="font-mono text-3xs text-muted-foreground truncate">{fullUrl}</div>
                           </div>
                           <Button
                             type="button"
@@ -1378,7 +1378,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                             }}
                           >
                             {copiedWebhookId === wh.webhook_id ? (
-                              <span className="text-[10px] text-green-400">ok</span>
+                              <span className="text-3xs text-green-400">ok</span>
                             ) : (
                               <Copy className="w-3.5 h-3.5" />
                             )}
@@ -1439,7 +1439,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                         >
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate">{username}</div>
-                            <div className="text-[10px] text-muted-foreground">
+                            <div className="text-3xs text-muted-foreground">
                               banned by {bannedByName} on {bannedDate}
                             </div>
                           </div>

@@ -470,20 +470,20 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                         <div key={memberId} className="opacity-60 transition-opacity duration-150 hover:opacity-100" title={name}>
                           <Avatar className="h-7 w-7 ring-2 ring-background">
                             <AuthAvatarImage src={presence?.avatarUrl} />
-                            <AvatarFallback className="text-[10px] bg-secondary">{initial}</AvatarFallback>
+                            <AvatarFallback className="text-3xs bg-secondary">{initial}</AvatarFallback>
                           </Avatar>
                         </div>
                       );
                     })}
                     {overflowCount > 0 && (
                       <div className="opacity-60 transition-opacity duration-150" title={`+${overflowCount} more`}>
-                        <div className="h-7 w-7 rounded-full bg-muted ring-2 ring-background flex items-center justify-center text-[10px] text-foreground">
+                        <div className="h-7 w-7 rounded-full bg-muted ring-2 ring-background flex items-center justify-center text-3xs text-foreground">
                           +{overflowCount}
                         </div>
                       </div>
                     )}
                   </div>
-                  <span className="rounded-full bg-background/80 backdrop-blur px-2 py-1 text-[11px] text-foreground tabular-nums whitespace-nowrap">
+                  <span className="rounded-full bg-background/80 backdrop-blur px-2 py-1 text-2xs text-foreground tabular-nums whitespace-nowrap">
                     {activeViewers.length} watching
                   </span>
                 </div>
@@ -494,7 +494,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
             <div className="flex flex-col gap-1.5 px-3 py-2 bg-card border-t border-border shrink-0">
               {/* Progress bar + volume */}
               {watchState.videoUrl && (
-                <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-2 text-2xs text-muted-foreground">
                   <span className="shrink-0 tabular-nums w-10 text-right">
                     {formatTime(Math.max(0, displayPosition))}
                   </span>
@@ -563,7 +563,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   Load
                 </Button>
                 <button
-                  className="flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors cursor-pointer shrink-0"
+                  className="flex items-center gap-1 text-2xs text-blue-400 hover:text-blue-300 transition-colors cursor-pointer shrink-0"
                   onClick={() => send({ type: "watchparty_request_sync" })}
                   title="Sync to current playback position"
                 >

@@ -84,7 +84,7 @@ function VoiceTimer({ since }: { since: number }) {
   const str = h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
     : `${m}:${String(s).padStart(2, "0")}`;
-  return <span className="text-green-400 text-[10px] font-mono ml-1 shrink-0">{str}</span>;
+  return <span className="text-green-400 text-3xs font-mono ml-1 shrink-0">{str}</span>;
 }
 
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
@@ -605,7 +605,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                         onChange={(e) => handleVolumeChange(m.userId, parseInt(e.target.value) / 100)}
                         className="flex-1 h-1 accent-primary cursor-pointer"
                       />
-                      <span className="text-[10px] w-7 text-right tabular-nums text-muted-foreground">{Math.round(localVol * 100)}%</span>
+                      <span className="text-3xs w-7 text-right tabular-nums text-muted-foreground">{Math.round(localVol * 100)}%</span>
                     </div>
                   )}
                 </div>
@@ -640,7 +640,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             ) : (
               <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
             )}
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">
+            <span className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
               {cat.name}
             </span>
           </button>
@@ -828,7 +828,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             </div>
           ) : canManage ? (
             <button
-              className="w-full flex items-center justify-center gap-1 py-1.5 text-[10px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
+              className="w-full flex items-center justify-center gap-1 py-1.5 text-3xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 transition-colors"
               onClick={() => bannerInputRef.current?.click()}
               title="Set room banner"
             >
@@ -1086,7 +1086,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   <Label>Bitrate</Label>
                   <span className="text-xs font-mono text-muted-foreground">{editVoiceBitrateKbps} kbps</span>
                 </div>
-                <p className="text-[10px] text-muted-foreground/70 mb-2">
+                <p className="text-3xs text-muted-foreground/70 mb-2">
                   Applies to everyone in this channel. Higher sounds better but uses more bandwidth.
                 </p>
                 <Slider
@@ -1096,7 +1096,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   max={VOICE_BITRATE_MAX_BPS / 1000}
                   step={8}
                 />
-                <div className="flex justify-between text-[10px] text-muted-foreground/70 mt-1">
+                <div className="flex justify-between text-3xs text-muted-foreground/70 mt-1">
                   <span>{VOICE_BITRATE_MIN_BPS / 1000} kbps</span>
                   <span>{VOICE_BITRATE_MAX_BPS / 1000} kbps</span>
                 </div>
@@ -1124,7 +1124,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               <>
                 <div>
                   <Label className="text-xs text-muted-foreground">Restrict visibility to roles</Label>
-                  <p className="text-[10px] text-muted-foreground/70 mb-1">If none selected, everyone can see this channel.</p>
+                  <p className="text-3xs text-muted-foreground/70 mb-1">If none selected, everyone can see this channel.</p>
                   <div className="space-y-1 max-h-28 overflow-y-auto">
                     {state.customRoles.map((r) => (
                       <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
@@ -1144,7 +1144,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">Restrict sending to roles</Label>
-                  <p className="text-[10px] text-muted-foreground/70 mb-1">If none selected, normal send rules apply.</p>
+                  <p className="text-3xs text-muted-foreground/70 mb-1">If none selected, normal send rules apply.</p>
                   <div className="space-y-1 max-h-28 overflow-y-auto">
                     {state.customRoles.map((r) => (
                       <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
@@ -1165,7 +1165,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 {editChannelType === "showcase" && (
                   <div>
                     <Label className="text-xs text-muted-foreground">Approved roles for featured pane</Label>
-                    <p className="text-[10px] text-muted-foreground/70 mb-1">Roles that can post in the left (featured) pane. If none selected, only owners/moderators can post.</p>
+                    <p className="text-3xs text-muted-foreground/70 mb-1">Roles that can post in the left (featured) pane. If none selected, only owners/moderators can post.</p>
                     <div className="space-y-1 max-h-28 overflow-y-auto">
                       {state.customRoles.map((r) => (
                         <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
@@ -1311,7 +1311,7 @@ function ChannelItem({
       <span className="truncate text-sm">{channel.name}</span>
       {badge}
       {(mentionCount ?? 0) > 0 && (
-        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold leading-none text-white shrink-0">
+        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-3xs font-bold leading-none text-white shrink-0">
           {mentionCount! > 99 ? "99+" : mentionCount}
         </span>
       )}

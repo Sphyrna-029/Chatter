@@ -285,7 +285,7 @@ export function ThreadPanel() {
       {/* Thread participants */}
       {threadRootMessage.thread_participants && threadRootMessage.thread_participants.length > 0 && (
         <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border/50 shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider shrink-0">
+          <span className="text-3xs font-medium text-muted-foreground uppercase tracking-wider shrink-0">
             Members
           </span>
           <div className="flex items-center -space-x-1.5 flex-wrap">
@@ -295,14 +295,14 @@ export function ThreadPanel() {
               return (
                 <Avatar key={pid} className="h-5 w-5 border-2 border-background" title={pName}>
                   <AuthAvatarImage src={pAvatar} />
-                  <AvatarFallback className="text-[8px] font-semibold bg-secondary">
+                  <AvatarFallback className="text-3xs font-semibold bg-secondary">
                     {pName.substring(0, 1).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
               );
             })}
           </div>
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-3xs text-muted-foreground">
             {threadRootMessage.thread_participants.length}
           </span>
         </div>
@@ -369,10 +369,10 @@ export function ThreadPanel() {
                 />
               </div>
               {uploadFileName && (
-                <p className="text-[10px] text-muted-foreground truncate mt-0.5">{uploadFileName}</p>
+                <p className="text-3xs text-muted-foreground truncate mt-0.5">{uploadFileName}</p>
               )}
             </div>
-            <span className="text-[10px] text-muted-foreground shrink-0">{uploadProgress}%</span>
+            <span className="text-3xs text-muted-foreground shrink-0">{uploadProgress}%</span>
           </div>
         )}
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">

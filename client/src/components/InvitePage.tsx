@@ -252,7 +252,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
         >
           <CardHeader className="text-center pb-0 pt-6 px-6">
             <div
-              className="text-[10px] uppercase tracking-[0.3em] mb-4 text-left"
+              className="text-3xs uppercase tracking-[0.3em] mb-4 text-left"
               style={{ color: "rgba(180, 210, 255, 0.35)" }}
             >
               Sign in to accept invite
@@ -284,7 +284,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                   return (
                     <div
                       key={i}
-                      className="flex items-center gap-2 text-[11px] tracking-wide"
+                      className="flex items-center gap-2 text-2xs tracking-wide"
                       style={{
                         opacity: visible ? 1 : 0,
                         transform: visible ? "translateX(0)" : "translateX(-6px)",
@@ -339,7 +339,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="nickname"
-                    className="text-[10px] uppercase tracking-[0.2em]"
+                    className="text-3xs uppercase tracking-[0.2em]"
                     style={{ color: "rgba(180, 210, 255, 0.4)" }}
                   >
                     username
@@ -380,12 +380,12 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                     }}
                   />
                   {nicknameError && (
-                    <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
+                    <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
                       err: {nicknameError}
                     </p>
                   )}
                   {!nicknameError && nicknameWarning && (
-                    <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
+                    <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
                       warn: {nicknameWarning}
                     </p>
                   )}
@@ -393,7 +393,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="password"
-                    className="text-[10px] uppercase tracking-[0.2em]"
+                    className="text-3xs uppercase tracking-[0.2em]"
                     style={{ color: "rgba(180, 210, 255, 0.4)" }}
                   >
                     password
@@ -420,7 +420,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                   <div className="space-y-1.5">
                     <Label
                       htmlFor="totp"
-                      className="text-[10px] uppercase tracking-[0.2em]"
+                      className="text-3xs uppercase tracking-[0.2em]"
                       style={{ color: "rgba(180, 210, 255, 0.4)" }}
                     >
                       {useRecoveryCode ? "recovery code" : "authenticator code"}
@@ -474,7 +474,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                           setTotpCode("");
                           setError(null);
                         }}
-                        className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+                        className="text-3xs uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
                         style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
                         onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
                         onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
@@ -486,7 +486,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                 )}
                 {error && (
                   <div
-                    className="p-3 text-[11px] uppercase tracking-[0.08em] border-[1px]"
+                    className="p-3 text-2xs uppercase tracking-[0.08em] border-[1px]"
                     style={{
                       borderColor: "rgba(255, 120, 100, 0.25)",
                       background: "rgba(255, 120, 100, 0.05)",
@@ -520,7 +520,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
                       window.history.replaceState({}, "", "/?action=register");
                       window.location.reload();
                     }}
-                    className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+                    className="text-3xs uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
                     style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
                     onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
@@ -579,7 +579,7 @@ export function InvitePage({ inviteCode }: InvitePageProps) {
       >
         <CardHeader className="text-center pb-0 pt-8 px-6">
           <div
-            className="text-[10px] uppercase tracking-[0.3em] mb-6 text-center"
+            className="text-3xs uppercase tracking-[0.3em] mb-6 text-center"
             style={{ color: "rgba(180, 210, 255, 0.35)" }}
           >
             Room Invite

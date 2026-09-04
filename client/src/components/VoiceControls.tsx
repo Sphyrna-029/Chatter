@@ -173,7 +173,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Voice Channel
         </span>
-        <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+        <span className="inline-flex items-center rounded-full bg-secondary px-1.5 py-0.5 text-3xs font-medium text-muted-foreground">
           {state.voiceMembers.length}
         </span>
       </div>

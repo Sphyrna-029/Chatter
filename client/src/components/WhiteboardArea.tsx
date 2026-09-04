@@ -806,7 +806,7 @@ export function WhiteboardArea() {
               step={1}
               className="h-20 mx-auto"
             />
-            <span className="text-[10px] text-muted-foreground text-center block mt-1">{width}px</span>
+            <span className="text-3xs text-muted-foreground text-center block mt-1">{width}px</span>
           </div>
 
           <div className="w-8 border-t border-border my-1" />
@@ -910,7 +910,7 @@ export function WhiteboardArea() {
                 return (
                   <div key={msg.event_id} className={`flex flex-col ${isOwn ? "items-end" : "items-start"}`}>
                     {!isOwn && (
-                      <span className="text-[10px] text-muted-foreground px-1 mb-0.5">{name}</span>
+                      <span className="text-3xs text-muted-foreground px-1 mb-0.5">{name}</span>
                     )}
                     <div className={`max-w-[90%] rounded-lg px-2.5 py-1.5 text-sm break-words ${isOwn ? "bg-primary text-primary-foreground" : "bg-muted"}`}>
                       {isGif ? (
@@ -964,7 +964,7 @@ export function WhiteboardArea() {
               {/* GIF picker */}
               <Popover>
                 <PopoverTrigger asChild>
-                  <button className="shrink-0 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-colors leading-none" title="GIF">
+                  <button className="shrink-0 text-3xs font-bold text-muted-foreground hover:text-foreground transition-colors leading-none" title="GIF">
                     GIF
                   </button>
                 </PopoverTrigger>

@@ -433,7 +433,7 @@ export function LoginScreen() {
     caretColor: "rgba(180, 210, 255, 0.6)",
   };
 
-  const labelClass = "text-[10px] uppercase tracking-[0.2em]";
+  const labelClass = "text-3xs uppercase tracking-[0.2em]";
   const labelStyle = { color: "rgba(180, 210, 255, 0.4)" };
 
   const renderUsernameInput = (
@@ -481,12 +481,12 @@ export function LoginScreen() {
         }}
       />
       {nicknameError && (
-        <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
+        <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
           err: {nicknameError}
         </p>
       )}
       {!nicknameError && nicknameWarning && (
-        <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
+        <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
           warn: {nicknameWarning}
         </p>
       )}
@@ -522,7 +522,7 @@ export function LoginScreen() {
   const renderError = () =>
     error ? (
       <div
-        className="p-3 text-[11px] uppercase tracking-[0.08em] border-[1px]"
+        className="p-3 text-2xs uppercase tracking-[0.08em] border-[1px]"
         style={{
           borderColor: "rgba(255, 120, 100, 0.25)",
           background: "rgba(255, 120, 100, 0.05)",
@@ -557,7 +557,7 @@ export function LoginScreen() {
     <button
       type="button"
       onClick={onClick}
-      className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+      className="text-3xs uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
       style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
       onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
       onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
@@ -575,7 +575,7 @@ export function LoginScreen() {
         return (
           <div
             key={i}
-            className="flex items-center gap-2 text-[11px] tracking-wide"
+            className="flex items-center gap-2 text-2xs tracking-wide"
             style={{
               opacity: visible ? 1 : 0,
               transform: visible ? "translateX(0)" : "translateX(-6px)",
@@ -669,7 +669,7 @@ export function LoginScreen() {
                       setTotpCode("");
                       setError(null);
                     }}
-                    className="text-[10px] uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
+                    className="text-3xs uppercase tracking-[0.15em] cursor-pointer bg-transparent border-0 p-0"
                     style={{ color: "rgba(180, 210, 255, 0.5)", transition: "color 0.2s" }}
                     onMouseEnter={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.85)")}
                     onMouseLeave={(e) => (e.currentTarget.style.color = "rgba(180, 210, 255, 0.5)")}
@@ -747,17 +747,17 @@ export function LoginScreen() {
                 }}
               />
               {nicknameError && (
-                <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
+                <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 120, 100, 0.8)" }}>
                   err: {nicknameError}
                 </p>
               )}
               {!nicknameError && nicknameWarning && (
-                <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
+                <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(255, 190, 90, 0.85)" }}>
                   warn: {nicknameWarning}
                 </p>
               )}
               {!nicknameError && !nicknameWarning && regUsername.trim().length >= USERNAME_MIN_LENGTH && (
-                <p className="text-[10px] tracking-[0.08em]" style={{
+                <p className="text-3xs tracking-[0.08em]" style={{
                   color: checkingUsername
                     ? "rgba(180, 210, 255, 0.4)"
                     : usernameAvailable === true
@@ -797,7 +797,7 @@ export function LoginScreen() {
                   className="rounded-md border-[1px] bg-transparent h-10 text-sm tracking-[0.15em] font-mono"
                   style={inputStyle}
                 />
-                <p className="text-[10px] tracking-[0.08em]" style={{ color: "rgba(180, 210, 255, 0.4)" }}>
+                <p className="text-3xs tracking-[0.08em]" style={{ color: "rgba(180, 210, 255, 0.4)" }}>
                   this server requires an invite code to register
                 </p>
               </div>
@@ -822,7 +822,7 @@ export function LoginScreen() {
         return (
           <form onSubmit={handleTotpVerify} className="space-y-5">
             <div className="text-center space-y-3">
-              <p className="text-[11px] tracking-wide" style={{ color: "rgba(200, 220, 255, 0.7)" }}>
+              <p className="text-2xs tracking-wide" style={{ color: "rgba(200, 220, 255, 0.7)" }}>
                 Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
               </p>
 
@@ -840,7 +840,7 @@ export function LoginScreen() {
               )}
 
               <div className="space-y-1">
-                <p className="text-[10px] uppercase tracking-[0.15em]" style={{ color: "rgba(180, 210, 255, 0.35)" }}>
+                <p className="text-3xs uppercase tracking-[0.15em]" style={{ color: "rgba(180, 210, 255, 0.35)" }}>
                   or enter this key manually
                 </p>
                 <div
@@ -885,7 +885,7 @@ export function LoginScreen() {
       case "recovery-login":
         return (
           <form onSubmit={handleRecoveryLogin} className="space-y-5">
-            <p className="text-[11px] tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
+            <p className="text-2xs tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
               Enter your username and a recovery code to sign in without your password.
             </p>
 
@@ -928,7 +928,7 @@ export function LoginScreen() {
       case "force-reset-password":
         return (
           <form onSubmit={handleForceResetPassword} className="space-y-5">
-            <p className="text-[11px] tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
+            <p className="text-2xs tracking-wide text-center" style={{ color: "rgba(200, 220, 255, 0.6)" }}>
               You must set a new password before continuing.
             </p>
 
@@ -944,7 +944,7 @@ export function LoginScreen() {
         return (
           <div className="space-y-5">
             <div className="text-center space-y-3">
-              <p className="text-[11px] tracking-wide" style={{ color: "rgba(200, 220, 255, 0.7)" }}>
+              <p className="text-2xs tracking-wide" style={{ color: "rgba(200, 220, 255, 0.7)" }}>
                 Save these recovery codes in a safe place. Each code can only be used once to sign in if you lose access to your authenticator app.
               </p>
             </div>
@@ -972,7 +972,7 @@ export function LoginScreen() {
               onClick={() => {
                 navigator.clipboard.writeText(recoveryCodes.join("\n"));
               }}
-              className="w-full rounded-md h-8 text-[10px] uppercase tracking-[0.2em] font-normal border-[1px]"
+              className="w-full rounded-md h-8 text-3xs uppercase tracking-[0.2em] font-normal border-[1px]"
               variant="outline"
               style={{
                 borderColor: "rgba(180, 210, 255, 0.15)",
@@ -1054,7 +1054,7 @@ export function LoginScreen() {
           <TooltipContent
             side="left"
             sideOffset={8}
-            className="max-w-[240px] rounded-md border-[1px] text-[11px] leading-relaxed tracking-wide"
+            className="max-w-[240px] rounded-md border-[1px] text-2xs leading-relaxed tracking-wide"
             style={{
               borderColor: "rgba(180, 210, 255, 0.2)",
               background: "rgba(10, 10, 10, 0.95)",
@@ -1107,7 +1107,7 @@ export function LoginScreen() {
       >
         <CardHeader className="text-center pb-0 pt-6 px-6">
           <div
-            className="text-[10px] uppercase tracking-[0.3em] mb-8 text-left"
+            className="text-3xs uppercase tracking-[0.3em] mb-8 text-left"
             style={{ color: "rgba(180, 210, 255, 0.35)" }}
           >
             v0.1.0 - Internal Build

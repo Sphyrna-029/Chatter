@@ -100,8 +100,8 @@ function SpotifyCard({ track, artist, albumArt }: { track: string; artist?: stri
         )}
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-green-400 truncate">{track}</p>
-          {artist && <p className="text-[10px] text-muted-foreground truncate">{artist}</p>}
-          <p className="text-[10px] text-muted-foreground/60">Listening on Spotify</p>
+          {artist && <p className="text-3xs text-muted-foreground truncate">{artist}</p>}
+          <p className="text-3xs text-muted-foreground/60">Listening on Spotify</p>
         </div>
       </div>
     </div>
@@ -139,7 +139,7 @@ function SteamGameCard({ game, appId, sessionStart }: { game: string; appId?: st
         </svg>
         <div className="min-w-0 flex-1">
           <p className="text-xs font-medium text-blue-400 truncate">{game}</p>
-          {elapsed && <p className="text-[10px] text-muted-foreground">Playing for {elapsed}</p>}
+          {elapsed && <p className="text-3xs text-muted-foreground">Playing for {elapsed}</p>}
         </div>
       </div>
     </div>
@@ -593,7 +593,7 @@ export function UserProfileDialog({
                       <div className="relative shrink-0">
                         <Avatar className="h-6 w-6">
                           <AuthAvatarImage src={fAvatar} />
-                          <AvatarFallback className="text-[10px] bg-secondary">
+                          <AvatarFallback className="text-3xs bg-secondary">
                             {fDisplay[0]?.toUpperCase() || "?"}
                           </AvatarFallback>
                         </Avatar>
@@ -632,7 +632,7 @@ export function UserProfileDialog({
               maxLength={200}
               rows={3}
             />
-            <p className="text-[10px] text-muted-foreground text-right">{aboutInput.length}/200</p>
+            <p className="text-3xs text-muted-foreground text-right">{aboutInput.length}/200</p>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name Font</label>
@@ -1017,7 +1017,7 @@ export function UserProfileDialog({
                     >
                       {canManage && <GripVertical className="h-3 w-3 shrink-0 opacity-50" />}
                       <span className="flex-1">{role.name}</span>
-                      {idx === 0 && <span className="text-[9px] opacity-60 uppercase">color</span>}
+                      {idx === 0 && <span className="text-3xs opacity-60 uppercase">color</span>}
                       {canManage && (
                         <button
                           className="ml-auto opacity-50 hover:opacity-100 transition-opacity"
@@ -1134,7 +1134,7 @@ export function UserProfileDialog({
               <div className="px-2 py-1.5 space-y-0.5">
                 <p className="text-xs font-medium truncate" title={file.filename}>{file.filename}</p>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-3xs text-muted-foreground">
                     {formatFileSize(file.size)} &middot;{" "}
                     {new Date(file.uploaded_at * 1000).toLocaleDateString(undefined, {
                       month: "short",
@@ -1343,7 +1343,7 @@ export function UserProfileDialog({
               />
             </div>
             <div className="space-y-1">
-              <p className="text-[10px] text-muted-foreground text-center">Or enter this key manually:</p>
+              <p className="text-3xs text-muted-foreground text-center">Or enter this key manually:</p>
               <p className="text-xs font-mono text-center break-all select-all bg-muted/30 rounded px-2 py-1">
                 {totpSetupData.totp_secret}
               </p>

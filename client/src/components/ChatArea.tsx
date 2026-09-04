@@ -1625,11 +1625,11 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     <div className="h-16 w-28 flex flex-col items-center justify-center rounded-md border border-border bg-muted px-2 gap-1">
                       <span className="text-lg">📄</span>
                       <span className="text-xs text-muted-foreground truncate max-w-full">{pf.file.name}</span>
-                      <span className="text-[10px] text-muted-foreground/70">{pf.file.size < 1024 * 1024 ? `${(pf.file.size / 1024).toFixed(1)} KB` : `${(pf.file.size / (1024 * 1024)).toFixed(1)} MB`}</span>
+                      <span className="text-3xs text-muted-foreground/70">{pf.file.size < 1024 * 1024 ? `${(pf.file.size / 1024).toFixed(1)} KB` : `${(pf.file.size / (1024 * 1024)).toFixed(1)} MB`}</span>
                     </div>
                   )}
                   <button
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-3xs flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
                     onClick={() => removePendingFile(i)}
                     title="Remove"
                   >
@@ -1655,7 +1655,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     </div>
                   )}
                   <button
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-3xs flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
                     onClick={() => removeMediaUrl(m.url)}
                     title="Remove"
                   >

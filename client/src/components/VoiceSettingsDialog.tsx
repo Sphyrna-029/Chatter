@@ -434,7 +434,7 @@ export function VoiceSettingsDialog({
                     {isCustom && (
                       <div className="absolute top-1 right-1 flex gap-1 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity">
                         <button
-                          className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white hover:bg-black/80"
+                          className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-white hover:bg-black/80"
                           onClick={() => {
                             setEditingThemeId(theme.id);
                             setThemeName(theme.name);
@@ -445,7 +445,7 @@ export function VoiceSettingsDialog({
                           Edit
                         </button>
                         <button
-                          className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white hover:bg-black/80"
+                          className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-white hover:bg-black/80"
                           onClick={async () => {
                             const json = exportTheme(theme.id);
                             if (!json) return;
@@ -459,7 +459,7 @@ export function VoiceSettingsDialog({
                           {copiedThemeId === theme.id ? "Copied!" : "Copy"}
                         </button>
                         <button
-                          className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-red-400 hover:bg-black/80"
+                          className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-red-400 hover:bg-black/80"
                           onClick={() => deleteCustomTheme(theme.id)}
                         >
                           Del

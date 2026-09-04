@@ -19,6 +19,11 @@
 }
 
 @theme inline {
+  /* Two defined steps below text-xs. The UI had drifted to four arbitrary
+     sizes (8/9/10/11px) used interchangeably; these give the dense surfaces —
+     badges, timestamps, meta rows — a scale to sit on. */
+  --text-2xs: 0.6875rem; /* 11px */
+  --text-3xs: 0.625rem;  /* 10px */
   --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
     Consolas, "Liberation Mono", "Courier New", monospace;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,

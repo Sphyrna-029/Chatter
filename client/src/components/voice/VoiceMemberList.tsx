@@ -81,7 +81,7 @@ export function VoiceMemberList({
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className={cn("text-[8px] leading-none flex-shrink-0", dotColor)}>●</span>
+                          <span className={cn("text-3xs leading-none flex-shrink-0", dotColor)}>●</span>
                         </TooltipTrigger>
                         <TooltipContent side="right" className="text-xs">
                           {rttMs != null ? `${rttMs}ms` : "No data"}
@@ -94,7 +94,7 @@ export function VoiceMemberList({
                   {name}{isSelf && " (You)"}
                 </span>
                 {isWebcamStreaming && (
-                  <span className="text-[10px] shrink-0 text-blue-400" title="Sharing camera">📷</span>
+                  <span className="text-3xs shrink-0 text-blue-400" title="Sharing camera">📷</span>
                 )}
               </div>
               {/* Sharing badge — clickable to open/toggle stream */}
@@ -103,7 +103,7 @@ export function VoiceMemberList({
                   type="button"
                   onClick={() => onWatchUser(memberId)}
                   className={cn(
-                    "text-[10px] font-semibold px-1 py-0.5 rounded-md mt-0.5 w-fit transition-colors cursor-pointer",
+                    "text-3xs font-semibold px-1 py-0.5 rounded-md mt-0.5 w-fit transition-colors cursor-pointer",
                     isWatching
                       ? "text-purple-200 bg-purple-600/40 hover:bg-purple-600/60"
                       : "text-purple-400 bg-purple-500/10 hover:bg-purple-500/20"
@@ -123,7 +123,7 @@ export function VoiceMemberList({
                       step={1}
                       className="flex-1"
                     />
-                    <span className="text-[10px] text-muted-foreground w-8 text-right">
+                    <span className="text-3xs text-muted-foreground w-8 text-right">
                       {Math.round(vol * 100)}%
                     </span>
                   </div>
@@ -136,7 +136,7 @@ export function VoiceMemberList({
                         onWatchUser(memberId);
                       }}
                       className={cn(
-                        "h-5 px-1.5 text-[10px] font-semibold w-full",
+                        "h-5 px-1.5 text-3xs font-semibold w-full",
                         isWatching
                           ? "bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
                           : "border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"

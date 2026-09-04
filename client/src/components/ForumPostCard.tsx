@@ -93,7 +93,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
                       e.stopPropagation();
                       addReaction(post.post_id, emoji);
                     }}
-                    className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] transition-colors cursor-pointer ${
+                    className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-3xs transition-colors cursor-pointer ${
                       userIds.includes(state.userId ?? "")
                         ? "border-primary/50 bg-primary/10"
                         : "border-border hover:bg-accent"
@@ -119,7 +119,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
           )}
 
           {/* Comment count */}
-          <span className="flex items-center gap-1 text-[10px] text-muted-foreground ml-auto">
+          <span className="flex items-center gap-1 text-3xs text-muted-foreground ml-auto">
             <MessageSquare className="w-3 h-3" />
             {post.comment_count}
           </span>

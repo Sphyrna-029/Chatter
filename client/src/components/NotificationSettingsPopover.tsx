@@ -49,7 +49,7 @@ export function NotificationSettingsPopover({
     <Popover>
       <PopoverTrigger asChild>{children}</PopoverTrigger>
       <PopoverContent side="right" align="start" className="w-60 p-1">
-        <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <div className="px-2 py-1 text-3xs uppercase tracking-wide text-muted-foreground">
           {channelId ? "Channel notifications" : "Room notifications"}
         </div>
 
@@ -100,12 +100,12 @@ export function NotificationSettingsPopover({
           </div>
         )}
         {permission === "denied" && (
-          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-[11px] text-muted-foreground">
+          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-2xs text-muted-foreground">
             Desktop notifications are blocked in your browser settings.
           </div>
         )}
         {permission === "unsupported" && (
-          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-[11px] text-muted-foreground">
+          <div className="mt-1 border-t pt-1 px-2 py-1.5 text-2xs text-muted-foreground">
             This browser doesn't support desktop notifications.
           </div>
         )}

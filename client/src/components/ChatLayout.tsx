@@ -106,7 +106,7 @@ function MobileHeader({
       <div className="flex-1 min-w-0 px-1 leading-tight">
         <h1 className="truncate text-sm font-semibold">{roomName}</h1>
         {channelName && (
-          <p className="truncate text-[11px] text-muted-foreground">#{channelName}</p>
+          <p className="truncate text-2xs text-muted-foreground">#{channelName}</p>
         )}
       </div>
       {showMembers && (

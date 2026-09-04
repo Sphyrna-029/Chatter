@@ -264,7 +264,7 @@ function ShowcaseChatPane({
         {pane === "featured" && <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold">{title}</h3>
-          <p className="text-[11px] text-muted-foreground truncate">{subtitle}</p>
+          <p className="text-2xs text-muted-foreground truncate">{subtitle}</p>
         </div>
         {headerExtra}
       </div>
@@ -378,7 +378,7 @@ function ShowcaseChatPane({
             <Popover open={gifOpen} onOpenChange={setGifOpen}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" title="GIF">
-                  <span className="text-[10px] font-bold leading-none">GIF</span>
+                  <span className="text-3xs font-bold leading-none">GIF</span>
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start" side="top">
