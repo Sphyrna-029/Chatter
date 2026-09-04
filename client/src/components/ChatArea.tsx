@@ -112,7 +112,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const newDividerRef = useRef<HTMLDivElement>(null);
   const unreadCountRef = useRef(0);
   const pendingDividerRef = useRef(false);
-  const prevChannelIdRef = useRef<string | null>(state.currentChannelId);
+  // Starts null so the first pass after a mount counts as a channel change —
+  // ChatArea unmounts when a forum/whiteboard/showcase channel or a thread is
+  // open, and the channel it comes back on still needs its unread cleared.
+  const prevChannelIdRef = useRef<string | null>(null);
   const currentChannelIdRef = useRef<string | null>(state.currentChannelId);
 
   // Room-level unread banner state

@@ -115,7 +115,14 @@ export function createWsMessageHandler(
         const bodyText = msg.content?.body || "";
         const hasMention = (myUsername !== "" && bodyText.includes(`@${myUsername}`)) || hasRoleMention(bodyText, stateRef);
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
+        const msgChannelId = msg.channel_id || msg.content?.channel_id;
         dispatch({ type: "INCREMENT_ROOM_UNREAD", payload: msg.room_id });
+        // Track the per-channel unread too, so the channel is highlighted once
+        // the user switches to that room. Channels of other rooms aren't loaded,
+        // so this is keyed off the event's own channel_id with no fallback.
+        if (msgChannelId) {
+          dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
+        }
         if (isDm || hasMention) {
           if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
           dispatch({
@@ -123,11 +130,8 @@ export function createWsMessageHandler(
             payload: { roomId: msg.room_id, hasMention: true },
           });
         }
-        if (hasMention) {
-          const msgChannelId = msg.channel_id || msg.content?.channel_id;
-          if (msgChannelId) {
-            dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
-          }
+        if (hasMention && msgChannelId) {
+          dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: msgChannelId, hasMention: true } });
         }
       }
     } else if (msg.type === "m.room.member") {
