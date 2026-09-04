@@ -537,7 +537,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                             <button
-                              className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+                              className="shrink-0 p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity"
                               title="Moderate"
                             >
                               <Shield className="h-3 w-3" />
@@ -647,7 +647,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
           {canManage && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity text-muted-foreground">
+                <button className="p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity text-muted-foreground">
                   <Pencil className="h-3 w-3" />
                 </button>
               </DropdownMenuTrigger>
@@ -1322,7 +1322,7 @@ function ChannelItem({
         >
           <NotificationSettingsPopover roomId={notifyRoomId} channelId={channel.channel_id}>
             <button
-              className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+              className="p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity"
               title="Notification settings"
             >
               <NotificationBell level={notifyLevel ?? "all"} className="h-3 w-3" />
@@ -1333,7 +1333,7 @@ function ChannelItem({
       {canManage && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-            <button className={`${(mentionCount ?? 0) > 0 || notifyRoomId ? "" : "ml-auto"} p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity`}>
+            <button className={`${(mentionCount ?? 0) > 0 || notifyRoomId ? "" : "ml-auto"} p-0.5 rounded can-hover:opacity-0 can-hover:group-hover:opacity-100 hover:bg-accent transition-opacity`}>
               <Pencil className="h-3 w-3" />
             </button>
           </DropdownMenuTrigger>

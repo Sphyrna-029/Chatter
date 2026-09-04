@@ -24,7 +24,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
     <div className="relative group/code my-1">
       <button
         onClick={handleCopy}
-        className="absolute right-2 top-2 opacity-0 group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
+        className="absolute right-2 top-2 can-hover:opacity-0 can-hover:group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
       >
         {copied ? "Copied!" : "Copy"}
       </button>

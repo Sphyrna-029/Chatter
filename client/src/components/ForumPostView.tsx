@@ -434,7 +434,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                             </span>
                           )}
                         </span>
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex items-center gap-1">
+                        <div className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity ml-auto flex items-center gap-1">
                           {isCommentAuthor && !isEditing && (
                             <button
                               onClick={() => startEditingComment(comment)}

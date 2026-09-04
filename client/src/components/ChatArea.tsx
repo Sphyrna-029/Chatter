@@ -1114,7 +1114,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 ? `# ${state.channels.find((c) => c.channel_id === state.currentChannelId)?.name || "channel"}`
                 : roomInfo?.name || "Unnamed Room"}
               {roomInfo?.is_direct && (
-                <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                <Pencil className="h-3 w-3 text-muted-foreground can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity shrink-0" />
               )}
             </h2>
           )}
@@ -1629,7 +1629,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     </div>
                   )}
                   <button
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
                     onClick={() => removePendingFile(i)}
                     title="Remove"
                   >
@@ -1655,7 +1655,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     </div>
                   )}
                   <button
-                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+                    className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground text-[10px] flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
                     onClick={() => removeMediaUrl(m.url)}
                     title="Remove"
                   >

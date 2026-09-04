@@ -488,7 +488,7 @@ export function ScreenShareViewer() {
       {/* Volume controls overlay */}
       {state.selectedScreenSharer &&
         screenStreamsMap.has(state.selectedScreenSharer) && (
-        <div className="absolute right-3 bottom-3 flex flex-col items-center gap-2 px-2 py-2.5 bg-black/60 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute right-3 bottom-3 flex flex-col items-center gap-2 px-2 py-2.5 bg-black/60 rounded-lg can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity">
           <span className="text-xs text-white/60 tabular-nums">
             {currentMuted ? 0 : currentVolume}%
           </span>

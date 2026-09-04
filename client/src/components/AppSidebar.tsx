@@ -3,12 +3,25 @@ import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
-import { NotificationSettingsPopover, NotificationBell } from "@/components/NotificationSettingsPopover";
-import { resolveNotificationLevel } from "@/lib/notifications";
+import { resolveNotificationLevel, type NotificationLevel } from "@/lib/notifications";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const NOTIFICATION_LEVELS: { value: NotificationLevel; label: string }[] = [
+  { value: "all", label: "All messages" },
+  { value: "mentions", label: "Only @mentions" },
+  { value: "none", label: "Nothing" },
+];
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2, Settings2, UsersRound } from "lucide-react";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Pencil, Trash2, Settings2, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -36,7 +49,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const confirm = useConfirm();
-  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms } = useAppContext();
+  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms, setNotificationLevel } = useAppContext();
   const { isMobile, setOpenMobile } = useSidebar();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -92,6 +105,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   );
 
   function renderRoomCard(roomId: string, isDm: boolean) {
+    const notificationLevel = resolveNotificationLevel(state.notificationSettings, roomId);
     const info = state.roomInfoMap[roomId];
     const summary = roomSummaries[roomId];
     const isActive = roomId === state.currentRoomId;
@@ -319,48 +333,56 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           </div>
         )}
 
-        {/* Leave button on hover */}
+        {/* One overflow menu instead of three separate corner affordances —
+            on touch every hover control is permanently visible, so three of
+            them crowded the card. */}
         <span
-          className="absolute top-1 left-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-[9px] text-destructive hover:text-destructive/80 cursor-pointer"
-          onClick={async (e) => {
-            e.stopPropagation();
-            if (await confirm({ title: "Leave this room?", confirmLabel: "Leave", destructive: true })) {
-              leaveRoom(roomId);
-            }
-          }}
-        >
-          x
-        </span>
-
-        {/* Notification level — every member, not just the owner */}
-        <span
-          className="absolute bottom-1 right-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
+          className="absolute top-0.5 right-0.5 can-hover:opacity-0 can-hover:group-hover/card:opacity-100 transition-opacity"
           onClick={(e) => e.stopPropagation()}
         >
-          <NotificationSettingsPopover roomId={roomId}>
-            <button title="Notification settings">
-              <NotificationBell
-                level={resolveNotificationLevel(state.notificationSettings, roomId)}
-              />
-            </button>
-          </NotificationSettingsPopover>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label={`Options for ${info?.name || "room"}`}
+              >
+                <MoreVertical className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Notifications
+              </DropdownMenuLabel>
+              {NOTIFICATION_LEVELS.map(({ value, label }) => (
+                <DropdownMenuItem
+                  key={value}
+                  onClick={() => void setNotificationLevel(roomId, value).catch(() => {})}
+                >
+                  <span className="w-4 flex justify-center">
+                    {notificationLevel === value && <Check className="h-3.5 w-3.5" />}
+                  </span>
+                  {label}
+                </DropdownMenuItem>
+              ))}
+              <DropdownMenuSeparator />
+              {!isDm && info?.creator === state.userId && (
+                <DropdownMenuItem onClick={() => setSettingsRoomId(roomId)}>
+                  <Settings2 className="h-3.5 w-3.5 mr-2" /> Room settings
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem
+                className="text-destructive"
+                onClick={async () => {
+                  if (await confirm({ title: "Leave this room?", confirmLabel: "Leave", destructive: true })) {
+                    leaveRoom(roomId);
+                  }
+                }}
+              >
+                <LogOut className="h-3.5 w-3.5 mr-2" /> Leave room
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
-
-        {/* Settings gear for room creator (non-DM only) */}
-        {!isDm && info?.creator === state.userId && (
-          <span
-            className="absolute top-1 right-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-[9px] text-muted-foreground hover:text-foreground cursor-pointer"
-            onClick={(e) => {
-              e.stopPropagation();
-              setSettingsRoomId(roomId);
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/>
-              <path d="M8 5.754a2.246 2.246 0 1 0 0 4.492 2.246 2.246 0 0 0 0-4.492zM9.246 8a1.246 1.246 0 1 1-2.492 0 1.246 1.246 0 0 1 2.492 0z"/>
-            </svg>
-          </span>
-        )}
       </button>
     );
   }
@@ -528,7 +550,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                                   {groupRooms.length}
                                 </span>
                                 {/* Hover menu */}
-                                <div className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover/header:opacity-100 flex items-center gap-0.5 transition-opacity">
+                                <div className="absolute right-1 top-1/2 -translate-y-1/2 can-hover:opacity-0 can-hover:group-hover/header:opacity-100 flex items-center gap-0.5 transition-opacity">
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();

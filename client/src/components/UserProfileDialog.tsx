@@ -445,7 +445,7 @@ export function UserProfileDialog({
         {/* Fade to dialog background */}
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background pointer-events-none" />
         {isSelf && (
-          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/40 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex items-center justify-center">
             <span className="text-white text-xs font-medium">Change Banner</span>
           </div>
         )}
@@ -471,7 +471,7 @@ export function UserProfileDialog({
             </AvatarFallback>
           </Avatar>
           {isSelf && (
-            <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full bg-black/50 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex items-center justify-center">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="white">
                 <path d="M10.5 8.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z" />
                 <path d="M2 4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-1.172a2 2 0 0 1-1.414-.586l-.828-.828A2 2 0 0 0 9.172 2H6.828a2 2 0 0 0-1.414.586l-.828.828A2 2 0 0 1 3.172 4H2zm.5 2a.5.5 0 1 1 0-1 .5.5 0 0 1 0 1zm9 2.5a3.5 3.5 0 1 1-7 0 3.5 3.5 0 0 1 7 0z" />
@@ -1144,7 +1144,7 @@ export function UserProfileDialog({
                   <button
                     onClick={() => handleDeleteUpload(file.url)}
                     disabled={deletingUrl === file.url}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/20 text-destructive"
+                    className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-destructive/20 text-destructive"
                     title="Delete file"
                   >
                     {deletingUrl === file.url ? (

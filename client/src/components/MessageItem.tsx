@@ -183,7 +183,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
     <div className="relative group/code my-1">
       <button
         onClick={handleCopy}
-        className="absolute right-2 top-2 opacity-0 group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
+        className="absolute right-2 top-2 can-hover:opacity-0 can-hover:group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
       >
         {copied ? "Copied!" : "Copy"}
       </button>
@@ -663,7 +663,7 @@ function YouTubeEmbed({ id }: { id: string }) {
         className="absolute inset-0 w-full h-full"
       />
       <button
-        className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity z-10"
         onClick={handleCopy}
         title="Copy video URL"
       >
@@ -937,7 +937,7 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
               onClick={() => setLightbox({ url, type: "image" })}
             />
             <button
-              className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute top-1.5 right-1.5 p-1 rounded-md bg-black/50 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
               onClick={(e) => {
                 e.stopPropagation();
                 fav ? removeFavorite(url) : addFavorite(url);
@@ -1180,7 +1180,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         <span className="text-xs text-muted-foreground/50">{time}</span>
         {canDeleteNotification && (
           <button
-            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
+            className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
             title="Delete notification"
             onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
           >
@@ -1216,7 +1216,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           <Popover>
             <PopoverTrigger asChild>
               <button
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-foreground text-xs"
+                className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-foreground text-xs"
                 title="Add reaction"
               >
                 😊
@@ -1232,7 +1232,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
           </Popover>
           {canDeleteNotification && (
             <button
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
+              className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity text-muted-foreground/50 hover:text-destructive"
               title="Delete notification"
               onClick={async () => { if (await confirm({ title: "Delete this notification?", confirmLabel: "Delete", destructive: true })) hardDeleteNotification(state.currentRoomId!, message.event_id); }}
             >
@@ -1575,7 +1575,7 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
 
         {/* Action buttons (shown on hover) */}
         {!isDeleted && (
-          <div className={cn("absolute right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1", grouped ? "top-0" : "top-1")}>
+          <div className={cn("absolute right-2 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex gap-1", grouped ? "top-0" : "top-1")}>
             <Button
               variant="ghost"
               size="icon"

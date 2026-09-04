@@ -159,7 +159,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
                       />
                     </button>
                     <button
-                      className="absolute top-1 right-1 p-0.5 rounded-sm bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-1 right-1 p-0.5 rounded-sm bg-black/50 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
                       onClick={(e) => {
                         e.stopPropagation();
                         fav ? removeFavorite(full) : addFavorite(full);
@@ -214,7 +214,7 @@ export function GifPicker({ onSelect }: GifPickerProps) {
                     />
                   </button>
                   <button
-                    className="absolute top-1 right-1 p-0.5 rounded-sm bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute top-1 right-1 p-0.5 rounded-sm bg-black/50 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
                     onClick={(e) => {
                       e.stopPropagation();
                       removeFavorite(url);

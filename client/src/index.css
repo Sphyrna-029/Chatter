@@ -5,6 +5,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Controls that appear on hover are invisible and unreachable on touch, where
+   there is no hover state at all. Gate the hiding on a hover-capable pointer
+   so the same markup shows the control outright on phones and tablets. */
+@custom-variant can-hover (@media (hover: hover) and (pointer: fine));
+
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;

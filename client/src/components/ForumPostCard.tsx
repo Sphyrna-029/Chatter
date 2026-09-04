@@ -61,7 +61,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
                 e.stopPropagation();
                 onDelete?.();
               }}
-              className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0 cursor-pointer"
+              className="can-hover:opacity-0 can-hover:group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity shrink-0 cursor-pointer"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
