@@ -262,6 +262,12 @@ struct SubtitleStream {
 /// (matching ffmpeg's `-map 0:s:N` selector), NOT the global ffprobe
 /// stream position — using the global position here previously made
 /// extraction fail for any file with audio/video streams before the subs.
+///
+/// The ordinal counts EVERY subtitle stream, including bitmap ones (PGS,
+/// dvd_subtitle) that cannot become WebVTT. Counting only the text streams
+/// shifts the ordinal whenever a bitmap track comes first — the common
+/// layout in Blu-ray rips — so `-map 0:s:N` then extracts the wrong stream,
+/// or fails outright and leaves the video with no captions at all.
 async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
     let Ok(output) = tokio::process::Command::new("ffprobe")
         .args(["-v", "error", "-show_streams", "-of", "json", video])
@@ -277,17 +283,20 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
         return Vec::new();
     };
     let mut result: Vec<SubtitleStream> = Vec::new();
+    let mut subtitle_ordinal = 0usize;
     for s in streams {
         if s.get("codec_type").and_then(|t| t.as_str()) != Some("subtitle") {
             continue;
         }
+        let ordinal = subtitle_ordinal;
+        subtitle_ordinal += 1;
         let codec = s.get("codec_name").and_then(|c| c.as_str()).unwrap_or("").to_string();
         if !is_text_subtitle_codec(&codec) {
             continue;
         }
         let tags = s.get("tags").cloned().unwrap_or(Value::Null);
         result.push(SubtitleStream {
-            index: result.len(),
+            index: ordinal,
             codec,
             language: tags.get("language").and_then(|l| l.as_str()).unwrap_or("").to_string(),
             title: tags.get("title").and_then(|t| t.as_str()).unwrap_or("").to_string(),
@@ -304,14 +313,19 @@ struct SubtitleTrack {
     language: String,
 }
 
-fn track_label(track_idx: usize, language: &str, title: &str) -> String {
+/// `position` is the track's 0-based place in the offered caption list, used
+/// only for the fallback label — never the stream ordinal, which can skip
+/// numbers when bitmap subtitle streams are interleaved.
+fn track_label(position: usize, language: &str, title: &str) -> String {
     if !title.is_empty() {
         return title.to_string();
     }
-    if !language.is_empty() {
+    // "und" is ffmpeg's placeholder for an untagged stream — showing it in the
+    // caption menu is worse than a plain track number.
+    if !language.is_empty() && language != "und" {
         return language.to_string();
     }
-    format!("Track {}", track_idx)
+    format!("Track {}", position + 1)
 }
 
 /// Extract embedded text-based subtitle tracks from a video into sidecar
@@ -332,7 +346,7 @@ async fn extract_subtitles(video: &str) {
     }
 
     let mut tracks: Vec<SubtitleTrack> = Vec::new();
-    for stream in &streams {
+    for (position, stream) in streams.iter().enumerate() {
         let vtt_path = format!("{}@{}.vtt", video, stream.index);
         if tokio::fs::metadata(&vtt_path).await.is_err() {
             let mut command = tokio::process::Command::new("ffmpeg");
@@ -361,7 +375,7 @@ async fn extract_subtitles(video: &str) {
         }
         tracks.push(SubtitleTrack {
             src: format!("@{}.vtt", stream.index),
-            label: track_label(stream.index, &stream.language, &stream.title),
+            label: track_label(position, &stream.language, &stream.title),
             language: stream.language.clone(),
         });
     }
@@ -1606,6 +1620,28 @@ pub(crate) async fn gif_search(
     }
 }
 
+/// Map a request URI path under `/external` to its path on disk.
+///
+/// The URI is percent-encoded (uploads keep spaces and other literal
+/// characters in their filenames), so the raw path must be decoded before it
+/// can be opened — ServeDir does this for the files it serves, but every
+/// branch below reads from disk directly. Returns `None` when the decoded
+/// path escapes the `external/` root.
+fn external_disk_path(uri_path: &str) -> Option<String> {
+    let relative = uri_path.trim_start_matches('/');
+    let decoded = percent_encoding::percent_decode_str(relative)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+    if decoded
+        .split(['/', '\\'])
+        .any(|segment| segment == ".." || segment == ".")
+    {
+        return None;
+    }
+    Some(format!("external/{decoded}"))
+}
+
 /// Middleware for uploaded file requests: auth check, dangerous extension
 /// blocking, and MKV→MP4 conversion. Safe files pass through to ServeDir.
 pub(crate) async fn upload_guard(
@@ -1656,8 +1692,12 @@ pub(crate) async fn upload_guard(
     // Block dangerous file extensions by serving as plain text
     if is_dangerous_extension(&ext) {
         // Construct disk path: the URI under /external nest is /{folder}/{filename}
-        let relative = uri_path.trim_start_matches('/');
-        let disk_path = format!("external/{}", relative);
+        let Some(disk_path) = external_disk_path(&uri_path) else {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap();
+        };
         let data = match tokio::fs::read(&disk_path).await {
             Ok(d) => d,
             Err(_) => {
@@ -1677,12 +1717,12 @@ pub(crate) async fn upload_guard(
     // Generate (or regenerate stale/black) thumbnail on demand when the
     // .thumb.jpg is requested
     if uri_path.ends_with(".thumb.jpg") {
-        let relative = uri_path.trim_start_matches('/');
-        let thumb_disk = format!("external/{}", relative);
-        let video_disk = thumb_disk.strip_suffix(".thumb.jpg").unwrap_or(&thumb_disk);
-        if thumb_needs_update(video_disk).await {
-            let _ = tokio::fs::remove_file(&thumb_disk).await;
-            generate_thumbnail(video_disk).await;
+        if let Some(thumb_disk) = external_disk_path(&uri_path) {
+            let video_disk = thumb_disk.strip_suffix(".thumb.jpg").unwrap_or(&thumb_disk);
+            if thumb_needs_update(video_disk).await {
+                let _ = tokio::fs::remove_file(&thumb_disk).await;
+                generate_thumbnail(video_disk).await;
+            }
         }
     }
 
@@ -1690,13 +1730,32 @@ pub(crate) async fn upload_guard(
     // Content-Types — the `@token` suffix can make some servers guess a
     // text/* content-type that would break `<track>` loading or JSON parsing.
     if uri_path.ends_with("@subs.json") || uri_path.ends_with(".vtt") {
-        let relative = uri_path.trim_start_matches('/');
-        let disk_path = format!("external/{}", relative);
+        let Some(disk_path) = external_disk_path(&uri_path) else {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from("Not found"))
+                .unwrap();
+        };
         let content_type = if uri_path.ends_with("@subs.json") {
             "application/json"
         } else {
             "text/vtt"
         };
+        // Extract on demand when the sidecars aren't there yet. The player
+        // requests the manifest as soon as it mounts, in parallel with the
+        // video itself, so waiting for the video request below to do the
+        // extraction loses the race and the player concludes the video has no
+        // captions. This also covers videos uploaded before CC existed.
+        if tokio::fs::metadata(&disk_path).await.is_err() {
+            if let Some(video) = disk_path
+                .strip_suffix("@subs.json")
+                .or_else(|| disk_path.rsplit_once('@').map(|(base, _)| base))
+            {
+                if tokio::fs::metadata(video).await.is_ok() {
+                    extract_subtitles(video).await;
+                }
+            }
+        }
         match tokio::fs::read(&disk_path).await {
             Ok(data) => {
                 return Response::builder()
@@ -1716,9 +1775,8 @@ pub(crate) async fn upload_guard(
 
     // Generate a WebP preview on demand when the .preview.webp is requested
     if uri_path.ends_with(".preview.webp") {
-        let relative = uri_path.trim_start_matches('/');
-        let preview_disk = format!("external/{}", relative);
-        if tokio::fs::metadata(&preview_disk).await.is_err() {
+        let preview_disk = external_disk_path(&uri_path).unwrap_or_default();
+        if !preview_disk.is_empty() && tokio::fs::metadata(&preview_disk).await.is_err() {
             let source_disk = preview_disk.strip_suffix(".preview.webp").unwrap_or(&preview_disk);
             generate_image_preview(source_disk).await;
         }
@@ -1728,10 +1786,9 @@ pub(crate) async fn upload_guard(
     // is at the front of the file — required for instant seeking in browsers.
     // Also generate a thumbnail if one doesn't exist yet.
     if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
-        let relative = uri_path.trim_start_matches('/');
-        let disk_path = format!("external/{}", relative);
+        let disk_path = external_disk_path(&uri_path).unwrap_or_default();
 
-        if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
+        if !disk_path.is_empty() && matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
             let marker = format!("{}.faststarted", disk_path);
             if tokio::fs::metadata(&marker).await.is_err() {
                 if tokio::fs::metadata(&disk_path).await.is_ok() {
@@ -1754,8 +1811,10 @@ pub(crate) async fn upload_guard(
         }
 
         // Lazily generate thumbnail + subtitle sidecars for existing videos
-        generate_thumbnail(&disk_path).await;
-        extract_subtitles(&disk_path).await;
+        if !disk_path.is_empty() {
+            generate_thumbnail(&disk_path).await;
+            extract_subtitles(&disk_path).await;
+        }
     }
 
     // For non-browser video formats, convert to MP4 on first access
@@ -1764,11 +1823,13 @@ pub(crate) async fn upload_guard(
     // to the ORIGINAL filename (what the client holds in its URL), stored next
     // to the source file.
     if matches!(ext.as_str(), "mkv" | "avi" | "wmv" | "flv" | "ts") {
-        let relative = uri_path.trim_start_matches('/');
-        let disk_path = format!("external/{}", relative);
+        let disk_path = external_disk_path(&uri_path).unwrap_or_default();
         let base = uri_path.rsplit_once('.').map(|(b, _)| b).unwrap_or(&uri_path);
         let mp4_uri = format!("{}.mp4", base);
-        let mp4_disk = format!("external{}.mp4", base);
+        let mp4_disk = external_disk_path(&mp4_uri).unwrap_or_default();
+        if disk_path.is_empty() || mp4_disk.is_empty() {
+            return next.run(req).await.into_response();
+        }
 
         // Extract subtitle sidecars + manifest keyed to the ORIGINAL video.
         if tokio::fs::metadata(&disk_path).await.is_ok() {
@@ -1869,5 +1930,94 @@ mod tests {
         for p in [&video, &vtt_path, &manifest] {
             let _ = tokio::fs::remove_file(p).await;
         }
+    }
+
+    /// Build a video whose FIRST subtitle stream is one this extractor cannot
+    /// turn into WebVTT (ttml here; a Blu-ray rip's PGS stream in the wild),
+    /// followed by an extractable mov_text track carrying distinct text.
+    async fn build_mixed_fixture() -> (String, String) {
+        let dir = std::env::temp_dir().join(format!("chatter_cc_mixed_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let video = dir.join("mixed.mp4").to_string_lossy().to_string();
+        let first = dir.join("first.vtt").to_string_lossy().to_string();
+        let second = dir.join("second.vtt").to_string_lossy().to_string();
+        for suffix in ["@subs.json", "@0.vtt", "@1.vtt"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", video, suffix)).await;
+        }
+        tokio::fs::write(&first, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nFIRST STREAM\n")
+            .await
+            .unwrap();
+        tokio::fs::write(&second, "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nSECOND STREAM\n")
+            .await
+            .unwrap();
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y", "-f", "lavfi", "-i", "testsrc=duration=5:size=320x240:rate=10",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=5",
+                "-i", &first, "-i", &second,
+                "-map", "0:v", "-map", "1:a", "-map", "2:s", "-map", "3:s",
+                "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac",
+                "-c:s:0", "ttml", "-c:s:1", "mov_text",
+                "-shortest", &video,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "mixed fixture build failed");
+        (video.clone(), format!("{}@subs.json", video))
+    }
+
+    #[tokio::test]
+    async fn subtitle_ordinal_counts_non_text_streams() {
+        let (video, manifest) = build_mixed_fixture().await;
+
+        // Regression: the extractable track is subtitle stream 1, behind a
+        // stream this code skips. Numbering only the text streams reported 0,
+        // so `-map 0:s:0` hit the unusable stream — ffmpeg failed, the track
+        // was dropped, no manifest was written, and the player reported that
+        // the video had no captions at all.
+        let streams = probe_subtitles(&video).await;
+        assert_eq!(streams.len(), 1, "only the mov_text stream is extractable");
+        assert_eq!(streams[0].index, 1, "ordinal must count the skipped stream");
+
+        extract_subtitles(&video).await;
+
+        let vtt_path = format!("{}@1.vtt", video);
+        let text = String::from_utf8(
+            tokio::fs::read(&vtt_path).await.expect("vtt sidecar not created"),
+        )
+        .unwrap();
+        assert!(text.contains("SECOND STREAM"), "extracted the wrong stream: {text}");
+
+        let manifest_data = tokio::fs::read(&manifest).await.expect("subs manifest not created");
+        let value: Value = serde_json::from_slice(&manifest_data).unwrap();
+        let tracks = value["tracks"].as_array().expect("manifest should list tracks");
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0]["src"], "@1.vtt");
+        // Fallback label numbers from the offered list, not the stream ordinal.
+        assert_eq!(tracks[0]["label"], "Track 1");
+
+        for p in [&video, &vtt_path, &manifest] {
+            let _ = tokio::fs::remove_file(p).await;
+        }
+    }
+
+    #[test]
+    fn external_disk_path_decodes_and_blocks_traversal() {
+        // Uploads keep spaces in their filenames; the URI is percent-encoded,
+        // so an undecoded path opened the wrong (non-existent) file and every
+        // sidecar 404'd for any video with a space in its name.
+        assert_eq!(
+            external_disk_path("/uploads/u1/My%20Movie.mkv@subs.json").as_deref(),
+            Some("external/uploads/u1/My Movie.mkv@subs.json"),
+        );
+        assert_eq!(
+            external_disk_path("/uploads/u1/plain.mp4").as_deref(),
+            Some("external/uploads/u1/plain.mp4"),
+        );
+        assert_eq!(external_disk_path("/uploads/../../etc/passwd"), None);
+        assert_eq!(external_disk_path("/uploads/%2e%2e/%2e%2e/etc/passwd"), None);
     }
 }

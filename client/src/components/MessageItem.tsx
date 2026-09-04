@@ -343,6 +343,10 @@ type SubtitleTrackDef = {
 
 type Manifest = { tracks: SubtitleTrackDef[] };
 
+function revokeIfBlob(src: string) {
+  if (src.startsWith("blob:")) URL.revokeObjectURL(src);
+}
+
 /**
  * Loads the `{url}@subs.json` manifest (if any) for a local video and exposes
  * the parsed track list plus the currently selected track. The caller passes
@@ -366,6 +370,7 @@ function useVideoSubtitles(
   useEffect(() => {
     if (!url.includes("/external/")) return;
     let cancelled = false;
+    let created: string[] = [];
     (async () => {
       try {
         let json: Manifest;
@@ -393,7 +398,12 @@ function useVideoSubtitles(
         const list = await Promise.all(
           defs.map(async (t) => ({ ...t, src: await fetchTrack(t.src) })),
         );
-        if (cancelled) return;
+        if (cancelled) {
+          // Nothing consumed these — release any blob URLs just created.
+          for (const t of list) revokeIfBlob(t.src);
+          return;
+        }
+        created = list.map((t) => t.src);
         setTracks(list);
         setSelected(0);
       } catch {
@@ -402,6 +412,7 @@ function useVideoSubtitles(
     })();
     return () => {
       cancelled = true;
+      for (const src of created) revokeIfBlob(src);
     };
   }, [url, requireAuth]);
 
@@ -411,7 +422,9 @@ function useVideoSubtitles(
         <track
           key={i}
           kind="subtitles"
-          src={url + t.src}
+          // Already resolved to an absolute (or blob:) URL when the manifest
+          // was loaded — prefixing `url` again yields a 404.
+          src={t.src}
           label={t.label}
           srcLang={t.language}
           // `default` (re)establishes which track shows on the initial load /
