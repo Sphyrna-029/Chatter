@@ -1,6 +1,6 @@
 use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
-    state::{AppState, ChannelRecord, ReactionRecord, RoomMemberRecord},
+    state::{AppState, ChannelRecord, ReactionRecord, RolePermissions, RoomMemberRecord},
 };
 use axum::{
     extract::ws::Message,
@@ -266,16 +266,26 @@ pub(crate) async fn is_moderator_or_owner(state: &AppState, room_id: &str, user_
     role == "owner" || role == "moderator"
 }
 
-/// Whether a user may pin, unpin, and otherwise curate other people's messages.
+/// The permissions a user actually holds in a room — the single source of truth
+/// every access check should go through.
 ///
-/// Owners and moderators always can. A regular member can if one of their custom
-/// roles grants `manage_messages`. In a DM every member can — there is nobody
-/// with a higher role to ask.
-pub(crate) async fn can_manage_messages(state: &AppState, room_id: &str, user_id: &str) -> bool {
+/// Built-in roles are implicit grants: an owner holds everything, a moderator
+/// holds a fixed legacy set, and both keep whatever their custom roles add. A
+/// plain member with no custom roles gets the baseline (`RolePermissions::default`).
+/// Once a member holds custom roles, the union of those roles is authoritative,
+/// so a role with everything switched off is a working mute.
+///
+/// A DM has no roles at all, so both participants hold everything.
+pub(crate) async fn effective_permissions(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+) -> RolePermissions {
     use super::state::{CustomRoleRecord, RoomRecord};
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
+    // A non-member holds nothing, whatever roles may still name them.
     {
         let rm = state.room_members.read().await;
         if !rm
@@ -283,39 +293,53 @@ pub(crate) async fn can_manage_messages(state: &AppState, room_id: &str, user_id
             .map(|m| m.contains(&user_id.to_string()))
             .unwrap_or(false)
         {
-            return false;
+            return RolePermissions::none();
         }
-    }
-
-    if is_moderator_or_owner(state, room_id, user_id).await {
-        return true;
     }
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     if let Ok(Some(room)) = rooms_coll.find_one(doc! { "_id": room_id }).await {
         if room.is_dm {
-            return true;
+            return RolePermissions::all();
         }
     }
 
-    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
-    if role_ids.is_empty() {
-        return false;
+    let role = get_user_role(state, room_id, user_id).await;
+    if role == "owner" {
+        return RolePermissions::all();
     }
 
-    let roles_coll = state.db.collection::<CustomRoleRecord>("custom_roles");
-    if let Ok(mut cursor) = roles_coll
-        .find(doc! { "room_id": room_id, "_id": { "$in": &role_ids } })
-        .await
-    {
-        while let Ok(Some(role)) = cursor.try_next().await {
-            if role.permissions.manage_messages {
-                return true;
+    // Union the custom roles the member holds.
+    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
+    let mut custom: Option<RolePermissions> = None;
+    if !role_ids.is_empty() {
+        let roles_coll = state.db.collection::<CustomRoleRecord>("custom_roles");
+        if let Ok(mut cursor) = roles_coll
+            .find(doc! { "room_id": room_id, "_id": { "$in": &role_ids } })
+            .await
+        {
+            while let Ok(Some(r)) = cursor.try_next().await {
+                custom = Some(match custom {
+                    Some(acc) => acc.union(&r.permissions),
+                    None => r.permissions,
+                });
             }
         }
     }
 
-    false
+    let base = custom.unwrap_or_default();
+    if role == "moderator" {
+        base.union(&RolePermissions::moderator())
+    } else {
+        base
+    }
+}
+
+/// Whether a user may pin, unpin, and otherwise curate other people's messages.
+pub(crate) async fn can_manage_messages(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    effective_permissions(state, room_id, user_id)
+        .await
+        .manage_messages
 }
 
 /// Get the custom role IDs assigned to a user in a room.

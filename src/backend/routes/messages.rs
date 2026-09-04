@@ -4,10 +4,10 @@ use super::super::{
         ThreadListQuery,
     },
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_allowed_channel_ids,
-        get_bot_from_token, get_reactions_for_events, get_thread_counts_for_events,
-        get_user_custom_role_ids, get_user_from_token, get_user_role, is_moderator_or_owner,
-        now_millis, send_to_user,
+        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
+        get_allowed_channel_ids, get_bot_from_token, get_reactions_for_events,
+        get_thread_counts_for_events, get_user_custom_role_ids, get_user_from_token, get_user_role,
+        is_moderator_or_owner, now_millis, send_to_user,
     },
     state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord},
 };
@@ -21,6 +21,14 @@ use mongodb::bson::doc;
 use regex::Regex;
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+/// Whether a message body carries a file served by this instance. Attachments
+/// are sent as `/external/...` URLs in the body, so that is where the
+/// attach_files permission has to be judged.
+fn body_has_attachment(body: &str) -> bool {
+    body.split_whitespace()
+        .any(|token| token.starts_with("/external/") || token.contains("/external/"))
+}
 
 pub(crate) async fn send_message(
     State(state): State<Arc<AppState>>,
@@ -84,6 +92,26 @@ pub(crate) async fn send_message(
                     "Not a member of this room",
                 ));
             }
+        }
+
+        let perms = effective_permissions(&state, &room_id, &sender_id).await;
+        if !perms.send_messages {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to send messages in this room",
+            ));
+        }
+        if !perms.attach_files && body_has_attachment(&req.body) {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to attach files in this room",
+            ));
+        }
+        if !perms.embed_links && req.embeds.as_ref().is_some_and(|e| !e.is_empty()) {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to post embeds in this room",
+            ));
         }
 
         if room.read_only {
@@ -206,6 +234,16 @@ pub(crate) async fn send_message(
 
     if req.spoiler == Some(true) {
         content["spoiler"] = json!(true);
+    }
+
+    // Without mention_everyone the message still sends and still reads as
+    // written — it just does not ping. Rejecting it outright would be a worse
+    // trade than quietly declawing the mention.
+    if !is_bot {
+        let perms = effective_permissions(&state, &room_id, &sender_id).await;
+        if !perms.mention_everyone {
+            content["suppress_role_mentions"] = json!(true);
+        }
     }
 
     if let Some(ref pane) = req.showcase_pane {
@@ -976,6 +1014,22 @@ pub(crate) async fn send_thread_message(
             return Err(error_response(
                 StatusCode::FORBIDDEN,
                 "Not a member of this room",
+            ));
+        }
+    }
+
+    {
+        let perms = effective_permissions(&state, &room_id, &user_id).await;
+        if !perms.send_messages {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to send messages in this room",
+            ));
+        }
+        if !perms.attach_files && body_has_attachment(&req.body) {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to attach files in this room",
             ));
         }
     }

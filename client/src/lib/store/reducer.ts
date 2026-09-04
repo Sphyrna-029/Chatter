@@ -45,6 +45,7 @@ export function reducer(state: AppState, action: Action): AppState {
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
+        myPermissions: null,
         pinnedMessages: [],
         pinsHasMore: false,
         pinsNextOffset: 0,
@@ -554,6 +555,8 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         customRoles: state.customRoles.filter((r) => r.role_id !== action.payload),
       };
+    case "SET_MY_PERMISSIONS":
+      return { ...state, myPermissions: action.payload };
     case "SET_MEMBER_CUSTOM_ROLES":
       return { ...state, memberCustomRoles: action.payload };
     case "UPDATE_MEMBER_CUSTOM_ROLES":

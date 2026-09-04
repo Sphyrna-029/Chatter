@@ -5,6 +5,7 @@ import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage 
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { MessagePanel, type PanelMode } from "./MessagePanel";
+import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile } from "lucide-react";
@@ -1394,6 +1395,15 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             </div>
           );
         }
+        // A role can revoke posting outright; the server refuses either way, so
+        // this only saves the user from typing into a dead composer.
+        if (!can(state, "send_messages")) {
+          return (
+            <div className="border-t p-3 flex items-center justify-center text-sm text-muted-foreground">
+              You do not have permission to send messages in this room.
+            </div>
+          );
+        }
         return (
         <div className={`border-t ${isMobile ? "p-2" : "p-3"}`}>
           {/* Spoiler mode banner */}
@@ -1522,22 +1532,24 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               multiple
               onChange={handleFileSelect}
             />
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0"
-              disabled={uploading}
-              asChild
-            >
-              {/* Using a label instead of onClick+click() is universally reliable */}
-              <label
-                htmlFor={uploading ? undefined : "chat-file-input"}
-                className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
-                title="Attach files (max 4)"
+            {can(state, "attach_files") && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                disabled={uploading}
+                asChild
               >
-                {uploading ? "…" : "+"}
-              </label>
-            </Button>
+                {/* Using a label instead of onClick+click() is universally reliable */}
+                <label
+                  htmlFor={uploading ? undefined : "chat-file-input"}
+                  className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
+                  title="Attach files (max 4)"
+                >
+                  {uploading ? "…" : "+"}
+                </label>
+              </Button>
+            )}
 
             <Button
               variant="ghost"

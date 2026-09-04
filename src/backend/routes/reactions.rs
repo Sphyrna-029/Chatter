@@ -1,6 +1,9 @@
 use super::super::{
     dto::ReactionRequest,
-    helpers::{broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token},
+    helpers::{
+        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
+        get_user_from_token,
+    },
     state::{AppState, ReactionRecord, RoomRecord},
 };
 use axum::{
@@ -47,6 +50,16 @@ pub(crate) async fn add_reaction(
                 "Not a member of this room",
             ));
         }
+    }
+
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .add_reactions
+    {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "You do not have permission to add reactions in this room",
+        ));
     }
 
     let emoji = req

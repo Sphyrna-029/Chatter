@@ -1,4 +1,4 @@
-import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, Embed } from "../api";
+import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, RolePermissions, Embed } from "../api";
 import type { Dispatch } from "react";
 import type { NotificationLevel, NotificationSettings } from "../notifications";
 
@@ -108,6 +108,9 @@ export interface AppState {
   // Custom Roles
   customRoles: CustomRole[];
   memberCustomRoles: Record<string, string[]>; // user_id -> role_ids
+  /** The caller's own effective permissions in the current room, as computed by
+   *  the server. Null until loaded. */
+  myPermissions: RolePermissions | null;
   // Friends
   friends: string[];
   incomingFriendRequests: { userId: string; requestId: string }[];
@@ -195,6 +198,7 @@ export type Action =
   | { type: "UPDATE_CUSTOM_ROLE"; payload: Partial<CustomRole> & { role_id: string } }
   | { type: "REMOVE_CUSTOM_ROLE"; payload: string }
   | { type: "SET_MEMBER_CUSTOM_ROLES"; payload: Record<string, string[]> }
+  | { type: "SET_MY_PERMISSIONS"; payload: RolePermissions | null }
   | { type: "UPDATE_MEMBER_CUSTOM_ROLES"; payload: { userId: string; roleIds: string[] } }
   | { type: "SET_CHANNELS"; payload: Channel[] }
   | { type: "SET_CHANNEL_CATEGORIES"; payload: ChannelCategory[] }
@@ -283,6 +287,7 @@ export const initialState: AppState = {
   roomGroups: [],
   customRoles: [],
   memberCustomRoles: {},
+  myPermissions: null,
   friends: [],
   incomingFriendRequests: [],
   outgoingFriendRequests: [],

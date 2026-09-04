@@ -16,7 +16,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn, displayUserId } from "@/lib/utils";
-import { canManageMessages } from "@/lib/permissions";
+import { can, canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1185,6 +1185,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     state.pinnedMessages.some((m) => m.event_id === message.event_id);
   const canPin =
     !hidePinControls && inCurrentChannel && !inThread && !isSystem && canManageMessages(state);
+  const canReact = !disableReactions && can(state, "add_reactions");
 
   const togglePin = async () => {
     try {
@@ -1657,7 +1658,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
               </Button>
             )}
-            {!disableReactions && <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
+            {canReact && <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="Add reaction">
                   <SmilePlus className="h-4 w-4" />

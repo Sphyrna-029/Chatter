@@ -107,6 +107,7 @@ On GitHub, the same checks run in `.github/workflows/rust-quality.yml`.
 - Reactions: PUT `/{room_id}/send/m.reaction/{event_id}` (toggles on/off)
 - Pins: GET `/api/rooms/{room_id}/pins?channel_id=`; POST/DELETE `/api/rooms/{room_id}/pins/{event_id}` (owner/moderator, a `manage_messages` role, or any DM member)
 - Paged listings (pins, search, threads) take `limit`/`offset` and answer with `{ items, has_more, next_offset }`; page with `next_offset`, not the row count
+- Permissions: every access check goes through `effective_permissions()` in `helpers.rs`. Owner holds all, moderator holds a fixed legacy set, both keep what their custom roles add; a member with no custom roles gets `RolePermissions::default()`, and once they hold roles the union of those roles is authoritative. `GET /api/rooms/{room_id}/permissions` returns the caller's own set — the client mirrors it only to hide controls
 - Pin changes broadcast `m.room.pinned` / `m.room.unpinned` to the room
 - WebSocket messages use a `type` field: `typing`, `voice_join`, `voice_leave`, `voice_mute`, `screen_share_start`, `screen_share_stop`
 - WebRTC signaling for voice and screen share flows through the WebSocket

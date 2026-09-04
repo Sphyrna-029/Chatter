@@ -773,3 +773,204 @@ async fn pin_and_search_pagination_contract() {
         assert!(!ids_one.contains(&msg["event_id"].as_str().unwrap()));
     }
 }
+
+#[tokio::test]
+async fn permission_contract_custom_roles_are_enforced() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_owner_id, owner_token) = register_user(&client, &server.base_url, "owner", "pw").await;
+    let (member_id, member_token) = register_user(&client, &server.base_url, "member", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &owner_token,
+        "Perms",
+        Some(vec![member_id.clone()]),
+        false,
+    )
+    .await;
+
+    // A plain member starts with the baseline: can send, cannot moderate.
+    let baseline: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(baseline["permissions"]["send_messages"], true);
+    assert_eq!(baseline["permissions"]["connect"], true);
+    assert_eq!(baseline["permissions"]["kick_members"], false);
+    assert_eq!(baseline["permissions"]["manage_roles"], false);
+
+    // The owner holds everything.
+    let owner_perms: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(owner_perms["permissions"]["kick_members"], true);
+    assert_eq!(owner_perms["permissions"]["manage_roles"], true);
+
+    // Without kick_members the member cannot kick, even though they are in the room.
+    let kick_denied = client
+        .delete(format!(
+            "{}/api/rooms/{}/members/{}",
+            server.base_url, room_id, "@owner:localhost"
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(kick_denied.status(), StatusCode::FORBIDDEN);
+
+    // A role that switches everything off is a working mute.
+    let muted_role: Value = client
+        .post(format!("{}/api/rooms/{}/roles", server.base_url, room_id))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "name": "Muted",
+            "permissions": {
+                "send_messages": false,
+                "attach_files": false,
+                "embed_links": false,
+                "add_reactions": false,
+                "connect": false,
+                "speak": false
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let role_id = muted_role["role_id"].as_str().unwrap().to_string();
+
+    let assign = client
+        .put(format!(
+            "{}/api/rooms/{}/members/{}/custom-roles",
+            server.base_url, room_id, member_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "role_ids": [role_id] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(assign.status(), StatusCode::OK);
+
+    let muted: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(muted["permissions"]["send_messages"], false);
+    assert_eq!(muted["permissions"]["add_reactions"], false);
+    assert_eq!(muted["permissions"]["connect"], false);
+
+    // And the server actually refuses the message, not just the button.
+    let send_denied = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/perm-txn1",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({"msgtype": "m.text", "body": "should not land"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send_denied.status(), StatusCode::FORBIDDEN);
+
+    // The owner is unaffected by the muted role existing.
+    let owner_send = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/perm-txn2",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({"msgtype": "m.text", "body": "owner still speaks"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(owner_send.status(), StatusCode::OK);
+    let event_id = owner_send.json::<Value>().await.unwrap()["event_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Reactions are gated too.
+    let react_denied = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.reaction/{}",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({"emoji": "👍"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(react_denied.status(), StatusCode::FORBIDDEN);
+
+    // Granting a permission through a second role unions with the first.
+    let mod_role: Value = client
+        .post(format!("{}/api/rooms/{}/roles", server.base_url, room_id))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "name": "Helper", "permissions": { "kick_members": true } }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let mod_role_id = mod_role["role_id"].as_str().unwrap().to_string();
+
+    let assign_both = client
+        .put(format!(
+            "{}/api/rooms/{}/members/{}/custom-roles",
+            server.base_url, room_id, member_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "role_ids": [role_id, mod_role_id] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(assign_both.status(), StatusCode::OK);
+
+    let unioned: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unioned["permissions"]["kick_members"], true);
+    // The Helper role leaves send_messages at its default of true, so the union
+    // restores it — roles grant, they do not stack denials.
+    assert_eq!(unioned["permissions"]["send_messages"], true);
+}

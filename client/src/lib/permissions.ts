@@ -1,21 +1,22 @@
 import type { AppState } from "./store/types";
+import type { RolePermissions } from "./api";
 
 /**
- * Mirrors `can_manage_messages` in src/backend/helpers.rs: owners and moderators
- * always qualify, a member qualifies through a custom role granting
- * `manage_messages`, and every member of a DM qualifies. The server enforces
- * this too — this copy only decides whether to show the control.
+ * A permission as the client understands it. The server computes the
+ * authoritative answer (see `effective_permissions` in src/backend/helpers.rs)
+ * and the client mirrors it purely to decide which controls to show — every
+ * check here is re-run server-side before anything happens.
+ *
+ * Falls back to permissive while `myPermissions` is still loading, so controls
+ * don't flicker out on room switch; the server refuses anything unearned.
  */
-export function canManageMessages(state: AppState): boolean {
+export function can(state: AppState, permission: keyof RolePermissions): boolean {
   if (!state.userId || !state.currentRoomId) return false;
+  if (!state.myPermissions) return permission !== "manage_messages";
+  return state.myPermissions[permission];
+}
 
-  const myRole = state.roomMembers.find((m) => m.userId === state.userId)?.role || "member";
-  if (myRole === "owner" || myRole === "moderator") return true;
-
-  if (state.roomInfoMap[state.currentRoomId]?.is_direct) return true;
-
-  const myRoleIds = state.memberCustomRoles[state.userId] || [];
-  return myRoleIds.some(
-    (rid) => state.customRoles.find((r) => r.role_id === rid)?.permissions?.manage_messages
-  );
+/** Whether the user may pin, unpin, and curate other people's messages. */
+export function canManageMessages(state: AppState): boolean {
+  return can(state, "manage_messages");
 }

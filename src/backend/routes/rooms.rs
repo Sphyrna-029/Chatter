@@ -4,9 +4,9 @@ use super::super::{
         UpdateRoomSettingsRequest, UpdateTopicRequest,
     },
     helpers::{
-        broadcast_to_room, do_join_room, error_response, extract_token, generate_id,
-        get_system_channel_id, get_user_from_token, get_user_role, hash_password, now_millis,
-        send_to_user, verify_password,
+        broadcast_to_room, do_join_room, effective_permissions, error_response, extract_token,
+        generate_id, get_system_channel_id, get_user_from_token, get_user_role, hash_password,
+        now_millis, send_to_user, verify_password,
     },
     state::{
         AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
@@ -954,10 +954,29 @@ pub(crate) async fn update_room_settings(
         // room.creator directly.  An ex-member who created the room must not be able
         // to update settings after leaving.
         let caller_role = get_user_role(&state, &room_id, &user_id).await;
-        if caller_role != "owner" && caller_role != "moderator" {
+        let perms = effective_permissions(&state, &room_id, &user_id).await;
+
+        // A request that only touches the emoji set is allowed by manage_emojis
+        // alone; anything else needs manage_channels.
+        let emoji_only = req.name.is_none()
+            && req.icon_url.is_none()
+            && req.tags.is_none()
+            && req.unlisted.is_none()
+            && req.password.is_none()
+            && req.remove_password.is_none()
+            && req.read_only.is_none()
+            && req.banner_url.is_none()
+            && (req.custom_emojis.is_some() || req.emoji_aliases.is_some());
+
+        let allowed = if emoji_only {
+            perms.manage_emojis || perms.manage_channels
+        } else {
+            perms.manage_channels
+        };
+        if !allowed {
             return Err(error_response(
                 StatusCode::FORBIDDEN,
-                "Only the room owner or moderators can edit settings",
+                "You do not have permission to edit this room's settings",
             ));
         }
 
@@ -1110,12 +1129,17 @@ pub(crate) async fn kick_member(
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
 
-    if caller_role == "member" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .kick_members
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "No permission to kick",
+            "You do not have permission to kick members in this room",
         ));
     }
+    // Hierarchy still applies on top of the permission: a role can grant the
+    // ability without granting it over everyone.
     if target_role == "owner" {
         return Err(error_response(
             StatusCode::FORBIDDEN,
@@ -1227,12 +1251,17 @@ pub(crate) async fn ban_member(
     let caller_role = get_user_role(&state, &room_id, &user_id).await;
     let target_role = get_user_role(&state, &room_id, &target_user_id).await;
 
-    if caller_role == "member" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .ban_members
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "No permission to ban",
+            "You do not have permission to ban members in this room",
         ));
     }
+    // Hierarchy still applies on top of the permission: a role can grant the
+    // ability without granting it over everyone.
     if target_role == "owner" {
         return Err(error_response(
             StatusCode::FORBIDDEN,
@@ -1343,11 +1372,13 @@ pub(crate) async fn unban_member(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let caller_role = get_user_role(&state, &room_id, &user_id).await;
-    if caller_role != "owner" && caller_role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .ban_members
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can unban",
+            "You do not have permission to unban members in this room",
         ));
     }
 
@@ -1536,11 +1567,13 @@ pub(crate) async fn list_banned_users(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let caller_role = get_user_role(&state, &room_id, &user_id).await;
-    if caller_role != "owner" && caller_role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .ban_members
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can view bans",
+            "You do not have permission to view bans in this room",
         ));
     }
 

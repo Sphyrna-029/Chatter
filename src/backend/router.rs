@@ -40,8 +40,8 @@ use super::{
         reactions::{add_reaction, get_reactions},
         read_markers::{get_unreads, mark_read},
         roles::{
-            assign_member_roles, create_role, delete_role, get_member_roles, list_all_member_roles,
-            list_roles, update_role,
+            assign_member_roles, create_role, delete_role, get_member_roles, get_my_permissions,
+            list_all_member_roles, list_roles, update_role,
         },
         room_groups::{
             create_room_group, delete_room_group, get_room_groups, set_group_collapsed,
@@ -234,6 +234,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/api/rooms/{room_id}/member-roles",
             get(list_all_member_roles),
         )
+        .route("/api/rooms/{room_id}/permissions", get(get_my_permissions))
         .route("/api/rooms/{room_id}/categories", post(create_category))
         .route(
             "/api/rooms/{room_id}/categories/{category_id}",

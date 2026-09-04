@@ -18,22 +18,47 @@ import { useConfirm } from "@/components/ConfirmDialog";
 
 const DEFAULT_PERMS: RolePermissions = {
   send_messages: true,
+  attach_files: true,
+  embed_links: true,
+  add_reactions: true,
+  connect: true,
+  speak: true,
   manage_channels: false,
   manage_roles: false,
   manage_messages: false,
+  manage_webhooks: false,
+  manage_emojis: false,
   kick_members: false,
   ban_members: false,
   mention_everyone: false,
 };
 
+/** Baseline abilities first, elevated ones after — the checkbox grid follows
+ *  this order, and the split is where the section break goes. */
+const GENERAL_PERMS = [
+  "send_messages",
+  "attach_files",
+  "embed_links",
+  "add_reactions",
+  "connect",
+  "speak",
+] as const;
+
 const PERM_LABELS: Record<keyof RolePermissions, string> = {
   send_messages: "Send Messages",
+  attach_files: "Attach Files",
+  embed_links: "Embed Links",
+  add_reactions: "Add Reactions",
+  connect: "Join Voice",
+  speak: "Speak in Voice",
   manage_channels: "Manage Channels",
   manage_roles: "Manage Roles",
   manage_messages: "Manage Messages",
+  manage_webhooks: "Manage Webhooks",
+  manage_emojis: "Manage Emojis",
   kick_members: "Kick Members",
   ban_members: "Ban Members",
-  mention_everyone: "Mention Everyone",
+  mention_everyone: "Mention Roles",
 };
 
 interface RoleManagementDialogProps {
@@ -103,17 +128,34 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
     perms: RolePermissions,
     setPerms: (p: RolePermissions) => void
   ) => (
-    <div className="grid grid-cols-2 gap-1">
-      {(Object.keys(PERM_LABELS) as (keyof RolePermissions)[]).map((key) => (
-        <label key={key} className="flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={perms[key]}
-            onChange={(e) => setPerms({ ...perms, [key]: e.target.checked })}
-            className="rounded border-input"
-          />
-          <span className="text-xs">{PERM_LABELS[key]}</span>
-        </label>
+    <div className="space-y-2">
+      {([
+        ["General", GENERAL_PERMS as readonly (keyof RolePermissions)[]],
+        [
+          "Moderation",
+          (Object.keys(PERM_LABELS) as (keyof RolePermissions)[]).filter(
+            (k) => !(GENERAL_PERMS as readonly string[]).includes(k),
+          ),
+        ],
+      ] as const).map(([section, keys]) => (
+        <div key={section}>
+          <p className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+            {section}
+          </p>
+          <div className="grid grid-cols-2 gap-1">
+            {keys.map((key) => (
+              <label key={key} className="flex items-center gap-1.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={perms[key]}
+                  onChange={(e) => setPerms({ ...perms, [key]: e.target.checked })}
+                  className="rounded border-input"
+                />
+                <span className="text-xs">{PERM_LABELS[key]}</span>
+              </label>
+            ))}
+          </div>
+        </div>
       ))}
     </div>
   );

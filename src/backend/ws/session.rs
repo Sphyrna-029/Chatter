@@ -20,8 +20,8 @@ use super::{
 };
 use crate::backend::{
     helpers::{
-        broadcast_to_room, generate_id, get_user_from_token, get_user_role, now_millis, now_secs,
-        send_to_user,
+        broadcast_to_room, effective_permissions, generate_id, get_allowed_channel_ids,
+        get_user_from_token, get_user_role, now_millis, now_secs, send_to_user,
     },
     state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
@@ -351,6 +351,55 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .get("channel_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
+
+            // The channel id arrives from the client, so every access rule has to
+            // be re-checked here: membership, bans, channel visibility and the
+            // connect permission. Nothing upstream has vetted it.
+            {
+                let is_member = {
+                    let rm = state.room_members.read().await;
+                    rm.get(room_id)
+                        .map(|m| m.iter().any(|u| u == user_id))
+                        .unwrap_or(false)
+                };
+                let is_banned = state
+                    .banned_users
+                    .read()
+                    .await
+                    .get(room_id)
+                    .map(|banned| banned.iter().any(|u| u == user_id))
+                    .unwrap_or(false);
+
+                let mut denied = !is_member || is_banned;
+
+                if !denied && channel_id != room_id {
+                    if let Some(allowed) = get_allowed_channel_ids(&state, room_id, user_id).await {
+                        denied = !allowed.iter().any(|c| c == channel_id);
+                    }
+                }
+
+                if !denied
+                    && !effective_permissions(&state, room_id, user_id)
+                        .await
+                        .connect
+                {
+                    denied = true;
+                }
+
+                if denied {
+                    send_to_user(
+                        &state,
+                        user_id,
+                        &json!({
+                            "type": "error",
+                            "error": "voice_forbidden",
+                            "message": "You do not have permission to join this voice channel"
+                        }),
+                    )
+                    .await;
+                    return;
+                }
+            }
 
             // Reject if this user is already in the target channel from another device.
             {

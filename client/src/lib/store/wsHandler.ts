@@ -51,6 +51,12 @@ function playLeaveSound() {
   } catch {}
 }
 
+/** The server sets this when the sender lacks the mention_everyone permission:
+ *  the @role still renders, it just must not ping anyone. */
+function roleMentionsSuppressed(msg: { content?: { suppress_role_mentions?: boolean } }): boolean {
+  return msg.content?.suppress_role_mentions === true;
+}
+
 function hasRoleMention(body: string, stateRef: MutableRefObject<AppState>): boolean {
   const userId = stateRef.current.userId;
   if (!userId) return false;
@@ -88,7 +94,7 @@ export function createWsMessageHandler(
     room_id: string;
     sender: string;
     channel_id?: string;
-    content?: { body?: string; msgtype?: string; channel_id?: string };
+    content?: { body?: string; msgtype?: string; channel_id?: string; suppress_role_mentions?: boolean };
   }
 
   /**
@@ -111,7 +117,7 @@ export function createWsMessageHandler(
     const bodyText = msg.content?.body || "";
     const isMention =
       (myUsername !== "" && bodyText.includes(`@${myUsername}`)) ||
-      hasRoleMention(bodyText, stateRef);
+      (!roleMentionsSuppressed(msg) && hasRoleMention(bodyText, stateRef));
 
     // Viewing means: this room, this channel, and the tab actually has focus.
     const sameChannel = channelId
@@ -180,7 +186,7 @@ export function createWsMessageHandler(
           const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
           const bodyText = msg.content?.body || "";
           const hasUserMention = myUsername !== "" && bodyText.includes(`@${myUsername}`);
-          if (hasUserMention || hasRoleMention(bodyText, stateRef)) {
+          if (hasUserMention || (!roleMentionsSuppressed(msg) && hasRoleMention(bodyText, stateRef))) {
             if (unreadChannelId) {
               dispatch({ type: "SET_CHANNEL_MENTION", payload: { channelId: unreadChannelId, hasMention: true } });
             }
@@ -193,7 +199,9 @@ export function createWsMessageHandler(
         const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
         const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
         const bodyText = msg.content?.body || "";
-        const hasMention = (myUsername !== "" && bodyText.includes(`@${myUsername}`)) || hasRoleMention(bodyText, stateRef);
+        const hasMention =
+          (myUsername !== "" && bodyText.includes(`@${myUsername}`)) ||
+          (!roleMentionsSuppressed(msg) && hasRoleMention(bodyText, stateRef));
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
         const msgChannelId = msg.channel_id || msg.content?.channel_id;
         dispatch({ type: "INCREMENT_ROOM_UNREAD", payload: msg.room_id });

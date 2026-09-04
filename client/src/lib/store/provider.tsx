@@ -41,6 +41,7 @@ import {
   apiEditMessage,
   apiAddReaction,
   apiGetPins,
+  apiGetMyPermissions,
   apiPinMessage,
   apiUnpinMessage,
   apiGetVoiceMembers,
@@ -619,6 +620,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { eventId: msg.event_id, reactions: msg.reactions },
           });
         }
+      }
+      // The server computes effective permissions; the client only mirrors them
+      // to decide which controls to show.
+      try {
+        const permsData = await apiGetMyPermissions(roomId);
+        dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
+      } catch {
+        dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
       }
       // Load pinned messages for the channel we landed on
       try {

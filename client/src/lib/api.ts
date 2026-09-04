@@ -741,6 +741,9 @@ export interface MatrixMessage {
     bot_avatar_url?: string;
     embeds?: Embed[];
     showcase_pane?: string;
+    /** Set by the server when the sender lacks mention_everyone: role mentions
+     *  render as written but must not notify. */
+    suppress_role_mentions?: boolean;
   };
   redacted?: boolean;
   edited?: boolean;
@@ -809,13 +812,31 @@ export interface Channel {
 // ─── Custom Roles ────────────────────────────────────────────────────────────
 
 export interface RolePermissions {
+  // Baseline abilities, granted unless a role narrows them
   send_messages: boolean;
+  attach_files: boolean;
+  embed_links: boolean;
+  add_reactions: boolean;
+  connect: boolean;
+  speak: boolean;
+  // Elevated abilities
   manage_channels: boolean;
   manage_roles: boolean;
   manage_messages: boolean;
+  manage_webhooks: boolean;
+  manage_emojis: boolean;
   kick_members: boolean;
   ban_members: boolean;
   mention_everyone: boolean;
+}
+
+/** The caller's own effective permissions in a room. */
+export async function apiGetMyPermissions(roomId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/permissions`
+  );
+  if (!res.ok) throw new Error("Failed to load permissions");
+  return res.json() as Promise<{ permissions: RolePermissions }>;
 }
 
 export interface CustomRole {

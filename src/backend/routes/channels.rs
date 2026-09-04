@@ -4,8 +4,8 @@ use super::super::{
         CreateCategoryRequest, CreateChannelRequest, UpdateCategoryRequest, UpdateChannelRequest,
     },
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_custom_role_ids,
-        get_user_from_token, get_user_role, now_millis,
+        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
+        get_user_custom_role_ids, get_user_from_token, get_user_role, now_millis,
     },
     state::{AppState, ChannelCategoryRecord, ChannelRecord, RoomRecord},
 };
@@ -151,11 +151,13 @@ pub(crate) async fn create_channel(
     }
 
     // Permission check: owner or moderator
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can create channels",
+            "You do not have permission to create channels",
         ));
     }
 
@@ -278,11 +280,13 @@ pub(crate) async fn update_channel(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can edit channels",
+            "You do not have permission to edit channels",
         ));
     }
 
@@ -415,11 +419,13 @@ pub(crate) async fn delete_channel(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can delete channels",
+            "You do not have permission to delete channels",
         ));
     }
 
@@ -564,11 +570,13 @@ pub(crate) async fn create_category(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can create categories",
+            "You do not have permission to create categories",
         ));
     }
 
@@ -626,11 +634,13 @@ pub(crate) async fn update_category(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can edit categories",
+            "You do not have permission to edit categories",
         ));
     }
 
@@ -694,11 +704,13 @@ pub(crate) async fn delete_category(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_channels
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can delete categories",
+            "You do not have permission to delete categories",
         ));
     }
 

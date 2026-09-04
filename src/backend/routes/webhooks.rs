@@ -1,8 +1,8 @@
 use super::super::{
     dto::CreateWebhookRequest,
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
-        now_millis,
+        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
+        get_user_from_token, now_millis,
     },
     state::{AppState, RoomRecord, WebhookRecord},
 };
@@ -67,10 +67,13 @@ pub(crate) async fn create_webhook(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    if room.creator != user_id {
+    if !effective_permissions(&state, &room.room_id, &user_id)
+        .await
+        .manage_webhooks
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only the room owner can create webhooks",
+            "You do not have permission to create webhooks in this room",
         ));
     }
 
@@ -131,10 +134,13 @@ pub(crate) async fn list_webhooks(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    if room.creator != user_id {
+    if !effective_permissions(&state, &room.room_id, &user_id)
+        .await
+        .manage_webhooks
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only the room owner can list webhooks",
+            "You do not have permission to list webhooks in this room",
         ));
     }
 
@@ -183,10 +189,13 @@ pub(crate) async fn delete_webhook(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
-    if room.creator != user_id {
+    if !effective_permissions(&state, &room.room_id, &user_id)
+        .await
+        .manage_webhooks
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only the room owner can delete webhooks",
+            "You do not have permission to delete webhooks in this room",
         ));
     }
 

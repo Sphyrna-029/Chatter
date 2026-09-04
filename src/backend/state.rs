@@ -450,8 +450,25 @@ fn default_voice_bitrate() -> i32 {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub(crate) struct RolePermissions {
+    // Baseline abilities every member has unless a role narrows them. These
+    // default to true so roles stored before they existed keep working.
     #[serde(default = "default_true")]
     pub(crate) send_messages: bool,
+    #[serde(default = "default_true")]
+    pub(crate) attach_files: bool,
+    #[serde(default = "default_true")]
+    pub(crate) embed_links: bool,
+    #[serde(default = "default_true")]
+    pub(crate) add_reactions: bool,
+    /// Join a voice channel.
+    #[serde(default = "default_true")]
+    pub(crate) connect: bool,
+    /// Transmit audio once connected. Separate from `connect` so a role can
+    /// listen without talking.
+    #[serde(default = "default_true")]
+    pub(crate) speak: bool,
+
+    // Elevated abilities, off unless granted.
     #[serde(default)]
     pub(crate) manage_channels: bool,
     #[serde(default)]
@@ -459,11 +476,84 @@ pub(crate) struct RolePermissions {
     #[serde(default)]
     pub(crate) manage_messages: bool,
     #[serde(default)]
+    pub(crate) manage_webhooks: bool,
+    #[serde(default)]
+    pub(crate) manage_emojis: bool,
+    #[serde(default)]
     pub(crate) kick_members: bool,
     #[serde(default)]
     pub(crate) ban_members: bool,
     #[serde(default)]
     pub(crate) mention_everyone: bool,
+}
+
+impl RolePermissions {
+    /// Nothing granted — what a non-member holds.
+    pub(crate) fn none() -> Self {
+        Self {
+            send_messages: false,
+            attach_files: false,
+            embed_links: false,
+            add_reactions: false,
+            connect: false,
+            speak: false,
+            ..Self::default()
+        }
+    }
+
+    /// Everything granted — what an owner holds.
+    pub(crate) fn all() -> Self {
+        Self {
+            send_messages: true,
+            attach_files: true,
+            embed_links: true,
+            add_reactions: true,
+            connect: true,
+            speak: true,
+            manage_channels: true,
+            manage_roles: true,
+            manage_messages: true,
+            manage_webhooks: true,
+            manage_emojis: true,
+            kick_members: true,
+            ban_members: true,
+            mention_everyone: true,
+        }
+    }
+
+    /// The fixed set a built-in moderator keeps, regardless of custom roles.
+    pub(crate) fn moderator() -> Self {
+        Self {
+            manage_channels: true,
+            manage_messages: true,
+            manage_webhooks: true,
+            manage_emojis: true,
+            kick_members: true,
+            ban_members: true,
+            mention_everyone: true,
+            ..Self::default()
+        }
+    }
+
+    /// Union with another set — assigning a second role can only grant more.
+    pub(crate) fn union(self, other: &Self) -> Self {
+        Self {
+            send_messages: self.send_messages || other.send_messages,
+            attach_files: self.attach_files || other.attach_files,
+            embed_links: self.embed_links || other.embed_links,
+            add_reactions: self.add_reactions || other.add_reactions,
+            connect: self.connect || other.connect,
+            speak: self.speak || other.speak,
+            manage_channels: self.manage_channels || other.manage_channels,
+            manage_roles: self.manage_roles || other.manage_roles,
+            manage_messages: self.manage_messages || other.manage_messages,
+            manage_webhooks: self.manage_webhooks || other.manage_webhooks,
+            manage_emojis: self.manage_emojis || other.manage_emojis,
+            kick_members: self.kick_members || other.kick_members,
+            ban_members: self.ban_members || other.ban_members,
+            mention_everyone: self.mention_everyone || other.mention_everyone,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -474,9 +564,16 @@ impl Default for RolePermissions {
     fn default() -> Self {
         Self {
             send_messages: true,
+            attach_files: true,
+            embed_links: true,
+            add_reactions: true,
+            connect: true,
+            speak: true,
             manage_channels: false,
             manage_roles: false,
             manage_messages: false,
+            manage_webhooks: false,
+            manage_emojis: false,
             kick_members: false,
             ban_members: false,
             mention_everyone: false,

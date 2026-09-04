@@ -1,8 +1,8 @@
 use super::super::{
     dto::{AssignMemberRolesRequest, CreateCustomRoleRequest, UpdateCustomRoleRequest},
     helpers::{
-        broadcast_to_room, error_response, extract_token, generate_id, get_user_from_token,
-        get_user_role, now_millis,
+        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
+        get_user_from_token, now_millis,
     },
     state::{AppState, CustomRoleRecord, MemberCustomRoleRecord},
 };
@@ -23,15 +23,9 @@ fn role_to_json(r: &CustomRoleRecord) -> Value {
         "name": r.name,
         "color": r.color,
         "position": r.position,
-        "permissions": {
-            "send_messages": r.permissions.send_messages,
-            "manage_channels": r.permissions.manage_channels,
-            "manage_roles": r.permissions.manage_roles,
-            "manage_messages": r.permissions.manage_messages,
-            "kick_members": r.permissions.kick_members,
-            "ban_members": r.permissions.ban_members,
-            "mention_everyone": r.permissions.mention_everyone,
-        },
+        // Serialized from the struct so a new permission can never be silently
+        // dropped from the API by a hand-maintained field list.
+        "permissions": serde_json::to_value(&r.permissions).unwrap_or_default(),
         "created_by": r.created_by,
         "created_at": r.created_at,
     })
@@ -105,11 +99,13 @@ pub(crate) async fn create_role(
         }
     }
 
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    if role != "owner" && role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_roles
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can create roles",
+            "You do not have permission to create roles",
         ));
     }
 
@@ -164,11 +160,13 @@ pub(crate) async fn update_role(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let user_role = get_user_role(&state, &room_id, &user_id).await;
-    if user_role != "owner" && user_role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_roles
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can edit roles",
+            "You do not have permission to edit roles",
         ));
     }
 
@@ -209,15 +207,7 @@ pub(crate) async fn update_role(
         set_doc.insert("permissions", perms_doc.clone());
         content.insert(
             "permissions".to_string(),
-            json!({
-                "send_messages": perms.send_messages,
-                "manage_channels": perms.manage_channels,
-                "manage_roles": perms.manage_roles,
-                "manage_messages": perms.manage_messages,
-                "kick_members": perms.kick_members,
-                "ban_members": perms.ban_members,
-                "mention_everyone": perms.mention_everyone,
-            }),
+            serde_json::to_value(perms).unwrap_or_default(),
         );
     }
 
@@ -252,11 +242,13 @@ pub(crate) async fn delete_role(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let user_role = get_user_role(&state, &room_id, &user_id).await;
-    if user_role != "owner" && user_role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_roles
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can delete roles",
+            "You do not have permission to delete roles",
         ));
     }
 
@@ -346,11 +338,13 @@ pub(crate) async fn assign_member_roles(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let user_role = get_user_role(&state, &room_id, &user_id).await;
-    if user_role != "owner" && user_role != "moderator" {
+    if !effective_permissions(&state, &room_id, &user_id)
+        .await
+        .manage_roles
+    {
         return Err(error_response(
             StatusCode::FORBIDDEN,
-            "Only owners and moderators can assign roles",
+            "You do not have permission to assign roles",
         ));
     }
 
@@ -426,4 +420,24 @@ pub(crate) async fn list_all_member_roles(
     }
 
     Ok(Json(json!({ "member_roles": map })))
+}
+
+/// GET /api/rooms/{room_id}/permissions
+///
+/// The caller's own effective permissions, so the client can hide controls the
+/// server would refuse anyway.
+pub(crate) async fn get_my_permissions(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    let perms = effective_permissions(&state, &room_id, &user_id).await;
+    Ok(Json(json!({
+        "permissions": serde_json::to_value(&perms).unwrap_or_default(),
+    })))
 }

@@ -1,7 +1,7 @@
 use super::screen_webrtc::user_in_voice_room;
 use crate::backend::{
     constants::VOICE_RTP_BUFFER_SIZE,
-    helpers::{broadcast_to_voice_channel, send_to_user},
+    helpers::{broadcast_to_voice_channel, effective_permissions, send_to_user},
     state::{AppState, PendingVoiceSubscribe, VoicePublisherState, VoiceSubscriberState},
     webrtc::{create_peer_connection, ice_candidate_to_json, parse_ice_candidate},
 };
@@ -178,6 +178,19 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
             "scope": "publish",
             "room_id": room_id,
             "detail": "You have been muted by a moderator"
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
+    // Same reasoning for the speak permission: enforce it where the audio
+    // actually arrives, not only by hiding the mic button.
+    if !effective_permissions(&state, room_id, user_id).await.speak {
+        let error = json!({
+            "type": "voice_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": "You do not have permission to speak in this room"
         });
         send_to_user(&state, user_id, &error).await;
         return;
