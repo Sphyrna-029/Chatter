@@ -105,6 +105,9 @@ export function AddToDMDialog({ open, onOpenChange, roomId }: AddToDMDialogProps
                     <div
                       key={uid}
                       className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent cursor-pointer"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
                       onClick={() => handleAdd(uid)}
                     >
                       <Avatar className="h-7 w-7 shrink-0">

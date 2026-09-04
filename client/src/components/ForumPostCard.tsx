@@ -5,6 +5,7 @@ import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { displayUserId } from "@/lib/utils";
+import { clickable } from "@/lib/a11y";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -36,7 +37,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
   return (
     <div
       className="group relative flex gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50 cursor-pointer"
-      onClick={onClick}
+      {...clickable(onClick, `Open post: ${post.title}`)}
     >
       {/* Thumbnail */}
       {post.image_url && (

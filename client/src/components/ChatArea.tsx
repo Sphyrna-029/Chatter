@@ -1357,6 +1357,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                         <div
                           key={thread.event_id}
                           className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
                           onClick={() => {
                             closeSearch();
                             openThread(thread.event_id);
@@ -1389,6 +1392,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                         <div
                           key={msg.event_id}
                           className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
                           onClick={async () => {
                             const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
                             if (!alreadyLoaded && state.currentRoomId) {
@@ -1427,6 +1433,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                     <div
                       key={msg.event_id}
                       className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
                       onClick={async () => {
                         if (!state.currentRoomId) return;
                         const msgChannelId = msg.channel_id;

@@ -35,6 +35,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
 import { NotificationSettingsPopover, NotificationBell } from "./NotificationSettingsPopover";
 import { resolveNotificationLevel } from "@/lib/notifications";
+import { clickable } from "@/lib/a11y";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 
@@ -1298,7 +1299,7 @@ function ChannelItem({
             ? "text-white font-bold hover:bg-accent/50"
             : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
       }`}
-      onClick={onSelect}
+      {...clickable(onSelect, `Open ${channel.name}`)}
       title={channel.topic || channel.name}
     >
       {showGrip && (

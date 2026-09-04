@@ -126,6 +126,12 @@ export function GroupDMDialog({ open, onOpenChange }: GroupDMDialogProps) {
                 <div
                   key={uid}
                   className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer ${isSelected ? "bg-accent" : "hover:bg-accent/50"} ${disableAdd ? "opacity-50 cursor-not-allowed" : ""}`}
+                  role="button"
+                  tabIndex={disableAdd ? -1 : 0}
+                  aria-pressed={isSelected}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); if (!disableAdd) toggle(uid); }
+                  }}
                   onClick={() => !disableAdd && toggle(uid)}
                 >
                   <Avatar className="h-7 w-7 shrink-0">
