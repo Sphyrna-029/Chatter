@@ -1924,53 +1924,6 @@ export async function apiUnblockUser(userId: string) {
   return res.json();
 }
 
-// ─── Tank Wars ────────────────────────────────────────────────────────────────
-
-export async function apiGetTankWarState(roomId: string) {
-  const res = await authenticatedFetch(`/api/tankwar/${roomId}/state`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to get tank war state");
-  }
-  return res.json();
-}
-
-export async function apiNewTankWarGame(roomId: string, settings?: { game_mode?: string; max_ticks?: number }) {
-  const res = await authenticatedFetch(`/api/tankwar/${roomId}/new`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(settings || {}),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to create new game");
-  }
-  return res.json() as Promise<{ game_id: string }>;
-}
-
-// ─── Tug of War ───────────────────────────────────────────────────────────────
-
-export async function apiGetTugOfWarState(roomId: string) {
-  const res = await authenticatedFetch(`/api/tugofwar/${roomId}/state`);
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to get tug of war state");
-  }
-  return res.json();
-}
-
-export async function apiNewTugOfWarGame(roomId: string) {
-  const res = await authenticatedFetch(`/api/tugofwar/${roomId}/new`, {
-    method: "POST",
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to create tug of war game");
-  }
-  return res.json() as Promise<{ game_id: string }>;
-}
-
-
 // ─── Steam ────────────────────────────────────────────────────────────────────
 
 export async function apiSteamExchangeCode(code: string): Promise<{

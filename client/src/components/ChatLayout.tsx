@@ -7,8 +7,6 @@ import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { ForumArea } from "./ForumArea";
 import { ShowcaseArea } from "./ShowcaseArea";
-import { TankWarArea } from "./TankWarArea";
-import { TugOfWarArea } from "./TugOfWarArea";
 import { WatchPartyArea } from "./WatchPartyArea";
 import { WhiteboardArea } from "./WhiteboardArea";
 import { ActivityPage } from "./ActivityPage";
@@ -205,16 +203,10 @@ export function ChatLayout() {
   const isWhiteboardRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "whiteboard"
     : false) || currentChannelType === "whiteboard";
-  const isTankWarRoom = state.currentRoomId
-    ? state.roomInfoMap[state.currentRoomId]?.room_type === "tankwar"
-    : false;
   const isWatchPartyRoom = (state.currentRoomId
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "watchparty"
     : false) || currentChannelType === "theater";
   const isShowcaseChannel = currentChannelType === "showcase";
-  const isTugOfWarRoom = state.currentRoomId
-    ? state.roomInfoMap[state.currentRoomId]?.room_type === "tugofwar"
-    : false;
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
     state.screenViewerOpen &&
@@ -355,7 +347,7 @@ export function ChatLayout() {
 
   // On a phone the channel column would eat most of the viewport, so it moves
   // into a drawer and the chat gets the full width.
-  const showChannelColumn = hasChannels && !isTankWarRoom && !isTugOfWarRoom;
+  const showChannelColumn = hasChannels;
 
   const renderChannelList = (asDrawer: boolean) => (
     <ChannelList
@@ -508,7 +500,7 @@ export function ChatLayout() {
             {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
             {/* VoiceControls is always mounted here (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isTankWarRoom || isTugOfWarRoom || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
+              <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
                 <VoiceControls
                   joinVoiceRef={joinVoiceRef}
                   leaveVoiceRef={leaveVoiceRef}
@@ -530,11 +522,7 @@ export function ChatLayout() {
               ) : (
               <>
                 {showChannelColumn && !isMobile && renderChannelList(false)}
-                {isTankWarRoom ? (
-                  <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
-                ) : isTugOfWarRoom ? (
-                  <TugOfWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
-                ) : isWatchPartyRoom ? (
+                {isWatchPartyRoom ? (
                   <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
                 ) : isShowcaseChannel ? (
                   <ShowcaseArea />

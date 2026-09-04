@@ -66,9 +66,7 @@ pub struct AppState {
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
     pub(crate) pending_registrations: RwLock<HashMap<String, PendingRegistration>>,
-    pub(crate) tank_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
-    pub(crate) tug_of_war_games: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
     pub(crate) klipy_api_key: String,
     pub(crate) steam_api_key: String,
     pub(crate) spotify_client_id: String,
@@ -222,10 +220,6 @@ pub(crate) struct RoomMemberRecord {
 
 fn default_member_role() -> String {
     "member".to_string()
-}
-
-fn default_game_mode() -> String {
-    "ctf".to_string()
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -385,81 +379,6 @@ pub(crate) struct UserRoomGroupsRecord {
     #[serde(rename = "_id")]
     pub(crate) user_id: String,
     pub(crate) groups: Vec<RoomGroupEntry>,
-}
-
-// ─── Tank Wars types ─────────────────────────────────────────────────────────
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TankGameRecord {
-    #[serde(rename = "_id")]
-    pub(crate) game_id: String,
-    pub(crate) room_id: String,
-    pub(crate) status: String, // "lobby" | "running" | "finished"
-    pub(crate) grid_size: usize,
-    pub(crate) max_ticks: usize,
-    pub(crate) current_tick: usize,
-    pub(crate) maze: Vec<Vec<u8>>, // 0=empty, 1=wall
-    pub(crate) players: Vec<TankPlayer>,
-    pub(crate) bullets: Vec<Bullet>,
-    pub(crate) flag_position: [usize; 2],
-    pub(crate) winner: Option<String>,
-    #[serde(default)]
-    pub(crate) reset_votes: Vec<String>,
-    #[serde(default = "default_game_mode")]
-    pub(crate) game_mode: String, // "ctf" | "battle_royale" | "koth"
-    pub(crate) created_at: i64,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TankPlayer {
-    pub(crate) user_id: String,
-    pub(crate) script: String,
-    pub(crate) ready: bool,
-    pub(crate) x: usize,
-    pub(crate) y: usize,
-    pub(crate) direction: String,
-    pub(crate) health: u8,
-    pub(crate) alive: bool,
-    pub(crate) color: String,
-    pub(crate) score: u32,
-    #[serde(default)]
-    pub(crate) hill_ticks: u32,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct Bullet {
-    pub(crate) x: usize,
-    pub(crate) y: usize,
-    pub(crate) direction: String,
-    pub(crate) owner: String,
-}
-
-// ─── Tug of War types ────────────────────────────────────────────────────────
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TugOfWarGame {
-    #[serde(rename = "_id")]
-    pub(crate) game_id: String,
-    pub(crate) room_id: String,
-    pub(crate) status: String, // "lobby" | "running" | "finished"
-    pub(crate) players: Vec<TugOfWarPlayer>,
-    pub(crate) rope_position: f64, // -100.0 to 100.0; positive = right winning
-    pub(crate) prompt: String,
-    pub(crate) started_at: Option<i64>,
-    pub(crate) winner: Option<String>, // "left" | "right" | "draw"
-    #[serde(default)]
-    pub(crate) reset_votes: Vec<String>,
-    pub(crate) created_at: i64,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct TugOfWarPlayer {
-    pub(crate) user_id: String,
-    pub(crate) team: String, // "left" | "right" | "" (unassigned)
-    pub(crate) ready: bool,
-    pub(crate) chars_correct: u32,
-    pub(crate) errors: u32,
-    pub(crate) wps: f64,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

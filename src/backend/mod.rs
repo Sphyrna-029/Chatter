@@ -6,8 +6,6 @@ pub(crate) mod router;
 pub(crate) mod routes;
 pub(crate) mod state;
 pub(crate) mod webrtc;
-pub(crate) mod tankwar_engine;
-pub(crate) mod tugofwar_engine;
 pub(crate) mod ws;
 
 pub use app::run;

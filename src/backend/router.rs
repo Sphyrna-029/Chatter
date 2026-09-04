@@ -20,8 +20,6 @@ use super::{
             leave_room, list_all_rooms, list_banned_users, set_member_role, set_name_colors,
             unban_member, update_room_settings, update_room_topic,
         },
-        tankwar::{get_tankwar_state, new_tankwar_game},
-        tugofwar::{get_tugofwar_state, new_tugofwar_game},
         watchparty::get_watchparty_state,
         steam::{steam_callback, steam_exchange, steam_link_url, steam_login, steam_set_hide_game, steam_status, steam_unlink},
         spotify::{spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink},
@@ -194,12 +192,6 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
            // Webhooks
            .route("/api/rooms/{room_id}/webhooks", post(create_webhook).get(list_webhooks))
            .route("/api/webhooks/{webhook_id}", delete(delete_webhook).post(execute_webhook))
-           // Tank Wars
-           .route("/api/tankwar/{room_id}/state", get(get_tankwar_state))
-           .route("/api/tankwar/{room_id}/new", post(new_tankwar_game))
-           // Tug of War
-           .route("/api/tugofwar/{room_id}/state", get(get_tugofwar_state))
-           .route("/api/tugofwar/{room_id}/new", post(new_tugofwar_game))
            // Watch Party
            .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
            // Whiteboard
