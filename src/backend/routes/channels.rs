@@ -7,7 +7,7 @@ use super::super::{
         broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
         get_user_custom_role_ids, get_user_from_token, get_user_role, now_millis,
     },
-    state::{AppState, ChannelCategoryRecord, ChannelRecord, RoomRecord},
+    state::{AppState, ChannelCategoryRecord, ChannelRecord, RolePermissions, RoomRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -73,6 +73,7 @@ pub(crate) async fn list_channels(
             "position": ch.position,
             "category_id": ch.category_id,
             "read_only": ch.read_only,
+            "overwrites": serde_json::to_value(&ch.overwrites).unwrap_or_default(),
             "view_roles": ch.view_roles,
             "write_roles": ch.write_roles,
             "showcase_write_roles": ch.showcase_write_roles,
@@ -227,6 +228,8 @@ pub(crate) async fn create_channel(
         position: max_pos,
         category_id: req.category_id.unwrap_or_default(),
         read_only: false,
+        overwrites: vec![],
+        overwrites_migrated: true,
         view_roles: vec![],
         write_roles: vec![],
         showcase_write_roles: vec![],
@@ -253,6 +256,7 @@ pub(crate) async fn create_channel(
             "position": channel.position,
             "category_id": channel.category_id,
             "read_only": channel.read_only,
+            "overwrites": serde_json::to_value(&channel.overwrites).unwrap_or_default(),
             "view_roles": channel.view_roles,
             "write_roles": channel.write_roles,
             "showcase_write_roles": channel.showcase_write_roles,
@@ -329,6 +333,42 @@ pub(crate) async fn update_channel(
         set_doc.insert("read_only", read_only);
         content.insert("read_only".to_string(), json!(read_only));
     }
+    if let Some(ref overwrites) = req.overwrites {
+        // Reject unknown permission names and target kinds rather than storing
+        // rules that would silently never apply.
+        for ow in overwrites {
+            if !matches!(ow.target_type.as_str(), "everyone" | "role" | "user") {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Overwrite target_type must be everyone, role or user",
+                ));
+            }
+            if ow.target_type != "everyone" && ow.target_id.is_empty() {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Role and user overwrites need a target_id",
+                ));
+            }
+            for name in ow.allow.iter().chain(ow.deny.iter()) {
+                if !RolePermissions::NAMES.contains(&name.as_str()) {
+                    return Err(error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Unknown permission in overwrite",
+                    ));
+                }
+            }
+        }
+        let bson = mongodb::bson::to_bson(overwrites)
+            .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid overwrites"))?;
+        set_doc.insert("overwrites", bson);
+        // Anything stored here is already in the new model.
+        set_doc.insert("overwrites_migrated", true);
+        content.insert(
+            "overwrites".to_string(),
+            serde_json::to_value(overwrites).unwrap_or_default(),
+        );
+    }
+
     if let Some(ref view_roles) = req.view_roles {
         let bson_arr: Vec<mongodb::bson::Bson> = view_roles
             .iter()
@@ -518,6 +558,8 @@ pub(crate) async fn ensure_default_channels(
             position: 0,
             category_id: String::new(),
             read_only: false,
+            overwrites: vec![],
+            overwrites_migrated: true,
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],
@@ -542,6 +584,8 @@ pub(crate) async fn ensure_default_channels(
             position: 1,
             category_id: String::new(),
             read_only: false,
+            overwrites: vec![],
+            overwrites_migrated: true,
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],

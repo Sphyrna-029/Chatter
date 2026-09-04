@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { memberCanViewChannel } from "@/lib/permissions";
 import { ensureFontFace } from "@/lib/fontFace";
 import { UserProfileDialog } from "./UserProfileDialog";
 
@@ -25,9 +26,10 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     ? state.roomInfoMap[state.currentRoomId]
     : null;
 
+  const { customRoles, memberCustomRoles } = state;
   const grouped = useMemo(() => {
     const currentChannel = state.channels.find((c) => c.channel_id === state.currentChannelId);
-    const channelViewRoles = currentChannel?.view_roles ?? [];
+    const roles = { customRoles, memberCustomRoles };
 
     const owners: typeof state.roomMembers = [];
     const moderators: typeof state.roomMembers = [];
@@ -35,11 +37,8 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     const offline: typeof state.roomMembers = [];
 
     for (const m of state.roomMembers) {
-      // If channel has view_roles, filter: owners/mods always pass, others need a matching role
-      if (channelViewRoles.length > 0 && m.role !== "owner" && m.role !== "moderator") {
-        const userRoles = state.memberCustomRoles[m.userId] || [];
-        if (!channelViewRoles.some((r) => userRoles.includes(r))) continue;
-      }
+      // Hide members who cannot see this channel under its overwrites.
+      if (!memberCanViewChannel(roles, currentChannel, m)) continue;
 
       const status = state.userPresence[m.userId]?.status || "offline";
       if (status === "offline") {
@@ -49,7 +48,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
       else members.push(m);
     }
     return { owners, moderators, members, offline };
-  }, [state.roomMembers, state.channels, state.currentChannelId, state.memberCustomRoles, state.userPresence]);
+  }, [state.roomMembers, state.channels, state.currentChannelId, state.userPresence, customRoles, memberCustomRoles]);
 
   if (!state.currentRoomId) return null;
 

@@ -624,7 +624,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // The server computes effective permissions; the client only mirrors them
       // to decide which controls to show.
       try {
-        const permsData = await apiGetMyPermissions(roomId);
+        const permsData = await apiGetMyPermissions(roomId, selectedChannelId);
         dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
       } catch {
         dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
@@ -1035,6 +1035,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           payload: { eventId: msg.event_id, reactions: msg.reactions },
         });
       }
+    }
+    // Overwrites make permissions channel-scoped, so they follow the channel.
+    try {
+      const permsData = await apiGetMyPermissions(cur.currentRoomId, channelId);
+      dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
+    } catch {
+      dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
     }
     try {
       const page = await apiGetPins(cur.currentRoomId, channelId);

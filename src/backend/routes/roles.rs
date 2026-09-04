@@ -1,13 +1,16 @@
 use super::super::{
-    dto::{AssignMemberRolesRequest, CreateCustomRoleRequest, UpdateCustomRoleRequest},
+    dto::{
+        AssignMemberRolesRequest, CreateCustomRoleRequest, PermissionsQuery,
+        UpdateCustomRoleRequest,
+    },
     helpers::{
-        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
-        get_user_from_token, now_millis,
+        broadcast_to_room, channel_permissions, effective_permissions, error_response,
+        extract_token, generate_id, get_user_from_token, now_millis,
     },
     state::{AppState, CustomRoleRecord, MemberCustomRoleRecord},
 };
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::Json,
 };
@@ -25,7 +28,7 @@ fn role_to_json(r: &CustomRoleRecord) -> Value {
         "position": r.position,
         // Serialized from the struct so a new permission can never be silently
         // dropped from the API by a hand-maintained field list.
-        "permissions": serde_json::to_value(&r.permissions).unwrap_or_default(),
+        "permissions": serde_json::to_value(r.permissions).unwrap_or_default(),
         "created_by": r.created_by,
         "created_at": r.created_at,
     })
@@ -430,14 +433,20 @@ pub(crate) async fn get_my_permissions(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
     headers: HeaderMap,
+    Query(query): Query<PermissionsQuery>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let perms = effective_permissions(&state, &room_id, &user_id).await;
+    // Room-level by default; pass channel_id to see the set after that
+    // channel's overwrites are applied.
+    let perms = match query.channel_id.as_deref().filter(|c| !c.is_empty()) {
+        Some(channel_id) => channel_permissions(&state, &room_id, channel_id, &user_id).await,
+        None => effective_permissions(&state, &room_id, &user_id).await,
+    };
     Ok(Json(json!({
-        "permissions": serde_json::to_value(&perms).unwrap_or_default(),
+        "permissions": serde_json::to_value(perms).unwrap_or_default(),
     })))
 }

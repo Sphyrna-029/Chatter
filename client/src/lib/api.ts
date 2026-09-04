@@ -797,6 +797,9 @@ export interface Channel {
   position: number;
   category_id?: string;
   read_only?: boolean;
+  /** Per-channel permission overwrites, applied over the room-level set. */
+  overwrites?: PermissionOverwrite[];
+  /** @deprecated superseded by `overwrites`; migrated on server start. */
   view_roles?: string[];
   write_roles?: string[];
   showcase_write_roles?: string[];
@@ -813,6 +816,7 @@ export interface Channel {
 
 export interface RolePermissions {
   // Baseline abilities, granted unless a role narrows them
+  view_channel: boolean;
   send_messages: boolean;
   attach_files: boolean;
   embed_links: boolean;
@@ -830,10 +834,22 @@ export interface RolePermissions {
   mention_everyone: boolean;
 }
 
-/** The caller's own effective permissions in a room. */
-export async function apiGetMyPermissions(roomId: string) {
+export type PermissionName = keyof RolePermissions;
+
+/** A per-channel adjustment layered over the room-level permissions. */
+export interface PermissionOverwrite {
+  target_type: "everyone" | "role" | "user";
+  target_id: string;
+  allow: PermissionName[];
+  deny: PermissionName[];
+}
+
+/** The caller's own effective permissions, optionally inside one channel. */
+export async function apiGetMyPermissions(roomId: string, channelId?: string) {
+  const params = new URLSearchParams();
+  if (channelId) params.set("channel_id", channelId);
   const res = await authenticatedFetch(
-    `/api/rooms/${encodeURIComponent(roomId)}/permissions`
+    `/api/rooms/${encodeURIComponent(roomId)}/permissions?${params}`
   );
   if (!res.ok) throw new Error("Failed to load permissions");
   return res.json() as Promise<{ permissions: RolePermissions }>;
@@ -927,7 +943,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; overwrites?: PermissionOverwrite[]; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

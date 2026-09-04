@@ -34,6 +34,9 @@ pub async fn build_state() -> Arc<AppState> {
     // Create indexes
     create_indexes(&db).await;
 
+    // Fold legacy channel view_roles/write_roles into the overwrite model
+    migrate_channel_overwrites(&db).await;
+
     // Load caches from MongoDB
     let (room_members, room_roles) = load_room_members_cache(&db).await;
     let banned_users = load_banned_users_cache(&db).await;
@@ -235,6 +238,44 @@ async fn create_indexes(db: &mongodb::Database) {
         .collection::<mongodb::bson::Document>("bots")
         .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
+}
+
+/// One-time, idempotent conversion of the legacy `view_roles` / `write_roles`
+/// arrays into `overwrites`. The legacy fields are left in place so a rollback
+/// still finds them; nothing reads them once `overwrites_migrated` is set.
+async fn migrate_channel_overwrites(db: &mongodb::Database) {
+    use crate::backend::helpers::legacy_role_overwrites;
+    use crate::backend::state::ChannelRecord;
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let coll = db.collection::<ChannelRecord>("channels");
+    let Ok(mut cursor) = coll
+        .find(doc! { "overwrites_migrated": { "$ne": true } })
+        .await
+    else {
+        return;
+    };
+
+    let mut pending: Vec<(String, Vec<crate::backend::state::PermissionOverwrite>)> = Vec::new();
+    while let Ok(Some(ch)) = cursor.try_next().await {
+        let converted = legacy_role_overwrites(&ch.view_roles, &ch.write_roles);
+        let mut merged = ch.overwrites.clone();
+        merged.extend(converted);
+        pending.push((ch.channel_id.clone(), merged));
+    }
+
+    for (channel_id, overwrites) in pending {
+        let Ok(bson) = mongodb::bson::to_bson(&overwrites) else {
+            continue;
+        };
+        let _ = coll
+            .update_one(
+                doc! { "_id": &channel_id },
+                doc! { "$set": { "overwrites": bson, "overwrites_migrated": true } },
+            )
+            .await;
+    }
 }
 
 async fn load_room_members_cache(

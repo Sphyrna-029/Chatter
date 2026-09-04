@@ -4,10 +4,10 @@ use super::super::{
         ThreadListQuery,
     },
     helpers::{
-        broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
-        get_allowed_channel_ids, get_bot_from_token, get_reactions_for_events,
-        get_thread_counts_for_events, get_user_custom_role_ids, get_user_from_token, get_user_role,
-        is_moderator_or_owner, now_millis, send_to_user,
+        broadcast_to_room, channel_permissions, effective_permissions, error_response,
+        extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
+        get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
+        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, send_to_user,
     },
     state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord},
 };
@@ -175,26 +175,27 @@ pub(crate) async fn send_message(
                     ));
                 }
 
-                // Check view_roles: user must be able to see the channel to send messages
-                if !ch.view_roles.is_empty() && !is_privileged {
-                    let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
-                    if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
-                        return Err(error_response(
-                            StatusCode::FORBIDDEN,
-                            "You do not have access to this channel",
-                        ));
-                    }
+                // Channel overwrites decide access from here: a member must be
+                // able to see the channel to post in it, and must still hold
+                // send_messages after the channel's own rules are applied.
+                let ch_perms = channel_permissions(&state, &room_id, &channel_id, &sender_id).await;
+                if !ch_perms.view_channel {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "You do not have access to this channel",
+                    ));
                 }
-
-                // Check write_roles: if set, only those roles can send
-                if !ch.write_roles.is_empty() && !is_privileged {
-                    let user_roles = get_user_custom_role_ids(&state, &room_id, &sender_id).await;
-                    if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
-                        return Err(error_response(
-                            StatusCode::FORBIDDEN,
-                            "You do not have permission to send messages in this channel",
-                        ));
-                    }
+                if !ch_perms.send_messages {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "You do not have permission to send messages in this channel",
+                    ));
+                }
+                if !ch_perms.attach_files && body_has_attachment(&req.body) {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "You do not have permission to attach files in this channel",
+                    ));
                 }
 
                 // For showcase channels, enforce featured pane write restrictions

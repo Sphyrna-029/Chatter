@@ -1,6 +1,9 @@
 use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
-    state::{AppState, ChannelRecord, ReactionRecord, RolePermissions, RoomMemberRecord},
+    state::{
+        AppState, ChannelRecord, PermissionOverwrite, ReactionRecord, RolePermissions,
+        RoomMemberRecord,
+    },
 };
 use axum::{
     extract::ws::Message,
@@ -367,6 +370,163 @@ pub(crate) async fn get_user_custom_role_ids(
     role_ids
 }
 
+/// A user's permissions inside one channel: the room-level set with the
+/// channel's overwrites applied.
+///
+/// Order follows Discord's, because it is the one people already reason about:
+/// the `everyone` overwrite first, then the union of the overwrites for every
+/// role the member holds, then the member's own overwrite. Within each step
+/// denies are applied before allows, so a more specific allow wins.
+///
+/// An owner bypasses overwrites entirely — otherwise a room owner could lock
+/// themselves out of their own channel with no way back.
+pub(crate) async fn channel_permissions(
+    state: &AppState,
+    room_id: &str,
+    channel_id: &str,
+    user_id: &str,
+) -> RolePermissions {
+    use mongodb::bson::doc;
+
+    let base = effective_permissions(state, room_id, user_id).await;
+    if channel_id.is_empty() || overwrites_bypassed(state, room_id, user_id).await {
+        return base;
+    }
+
+    let channels_coll = state.db.collection::<ChannelRecord>("channels");
+    let Ok(Some(channel)) = channels_coll
+        .find_one(doc! { "_id": channel_id, "room_id": room_id })
+        .await
+    else {
+        return base;
+    };
+
+    let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
+    apply_overwrites(base, &channel_overwrites(&channel), &user_roles, user_id)
+}
+
+/// Owners and moderators are not subject to channel overwrites: an owner must
+/// not be able to lock themselves out, and moderators already saw every channel
+/// under the `view_roles` rules this replaces.
+pub(crate) async fn overwrites_bypassed(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    let role = get_user_role(state, room_id, user_id).await;
+    role == "owner" || role == "moderator"
+}
+
+/// Layer a channel's overwrites over a room-level permission set.
+///
+/// Order follows Discord's, because it is the one people already reason about:
+/// the `everyone` overwrite first, then the union of the overwrites for every
+/// role the member holds, then the member's own overwrite. Within each step
+/// denies are applied before allows, so a more specific allow wins.
+pub(crate) fn apply_overwrites(
+    base: RolePermissions,
+    overwrites: &[PermissionOverwrite],
+    user_roles: &[String],
+    user_id: &str,
+) -> RolePermissions {
+    if overwrites.is_empty() {
+        return base;
+    }
+
+    fn apply(perms: &mut RolePermissions, allow: &[String], deny: &[String]) {
+        for name in deny {
+            perms.set(name, false);
+        }
+        for name in allow {
+            perms.set(name, true);
+        }
+    }
+
+    let mut perms = base;
+
+    for ow in overwrites.iter().filter(|o| o.target_type == "everyone") {
+        apply(&mut perms, &ow.allow, &ow.deny);
+    }
+
+    // Roles are unioned before they are applied, so holding two roles cannot
+    // let the order of the list decide the outcome.
+    if !user_roles.is_empty() {
+        let mut allow: Vec<String> = Vec::new();
+        let mut deny: Vec<String> = Vec::new();
+        for ow in overwrites
+            .iter()
+            .filter(|o| o.target_type == "role" && user_roles.contains(&o.target_id))
+        {
+            allow.extend(ow.allow.iter().cloned());
+            deny.extend(ow.deny.iter().cloned());
+        }
+        apply(&mut perms, &allow, &deny);
+    }
+
+    for ow in overwrites
+        .iter()
+        .filter(|o| o.target_type == "user" && o.target_id == user_id)
+    {
+        apply(&mut perms, &ow.allow, &ow.deny);
+    }
+
+    perms
+}
+
+/// A channel's overwrites, including any still expressed as the legacy
+/// `view_roles` / `write_roles` arrays. Channels are migrated at startup, so
+/// this fallback only matters for records written by an older build.
+pub(crate) fn channel_overwrites(channel: &ChannelRecord) -> Vec<PermissionOverwrite> {
+    if channel.overwrites_migrated
+        || (channel.view_roles.is_empty() && channel.write_roles.is_empty())
+    {
+        return channel.overwrites.clone();
+    }
+    let mut out = channel.overwrites.clone();
+    out.extend(legacy_role_overwrites(
+        &channel.view_roles,
+        &channel.write_roles,
+    ));
+    out
+}
+
+/// "only these roles may view/write" becomes "deny everyone, allow those roles".
+pub(crate) fn legacy_role_overwrites(
+    view_roles: &[String],
+    write_roles: &[String],
+) -> Vec<PermissionOverwrite> {
+    let mut out: Vec<PermissionOverwrite> = Vec::new();
+    let mut everyone_deny: Vec<String> = Vec::new();
+    if !view_roles.is_empty() {
+        everyone_deny.push("view_channel".to_string());
+    }
+    if !write_roles.is_empty() {
+        everyone_deny.push("send_messages".to_string());
+    }
+    if everyone_deny.is_empty() {
+        return out;
+    }
+    out.push(PermissionOverwrite {
+        target_type: "everyone".to_string(),
+        target_id: String::new(),
+        allow: Vec::new(),
+        deny: everyone_deny,
+    });
+    for role_id in view_roles {
+        out.push(PermissionOverwrite {
+            target_type: "role".to_string(),
+            target_id: role_id.clone(),
+            allow: vec!["view_channel".to_string()],
+            deny: Vec::new(),
+        });
+    }
+    for role_id in write_roles {
+        out.push(PermissionOverwrite {
+            target_type: "role".to_string(),
+            target_id: role_id.clone(),
+            allow: vec!["send_messages".to_string()],
+            deny: Vec::new(),
+        });
+    }
+    out
+}
+
 /// Returns the set of channel IDs the user is allowed to see in a room.
 /// Returns None if the user is an owner or moderator (can see all channels).
 /// Returns Some(ids) for regular members — only channels with empty view_roles
@@ -379,16 +539,17 @@ pub(crate) async fn get_allowed_channel_ids(
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
-    let role = get_user_role(state, room_id, user_id).await;
-    if role == "owner" || role == "moderator" {
+    if overwrites_bypassed(state, room_id, user_id).await {
         return None; // privileged: unrestricted access
     }
+    let base = effective_permissions(state, room_id, user_id).await;
     let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
     let mut allowed = Vec::new();
     if let Ok(mut cursor) = channels_coll.find(doc! { "room_id": room_id }).await {
         while let Ok(Some(ch)) = cursor.try_next().await {
-            if ch.view_roles.is_empty() || ch.view_roles.iter().any(|r| user_roles.contains(r)) {
+            let perms = apply_overwrites(base, &channel_overwrites(&ch), &user_roles, user_id);
+            if perms.view_channel {
                 allowed.push(ch.channel_id.clone());
             }
         }

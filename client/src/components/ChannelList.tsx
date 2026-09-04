@@ -12,7 +12,8 @@ import {
   apiCreateCategory, apiUpdateCategory, apiDeleteCategory,
   apiUpdateChannel, apiUploadFile, apiUpdateRoomSettings,
 } from "@/lib/api";
-import type { Channel, ChannelCategory } from "@/lib/api";
+import type { Channel, ChannelCategory, PermissionOverwrite } from "@/lib/api";
+import { ChannelOverwrites } from "./ChannelOverwrites";
 import { VOICE_BITRATE_MIN_BPS, VOICE_BITRATE_MAX_BPS, VOICE_BITRATE_DEFAULT_BPS, clampVoiceBitrate } from "@/lib/webrtc";
 import {
   DropdownMenu,
@@ -95,8 +96,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
   const [editReadOnly, setEditReadOnly] = useState(false);
-  const [editViewRoles, setEditViewRoles] = useState<string[]>([]);
-  const [editWriteRoles, setEditWriteRoles] = useState<string[]>([]);
+  const [editOverwrites, setEditOverwrites] = useState<PermissionOverwrite[]>([]);
   const [editShowcaseWriteRoles, setEditShowcaseWriteRoles] = useState<string[]>([]);
   const [editChannelType, setEditChannelType] = useState<string>("");
   const [editSystemChannel, setEditSystemChannel] = useState(false);
@@ -225,13 +225,12 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         name: name.trim() || undefined,
         topic: topic.trim(),
         read_only: editReadOnly,
-        view_roles: editViewRoles,
-        write_roles: editWriteRoles,
+        overwrites: editOverwrites,
         showcase_write_roles: editChannelType === "showcase" ? editShowcaseWriteRoles : undefined,
         system_channel: editSystemChannel,
         voice_bitrate: isVoiceChannel ? editVoiceBitrateKbps * 1000 : undefined,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, view_roles: editViewRoles, write_roles: editWriteRoles, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, overwrites: editOverwrites, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -256,8 +255,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
     setName(ch.name);
     setTopic(ch.topic || "");
     setEditReadOnly(ch.read_only ?? false);
-    setEditViewRoles(ch.view_roles ?? []);
-    setEditWriteRoles(ch.write_roles ?? []);
+    setEditOverwrites(ch.overwrites ?? []);
     setEditShowcaseWriteRoles(ch.showcase_write_roles ?? []);
     setEditChannelType(ch.channel_type);
     setEditSystemChannel(ch.system_channel ?? false);
@@ -1121,48 +1119,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               />
               <span className="text-sm">System messages channel (join/leave/kick/ban)</span>
             </label>
+            <ChannelOverwrites
+              overwrites={editOverwrites}
+              onChange={setEditOverwrites}
+              roles={state.customRoles}
+              members={state.roomMembers.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
+            />
             {state.customRoles.length > 0 && (
               <>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Restrict visibility to roles</Label>
-                  <p className="text-3xs text-muted-foreground/70 mb-1">If none selected, everyone can see this channel.</p>
-                  <div className="space-y-1 max-h-28 overflow-y-auto">
-                    {state.customRoles.map((r) => (
-                      <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={editViewRoles.includes(r.role_id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setEditViewRoles((prev) => [...prev, r.role_id]);
-                            else setEditViewRoles((prev) => prev.filter((id) => id !== r.role_id));
-                          }}
-                          className="rounded border-input"
-                        />
-                        <span className="text-sm" style={{ color: r.color || undefined }}>{r.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">Restrict sending to roles</Label>
-                  <p className="text-3xs text-muted-foreground/70 mb-1">If none selected, normal send rules apply.</p>
-                  <div className="space-y-1 max-h-28 overflow-y-auto">
-                    {state.customRoles.map((r) => (
-                      <label key={r.role_id} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={editWriteRoles.includes(r.role_id)}
-                          onChange={(e) => {
-                            if (e.target.checked) setEditWriteRoles((prev) => [...prev, r.role_id]);
-                            else setEditWriteRoles((prev) => prev.filter((id) => id !== r.role_id));
-                          }}
-                          className="rounded border-input"
-                        />
-                        <span className="text-sm" style={{ color: r.color || undefined }}>{r.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
                 {editChannelType === "showcase" && (
                   <div>
                     <Label className="text-xs text-muted-foreground">Approved roles for featured pane</Label>

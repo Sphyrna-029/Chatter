@@ -296,6 +296,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) read_only: Option<bool>,
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
+    pub(crate) overwrites: Option<Vec<super::state::PermissionOverwrite>>,
     pub(crate) showcase_write_roles: Option<Vec<String>>,
     pub(crate) showcase_posters: Option<Vec<String>>,
     pub(crate) system_channel: Option<bool>,
@@ -315,6 +316,11 @@ pub(crate) struct UpdateCustomRoleRequest {
     pub(crate) color: Option<String>,
     pub(crate) position: Option<i32>,
     pub(crate) permissions: Option<super::state::RolePermissions>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PermissionsQuery {
+    pub(crate) channel_id: Option<String>,
 }
 
 #[derive(Deserialize)]

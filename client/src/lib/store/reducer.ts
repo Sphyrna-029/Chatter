@@ -594,6 +594,7 @@ export function reducer(state: AppState, action: Action): AppState {
         hasMoreMessages: false,
         oldestMessageIndex: null,
         loadingOlderMessages: false,
+        myPermissions: null,
         pinnedMessages: [],
         pinsHasMore: false,
         pinsNextOffset: 0,

@@ -974,3 +974,191 @@ async fn permission_contract_custom_roles_are_enforced() {
     // restores it — roles grant, they do not stack denials.
     assert_eq!(unioned["permissions"]["send_messages"], true);
 }
+
+#[tokio::test]
+async fn channel_overwrite_contract_denies_allows_and_precedence() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_owner_id, owner_token) = register_user(&client, &server.base_url, "owner", "pw").await;
+    let (member_id, member_token) = register_user(&client, &server.base_url, "member", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &owner_token,
+        "Overwrites",
+        Some(vec![member_id.clone()]),
+        false,
+    )
+    .await;
+
+    let channels: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/channels",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let channel_id = channels["channels"][0]["channel_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let perms_in_channel = |token: String, channel: String| {
+        let client = client.clone();
+        let base_url = server.base_url.clone();
+        let room_id = room_id.clone();
+        async move {
+            client
+                .get(format!(
+                    "{}/api/rooms/{}/permissions?channel_id={}",
+                    base_url, room_id, channel
+                ))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()["permissions"]
+                .clone()
+        }
+    };
+
+    // Baseline: the member can post in the channel.
+    let before = perms_in_channel(member_token.clone(), channel_id.clone()).await;
+    assert_eq!(before["send_messages"], true);
+    assert_eq!(before["view_channel"], true);
+
+    // Deny send_messages to everyone in this channel.
+    let set_everyone_deny = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "everyone", "target_id": "", "allow": [], "deny": ["send_messages"] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set_everyone_deny.status(), StatusCode::OK);
+
+    let denied = perms_in_channel(member_token.clone(), channel_id.clone()).await;
+    assert_eq!(denied["send_messages"], false);
+
+    // The server refuses the message, not just the button.
+    let send_denied = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/ow-txn1",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({"msgtype": "m.text", "body": "blocked", "channel_id": channel_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send_denied.status(), StatusCode::FORBIDDEN);
+
+    // The owner bypasses overwrites entirely.
+    let owner_perms = perms_in_channel(owner_token.clone(), channel_id.clone()).await;
+    assert_eq!(owner_perms["send_messages"], true);
+
+    // A user-specific allow beats the everyone deny — precedence is
+    // everyone, then roles, then the member.
+    let add_user_allow = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "everyone", "target_id": "", "allow": [], "deny": ["send_messages"] },
+                { "target_type": "user", "target_id": member_id, "allow": ["send_messages"], "deny": [] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(add_user_allow.status(), StatusCode::OK);
+
+    let restored = perms_in_channel(member_token.clone(), channel_id.clone()).await;
+    assert_eq!(restored["send_messages"], true);
+
+    let send_allowed = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/ow-txn2",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({"msgtype": "m.text", "body": "allowed again", "channel_id": channel_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send_allowed.status(), StatusCode::OK);
+
+    // Denying view_channel hides it from the channel listing.
+    let hide = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "everyone", "target_id": "", "allow": [], "deny": ["view_channel"] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hide.status(), StatusCode::OK);
+
+    let visible: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/channels",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(
+        !visible["channels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["channel_id"].as_str() == Some(channel_id.as_str())),
+        "a channel denying view_channel must not appear in the member's listing"
+    );
+
+    // An unknown permission name is rejected rather than silently stored.
+    let bad = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "everyone", "target_id": "", "allow": ["fly"], "deny": [] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+}

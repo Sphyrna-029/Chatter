@@ -424,10 +424,17 @@ pub(crate) struct ChannelRecord {
     pub(crate) category_id: String,
     #[serde(default)]
     pub(crate) read_only: bool,
+    /// Per-channel permission overwrites, applied over the room-level set.
     #[serde(default)]
-    pub(crate) view_roles: Vec<String>, // role_ids that can see this channel (empty = everyone)
+    pub(crate) overwrites: Vec<PermissionOverwrite>,
+    /// Set once the legacy view_roles/write_roles have been folded into
+    /// `overwrites`, so the one-time migration never runs twice.
     #[serde(default)]
-    pub(crate) write_roles: Vec<String>, // role_ids that can send messages (empty = normal rules)
+    pub(crate) overwrites_migrated: bool,
+    #[serde(default)]
+    pub(crate) view_roles: Vec<String>, // legacy; superseded by `overwrites`
+    #[serde(default)]
+    pub(crate) write_roles: Vec<String>, // legacy; superseded by `overwrites`
     #[serde(default)]
     pub(crate) showcase_write_roles: Vec<String>, // role_ids that can post in the featured (left) pane of showcase channels
     #[serde(default)]
@@ -448,10 +455,12 @@ fn default_voice_bitrate() -> i32 {
 
 // ─── Custom Roles ────────────────────────────────────────────────────────────
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 pub(crate) struct RolePermissions {
     // Baseline abilities every member has unless a role narrows them. These
     // default to true so roles stored before they existed keep working.
+    #[serde(default = "default_true")]
+    pub(crate) view_channel: bool,
     #[serde(default = "default_true")]
     pub(crate) send_messages: bool,
     #[serde(default = "default_true")]
@@ -491,6 +500,7 @@ impl RolePermissions {
     /// Nothing granted — what a non-member holds.
     pub(crate) fn none() -> Self {
         Self {
+            view_channel: false,
             send_messages: false,
             attach_files: false,
             embed_links: false,
@@ -504,6 +514,7 @@ impl RolePermissions {
     /// Everything granted — what an owner holds.
     pub(crate) fn all() -> Self {
         Self {
+            view_channel: true,
             send_messages: true,
             attach_files: true,
             embed_links: true,
@@ -535,9 +546,51 @@ impl RolePermissions {
         }
     }
 
+    /// Every permission name, in the order the UI presents them. A channel
+    /// overwrite addresses permissions by these names.
+    pub(crate) const NAMES: [&'static str; 15] = [
+        "view_channel",
+        "send_messages",
+        "attach_files",
+        "embed_links",
+        "add_reactions",
+        "connect",
+        "speak",
+        "manage_channels",
+        "manage_roles",
+        "manage_messages",
+        "manage_webhooks",
+        "manage_emojis",
+        "kick_members",
+        "ban_members",
+        "mention_everyone",
+    ];
+
+    pub(crate) fn set(&mut self, name: &str, value: bool) {
+        match name {
+            "view_channel" => self.view_channel = value,
+            "send_messages" => self.send_messages = value,
+            "attach_files" => self.attach_files = value,
+            "embed_links" => self.embed_links = value,
+            "add_reactions" => self.add_reactions = value,
+            "connect" => self.connect = value,
+            "speak" => self.speak = value,
+            "manage_channels" => self.manage_channels = value,
+            "manage_roles" => self.manage_roles = value,
+            "manage_messages" => self.manage_messages = value,
+            "manage_webhooks" => self.manage_webhooks = value,
+            "manage_emojis" => self.manage_emojis = value,
+            "kick_members" => self.kick_members = value,
+            "ban_members" => self.ban_members = value,
+            "mention_everyone" => self.mention_everyone = value,
+            _ => {}
+        }
+    }
+
     /// Union with another set — assigning a second role can only grant more.
     pub(crate) fn union(self, other: &Self) -> Self {
         Self {
+            view_channel: self.view_channel || other.view_channel,
             send_messages: self.send_messages || other.send_messages,
             attach_files: self.attach_files || other.attach_files,
             embed_links: self.embed_links || other.embed_links,
@@ -563,6 +616,7 @@ fn default_true() -> bool {
 impl Default for RolePermissions {
     fn default() -> Self {
         Self {
+            view_channel: true,
             send_messages: true,
             attach_files: true,
             embed_links: true,
@@ -579,6 +633,23 @@ impl Default for RolePermissions {
             mention_everyone: false,
         }
     }
+}
+
+/// A per-channel adjustment to the room-level permissions, in Discord's shape:
+/// a target (everyone / one role / one member) and the permission names it
+/// explicitly allows or denies. Anything not named is left untouched, which is
+/// what makes overwrites composable.
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
+pub(crate) struct PermissionOverwrite {
+    /// "everyone" | "role" | "user"
+    pub(crate) target_type: String,
+    /// Role id or user id; ignored for "everyone".
+    #[serde(default)]
+    pub(crate) target_id: String,
+    #[serde(default)]
+    pub(crate) allow: Vec<String>,
+    #[serde(default)]
+    pub(crate) deny: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

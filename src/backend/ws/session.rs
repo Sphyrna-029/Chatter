@@ -20,8 +20,8 @@ use super::{
 };
 use crate::backend::{
     helpers::{
-        broadcast_to_room, effective_permissions, generate_id, get_allowed_channel_ids,
-        get_user_from_token, get_user_role, now_millis, now_secs, send_to_user,
+        broadcast_to_room, channel_permissions, generate_id, get_user_from_token, get_user_role,
+        now_millis, now_secs, send_to_user,
     },
     state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
@@ -372,18 +372,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
 
                 let mut denied = !is_member || is_banned;
 
-                if !denied && channel_id != room_id {
-                    if let Some(allowed) = get_allowed_channel_ids(&state, room_id, user_id).await {
-                        denied = !allowed.iter().any(|c| c == channel_id);
-                    }
-                }
-
-                if !denied
-                    && !effective_permissions(&state, room_id, user_id)
-                        .await
-                        .connect
-                {
-                    denied = true;
+                // Voice channels carry overwrites like any other, so connect is
+                // judged against this channel, not just the room.
+                if !denied {
+                    let scope = if channel_id == room_id {
+                        ""
+                    } else {
+                        channel_id
+                    };
+                    let perms = channel_permissions(&state, room_id, scope, user_id).await;
+                    denied = !perms.connect || (!scope.is_empty() && !perms.view_channel);
                 }
 
                 if denied {

@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 
 const DEFAULT_PERMS: RolePermissions = {
+  view_channel: true,
   send_messages: true,
   attach_files: true,
   embed_links: true,
@@ -36,6 +37,7 @@ const DEFAULT_PERMS: RolePermissions = {
 /** Baseline abilities first, elevated ones after — the checkbox grid follows
  *  this order, and the split is where the section break goes. */
 const GENERAL_PERMS = [
+  "view_channel",
   "send_messages",
   "attach_files",
   "embed_links",
@@ -45,6 +47,7 @@ const GENERAL_PERMS = [
 ] as const;
 
 const PERM_LABELS: Record<keyof RolePermissions, string> = {
+  view_channel: "View Channel",
   send_messages: "Send Messages",
   attach_files: "Attach Files",
   embed_links: "Embed Links",
