@@ -1071,11 +1071,11 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
 
       {/* Edit channel dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Edit Channel</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
             <div>
               <Label>Name</Label>
               <Input
@@ -1216,11 +1216,11 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
 
       {/* Edit category dialog */}
       <Dialog open={categoryEditOpen} onOpenChange={setCategoryEditOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>Category Settings</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-3 max-h-[65vh] overflow-y-auto pr-1">
             <div>
               <Label>Name</Label>
               <Input

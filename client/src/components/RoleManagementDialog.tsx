@@ -191,7 +191,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-muted-foreground" />
@@ -199,13 +199,13 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex gap-4 min-h-[26rem] max-h-[60vh]">
+        <div className="flex gap-4 min-h-0 h-[26rem] max-h-[60vh] overflow-hidden">
           {/* Role list, strongest first */}
-          <div className="w-52 shrink-0 flex flex-col border-r pr-3">
+          <div className="w-52 shrink-0 flex flex-col min-h-0 border-r pr-3">
             <p className="text-3xs uppercase tracking-wider text-muted-foreground mb-1.5">
               Highest first
             </p>
-            <ScrollArea className="flex-1 -mr-2 pr-2">
+            <ScrollArea className="flex-1 min-h-0 -mr-2 pr-2">
               <div className="space-y-0.5">
                 {roles.map((r, i) => (
                   <div
@@ -276,7 +276,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
             <Button
               variant="outline"
               size="sm"
-              className="mt-2 h-7 text-xs w-full"
+              className="mt-2 h-7 text-xs w-full shrink-0"
               onClick={startCreating}
             >
               <Plus className="h-3 w-3" />
@@ -286,8 +286,8 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
 
           {/* Editor */}
           {editing ? (
-            <div className="flex-1 min-w-0 flex flex-col">
-              <div className="flex items-end gap-2 mb-3">
+            <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+              <div className="flex items-end gap-2 mb-3 shrink-0">
                 <div className="flex-1 min-w-0">
                   <Label className="text-xs text-muted-foreground">Name</Label>
                   <Input
@@ -321,7 +321,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
                 )}
               </div>
 
-              <ScrollArea className="flex-1 -mr-2 pr-2">
+              <ScrollArea className="flex-1 min-h-0 -mr-2 pr-2">
                 <div className="space-y-3">
                   {PERMISSION_SECTIONS.map((section) => (
                     <div key={section.title}>
@@ -346,7 +346,7 @@ export function RoleManagementDialog({ open, onOpenChange }: RoleManagementDialo
                 </div>
               </ScrollArea>
 
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="flex justify-end gap-2 pt-3 shrink-0">
                 {creating && (
                   <Button variant="ghost" size="sm" onClick={() => setCreating(false)}>
                     Cancel
