@@ -1,8 +1,7 @@
 import {
-  createContext,
-  useContext,
   useReducer,
   useCallback,
+  useMemo,
   useRef,
   useEffect,
   type ReactNode,
@@ -90,18 +89,12 @@ import {
   type RoomInfo,
 } from "../api";
 import { fetchIceServers } from "../webrtc";
-import type { AppContextValue } from "./types";
+import { AppActionsContext, AppStateContext, type AppActions } from "./context";
 import { initialState } from "./types";
 import { reducer } from "./reducer";
 import { createWsMessageHandler } from "./wsHandler";
 
-const AppContext = createContext<AppContextValue | null>(null);
 
-export function useAppContext() {
-  const ctx = useContext(AppContext);
-  if (!ctx) throw new Error("useAppContext must be within AppProvider");
-  return ctx;
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   useVersionCheck();
@@ -129,8 +122,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "CLOSE_SEARCH" });
   }, [state.currentRoomId]);
 
-  // Debounced message-search execution (state lives in the store so the members
-  // panel and chat area share one source of truth).
+  // Debounced message-search execution (state lives in the store so the search
+  // panel and the provider share one source of truth).
   useEffect(() => {
     const { open, query, filter, fileTypeFilter, thisChannel } = state.search;
     if (!open || !state.currentRoomId) return;
@@ -1189,81 +1182,84 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Stable across state changes so action-only consumers never re-render.
+  const actions = useMemo<AppActions>(
+    () => ({
+      dispatch,
+      wsRef,
+      login,
+      register,
+      logout,
+      deleteAccount,
+      loadRooms,
+      selectRoom,
+      loadOlderMessages,
+      loadMessagesAround,
+      sendMessage,
+      openThread,
+      closeThread,
+      sendThreadMessage,
+      setThreadName,
+      deleteThread,
+      deleteMessage,
+      hardDeleteNotification,
+      editMessage,
+      addReaction,
+      loadPins,
+      pinMessage,
+      unpinMessage,
+      createRoom,
+      joinRoom,
+      leaveRoom,
+      loadVoiceMembers,
+      sendTyping,
+      getAllRooms,
+      openDM,
+      addToGroupDM,
+      updateTopic,
+      updateRoomSettings,
+      setCustomStatus,
+      setManualStatus,
+      updateProfile,
+      kickMember,
+      banMember,
+      unbanMember,
+      setMemberRole,
+      setNameColors,
+      selectChannel,
+      createChannel,
+      updateChannel,
+      deleteChannel,
+      loadRoles,
+      createRole,
+      updateRole,
+      deleteRole,
+      assignMemberRoles,
+      loadRoomGroups,
+      createRoomGroup,
+      deleteRoomGroup,
+      renameRoomGroup,
+      setGroupRooms,
+      toggleGroupCollapsed,
+      loadFriends,
+      loadUnreads,
+      markChannelRead,
+      loadNotificationSettings,
+      setNotificationLevel,
+      moderateVoice,
+      sendFriendRequest,
+      acceptFriendRequest,
+      rejectFriendRequest,
+      removeFriend,
+      blockUser,
+      unblockUser,
+    }),
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+  );
+
   return (
-    <AppContext.Provider
-      value={{
-        state,
-        dispatch,
-        wsRef,
-        login,
-        register,
-        logout,
-        deleteAccount,
-        loadRooms,
-        selectRoom,
-        loadOlderMessages,
-        loadMessagesAround,
-        sendMessage,
-        openThread,
-        closeThread,
-        sendThreadMessage,
-        setThreadName,
-        deleteThread,
-        deleteMessage,
-        hardDeleteNotification,
-        editMessage,
-        addReaction,
-        loadPins,
-        pinMessage,
-        unpinMessage,
-        createRoom,
-        joinRoom,
-        leaveRoom,
-        loadVoiceMembers,
-        sendTyping,
-        getAllRooms,
-        openDM,
-        addToGroupDM,
-        updateTopic,
-        updateRoomSettings,
-        setCustomStatus,
-        setManualStatus,
-        updateProfile,
-        kickMember,
-        banMember,
-        unbanMember,
-        setMemberRole,
-        setNameColors,
-        selectChannel,
-        createChannel,
-        updateChannel,
-        deleteChannel,
-        loadRoles,
-        createRole,
-        updateRole,
-        deleteRole,
-        assignMemberRoles,
-        loadRoomGroups,
-        createRoomGroup,
-        deleteRoomGroup,
-        renameRoomGroup,
-        setGroupRooms,
-        toggleGroupCollapsed,
-        loadFriends,
-        loadUnreads,
-        markChannelRead,
-        loadNotificationSettings,
-        setNotificationLevel,
-        moderateVoice,
-        sendFriendRequest,
-        acceptFriendRequest,
-        rejectFriendRequest,
-        removeFriend,
-        blockUser,
-        unblockUser,
-      }}
-    >
-      {children}
-    </AppContext.Provider>
+    <AppActionsContext.Provider value={actions}>
+      <AppStateContext.Provider value={state}>{children}</AppStateContext.Provider>
+    </AppActionsContext.Provider>
   );
 }

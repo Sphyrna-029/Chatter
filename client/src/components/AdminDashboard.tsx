@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw } from "lucide-react";
-import { useAppContext } from "@/lib/store";
+import { useAppActions } from "@/lib/store";
 import {
   apiAdminGetStats,
   apiAdminListUsers,
@@ -37,7 +37,7 @@ function formatBytes(bytes: number): string {
 
 export function AdminDashboard() {
   const confirm = useConfirm();
-  const { dispatch } = useAppContext();
+  const { dispatch } = useAppActions();
   const [tab, setTab] = useState<Tab>("overview");
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [users, setUsers] = useState<AdminUser[]>([]);

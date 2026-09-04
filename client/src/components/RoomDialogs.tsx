@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from "react";
-import { useAppContext } from "@/lib/store";
+import { useAppActions, useAppContext } from "@/lib/store";
 import { apiUploadFile, apiCreateInvite, apiListInvites, apiDeleteInvite, apiDeleteRoom, apiGetBannedUsers, apiUnbanMember, apiCreateWebhook, apiListWebhooks, apiDeleteWebhook, apiCreateBot, apiListBots, apiDeleteBot, apiRegenerateBotToken, apiCreateChannel, type RoomSummary, type BannedUser, type Webhook, type Bot } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +27,7 @@ interface CreateRoomDialogProps {
 }
 
 export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) {
-  const { createRoom } = useAppContext();
+  const { createRoom } = useAppActions();
   const [name, setName] = useState("");
   const [topic, setTopic] = useState("");
   const [tags, setTags] = useState<string[]>([]);

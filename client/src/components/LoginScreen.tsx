@@ -5,7 +5,7 @@ import {
   useRef,
   type FormEvent,
 } from "react";
-import { useAppContext } from "@/lib/store";
+import { useAppActions } from "@/lib/store";
 import { apiCheckUsername, apiVerifyTotp, apiRecoveryLogin, apiForceResetPassword, apiGetServerInfo, apiSteamExchangeCode, getAccessToken, setAccessToken, setRefreshToken, setIsAdmin, setTotpVerified } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,7 +45,7 @@ const CONNECTION_STEPS = [
 const TOTAL_DELAY_MS = 3500;
 
 export function LoginScreen() {
-  const { login, register, dispatch } = useAppContext();
+  const { login, register, dispatch } = useAppActions();
   const [step, setStep] = useState<Step>(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get("action") === "register") {
