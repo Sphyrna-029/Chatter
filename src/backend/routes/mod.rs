@@ -9,6 +9,7 @@ pub(crate) mod media;
 pub(crate) mod messages;
 pub(crate) mod presence;
 pub(crate) mod reactions;
+pub(crate) mod read_markers;
 pub(crate) mod roles;
 pub(crate) mod room_groups;
 pub(crate) mod rooms;

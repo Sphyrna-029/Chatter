@@ -191,6 +191,7 @@ export type Action =
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
+  | { type: "SET_UNREADS"; payload: { room_id: string; channel_id: string; count: number; mentions: number }[] }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
   | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
   | { type: "INCREMENT_ROOM_UNREAD"; payload: string }
@@ -320,6 +321,10 @@ export interface AppContextValue {
   toggleGroupCollapsed: (groupId: string, collapsed: boolean) => Promise<void>;
   // Friends
   loadFriends: () => Promise<void>;
+  /** Pull server-computed unread + mention counts (survives a refresh). */
+  loadUnreads: () => Promise<void>;
+  /** Persist that this channel is read up to now; fire-and-forget. */
+  markChannelRead: (roomId: string, channelId?: string) => void;
   sendFriendRequest: (userId: string) => Promise<void>;
   acceptFriendRequest: (userId: string) => Promise<void>;
   rejectFriendRequest: (userId: string) => Promise<void>;

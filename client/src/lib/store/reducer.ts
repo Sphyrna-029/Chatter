@@ -597,6 +597,26 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload]: (state.channelUnreadCounts[action.payload] || 0) + 1,
         },
       };
+    // Server-computed unreads replace the in-memory tallies wholesale — they are
+    // authoritative, and a partial merge would double-count anything the client
+    // had already counted this session.
+    case "SET_UNREADS": {
+      const channelUnreadCounts: Record<string, number> = {};
+      const channelMentions: Record<string, number> = {};
+      const roomUnreadCounts: Record<string, number> = {};
+      const roomMentions: Record<string, number> = {};
+      for (const entry of action.payload) {
+        if (entry.channel_id) {
+          channelUnreadCounts[entry.channel_id] = entry.count;
+          if (entry.mentions > 0) channelMentions[entry.channel_id] = entry.mentions;
+        }
+        roomUnreadCounts[entry.room_id] = (roomUnreadCounts[entry.room_id] || 0) + entry.count;
+        if (entry.mentions > 0) {
+          roomMentions[entry.room_id] = (roomMentions[entry.room_id] || 0) + entry.mentions;
+        }
+      }
+      return { ...state, channelUnreadCounts, channelMentions, roomUnreadCounts, roomMentions };
+    }
     case "CLEAR_CHANNEL_UNREAD":
       return {
         ...state,

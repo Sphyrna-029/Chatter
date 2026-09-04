@@ -36,6 +36,7 @@ use super::{
         },
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
+        read_markers::{get_unreads, mark_read},
         roles::{
             assign_member_roles, create_role, delete_role, get_member_roles, list_all_member_roles,
             list_roles, update_role,
@@ -278,6 +279,9 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/api/webhooks/{webhook_id}",
             delete(delete_webhook).post(execute_webhook),
         )
+        // Read markers / unread counts
+        .route("/api/rooms/{room_id}/read", post(mark_read))
+        .route("/api/unreads", get(get_unreads))
         // Watch Party
         .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
         // Whiteboard

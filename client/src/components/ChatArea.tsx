@@ -69,7 +69,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel, markChannelRead } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -317,6 +317,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       currentChannelIdRef.current = channelId;
       const count = state.channelUnreadCounts[channelId ?? ""] || 0;
       unreadCountRef.current = count;
+      if (state.currentRoomId) markChannelRead(state.currentRoomId, channelId ?? undefined);
       if (count > 0) {
         pendingDividerRef.current = true;
         showNewDividerRef.current = true;
@@ -355,6 +356,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         const channelId = currentChannelIdRef.current;
         if (channelId) {
           dispatch({ type: "CLEAR_CHANNEL_UNREAD", payload: channelId });
+          if (state.currentRoomId) markChannelRead(state.currentRoomId, channelId);
         }
       }
       // Clear room unread banner when user scrolls to bottom
@@ -365,7 +367,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch]);
+  }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch, markChannelRead]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -387,6 +389,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       scrollToBottom();
     }
   }, [state.currentChannelId, scrollToBottom]);
+
+  // Advance the stored read marker while the user is sitting at the bottom of an
+  // active channel. Debounced — a busy channel would otherwise be one request
+  // per message.
+  useEffect(() => {
+    const roomId = state.currentRoomId;
+    const channelId = state.currentChannelId;
+    if (!roomId || state.messages.length === 0) return;
+    if (!isNearBottomRef.current) return;
+    const timer = setTimeout(() => markChannelRead(roomId, channelId ?? undefined), 3000);
+    return () => clearTimeout(timer);
+  }, [state.messages, state.currentRoomId, state.currentChannelId, markChannelRead]);
 
   // When messages load for a channel with unreads, compute the first unread event ID
   useLayoutEffect(() => {

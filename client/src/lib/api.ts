@@ -1924,6 +1924,33 @@ export async function apiUnblockUser(userId: string) {
   return res.json();
 }
 
+// ─── Read markers / unread counts ─────────────────────────────────────────────
+
+export interface UnreadEntry {
+  room_id: string;
+  /** "" for rooms whose messages carry no channel_id (DMs) */
+  channel_id: string;
+  count: number;
+  mentions: number;
+}
+
+/** Unread + mention counts for every joined room, derived from stored read markers. */
+export async function apiGetUnreads() {
+  const res = await authenticatedFetch("/api/unreads");
+  if (!res.ok) throw new Error("Failed to load unread counts");
+  return res.json() as Promise<{ unreads: UnreadEntry[] }>;
+}
+
+/** Record that the user has read a channel up to now. Markers only move forward. */
+export async function apiMarkRead(roomId: string, channelId?: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/read`, {
+    method: "POST",
+    body: JSON.stringify({ channel_id: channelId ?? "" }),
+  });
+  if (!res.ok) throw new Error("Failed to save read marker");
+  return res.json() as Promise<{ last_read_ts: number }>;
+}
+
 // ─── Steam ────────────────────────────────────────────────────────────────────
 
 export async function apiSteamExchangeCode(code: string): Promise<{

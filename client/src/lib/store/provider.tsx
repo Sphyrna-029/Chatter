@@ -24,6 +24,8 @@ import {
   apiLogout,
   apiDeleteAccount,
   apiGetJoinedRooms,
+  apiGetUnreads,
+  apiMarkRead,
   apiSync,
   apiCreateRoom,
   apiJoinRoom,
@@ -466,6 +468,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
   loadRoomsRef.current = loadRooms;
+
+  // Unread counts are derived server-side from stored read markers, so they
+  // survive a refresh; the reducer's own tallies only cover the live session.
+  const loadUnreads = useCallback(async () => {
+    try {
+      const data = await apiGetUnreads();
+      dispatch({ type: "SET_UNREADS", payload: data.unreads || [] });
+    } catch {
+      // Leave whatever the session has accumulated.
+    }
+  }, []);
+
+  const markChannelRead = useCallback((roomId: string, channelId?: string) => {
+    void apiMarkRead(roomId, channelId).catch(() => {});
+  }, []);
 
   const selectRoom = useCallback(
     async (roomId: string) => {
@@ -1136,6 +1153,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setGroupRooms,
         toggleGroupCollapsed,
         loadFriends,
+        loadUnreads,
+        markChannelRead,
         sendFriendRequest,
         acceptFriendRequest,
         rejectFriendRequest,

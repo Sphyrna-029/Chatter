@@ -123,7 +123,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, selectRoom, closeThread } = useAppContext();
+  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, selectRoom, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -150,12 +150,13 @@ export function ChatLayout() {
   // Flag to distinguish our code exiting PiP vs the user clicking "back to tab" / close
   const programmaticPipExitRef = useRef(false);
 
-  // Load rooms, friends, and room groups on mount
+  // Load rooms, friends, room groups and unread counts on mount
   useEffect(() => {
     loadRooms();
     loadFriends();
     loadRoomGroups();
-  }, [loadRooms, loadFriends, loadRoomGroups]);
+    loadUnreads();
+  }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads]);
 
   // Auto-rejoin voice channel on page refresh (within 30 seconds)
   const autoRejoinAttemptedRef = useRef(false);

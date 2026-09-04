@@ -97,6 +97,23 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
+    // messages: compound {room_id, channel_id, origin_server_ts} — backs the
+    // per-channel unread counts in routes/read_markers.rs
+    let _ = db
+        .collection::<mongodb::bson::Document>("messages")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "channel_id": 1, "origin_server_ts": -1 })
+                .build(),
+        )
+        .await;
+
+    // read_markers: lookup of every marker belonging to one user
+    let _ = db
+        .collection::<mongodb::bson::Document>("read_markers")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await;
+
     // reactions: unique compound {event_id, emoji, user_id}
     let _ = db
         .collection::<mongodb::bson::Document>("reactions")
