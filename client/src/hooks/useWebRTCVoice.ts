@@ -28,6 +28,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const createVoicePublisherRef = useRef<() => Promise<void>>(async () => {});
   // Bitrate configured on the voice channel we're publishing into
   const voiceBitrateRef = useRef(VOICE_BITRATE_DEFAULT_BPS);
+  // Set below; lets the moderation handlers call join/leave without adding them
+  // to the WS effect's dependencies.
+  const joinVoiceRef = useRef<(channelId?: string) => Promise<void>>(async () => {});
+  const leaveVoiceRef = useRef<() => Promise<void>>(async () => {});
 
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
@@ -346,6 +350,26 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
           voiceRetryCountsRef.current.delete(msg.user_id);
           createVoiceSub(msg.user_id);
         }
+      } else if (msg.type === "voice_force_muted") {
+        // A moderator muted or unmuted us. The SFU already refuses our audio
+        // while muted, so tearing the publisher down here just stops sending
+        // into a closed door; rebuilding it on release restores our voice.
+        if (msg.force_muted) {
+          localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = false; });
+          if (voicePublisherPcRef.current) {
+            try { voicePublisherPcRef.current.close(); } catch { /* already closed */ }
+            voicePublisherPcRef.current = null;
+          }
+          dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: true } });
+        } else if (inVoiceRef.current && !voicePublisherPcRef.current) {
+          await createVoicePublisherRef.current();
+        }
+      } else if (msg.type === "voice_force_moved") {
+        // The server has already moved us in its own state; rebuild the peer
+        // connections for the new channel.
+        if (msg.channel_id) await joinVoiceRef.current(msg.channel_id);
+      } else if (msg.type === "voice_force_disconnected") {
+        if (inVoiceRef.current) await leaveVoiceRef.current();
       } else if (msg.type === "voice_webrtc_error") {
         console.warn("[voice] WebRTC error:", msg.detail || msg);
         if (msg.scope === "subscribe" && msg.speaker_user_id) {
@@ -362,7 +386,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId, createVoiceSub]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, createVoiceSub, dispatch]);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async (channelId?: string) => {
@@ -575,6 +599,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }));
     }
   }, [state.isDeafened, state.isMuted, dispatch]);
+
+  joinVoiceRef.current = joinVoice;
+  leaveVoiceRef.current = leaveVoice;
 
   return {
     localStreamRef,

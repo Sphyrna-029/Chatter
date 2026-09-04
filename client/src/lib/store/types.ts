@@ -36,7 +36,7 @@ export interface AppState {
   channelCategories: ChannelCategory[];
   currentChannelId: string | null;
   // Voice channels: channel_id -> list of user_ids in that voice channel
-  voiceChannelMembers: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]>;
+  voiceChannelMembers: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]>;
   voiceChannelId: string | null;
   // Voice
   inVoiceChannel: boolean;
@@ -188,7 +188,7 @@ export type Action =
   | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
   | { type: "REMOVE_CHANNEL"; payload: string }
   | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> }
-  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[] } }
+  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[] } }
   | { type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: Record<string, number> }
   | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
@@ -331,6 +331,13 @@ export interface AppContextValue {
   loadUnreads: () => Promise<void>;
   /** Persist that this channel is read up to now; fire-and-forget. */
   markChannelRead: (roomId: string, channelId?: string) => void;
+  /** Owner/moderator action on another member's voice session. */
+  moderateVoice: (
+    roomId: string,
+    targetUserId: string,
+    action: "mute" | "unmute" | "move" | "disconnect",
+    targetChannelId?: string,
+  ) => void;
   /** Load stored notification levels for every room/channel the user has set. */
   loadNotificationSettings: () => Promise<void>;
   /** Persist a level; "default" clears the override. */

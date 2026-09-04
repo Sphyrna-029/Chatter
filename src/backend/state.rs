@@ -50,6 +50,9 @@ pub struct AppState {
     // Maps user_id -> { conn_id -> sender } so multiple devices can be connected simultaneously.
     pub(crate) active_websockets: RwLock<HashMap<String, HashMap<u64, WsSender>>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
+    // Server-muted users per room. Held outside VoiceMemberState so a moderator's
+    // mute survives the user leaving and rejoining the channel.
+    pub(crate) voice_force_muted: RwLock<HashMap<String, Vec<String>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied
     pub(crate) voice_channel_occupied_since: RwLock<HashMap<String, u64>>,
     // Queued subscribe offers waiting for a publisher's audio track to arrive
@@ -516,6 +519,10 @@ pub(crate) struct VoiceMemberState {
     pub(crate) muted: bool,
     pub(crate) deafened: bool,
     pub(crate) screen_sharing: bool,
+    /// Muted by a moderator. Unlike `muted` the user cannot clear it, and the
+    /// publish path refuses their audio while it is set, so a patched client
+    /// cannot talk around it.
+    pub(crate) force_muted: bool,
 }
 
 #[derive(Clone)]

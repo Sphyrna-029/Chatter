@@ -364,6 +364,18 @@ export function createWsMessageHandler(
           const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
           const members = (msg.voice_members as string[]).map((uid: string) => {
             const ex = existing.find((m) => m.userId === uid);
+            // A server-muted user rejoining must not look unmuted to everyone
+            // else, so the joiner's own flag rides along on the event.
+            if (uid === msg.user_id) {
+              const forceMuted: boolean = msg.force_muted ?? ex?.force_muted ?? false;
+              return {
+                userId: uid,
+                deafened: ex?.deafened ?? false,
+                screen_sharing: ex?.screen_sharing ?? false,
+                muted: forceMuted || (ex?.muted ?? false),
+                force_muted: forceMuted,
+              };
+            }
             return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
           });
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
@@ -409,7 +421,14 @@ export function createWsMessageHandler(
         const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
         if (msg.channel_id && isCurrentRoom) {
           const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
-            m.userId === msg.user_id ? { ...m, muted: msg.muted as boolean } : m
+            m.userId === msg.user_id
+              ? {
+                  ...m,
+                  muted: msg.muted as boolean,
+                  // Absent on a self-mute; only moderation carries the flag.
+                  force_muted: msg.force_muted ?? m.force_muted ?? false,
+                }
+              : m
           );
           dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
         }

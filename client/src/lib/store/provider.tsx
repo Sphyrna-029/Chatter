@@ -487,6 +487,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void apiMarkRead(roomId, channelId).catch(() => {});
   }, []);
 
+  const moderateVoice = useCallback(
+    (
+      roomId: string,
+      targetUserId: string,
+      action: "mute" | "unmute" | "move" | "disconnect",
+      targetChannelId?: string,
+    ) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(
+        JSON.stringify({
+          type: "voice_moderate",
+          room_id: roomId,
+          target_user_id: targetUserId,
+          action,
+          ...(targetChannelId ? { target_channel_id: targetChannelId } : {}),
+        }),
+      );
+    },
+    [],
+  );
+
   const loadNotificationSettings = useCallback(async () => {
     try {
       const data = await apiGetNotificationSettings();
@@ -555,13 +577,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         try {
           const voiceData = await apiGetVoiceMembers(roomId);
           if (voiceData.voice_channels) {
-            const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> = {};
+            const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]> = {};
             for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
               mapped[chId] = (members as any[]).map((m: any) => ({
                 userId: m.user_id || m.userId,
                 muted: m.muted,
                 deafened: m.deafened ?? false,
                 screen_sharing: m.screen_sharing,
+                force_muted: m.force_muted ?? false,
               }));
             }
             // Only show voice members for the room being viewed — don't carry
@@ -855,13 +878,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       // Also load per-channel voice members
       if (voiceData.voice_channels) {
-        const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> = {};
+        const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]> = {};
         for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
           mapped[chId] = (members as any[]).map((m: any) => ({
             userId: m.user_id || m.userId,
             muted: m.muted,
             deafened: m.deafened ?? false,
             screen_sharing: m.screen_sharing,
+            force_muted: m.force_muted ?? false,
           }));
         }
         dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
@@ -1186,6 +1210,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         markChannelRead,
         loadNotificationSettings,
         setNotificationLevel,
+        moderateVoice,
         sendFriendRequest,
         acceptFriendRequest,
         rejectFriendRequest,

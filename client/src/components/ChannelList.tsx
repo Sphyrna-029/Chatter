@@ -4,7 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
-  Film, LayoutList, PenTool, Sparkles, Bot,
+  Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -86,7 +86,7 @@ function VoiceTimer({ since }: { since: number }) {
 }
 
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
-  const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
+  const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel, moderateVoice } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
@@ -174,6 +174,9 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
 
   const categories = [...state.channelCategories].sort((a, b) => a.position - b.position);
   const channels = state.channels;
+
+  // Destinations offered by the "Move to" moderation action.
+  const voiceChannels = channels.filter((c) => c.channel_type === "voice");
 
   // Group channels by category
   const uncategorized = channels.filter((c) => !c.category_id);
@@ -496,6 +499,9 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                     {m.deafened && (
                       <HeadphoneOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Deafened" />
                     )}
+                    {m.force_muted && (
+                      <ShieldOff className="h-3 w-3 shrink-0 text-red-400" aria-label="Muted by a moderator" />
+                    )}
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
                       {state.activeWebcamStreamers.includes(m.userId) && (
@@ -523,6 +529,54 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                         >
                           <Monitor className="h-3 w-3 text-purple-400" />
                         </button>
+                      )}
+                      {canManage && !isMe && roomId && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+                              title="Moderate"
+                            >
+                              <Shield className="h-3 w-3" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moderateVoice(roomId, m.userId, m.force_muted ? "unmute" : "mute");
+                              }}
+                            >
+                              {m.force_muted ? (
+                                <><Shield className="h-3.5 w-3.5 mr-2" /> Remove server mute</>
+                              ) : (
+                                <><ShieldOff className="h-3.5 w-3.5 mr-2" /> Server mute</>
+                              )}
+                            </DropdownMenuItem>
+                            {voiceChannels
+                              .filter((vc) => vc.channel_id !== ch.channel_id)
+                              .map((vc) => (
+                                <DropdownMenuItem
+                                  key={vc.channel_id}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    moderateVoice(roomId, m.userId, "move", vc.channel_id);
+                                  }}
+                                >
+                                  <Volume2 className="h-3.5 w-3.5 mr-2" /> Move to {vc.name}
+                                </DropdownMenuItem>
+                              ))}
+                            <DropdownMenuItem
+                              className="text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                moderateVoice(roomId, m.userId, "disconnect");
+                              }}
+                            >
+                              <PhoneOff className="h-3.5 w-3.5 mr-2" /> Disconnect
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                   </div>

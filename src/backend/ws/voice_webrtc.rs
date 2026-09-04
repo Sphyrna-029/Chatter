@@ -162,6 +162,27 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
         return;
     }
 
+    // The real enforcement point for a server mute: refuse the audio at the
+    // SFU. Disabling the track client-side is a courtesy a patched client can
+    // simply skip.
+    let force_muted = state
+        .voice_force_muted
+        .read()
+        .await
+        .get(room_id)
+        .map(|users| users.iter().any(|u| u == user_id))
+        .unwrap_or(false);
+    if force_muted {
+        let error = json!({
+            "type": "voice_webrtc_error",
+            "scope": "publish",
+            "room_id": room_id,
+            "detail": "You have been muted by a moderator"
+        });
+        send_to_user(&state, user_id, &error).await;
+        return;
+    }
+
     // Teardown any existing publisher for this user
     let _ = teardown_voice_publisher(&state, user_id).await;
 

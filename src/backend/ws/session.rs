@@ -9,6 +9,7 @@ use super::{
         handle_voice_webrtc_publish_candidate, handle_voice_webrtc_publish_offer,
         handle_voice_webrtc_subscribe_candidate, handle_voice_webrtc_subscribe_offer,
         teardown_voice_publisher, teardown_voice_subscriptions_for_listener,
+        teardown_voice_subscriptions_for_speaker,
     },
     webcam_webrtc::{
         handle_webcam_webrtc_publish_candidate, handle_webcam_webrtc_publish_offer,
@@ -19,7 +20,8 @@ use super::{
 };
 use crate::backend::{
     helpers::{
-        broadcast_to_room, generate_id, get_user_from_token, now_millis, now_secs, send_to_user,
+        broadcast_to_room, generate_id, get_user_from_token, get_user_role, now_millis, now_secs,
+        send_to_user,
     },
     state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
@@ -372,6 +374,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
 
+            // A server mute is room-scoped and outlives channel membership, so a
+            // rejoin must not hand the user their microphone back.
+            let force_muted = state
+                .voice_force_muted
+                .read()
+                .await
+                .get(room_id)
+                .map(|users| users.iter().any(|u| u == user_id))
+                .unwrap_or(false);
+
             // Atomically: remove user from every other channel AND insert into the target
             // channel in one write-lock hold. This prevents a second voice_join from racing
             // in between the removal and the insert, which caused users to appear in two
@@ -394,9 +406,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 chan_vc.insert(
                     user_id.to_string(),
                     VoiceMemberState {
-                        muted: false,
+                        muted: force_muted,
                         deafened: false,
                         screen_sharing: false,
+                        force_muted,
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
@@ -474,6 +487,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "channel_id": channel_id,
                 "user_id": user_id,
                 "voice_members": voice_members,
+                "force_muted": force_muted,
                 "occupied_since": occupied_since_ms
             });
             broadcast_to_room(&state, room_id, &event).await;
@@ -598,14 +612,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 .get("channel_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
-            {
+            // A moderator's mute wins: self-unmute is ignored while it is set.
+            let muted = {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(chan_vc) = vc.get_mut(channel_id) {
-                    if let Some(member) = chan_vc.get_mut(user_id) {
+                match vc.get_mut(channel_id).and_then(|c| c.get_mut(user_id)) {
+                    Some(member) if member.force_muted => true,
+                    Some(member) => {
                         member.muted = muted;
+                        muted
                     }
+                    None => muted,
                 }
-            }
+            };
             let event = json!({
                 "type": "voice_user_muted",
                 "room_id": room_id,
@@ -614,6 +632,258 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "muted": muted
             });
             broadcast_to_room(&state, room_id, &event).await;
+        }
+        // ─── Voice moderation ────────────────────────────────────────────────
+        // Owners and moderators acting on another member's voice session:
+        // server mute, move between channels, or disconnect outright.
+        "voice_moderate" => {
+            let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("");
+            let target = msg
+                .get("target_user_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if room_id.is_empty() || target.is_empty() {
+                return;
+            }
+
+            let role = get_user_role(&state, room_id, user_id).await;
+            if role != "owner" && role != "moderator" {
+                send_to_user(
+                    &state,
+                    user_id,
+                    &json!({
+                        "type": "error",
+                        "error": "forbidden",
+                        "message": "Only owners and moderators can moderate voice"
+                    }),
+                )
+                .await;
+                return;
+            }
+            // A moderator cannot act on an owner; nobody needs to act on themselves.
+            let target_role = get_user_role(&state, room_id, target).await;
+            if target == user_id || (target_role == "owner" && role != "owner") {
+                return;
+            }
+
+            match action {
+                "mute" | "unmute" => {
+                    let force_muted = action == "mute";
+                    {
+                        let mut fm = state.voice_force_muted.write().await;
+                        let users = fm.entry(room_id.to_string()).or_default();
+                        users.retain(|u| u != target);
+                        if force_muted {
+                            users.push(target.to_string());
+                        }
+                    }
+                    let mut channel_id = String::new();
+                    {
+                        let mut vc = state.voice_channels.write().await;
+                        for (cid, members) in vc.iter_mut() {
+                            if let Some(member) = members.get_mut(target) {
+                                member.force_muted = force_muted;
+                                // Lifting a server mute does not unmute them —
+                                // they choose when to speak again.
+                                if force_muted {
+                                    member.muted = true;
+                                }
+                                channel_id = cid.clone();
+                            }
+                        }
+                    }
+                    // Cut the audio at the SFU rather than trusting the client to.
+                    if force_muted {
+                        let _ = teardown_voice_publisher(&state, target).await;
+                    }
+
+                    broadcast_to_room(
+                        &state,
+                        room_id,
+                        &json!({
+                            "type": "voice_user_muted",
+                            "room_id": room_id,
+                            "channel_id": channel_id,
+                            "user_id": target,
+                            "muted": force_muted,
+                            "force_muted": force_muted,
+                            "by": user_id,
+                        }),
+                    )
+                    .await;
+                    // Tells the target's client to drop or rebuild its publisher.
+                    send_to_user(
+                        &state,
+                        target,
+                        &json!({
+                            "type": "voice_force_muted",
+                            "room_id": room_id,
+                            "channel_id": channel_id,
+                            "force_muted": force_muted,
+                        }),
+                    )
+                    .await;
+                }
+                "move" => {
+                    let target_channel = msg
+                        .get("target_channel_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if target_channel.is_empty() {
+                        return;
+                    }
+
+                    let (old_channel, moved, new_members) = {
+                        let mut vc = state.voice_channels.write().await;
+                        let mut old_channel = String::new();
+                        let mut moved_state: Option<VoiceMemberState> = None;
+                        for (cid, members) in vc.iter_mut() {
+                            if cid == target_channel {
+                                continue;
+                            }
+                            if let Some(member) = members.remove(target) {
+                                old_channel = cid.clone();
+                                moved_state = Some(member);
+                            }
+                        }
+                        match moved_state {
+                            Some(member) => {
+                                let chan = vc
+                                    .entry(target_channel.to_string())
+                                    .or_insert_with(HashMap::new);
+                                chan.insert(target.to_string(), member);
+                                let members = chan.keys().cloned().collect::<Vec<_>>();
+                                (old_channel, true, members)
+                            }
+                            None => (old_channel, false, Vec::new()),
+                        }
+                    };
+                    if !moved {
+                        return; // not in voice
+                    }
+
+                    // The peer mesh is per channel, so every existing pairing
+                    // for this user is stale after the move.
+                    teardown_voice_subscriptions_for_listener(&state, target).await;
+                    let _ = teardown_voice_publisher(&state, target).await;
+
+                    let remaining = {
+                        let vc = state.voice_channels.read().await;
+                        vc.get(&old_channel)
+                            .map(|m| m.keys().cloned().collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    };
+                    // Emptying a channel stops its occupancy clock; leaving the
+                    // stale timestamp makes the next joiner show a bogus timer.
+                    if remaining.is_empty() {
+                        state
+                            .voice_channel_occupied_since
+                            .write()
+                            .await
+                            .remove(&old_channel);
+                    }
+                    broadcast_to_room(
+                        &state,
+                        room_id,
+                        &json!({
+                            "type": "voice_user_left",
+                            "room_id": room_id,
+                            "channel_id": old_channel,
+                            "user_id": target,
+                            "voice_members": remaining,
+                        }),
+                    )
+                    .await;
+                    broadcast_to_room(
+                        &state,
+                        room_id,
+                        &json!({
+                            "type": "voice_user_joined",
+                            "room_id": room_id,
+                            "channel_id": target_channel,
+                            "user_id": target,
+                            "voice_members": new_members,
+                        }),
+                    )
+                    .await;
+                    // The target has to rebuild its peer connections for the new
+                    // channel; the server cannot do that on its behalf.
+                    send_to_user(
+                        &state,
+                        target,
+                        &json!({
+                            "type": "voice_force_moved",
+                            "room_id": room_id,
+                            "channel_id": target_channel,
+                            "by": user_id,
+                        }),
+                    )
+                    .await;
+                }
+                "disconnect" => {
+                    let (old_channel, was_in_voice) = {
+                        let mut vc = state.voice_channels.write().await;
+                        let mut old_channel = String::new();
+                        let mut found = false;
+                        for (cid, members) in vc.iter_mut() {
+                            if members.remove(target).is_some() {
+                                old_channel = cid.clone();
+                                found = true;
+                            }
+                        }
+                        (old_channel, found)
+                    };
+                    if !was_in_voice {
+                        return;
+                    }
+
+                    teardown_voice_subscriptions_for_listener(&state, target).await;
+                    teardown_voice_subscriptions_for_speaker(&state, target).await;
+                    let _ = teardown_voice_publisher(&state, target).await;
+                    teardown_screen_subscriptions_for_viewer(&state, target).await;
+                    let _ = teardown_screen_publisher(&state, target).await;
+                    teardown_webcam_subscriptions_for_viewer(&state, target).await;
+                    let _ = teardown_webcam_publisher(&state, target).await;
+
+                    let remaining = {
+                        let vc = state.voice_channels.read().await;
+                        vc.get(&old_channel)
+                            .map(|m| m.keys().cloned().collect::<Vec<_>>())
+                            .unwrap_or_default()
+                    };
+                    if remaining.is_empty() {
+                        state
+                            .voice_channel_occupied_since
+                            .write()
+                            .await
+                            .remove(&old_channel);
+                    }
+                    broadcast_to_room(
+                        &state,
+                        room_id,
+                        &json!({
+                            "type": "voice_user_left",
+                            "room_id": room_id,
+                            "channel_id": old_channel,
+                            "user_id": target,
+                            "voice_members": remaining,
+                        }),
+                    )
+                    .await;
+                    send_to_user(
+                        &state,
+                        target,
+                        &json!({
+                            "type": "voice_force_disconnected",
+                            "room_id": room_id,
+                            "channel_id": old_channel,
+                            "by": user_id,
+                        }),
+                    )
+                    .await;
+                }
+                _ => {}
+            }
         }
         "voice_deafen" => {
             let deafened = msg

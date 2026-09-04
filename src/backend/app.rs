@@ -50,6 +50,7 @@ pub async fn build_state() -> Arc<AppState> {
         banned_users: RwLock::new(banned_users),
         active_websockets: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
+        voice_force_muted: RwLock::new(HashMap::new()),
         voice_channel_occupied_since: RwLock::new(HashMap::new()),
         pending_voice_subscribes: RwLock::new(HashMap::new()),
         user_presence: RwLock::new(HashMap::new()),
