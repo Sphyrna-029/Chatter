@@ -6,8 +6,46 @@ on:
       - main  # Change this to your default branch if different
   workflow_dispatch:  # Allows manual triggering
 
+permissions:
+  contents: read
+
 jobs:
+  # Gate deploys on the same checks scripts/rust-ci.sh runs locally. This job
+  # is duplicated from rust-quality.yml rather than reused: pulling in that
+  # whole workflow would also block deploys on the advisory scan, which can
+  # start failing because of a newly published RUSTSEC entry that has nothing
+  # to do with a given push. Advisories still run on every pull request.
+  quality:
+    name: Quality
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run quality gate
+        run: ./scripts/rust-ci.sh
+
   deploy:
+    needs: quality
     runs-on: ubuntu-latest
 
     steps:
@@ -37,20 +75,3 @@ jobs:
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh build
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh stop
             echo "${{ secrets.SSH_PASSWORD }}" | sudo -S ./control.sh start
-
-      - name: Notify deploy success
-        if: success() && vars.WEBHOOK_URL != ''
-        run: |
-          COMMIT_MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
-          curl -s -X POST "${{ vars.WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"Deploy succeeded: ${COMMIT_MSG} (${{ github.sha }})\"}"
-
-      - name: Notify deploy failure
-        if: failure() && vars.WEBHOOK_URL != ''
-        run: |
-          COMMIT_MSG=$(echo '${{ github.event.head_commit.message }}' | head -1)
-          curl -s -X POST "${{ vars.WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{\"content\": \"Deploy failed: ${COMMIT_MSG} (${{ github.sha }})\"}"
-            

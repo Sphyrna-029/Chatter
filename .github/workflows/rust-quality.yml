@@ -1,6 +1,7 @@
 name: Rust Quality Gate
 
 on:
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -10,6 +11,19 @@ jobs:
   quality:
     name: Quality
     runs-on: ubuntu-latest
+    # scripts/rust-ci.sh runs `cargo test --workspace`, and the integration
+    # tests in tests/ spawn a real server via build_state(), which connects to
+    # MongoDB. Without this service they fail before asserting anything.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@v4
