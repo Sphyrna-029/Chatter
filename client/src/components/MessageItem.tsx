@@ -769,7 +769,7 @@ function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
 
   const actionStyleClasses: Record<string, string> = {
     primary: "bg-indigo-500 hover:bg-indigo-600 text-white",
-    secondary: "bg-zinc-600 hover:bg-zinc-500 text-white",
+    secondary: "bg-secondary hover:bg-secondary/80 text-secondary-foreground",
     success: "bg-emerald-600 hover:bg-emerald-700 text-white",
     danger: "bg-red-600 hover:bg-red-700 text-white",
   };

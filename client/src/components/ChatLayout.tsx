@@ -711,7 +711,7 @@ function VoiceBar({
   onNavigate, onToggleMute, onToggleDeafen, onToggleScreenShare, onToggleWebcam, onHangUp,
 }: VoiceBarProps) {
   return (
-    <div className="flex items-center gap-3 shrink-0 bg-zinc-900 border-t border-zinc-700 px-4 py-2">
+    <div className="flex items-center gap-3 shrink-0 bg-card border-t border-border px-4 py-2">
       {/* Channel name link + timer */}
       <button
         onClick={onNavigate}
@@ -724,7 +724,7 @@ function VoiceBar({
           <line x1="8" x2="16" y1="23" y2="23" />
         </svg>
         <span className="truncate">{channelName}</span>
-        <span className="text-zinc-500 text-xs truncate">in {roomName}</span>
+        <span className="text-muted-foreground text-xs truncate">in {roomName}</span>
       </button>
 
       {occupiedSince && <VoiceBarTimer since={occupiedSince} />}
@@ -735,28 +735,28 @@ function VoiceBar({
       <div className="flex items-center gap-1">
         <button
           onClick={onToggleMute}
-          className={`p-1.5 rounded-md transition-colors ${isMuted || isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          className={`p-1.5 rounded-md transition-colors ${isMuted || isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
         >
           {isMuted || isDeafened ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         </button>
         <button
           onClick={onToggleDeafen}
-          className={`p-1.5 rounded-md transition-colors ${isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          className={`p-1.5 rounded-md transition-colors ${isDeafened ? "text-red-400 bg-red-500/10 hover:bg-red-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isDeafened ? "Undeafen" : "Deafen"}
         >
           {isDeafened ? <HeadphoneOff className="w-4 h-4" /> : <Headphones className="w-4 h-4" />}
         </button>
         <button
           onClick={onToggleWebcam}
-          className={`p-1.5 rounded-md transition-colors ${isWebcamActive ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          className={`p-1.5 rounded-md transition-colors ${isWebcamActive ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isWebcamActive ? "Stop camera" : "Share camera"}
         >
           <Camera className="w-4 h-4" />
         </button>
         <button
           onClick={onToggleScreenShare}
-          className={`p-1.5 rounded-md transition-colors ${isScreenSharing ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-zinc-300 hover:bg-zinc-700"}`}
+          className={`p-1.5 rounded-md transition-colors ${isScreenSharing ? "text-green-400 bg-green-500/10 hover:bg-green-500/20" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}
           title={isScreenSharing ? "Stop sharing" : "Share screen"}
         >
           <MonitorUp className="w-4 h-4" />
