@@ -123,7 +123,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, selectRoom, closeThread } = useAppContext();
+  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, selectRoom, selectChannel, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -156,7 +156,21 @@ export function ChatLayout() {
     loadFriends();
     loadRoomGroups();
     loadUnreads();
-  }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads]);
+    loadNotificationSettings();
+  }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings]);
+
+  // Clicking a desktop notification should land on the message it was about.
+  // The WS handler cannot navigate on its own, so it raises this event.
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const { roomId, channelId } = (e as CustomEvent).detail ?? {};
+      if (!roomId) return;
+      if (roomId !== state.currentRoomId) await selectRoom(roomId);
+      if (channelId) await selectChannel(channelId);
+    };
+    window.addEventListener("notification-navigate", handler);
+    return () => window.removeEventListener("notification-navigate", handler);
+  }, [selectRoom, selectChannel, state.currentRoomId]);
 
   // Auto-rejoin voice channel on page refresh (within 30 seconds)
   const autoRejoinAttemptedRef = useRef(false);

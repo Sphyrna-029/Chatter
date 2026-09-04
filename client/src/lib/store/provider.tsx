@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useVersionCheck } from "@/hooks/useVersionCheck";
 import { displayUserId } from "@/lib/utils";
+import { settingsKey, type NotificationLevel, type NotificationSettings } from "@/lib/notifications";
 import {
   setAccessToken,
   setRefreshToken,
@@ -26,6 +27,8 @@ import {
   apiGetJoinedRooms,
   apiGetUnreads,
   apiMarkRead,
+  apiGetNotificationSettings,
+  apiSetNotificationLevel,
   apiSync,
   apiCreateRoom,
   apiJoinRoom,
@@ -483,6 +486,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const markChannelRead = useCallback((roomId: string, channelId?: string) => {
     void apiMarkRead(roomId, channelId).catch(() => {});
   }, []);
+
+  const loadNotificationSettings = useCallback(async () => {
+    try {
+      const data = await apiGetNotificationSettings();
+      const map: NotificationSettings = {};
+      for (const entry of data.settings || []) {
+        map[settingsKey(entry.room_id, entry.channel_id)] = entry.level;
+      }
+      dispatch({ type: "SET_NOTIFICATION_SETTINGS", payload: map });
+    } catch {
+      // Fall back to the default level for everything.
+    }
+  }, []);
+
+  const setNotificationLevel = useCallback(
+    async (roomId: string, level: NotificationLevel | "default", channelId?: string) => {
+      // Optimistic: the control should respond immediately, and a failed write
+      // only costs the user a re-click.
+      dispatch({
+        type: "SET_NOTIFICATION_LEVEL",
+        payload: { roomId, channelId: channelId ?? "", level },
+      });
+      await apiSetNotificationLevel(roomId, level, channelId);
+    },
+    [],
+  );
 
   const selectRoom = useCallback(
     async (roomId: string) => {
@@ -1155,6 +1184,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadFriends,
         loadUnreads,
         markChannelRead,
+        loadNotificationSettings,
+        setNotificationLevel,
         sendFriendRequest,
         acceptFriendRequest,
         rejectFriendRequest,

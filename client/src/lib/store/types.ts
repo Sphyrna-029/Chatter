@@ -1,5 +1,6 @@
 import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, Embed } from "../api";
 import type { Dispatch } from "react";
+import type { NotificationLevel, NotificationSettings } from "../notifications";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,8 @@ export interface AppState {
   watchViewers: Record<string, string[]>;
   // UI
   roomMentions: Record<string, number>;
+  /** Notification level keyed by `${room_id}|${channel_id}`; see lib/notifications.ts */
+  notificationSettings: NotificationSettings;
   roomUnreadCounts: Record<string, number>;
   channelUnreadCounts: Record<string, number>;
   channelMentions: Record<string, number>;
@@ -191,6 +194,8 @@ export type Action =
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
+  | { type: "SET_NOTIFICATION_SETTINGS"; payload: NotificationSettings }
+  | { type: "SET_NOTIFICATION_LEVEL"; payload: { roomId: string; channelId: string; level: NotificationLevel | "default" } }
   | { type: "SET_UNREADS"; payload: { room_id: string; channel_id: string; count: number; mentions: number }[] }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
   | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
@@ -235,6 +240,7 @@ export const initialState: AppState = {
   voiceChannelOccupiedSince: {},
   watchViewers: {},
   roomMentions: {},
+  notificationSettings: {},
   roomUnreadCounts: {},
   channelUnreadCounts: {},
   channelMentions: {},
@@ -325,6 +331,10 @@ export interface AppContextValue {
   loadUnreads: () => Promise<void>;
   /** Persist that this channel is read up to now; fire-and-forget. */
   markChannelRead: (roomId: string, channelId?: string) => void;
+  /** Load stored notification levels for every room/channel the user has set. */
+  loadNotificationSettings: () => Promise<void>;
+  /** Persist a level; "default" clears the override. */
+  setNotificationLevel: (roomId: string, level: NotificationLevel | "default", channelId?: string) => Promise<void>;
   sendFriendRequest: (userId: string) => Promise<void>;
   acceptFriendRequest: (userId: string) => Promise<void>;
   rejectFriendRequest: (userId: string) => Promise<void>;

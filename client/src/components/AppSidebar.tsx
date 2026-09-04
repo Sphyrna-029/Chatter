@@ -3,6 +3,8 @@ import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
+import { NotificationSettingsPopover, NotificationBell } from "@/components/NotificationSettingsPopover";
+import { resolveNotificationLevel } from "@/lib/notifications";
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
@@ -326,6 +328,20 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           }}
         >
           x
+        </span>
+
+        {/* Notification level — every member, not just the owner */}
+        <span
+          className="absolute bottom-1 right-1 opacity-0 group-hover/card:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <NotificationSettingsPopover roomId={roomId}>
+            <button title="Notification settings">
+              <NotificationBell
+                level={resolveNotificationLevel(state.notificationSettings, roomId)}
+              />
+            </button>
+          </NotificationSettingsPopover>
         </span>
 
         {/* Settings gear for room creator (non-DM only) */}

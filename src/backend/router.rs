@@ -34,6 +34,7 @@ use super::{
             get_thread_messages, redact_message, search_messages, send_message,
             send_thread_message, set_thread_name,
         },
+        notification_settings::{get_notification_settings, set_notification_level},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         read_markers::{get_unreads, mark_read},
@@ -279,6 +280,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/api/webhooks/{webhook_id}",
             delete(delete_webhook).post(execute_webhook),
         )
+        // Notification preferences
+        .route(
+            "/api/rooms/{room_id}/notification_settings",
+            put(set_notification_level),
+        )
+        .route("/api/notification_settings", get(get_notification_settings))
         // Read markers / unread counts
         .route("/api/rooms/{room_id}/read", post(mark_read))
         .route("/api/unreads", get(get_unreads))

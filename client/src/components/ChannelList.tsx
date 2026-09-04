@@ -33,6 +33,8 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
+import { NotificationSettingsPopover, NotificationBell } from "./NotificationSettingsPopover";
+import { resolveNotificationLevel } from "@/lib/notifications";
 
 interface ChannelListProps {
   /** Renders full-bleed inside the mobile drawer instead of as a resizable column. */
@@ -435,6 +437,8 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             channel={ch}
             isSelected={isVoice ? state.voiceChannelId === ch.channel_id : state.currentChannelId === ch.channel_id}
             canManage={canManage}
+            notifyRoomId={!isVoice && roomId ? roomId : undefined}
+            notifyLevel={roomId ? resolveNotificationLevel(state.notificationSettings, roomId, ch.channel_id) : undefined}
             hasUnread={!isVoice && ((state.channelUnreadCounts[ch.channel_id] || 0) > 0 || (state.channelMentions[ch.channel_id] || 0) > 0)}
             unreadCount={!isVoice ? (state.channelUnreadCounts[ch.channel_id] || 0) : 0}
             mentionCount={!isVoice ? (state.channelMentions[ch.channel_id] || 0) : 0}
@@ -1199,6 +1203,8 @@ function ChannelItem({
   channel,
   isSelected,
   canManage,
+  notifyRoomId,
+  notifyLevel,
   hasUnread,
   unreadCount,
   mentionCount,
@@ -1212,6 +1218,9 @@ function ChannelItem({
   channel: { channel_id: string; name: string; topic?: string };
   isSelected: boolean;
   canManage: boolean;
+  /** Set for message-bearing channels; enables the per-channel notification bell. */
+  notifyRoomId?: string;
+  notifyLevel?: "all" | "mentions" | "none";
   hasUnread?: boolean;
   unreadCount?: number;
   mentionCount?: number;
@@ -1249,10 +1258,25 @@ function ChannelItem({
           {mentionCount! > 99 ? "99+" : mentionCount}
         </span>
       )}
+      {notifyRoomId && (
+        <span
+          className={`${(mentionCount ?? 0) > 0 || canManage ? "" : "ml-auto"} shrink-0`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <NotificationSettingsPopover roomId={notifyRoomId} channelId={channel.channel_id}>
+            <button
+              className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity"
+              title="Notification settings"
+            >
+              <NotificationBell level={notifyLevel ?? "all"} className="h-3 w-3" />
+            </button>
+          </NotificationSettingsPopover>
+        </span>
+      )}
       {canManage && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-            <button className={`${(mentionCount ?? 0) > 0 ? "" : "ml-auto"} p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity`}>
+            <button className={`${(mentionCount ?? 0) > 0 || notifyRoomId ? "" : "ml-auto"} p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-opacity`}>
               <Pencil className="h-3 w-3" />
             </button>
           </DropdownMenuTrigger>

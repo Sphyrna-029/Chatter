@@ -2,6 +2,12 @@ import type { Dispatch, MutableRefObject } from "react";
 import type { Action, AppState } from "./types";
 import { apiSync, apiGetPresence } from "../api";
 import { displayUserId } from "@/lib/utils";
+import {
+  notificationBody,
+  resolveNotificationLevel,
+  shouldNotify,
+  showDesktopNotification,
+} from "@/lib/notifications";
 
 // Pre-decode and cache the reversed leave sound so playback is instant
 let cachedLeaveBuffer: AudioBuffer | null = null;
@@ -77,8 +83,82 @@ export function createWsMessageHandler(
   typingTimeoutsRef: MutableRefObject<Record<string, ReturnType<typeof setTimeout>>>,
   loadRoomsRef: MutableRefObject<() => Promise<void>>,
 ) {
+  /** The fields maybeNotify reads off an m.room.message event. */
+  interface IncomingMessage {
+    room_id: string;
+    sender: string;
+    channel_id?: string;
+    content?: { body?: string; msgtype?: string; channel_id?: string };
+  }
+
+  /**
+   * Raise a desktop notification for an incoming message when the user's
+   * settings and attention allow it. Called once per message, before the
+   * room/channel branching below, so the same rules apply whether or not the
+   * message belongs to the room currently on screen.
+   */
+  const maybeNotify = (msg: IncomingMessage) => {
+    const me = stateRef.current.userId;
+    if (!me || msg.sender === me) return;
+    if (msg.content?.msgtype === "m.system") return;
+
+    const roomId: string = msg.room_id;
+    const channelId: string = msg.channel_id || msg.content?.channel_id || "";
+    const roomInfo = stateRef.current.roomInfoMap[roomId];
+    const isDm = roomInfo?.is_direct === true;
+
+    const myUsername = displayUserId(me);
+    const bodyText = msg.content?.body || "";
+    const isMention =
+      (myUsername !== "" && bodyText.includes(`@${myUsername}`)) ||
+      hasRoleMention(bodyText, stateRef);
+
+    // Viewing means: this room, this channel, and the tab actually has focus.
+    const sameChannel = channelId
+      ? channelId === stateRef.current.currentChannelId
+      : !stateRef.current.currentChannelId;
+    const isViewing =
+      typeof document !== "undefined" &&
+      document.hasFocus() &&
+      roomId === stateRef.current.currentRoomId &&
+      sameChannel;
+
+    const level = resolveNotificationLevel(
+      stateRef.current.notificationSettings,
+      roomId,
+      channelId,
+    );
+    const presence = stateRef.current.userPresence[me]?.status;
+    if (!shouldNotify({ level, isMention, isDm, isViewing, presence })) return;
+
+    const senderName =
+      stateRef.current.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
+    const roomName = roomInfo?.name || "Chatter";
+    const channelName = stateRef.current.channels.find(
+      (c) => c.channel_id === channelId,
+    )?.name;
+    const title = isDm
+      ? senderName
+      : channelName
+        ? `${senderName} · #${channelName}`
+        : `${senderName} · ${roomName}`;
+
+    showDesktopNotification({
+      title,
+      body: notificationBody(bodyText),
+      icon: roomInfo?.icon_url || undefined,
+      // One notification per channel — a burst collapses instead of stacking.
+      tag: `${roomId}|${channelId}`,
+      onClick: () =>
+        window.dispatchEvent(
+          new CustomEvent("notification-navigate", { detail: { roomId, channelId } }),
+        ),
+    });
+  };
+
   return (msg: any) => {
     if (msg.type === "m.room.message") {
+      maybeNotify(msg);
       if (msg.room_id === stateRef.current.currentRoomId) {
         const msgChannelId = msg.channel_id || msg.content?.channel_id;
         const currentChannelId = stateRef.current.currentChannelId;

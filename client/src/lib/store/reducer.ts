@@ -597,6 +597,16 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload]: (state.channelUnreadCounts[action.payload] || 0) + 1,
         },
       };
+    case "SET_NOTIFICATION_SETTINGS":
+      return { ...state, notificationSettings: action.payload };
+    case "SET_NOTIFICATION_LEVEL": {
+      const key = `${action.payload.roomId}|${action.payload.channelId}`;
+      const next = { ...state.notificationSettings };
+      // "default" is the absence of an override, not a stored value.
+      if (action.payload.level === "default") delete next[key];
+      else next[key] = action.payload.level;
+      return { ...state, notificationSettings: next };
+    }
     // Server-computed unreads replace the in-memory tallies wholesale — they are
     // authoritative, and a partial merge would double-count anything the client
     // had already counted this session.

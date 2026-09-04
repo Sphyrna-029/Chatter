@@ -1924,6 +1924,38 @@ export async function apiUnblockUser(userId: string) {
   return res.json();
 }
 
+// ─── Notification preferences ─────────────────────────────────────────────────
+
+export interface NotificationSettingEntry {
+  room_id: string;
+  /** "" for a room-wide setting */
+  channel_id: string;
+  level: "all" | "mentions" | "none";
+}
+
+export async function apiGetNotificationSettings() {
+  const res = await authenticatedFetch("/api/notification_settings");
+  if (!res.ok) throw new Error("Failed to load notification settings");
+  return res.json() as Promise<{ settings: NotificationSettingEntry[] }>;
+}
+
+/** Pass level "default" to clear an override and inherit the next scope up. */
+export async function apiSetNotificationLevel(
+  roomId: string,
+  level: "all" | "mentions" | "none" | "default",
+  channelId?: string,
+) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/notification_settings`,
+    { method: "PUT", body: JSON.stringify({ channel_id: channelId ?? "", level }) },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to save notification setting");
+  }
+  return res.json() as Promise<{ level: string }>;
+}
+
 // ─── Read markers / unread counts ─────────────────────────────────────────────
 
 export interface UnreadEntry {
