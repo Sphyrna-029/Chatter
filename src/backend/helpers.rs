@@ -266,6 +266,58 @@ pub(crate) async fn is_moderator_or_owner(state: &AppState, room_id: &str, user_
     role == "owner" || role == "moderator"
 }
 
+/// Whether a user may pin, unpin, and otherwise curate other people's messages.
+///
+/// Owners and moderators always can. A regular member can if one of their custom
+/// roles grants `manage_messages`. In a DM every member can — there is nobody
+/// with a higher role to ask.
+pub(crate) async fn can_manage_messages(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    use super::state::{CustomRoleRecord, RoomRecord};
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    {
+        let rm = state.room_members.read().await;
+        if !rm
+            .get(room_id)
+            .map(|m| m.contains(&user_id.to_string()))
+            .unwrap_or(false)
+        {
+            return false;
+        }
+    }
+
+    if is_moderator_or_owner(state, room_id, user_id).await {
+        return true;
+    }
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    if let Ok(Some(room)) = rooms_coll.find_one(doc! { "_id": room_id }).await {
+        if room.is_dm {
+            return true;
+        }
+    }
+
+    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
+    if role_ids.is_empty() {
+        return false;
+    }
+
+    let roles_coll = state.db.collection::<CustomRoleRecord>("custom_roles");
+    if let Ok(mut cursor) = roles_coll
+        .find(doc! { "room_id": room_id, "_id": { "$in": &role_ids } })
+        .await
+    {
+        while let Ok(Some(role)) = cursor.try_next().await {
+            if role.permissions.manage_messages {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Get the custom role IDs assigned to a user in a room.
 pub(crate) async fn get_user_custom_role_ids(
     state: &AppState,

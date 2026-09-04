@@ -240,6 +240,19 @@ pub(crate) struct ReactionRecord {
     pub(crate) user_id: String,
 }
 
+/// A message pinned to a room/channel. `_id` is the pinned message's event_id,
+/// so a message can only ever be pinned once.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct PinRecord {
+    #[serde(rename = "_id")]
+    pub(crate) event_id: String,
+    pub(crate) room_id: String,
+    #[serde(default)]
+    pub(crate) channel_id: String,
+    pub(crate) pinned_by: String,
+    pub(crate) pinned_at: i64,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct DmRoomRecord {
     #[serde(rename = "_id")]

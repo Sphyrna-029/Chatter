@@ -45,6 +45,7 @@ export function reducer(state: AppState, action: Action): AppState {
         roomMentions: action.payload
           ? { ...state.roomMentions, [action.payload]: 0 }
           : state.roomMentions,
+        pinnedMessages: [],
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
@@ -74,16 +75,33 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         messages: state.messages.filter((m) => m.event_id !== action.payload),
+        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
       };
     case "REMOVE_MESSAGE":
       return {
         ...state,
         messages: state.messages.filter((m) => m.event_id !== action.payload),
+        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
+      };
+    case "SET_PINNED_MESSAGES":
+      return { ...state, pinnedMessages: action.payload };
+    case "ADD_PINNED_MESSAGE":
+      if (state.pinnedMessages.some((m) => m.event_id === action.payload.event_id)) return state;
+      return { ...state, pinnedMessages: [action.payload, ...state.pinnedMessages] };
+    case "REMOVE_PINNED_MESSAGE":
+      return {
+        ...state,
+        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
       };
     case "EDIT_MESSAGE":
       return {
         ...state,
         messages: state.messages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
+            : m
+        ),
+        pinnedMessages: state.pinnedMessages.map((m) =>
           m.event_id === action.payload.eventId
             ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
             : m
@@ -528,6 +546,7 @@ export function reducer(state: AppState, action: Action): AppState {
         hasMoreMessages: false,
         oldestMessageIndex: null,
         loadingOlderMessages: false,
+        pinnedMessages: [],
       };
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;

@@ -488,6 +488,48 @@ export async function apiAddReaction(
   return res.json();
 }
 
+// ─── Pinned messages ─────────────────────────────────────────────────────────
+
+/** A pinned message: the message itself plus who pinned it and when. */
+export interface PinnedMessage extends MatrixMessage {
+  pinned_by: string;
+  pinned_at: number;
+}
+
+export async function apiGetPins(roomId: string, channelId?: string) {
+  const params = new URLSearchParams();
+  if (channelId) params.set("channel_id", channelId);
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/pins?${params}`
+  );
+  if (!res.ok) throw new Error("Failed to load pinned messages");
+  return res.json() as Promise<{ pins: PinnedMessage[] }>;
+}
+
+export async function apiPinMessage(roomId: string, eventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/pins/${encodeURIComponent(eventId)}`,
+    { method: "POST" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to pin message");
+  }
+  return res.json() as Promise<{ pinned: boolean; pinned_at: number }>;
+}
+
+export async function apiUnpinMessage(roomId: string, eventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/pins/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed" }));
+    throw new Error(err.error || "Failed to unpin message");
+  }
+  return res.json() as Promise<{ unpinned: boolean }>;
+}
+
 // ─── Threads ─────────────────────────────────────────────────────────────────
 
 export async function apiGetThreadMessages(roomId: string, threadEventId: string) {

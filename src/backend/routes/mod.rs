@@ -8,6 +8,7 @@ pub(crate) mod invites;
 pub(crate) mod media;
 pub(crate) mod messages;
 pub(crate) mod notification_settings;
+pub(crate) mod pins;
 pub(crate) mod presence;
 pub(crate) mod reactions;
 pub(crate) mod read_markers;

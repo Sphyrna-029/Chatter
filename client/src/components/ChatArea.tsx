@@ -4,7 +4,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiSearchMessages, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
-import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, UserPlus, Pencil } from "lucide-react";
+import { Search, X, ArrowDown, Image, Film, Music, FileText, EyeOff, MessageSquare, AtSign, UserPlus, Pencil, Pin, PinOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import {
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
+import { canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
 
 const MAX_MESSAGE_LENGTH = 4000;
@@ -70,7 +71,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel, markChannelRead } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, openThread, selectChannel, markChannelRead, unpinMessage, loadPins } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -260,6 +261,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     };
     return walk(div) ? range : null;
   };
+
+  // Pinned-messages panel state
+  const [pinsOpen, setPinsOpen] = useState(false);
 
   // Mentions state
   const [mentionsOpen, setMentionsOpen] = useState(false);
@@ -977,9 +981,20 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setMentionResults([]);
   };
 
+  const canUnpin = canManageMessages(state);
+
+  const openPins = () => {
+    closeSearch();
+    closeMentions();
+    setPinsOpen(true);
+    // Refresh in case a pin changed while this client was disconnected.
+    void loadPins();
+  };
+
   const openMentions = async () => {
     if (!state.currentRoomId || !state.userId) return;
     closeSearch();
+    setPinsOpen(false);
     setMentionsOpen(true);
     setMentionsLoading(true);
     const username = state.userId.replace(/^@/, "").replace(/:.*$/, "");
@@ -1004,7 +1019,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Scroll to a message after search/mentions closes and messages are rendered
   useEffect(() => {
-    if (!scrollToEventId || search.open || mentionsOpen) return;
+    if (!scrollToEventId || search.open || mentionsOpen || pinsOpen) return;
     // Use requestAnimationFrame to wait for DOM to render
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
@@ -1016,7 +1031,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       setScrollToEventId(null);
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollToEventId, search.open, mentionsOpen, state.messages]);
+  }, [scrollToEventId, search.open, mentionsOpen, pinsOpen, state.messages]);
 
   const mentionMatches = useMemo(() => {
     if (!mentionOpen) return [];
@@ -1178,6 +1193,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               <UserPlus className="h-4 w-4" />
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 relative"
+            onClick={() => pinsOpen ? setPinsOpen(false) : openPins()}
+            title="Pinned messages"
+          >
+            <Pin className="h-4 w-4" />
+            {state.pinnedMessages.length > 0 && (
+              <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary" />
+            )}
+          </Button>
           {roomInfo?.room_type === "text" && (
             <Button
               variant="ghost"
@@ -1193,7 +1220,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
             variant="ghost"
             size="icon"
             className="shrink-0"
-            onClick={() => search.open ? closeSearch() : (closeMentions(), dispatch({ type: "SET_SEARCH", payload: { open: true } }))}
+            onClick={() => search.open ? closeSearch() : (closeMentions(), setPinsOpen(false), dispatch({ type: "SET_SEARCH", payload: { open: true } }))}
             title="Search messages"
           >
             <Search className="h-4 w-4" />
@@ -1206,6 +1233,25 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           onOpenChange={setAddToDMOpen}
           roomId={state.currentRoomId}
         />
+      )}
+
+      {/* Pinned messages bar */}
+      {pinsOpen && (
+        <div className="border-b px-4 py-2 flex items-center justify-between">
+          <span className="text-sm font-medium flex items-center gap-1.5">
+            <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+            Pinned messages
+            {state.pinnedMessages.length > 0 && (
+              <span className="text-xs text-muted-foreground">({state.pinnedMessages.length})</span>
+            )}
+          </span>
+          <button
+            onClick={() => setPinsOpen(false)}
+            className="text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       )}
 
       {/* Mentions bar */}
@@ -1408,6 +1454,55 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                         </div>
                       );
                     })}
+              </>
+            ) : pinsOpen ? (
+              <>
+                {state.pinnedMessages.length === 0 && (
+                  <div className="text-center text-xs text-muted-foreground py-4">
+                    No pinned messages in this channel yet
+                  </div>
+                )}
+                {state.pinnedMessages.map((msg) => (
+                  <div key={msg.event_id}>
+                    <div
+                      className="cursor-pointer hover:bg-accent/30 rounded-md transition-colors"
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+                      onClick={async () => {
+                        if (!state.currentRoomId) return;
+                        const alreadyLoaded = state.messages.some((m) => m.event_id === msg.event_id);
+                        if (!alreadyLoaded) {
+                          await loadMessagesAround(state.currentRoomId, msg.origin_server_ts);
+                        }
+                        setPinsOpen(false);
+                        setScrollToEventId(msg.event_id);
+                      }}
+                    >
+                      <MessageItem message={msg} disableReactions hidePinControls />
+                    </div>
+                    <div className="px-2 pb-1 flex items-center gap-2">
+                      <span className="text-3xs text-muted-foreground">
+                        Pinned by {state.userPresence[msg.pinned_by]?.displayName || displayUserId(msg.pinned_by)}
+                      </span>
+                      {canUnpin && (
+                        <button
+                          className="text-3xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1 cursor-pointer"
+                          onClick={async () => {
+                            try {
+                              await unpinMessage(msg.event_id);
+                            } catch (e) {
+                              toast.error(e instanceof Error ? e.message : "Failed to unpin message");
+                            }
+                          }}
+                        >
+                          <PinOff className="h-2.5 w-2.5" />
+                          Unpin
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </>
             ) : mentionsOpen ? (
               <>

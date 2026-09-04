@@ -453,6 +453,14 @@ pub(crate) async fn delete_channel(
         .delete_many(doc! { "room_id": &room_id, "channel_id": &channel_id })
         .await;
 
+    // Drop the channel's pins along with its messages
+    let pins_coll = state
+        .db
+        .collection::<super::super::state::PinRecord>("pins");
+    let _ = pins_coll
+        .delete_many(doc! { "room_id": &room_id, "channel_id": &channel_id })
+        .await;
+
     // Remove voice channel state for this channel
     {
         let mut vc = state.voice_channels.write().await;

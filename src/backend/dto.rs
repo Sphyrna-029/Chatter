@@ -94,6 +94,11 @@ pub(crate) struct MessagesQuery {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct PinsQuery {
+    pub(crate) channel_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct ReactionRequest {
     pub(crate) emoji: Option<String>,
 }

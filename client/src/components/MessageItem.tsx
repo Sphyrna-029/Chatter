@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import {
@@ -16,6 +16,8 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn, displayUserId } from "@/lib/utils";
+import { canManageMessages } from "@/lib/permissions";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -1007,11 +1009,14 @@ interface MessageItemProps {
   triggerEdit?: boolean;
   onEditDone?: () => void;
   disableReactions?: boolean;
+  /** Set inside the pinned-messages panel, where the pin badge and the pin
+   *  button would only repeat what the panel already says. */
+  hidePinControls?: boolean;
 }
 
-export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions }: MessageItemProps) {
+export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
   const confirm = useConfirm();
-  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread } = useAppContext();
+  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1170,6 +1175,28 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
 
   const canDeleteNotification = myRole === "owner" || myRole === "moderator";
 
+  // Pins are tracked per channel, so only trust the pin state for a message that
+  // belongs to the channel currently open (search results can come from others).
+  const inCurrentChannel = (message.channel_id || "") === (state.currentChannelId || "");
+  const isPinned =
+    !hidePinControls &&
+    inCurrentChannel &&
+    state.pinnedMessages.some((m) => m.event_id === message.event_id);
+  const canPin =
+    !hidePinControls && inCurrentChannel && !inThread && !isSystem && canManageMessages(state);
+
+  const togglePin = async () => {
+    try {
+      if (isPinned) {
+        await unpinMessage(message.event_id);
+      } else {
+        await pinMessage(message.event_id);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update pin");
+    }
+  };
+
   if (message.content.msgtype === "m.watchparty") {
     return (
       <div className="group flex items-center justify-center gap-2 py-1.5 px-2">
@@ -1316,6 +1343,12 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
         )}
 
         <div className="flex-1 min-w-0 overflow-hidden">
+          {isPinned && !isDeleted && (
+            <div className="flex items-center gap-1 mb-0.5 text-3xs font-medium text-muted-foreground">
+              <Pin className="h-2.5 w-2.5" />
+              <span>Pinned</span>
+            </div>
+          )}
           {/* Reply quote */}
           {message.content.in_reply_to && replySender && (
             <button
@@ -1594,6 +1627,17 @@ export function MessageItem({ message, grouped, inThread, triggerEdit, onEditDon
                 title="Open thread"
               >
                 <span className="text-xs">⋮</span>
+              </Button>
+            )}
+            {canPin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                onClick={togglePin}
+                title={isPinned ? "Unpin message" : "Pin message"}
+              >
+                {isPinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
               </Button>
             )}
             {!disableReactions && <Popover>

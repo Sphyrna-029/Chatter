@@ -270,6 +270,21 @@ export function createWsMessageHandler(
           payload: { eventId: msg.edits, newBody: msg.new_body, newEmbeds: msg.new_embeds },
         });
       }
+    } else if (msg.type === "m.room.pinned") {
+      // Only track pins for the channel currently on screen; switching channels
+      // reloads the list from the server.
+      const cur = stateRef.current;
+      if (
+        msg.room_id === cur.currentRoomId &&
+        (msg.channel_id || "") === (cur.currentChannelId || "") &&
+        msg.message
+      ) {
+        dispatch({ type: "ADD_PINNED_MESSAGE", payload: msg.message });
+      }
+    } else if (msg.type === "m.room.unpinned") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({ type: "REMOVE_PINNED_MESSAGE", payload: msg.event_id });
+      }
     } else if (msg.type === "m.reaction") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({

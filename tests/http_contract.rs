@@ -459,3 +459,164 @@ async fn voice_presence_and_upload_contract_auth_and_size_checks() {
     let body: Value = oversized_upload.json().await.unwrap();
     assert_eq!(body["error"], "File too large (max 10MB)");
 }
+
+#[tokio::test]
+async fn pin_contract_permissions_broadcast_and_redaction_cleanup() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Pins",
+        Some(vec![bob_user_id]),
+        false,
+    )
+    .await;
+
+    let send = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/pin-txn1",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({"msgtype": "m.text", "body": "worth keeping"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(send.status(), StatusCode::OK);
+    let event_id = send.json::<Value>().await.unwrap()["event_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The message landed in the room's default text channel; pins are scoped to it.
+    let messages: Value = client
+        .get(format!(
+            "{}/_matrix/client/r0/rooms/{}/messages?limit=20",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let channel_id = messages["chunk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["event_id"].as_str() == Some(event_id.as_str()))
+        .and_then(|event| event["channel_id"].as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // A plain member cannot pin.
+    let forbidden = client
+        .post(format!(
+            "{}/api/rooms/{}/pins/{}",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    let mut bob_ws = ws_connect_authenticated(&server.ws_url, &bob_token).await;
+
+    let pinned = client
+        .post(format!(
+            "{}/api/rooms/{}/pins/{}",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pinned.status(), StatusCode::OK);
+
+    let pin_event = recv_event_type(&mut bob_ws, "m.room.pinned").await;
+    assert_eq!(pin_event["room_id"], room_id);
+    assert_eq!(pin_event["event_id"], event_id);
+    assert_eq!(pin_event["pinned_by"], "@alice:localhost");
+    assert_eq!(pin_event["message"]["content"]["body"], "worth keeping");
+
+    // Pinning twice is rejected.
+    let duplicate = client
+        .post(format!(
+            "{}/api/rooms/{}/pins/{}",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), StatusCode::BAD_REQUEST);
+
+    // Every member can read the pin list.
+    let list: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/pins?channel_id={}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let pins = list["pins"].as_array().unwrap();
+    assert_eq!(pins.len(), 1);
+    assert_eq!(pins[0]["event_id"], event_id);
+    assert_eq!(pins[0]["pinned_by"], "@alice:localhost");
+    assert!(pins[0]["pinned_at"].as_i64().unwrap() > 0);
+
+    // Deleting the message drops its pin and tells the room.
+    let redact = client
+        .delete(format!(
+            "{}/_matrix/client/r0/rooms/{}/redact/{}/pin-txn2",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(redact.status(), StatusCode::OK);
+
+    let unpin_event = recv_event_type(&mut bob_ws, "m.room.unpinned").await;
+    assert_eq!(unpin_event["event_id"], event_id);
+
+    let list_after: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/pins?channel_id={}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(list_after["pins"].as_array().unwrap().len(), 0);
+
+    // The pin is gone, so unpinning again is a 404.
+    let unpin_missing = client
+        .delete(format!(
+            "{}/api/rooms/{}/pins/{}",
+            server.base_url, room_id, event_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unpin_missing.status(), StatusCode::NOT_FOUND);
+}

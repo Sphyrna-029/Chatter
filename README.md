@@ -27,6 +27,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Profile Customization
 - Friend Requests
 - Chat Search
+- Message Pins
 - Webhooks
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard

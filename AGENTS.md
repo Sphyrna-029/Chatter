@@ -105,5 +105,7 @@ On GitHub, the same checks run in `.github/workflows/rust-quality.yml`.
 - Room CRUD: POST `/createRoom`, `/{room_id}/join`, `/{room_id}/leave`; GET `/joined_rooms`
 - Messages: PUT `/{room_id}/send/m.room.message/{txn_id}`; DELETE via `/{room_id}/redact/{event_id}/{txn_id}`
 - Reactions: PUT `/{room_id}/send/m.reaction/{event_id}` (toggles on/off)
+- Pins: GET `/api/rooms/{room_id}/pins?channel_id=`; POST/DELETE `/api/rooms/{room_id}/pins/{event_id}` (owner/moderator, a `manage_messages` role, or any DM member)
+- Pin changes broadcast `m.room.pinned` / `m.room.unpinned` to the room
 - WebSocket messages use a `type` field: `typing`, `voice_join`, `voice_leave`, `voice_mute`, `screen_share_start`, `screen_share_stop`
 - WebRTC signaling for voice and screen share flows through the WebSocket

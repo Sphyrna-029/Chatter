@@ -41,6 +41,9 @@ import {
   apiHardDeleteNotification,
   apiEditMessage,
   apiAddReaction,
+  apiGetPins,
+  apiPinMessage,
+  apiUnpinMessage,
   apiGetVoiceMembers,
   apiGetPresence,
   apiGetAllRooms,
@@ -618,6 +621,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           });
         }
       }
+      // Load pinned messages for the channel we landed on
+      try {
+        const pinData = await apiGetPins(roomId, selectedChannelId);
+        dispatch({ type: "SET_PINNED_MESSAGES", payload: pinData.pins || [] });
+      } catch {
+        dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
+      }
       // Load members
       const syncData = await apiSync();
       const roomData = syncData.rooms?.join?.[roomId];
@@ -759,6 +769,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  // ─── Pinned messages ──────────────────────────────────────────────────
+  const loadPins = useCallback(async () => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId) return;
+    try {
+      const data = await apiGetPins(cur.currentRoomId, cur.currentChannelId || undefined);
+      dispatch({ type: "SET_PINNED_MESSAGES", payload: data.pins || [] });
+    } catch {
+      dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
+    }
+  }, []);
+
+  const pinMessage = useCallback(async (eventId: string) => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId) return;
+    // The server broadcasts m.room.pinned, which is what updates the list.
+    await apiPinMessage(cur.currentRoomId, eventId);
+  }, []);
+
+  const unpinMessage = useCallback(async (eventId: string) => {
+    const cur = stateRef.current;
+    if (!cur.currentRoomId) return;
+    await apiUnpinMessage(cur.currentRoomId, eventId);
+  }, []);
 
   const openThread = useCallback(async (eventId: string) => {
     if (!stateRef.current.currentRoomId) return;
@@ -916,6 +951,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           payload: { eventId: msg.event_id, reactions: msg.reactions },
         });
       }
+    }
+    try {
+      const pinData = await apiGetPins(cur.currentRoomId, channelId);
+      dispatch({ type: "SET_PINNED_MESSAGES", payload: pinData.pins || [] });
+    } catch {
+      dispatch({ type: "SET_PINNED_MESSAGES", payload: [] });
     }
   }, []);
 
@@ -1172,6 +1213,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         hardDeleteNotification,
         editMessage,
         addReaction,
+        loadPins,
+        pinMessage,
+        unpinMessage,
         createRoom,
         joinRoom,
         leaveRoom,

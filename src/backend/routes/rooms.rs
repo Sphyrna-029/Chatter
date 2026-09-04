@@ -767,6 +767,12 @@ pub(crate) async fn delete_room(
         .delete_many(doc! { "room_id": &room_id })
         .await;
 
+    // Remove pinned messages
+    let pins_coll = state
+        .db
+        .collection::<super::super::state::PinRecord>("pins");
+    let _ = pins_coll.delete_many(doc! { "room_id": &room_id }).await;
+
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
     let _ = dm_coll.delete_many(doc! { "room_id": &room_id }).await;

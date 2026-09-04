@@ -1,4 +1,4 @@
-import type { MatrixMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, Embed } from "../api";
+import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, Embed } from "../api";
 import type { Dispatch } from "react";
 import type { NotificationLevel, NotificationSettings } from "../notifications";
 
@@ -74,6 +74,8 @@ export interface AppState {
   currentView: "chat" | "voice";
   search: SearchState;
   replyingTo: MatrixMessage | null;
+  // Pinned messages of the current room/channel, newest pin first
+  pinnedMessages: PinnedMessage[];
   // Threads
   activeThreadEventId: string | null;
   threadRootMessage: MatrixMessage | null;
@@ -140,6 +142,9 @@ export type Action =
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
+  | { type: "SET_PINNED_MESSAGES"; payload: PinnedMessage[] }
+  | { type: "ADD_PINNED_MESSAGE"; payload: PinnedMessage }
+  | { type: "REMOVE_PINNED_MESSAGE"; payload: string }
   | { type: "OPEN_THREAD"; payload: { eventId: string; root: MatrixMessage; messages: MatrixMessage[] } }
   | { type: "CLOSE_THREAD" }
   | { type: "ADD_THREAD_MESSAGE"; payload: MatrixMessage }
@@ -247,6 +252,7 @@ export const initialState: AppState = {
   currentView: "chat",
   search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false },
   replyingTo: null,
+  pinnedMessages: [],
   activeThreadEventId: null,
   threadRootMessage: null,
   threadMessages: [],
@@ -287,6 +293,10 @@ export interface AppContextValue {
   deleteMessage: (eventId: string) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
+  /** Refresh the pin list for the room/channel currently open. */
+  loadPins: () => Promise<void>;
+  pinMessage: (eventId: string) => Promise<void>;
+  unpinMessage: (eventId: string) => Promise<void>;
   createRoom: (name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string, roomType?: string) => Promise<void>;
   joinRoom: (roomId: string, password?: string) => Promise<void>;
   leaveRoom: (roomId: string) => Promise<void>;

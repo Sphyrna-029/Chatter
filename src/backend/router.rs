@@ -35,6 +35,7 @@ use super::{
             send_thread_message, set_thread_name,
         },
         notification_settings::{get_notification_settings, set_notification_level},
+        pins::{list_pins, pin_message, unpin_message},
         presence::{get_room_presence, get_voice_channel_status},
         reactions::{add_reaction, get_reactions},
         read_markers::{get_unreads, mark_read},
@@ -187,6 +188,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route(
             "/_matrix/client/r0/rooms/{room_id}/event/{event_id}/reactions",
             get(get_reactions),
+        )
+        // Pinned messages
+        .route("/api/rooms/{room_id}/pins", get(list_pins))
+        .route(
+            "/api/rooms/{room_id}/pins/{event_id}",
+            post(pin_message).delete(unpin_message),
         )
         // Permissions
         .route(

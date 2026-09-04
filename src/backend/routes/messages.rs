@@ -637,6 +637,9 @@ pub(crate) async fn redact_message(
         )
         .await;
 
+    // A deleted message must not linger in the pin list.
+    super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
+
     let redaction_event_id = generate_id("$");
     let redaction_event = json!({
         "type": "m.room.redaction",
@@ -695,6 +698,8 @@ pub(crate) async fn delete_notification(
     let _ = msg_coll
         .delete_one(doc! { "event_id": &event_id, "room_id": &room_id })
         .await;
+
+    super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
 
     let removal_event = json!({
         "type": "m.room.message_removed",
