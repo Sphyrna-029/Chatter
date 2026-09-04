@@ -5,20 +5,12 @@ import { Label } from "@/components/ui/label";
 import { cn, displayUserId } from "@/lib/utils";
 import { apiGetMyPermissions } from "@/lib/api";
 import type { CustomRole, PermissionName, PermissionOverwrite, RolePermissions } from "@/lib/api";
+import { CHANNEL_PERMISSION_SECTIONS } from "@/lib/permissionMeta";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-/** The permissions worth adjusting per channel. Room-wide powers like
- *  manage_roles or ban_members are deliberately absent — scoping them to one
- *  channel is meaningless. */
-const CHANNEL_PERMISSIONS: { key: PermissionName; label: string }[] = [
-  { key: "view_channel", label: "View Channel" },
-  { key: "send_messages", label: "Send Messages" },
-  { key: "attach_files", label: "Attach Files" },
-  { key: "embed_links", label: "Embed Links" },
-  { key: "add_reactions", label: "Add Reactions" },
-  { key: "connect", label: "Join Voice" },
-  { key: "speak", label: "Speak in Voice" },
-  { key: "manage_messages", label: "Manage Messages" },
-];
+/** Room-wide powers like manage_roles are absent by design — scoping them to a
+ *  single channel is meaningless. */
+const CHANNEL_PERMISSIONS = CHANNEL_PERMISSION_SECTIONS.flatMap((s) => s.permissions);
 
 /** Neutral means "inherit" — the permission is left to the room-level result. */
 type TriState = "allow" | "deny" | "neutral";
@@ -133,9 +125,9 @@ function ViewAsPreview({
       {error && <p className="text-3xs text-destructive">{error}</p>}
       {target && resolved && (
         <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-          {CHANNEL_PERMISSIONS.map(({ key, label }) => (
-            <div key={key} className="flex items-center gap-1.5">
-              {resolved[key] ? (
+          {CHANNEL_PERMISSIONS.map((meta) => (
+            <div key={meta.key} className="flex items-center gap-1.5">
+              {resolved[meta.key] ? (
                 <Check className="h-3 w-3 text-green-500 shrink-0" />
               ) : (
                 <X className="h-3 w-3 text-destructive shrink-0" />
@@ -143,10 +135,10 @@ function ViewAsPreview({
               <span
                 className={cn(
                   "text-3xs truncate",
-                  resolved[key] ? "text-foreground" : "text-muted-foreground",
+                  resolved[meta.key] ? "text-foreground" : "text-muted-foreground",
                 )}
               >
-                {label}
+                {meta.label}
               </span>
             </div>
           ))}
@@ -237,49 +229,68 @@ export function ChannelOverwrites({
                 <X className="h-3.5 w-3.5" />
               </button>
             </div>
-            <div className="space-y-1">
-              {CHANNEL_PERMISSIONS.map(({ key, label }) => {
-                const current = stateOf(ow, key);
-                return (
-                  <div key={key} className="flex items-center gap-2">
-                    <span className="text-xs flex-1 min-w-0 truncate">{label}</span>
-                    <div className="flex items-center gap-0.5 shrink-0">
-                      {(
-                        [
-                          ["deny", X, "Deny"],
-                          ["neutral", Minus, "Inherit"],
-                          ["allow", Check, "Allow"],
-                        ] as const
-                      ).map(([value, Icon, title]) => (
-                        <button
-                          key={value}
-                          title={title}
-                          aria-pressed={current === value}
-                          className={cn(
-                            "h-5 w-5 rounded flex items-center justify-center transition-colors cursor-pointer",
-                            current === value
-                              ? value === "deny"
-                                ? "bg-destructive/20 text-destructive"
-                                : value === "allow"
-                                  ? "bg-green-500/20 text-green-500"
-                                  : "bg-accent text-foreground"
-                              : "text-muted-foreground/50 hover:text-foreground hover:bg-accent/50",
-                          )}
-                          onClick={() =>
-                            onChange(
-                              overwrites.map((o, idx) =>
-                                idx === i ? withState(o, key, value) : o,
-                              ),
-                            )
-                          }
-                        >
-                          <Icon className="h-3 w-3" />
-                        </button>
-                      ))}
-                    </div>
+            <div className="space-y-2">
+              {CHANNEL_PERMISSION_SECTIONS.map((section) => (
+                <div key={section.title}>
+                  <p className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground/70 mb-0.5">
+                    {section.title}
+                  </p>
+                  <div className="space-y-0.5">
+                    {section.permissions.map((meta) => {
+                      const current = stateOf(ow, meta.key);
+                      return (
+                        <div key={meta.key} className="flex items-center gap-2">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="text-xs flex-1 min-w-0 truncate cursor-help">
+                                {meta.label}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent side="left" className="max-w-56">
+                              {meta.description}
+                            </TooltipContent>
+                          </Tooltip>
+                          <div className="flex items-center rounded-md border overflow-hidden shrink-0">
+                            {(
+                              [
+                                ["deny", X, "Deny"],
+                                ["neutral", Minus, "Inherit"],
+                                ["allow", Check, "Allow"],
+                              ] as const
+                            ).map(([value, Icon, title]) => (
+                              <button
+                                key={value}
+                                title={title}
+                                aria-pressed={current === value}
+                                className={cn(
+                                  "h-5 px-1.5 inline-flex items-center gap-1 text-3xs transition-colors cursor-pointer border-r last:border-r-0",
+                                  current === value
+                                    ? value === "deny"
+                                      ? "bg-destructive/20 text-destructive"
+                                      : value === "allow"
+                                        ? "bg-green-500/20 text-green-500"
+                                        : "bg-accent text-foreground"
+                                    : "text-muted-foreground/50 hover:text-foreground hover:bg-accent/50",
+                                )}
+                                onClick={() =>
+                                  onChange(
+                                    overwrites.map((o, idx) =>
+                                      idx === i ? withState(o, meta.key, value) : o,
+                                    ),
+                                  )
+                                }
+                              >
+                                <Icon className="h-3 w-3" />
+                                {current === value && <span>{title}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         );
