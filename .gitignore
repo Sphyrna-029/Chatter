@@ -13,6 +13,9 @@ test_server.py
 CLAUDE.md
 .claude/
 
+# OpenCode
+.opencode/
+
 # Node/Client
 client/node_modules/
 client/dist/
