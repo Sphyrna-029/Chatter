@@ -370,6 +370,69 @@ pub(crate) async fn get_user_custom_role_ids(
     role_ids
 }
 
+/// How much authority a user has over roles, as a comparable rank where a
+/// **lower** number is stronger. Roles are created at the end of the list and
+/// the UI sorts ascending, so position 0 sits at the top and outranks the rest;
+/// this is Discord's visual convention with the numeric order inverted.
+///
+/// Built-ins sit above every custom role: an owner outranks everything, a
+/// moderator outranks every custom role but the owner.
+pub(crate) async fn role_authority(state: &AppState, room_id: &str, user_id: &str) -> i32 {
+    use super::state::CustomRoleRecord;
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    match get_user_role(state, room_id, user_id).await.as_str() {
+        "owner" => return i32::MIN,
+        "moderator" => return i32::MIN + 1,
+        _ => {}
+    }
+
+    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
+    if role_ids.is_empty() {
+        return i32::MAX;
+    }
+    let coll = state.db.collection::<CustomRoleRecord>("custom_roles");
+    let mut best = i32::MAX;
+    if let Ok(mut cursor) = coll
+        .find(doc! { "room_id": room_id, "_id": { "$in": &role_ids } })
+        .await
+    {
+        while let Ok(Some(r)) = cursor.try_next().await {
+            best = best.min(r.position);
+        }
+    }
+    best
+}
+
+/// Whether `user_id` outranks a role at `position`. Strict, so a role can never
+/// edit itself or a peer at the same position.
+pub(crate) async fn outranks_role(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+    position: i32,
+) -> bool {
+    role_authority(state, room_id, user_id).await < position
+}
+
+/// The permissions `user_id` may hand out — you cannot grant what you do not
+/// hold. Owners bypass this, since they hold everything by definition.
+pub(crate) async fn ungrantable_permission(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+    requested: &RolePermissions,
+) -> Option<&'static str> {
+    if get_user_role(state, room_id, user_id).await == "owner" {
+        return None;
+    }
+    let held = effective_permissions(state, room_id, user_id).await;
+    RolePermissions::NAMES
+        .into_iter()
+        .find(|name| requested.get(name) && !held.get(name))
+}
+
 /// A user's permissions inside one channel: the room-level set with the
 /// channel's overwrites applied.
 ///
@@ -401,8 +464,52 @@ pub(crate) async fn channel_permissions(
         return base;
     };
 
+    let category = category_overwrites(state, &channel).await;
     let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
-    apply_overwrites(base, &channel_overwrites(&channel), &user_roles, user_id)
+    apply_overwrites(
+        base,
+        &merged_overwrites(&category, &channel),
+        &user_roles,
+        user_id,
+    )
+}
+
+/// The overwrites a channel inherits from its category, or nothing when the
+/// channel has no category or has opted out of inheriting.
+pub(crate) async fn category_overwrites(
+    state: &AppState,
+    channel: &ChannelRecord,
+) -> Vec<PermissionOverwrite> {
+    use super::state::ChannelCategoryRecord;
+    use mongodb::bson::doc;
+
+    if !channel.inherit_category_permissions || channel.category_id.is_empty() {
+        return Vec::new();
+    }
+    let coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
+    coll.find_one(doc! { "_id": &channel.category_id })
+        .await
+        .ok()
+        .flatten()
+        .map(|c| c.overwrites)
+        .unwrap_or_default()
+}
+
+/// Category rules first, then the channel's own — so a channel refines what it
+/// inherits rather than being stuck with it.
+pub(crate) fn merged_overwrites(
+    category: &[PermissionOverwrite],
+    channel: &ChannelRecord,
+) -> Vec<PermissionOverwrite> {
+    let own = channel_overwrites(channel);
+    if category.is_empty() {
+        return own;
+    }
+    let mut merged = category.to_vec();
+    merged.extend(own);
+    merged
 }
 
 /// Owners and moderators are not subject to channel overwrites: an owner must
@@ -542,13 +649,38 @@ pub(crate) async fn get_allowed_channel_ids(
     if overwrites_bypassed(state, room_id, user_id).await {
         return None; // privileged: unrestricted access
     }
+    use super::state::ChannelCategoryRecord;
+    use std::collections::HashMap;
+
     let base = effective_permissions(state, room_id, user_id).await;
     let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
+
+    // One pass for the categories rather than a lookup per channel.
+    let mut categories: HashMap<String, Vec<PermissionOverwrite>> = HashMap::new();
+    let cat_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
+    if let Ok(mut cursor) = cat_coll.find(doc! { "room_id": room_id }).await {
+        while let Ok(Some(cat)) = cursor.try_next().await {
+            categories.insert(cat.category_id.clone(), cat.overwrites);
+        }
+    }
+
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
     let mut allowed = Vec::new();
     if let Ok(mut cursor) = channels_coll.find(doc! { "room_id": room_id }).await {
         while let Ok(Some(ch)) = cursor.try_next().await {
-            let perms = apply_overwrites(base, &channel_overwrites(&ch), &user_roles, user_id);
+            let inherited = if ch.inherit_category_permissions {
+                categories.get(&ch.category_id).cloned().unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let perms = apply_overwrites(
+                base,
+                &merged_overwrites(&inherited, &ch),
+                &user_roles,
+                user_id,
+            );
             if perms.view_channel {
                 allowed.push(ch.channel_id.clone());
             }

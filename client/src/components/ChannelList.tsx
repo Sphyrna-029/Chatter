@@ -97,6 +97,11 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
   const [editReadOnly, setEditReadOnly] = useState(false);
   const [editOverwrites, setEditOverwrites] = useState<PermissionOverwrite[]>([]);
+  const [editInheritCategory, setEditInheritCategory] = useState(true);
+  const [editCategoryIdOfChannel, setEditCategoryIdOfChannel] = useState("");
+  const editCategoryOfChannel = state.channelCategories.find(
+    (c) => c.category_id === editCategoryIdOfChannel
+  );
   const [editShowcaseWriteRoles, setEditShowcaseWriteRoles] = useState<string[]>([]);
   const [editChannelType, setEditChannelType] = useState<string>("");
   const [editSystemChannel, setEditSystemChannel] = useState(false);
@@ -150,6 +155,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const [categoryEditOpen, setCategoryEditOpen] = useState(false);
   const [categoryName, setCategoryName] = useState("");
   const [editCategoryId, setEditCategoryId] = useState<string | null>(null);
+  const [editCategoryOverwrites, setEditCategoryOverwrites] = useState<PermissionOverwrite[]>([]);
 
   // Collapsed categories
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -226,11 +232,12 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         topic: topic.trim(),
         read_only: editReadOnly,
         overwrites: editOverwrites,
+        inherit_category_permissions: editInheritCategory,
         showcase_write_roles: editChannelType === "showcase" ? editShowcaseWriteRoles : undefined,
         system_channel: editSystemChannel,
         voice_bitrate: isVoiceChannel ? editVoiceBitrateKbps * 1000 : undefined,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, overwrites: editOverwrites, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, overwrites: editOverwrites, inherit_category_permissions: editInheritCategory, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -256,6 +263,8 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
     setTopic(ch.topic || "");
     setEditReadOnly(ch.read_only ?? false);
     setEditOverwrites(ch.overwrites ?? []);
+    setEditInheritCategory(ch.inherit_category_permissions ?? true);
+    setEditCategoryIdOfChannel(ch.category_id ?? "");
     setEditShowcaseWriteRoles(ch.showcase_write_roles ?? []);
     setEditChannelType(ch.channel_type);
     setEditSystemChannel(ch.system_channel ?? false);
@@ -278,7 +287,10 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const handleEditCategory = async () => {
     if (!editCategoryId || !categoryName.trim() || !roomId) return;
     try {
-      await apiUpdateCategory(roomId, editCategoryId, { name: categoryName.trim() });
+      await apiUpdateCategory(roomId, editCategoryId, {
+        name: categoryName.trim(),
+        overwrites: editCategoryOverwrites,
+      });
       setCategoryEditOpen(false);
       setEditCategoryId(null);
       setCategoryName("");
@@ -661,6 +673,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 <DropdownMenuItem onClick={() => {
                   setEditCategoryId(cat.category_id);
                   setCategoryName(cat.name);
+                  setEditCategoryOverwrites(cat.overwrites ?? []);
                   setCategoryEditOpen(true);
                 }}>
                   <Pencil className="h-3.5 w-3.5 mr-2" /> Rename
@@ -1124,6 +1137,23 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               onChange={setEditOverwrites}
               roles={state.customRoles}
               members={state.roomMembers.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
+              roomId={roomId ?? undefined}
+              channelId={editChannelId ?? undefined}
+              header={
+                editCategoryOfChannel ? (
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editInheritCategory}
+                      onChange={(e) => setEditInheritCategory(e.target.checked)}
+                      className="rounded border-input"
+                    />
+                    <span className="text-xs">
+                      Inherit permissions from “{editCategoryOfChannel.name}”
+                    </span>
+                  </label>
+                ) : null
+              }
             />
             {state.customRoles.length > 0 && (
               <>
@@ -1188,9 +1218,9 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       <Dialog open={categoryEditOpen} onOpenChange={setCategoryEditOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Rename Category</DialogTitle>
+            <DialogTitle>Category Settings</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
             <div>
               <Label>Name</Label>
               <Input
@@ -1200,6 +1230,17 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 autoFocus
               />
             </div>
+            <ChannelOverwrites
+              overwrites={editCategoryOverwrites}
+              onChange={setEditCategoryOverwrites}
+              roles={state.customRoles}
+              members={state.roomMembers.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
+              header={
+                <p className="text-3xs text-muted-foreground/70">
+                  Channels in this category inherit these unless they opt out.
+                </p>
+              }
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCategoryEditOpen(false)}>Cancel</Button>

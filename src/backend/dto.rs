@@ -297,6 +297,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
     pub(crate) overwrites: Option<Vec<super::state::PermissionOverwrite>>,
+    pub(crate) inherit_category_permissions: Option<bool>,
     pub(crate) showcase_write_roles: Option<Vec<String>>,
     pub(crate) showcase_posters: Option<Vec<String>>,
     pub(crate) system_channel: Option<bool>,
@@ -321,6 +322,10 @@ pub(crate) struct UpdateCustomRoleRequest {
 #[derive(Deserialize)]
 pub(crate) struct PermissionsQuery {
     pub(crate) channel_id: Option<String>,
+    /// Resolve as this member instead of the caller (needs manage_roles).
+    pub(crate) as_user: Option<String>,
+    /// Resolve as a hypothetical member holding only this role.
+    pub(crate) as_role: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -337,4 +342,5 @@ pub(crate) struct CreateCategoryRequest {
 pub(crate) struct UpdateCategoryRequest {
     pub(crate) name: Option<String>,
     pub(crate) position: Option<i32>,
+    pub(crate) overwrites: Option<Vec<super::state::PermissionOverwrite>>,
 }

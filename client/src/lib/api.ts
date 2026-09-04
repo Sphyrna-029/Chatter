@@ -786,6 +786,8 @@ export interface ChannelCategory {
   category_id: string;
   name: string;
   position: number;
+  /** Inherited by this category's channels unless a channel opts out. */
+  overwrites?: PermissionOverwrite[];
 }
 
 export interface Channel {
@@ -797,8 +799,11 @@ export interface Channel {
   position: number;
   category_id?: string;
   read_only?: boolean;
-  /** Per-channel permission overwrites, applied over the room-level set. */
+  /** Per-channel permission overwrites, applied over the room-level set and
+   *  after any inherited from the channel's category. */
   overwrites?: PermissionOverwrite[];
+  /** When true (default) the category's overwrites apply first. */
+  inherit_category_permissions?: boolean;
   /** @deprecated superseded by `overwrites`; migrated on server start. */
   view_roles?: string[];
   write_roles?: string[];
@@ -844,10 +849,18 @@ export interface PermissionOverwrite {
   deny: PermissionName[];
 }
 
-/** The caller's own effective permissions, optionally inside one channel. */
-export async function apiGetMyPermissions(roomId: string, channelId?: string) {
+/** Resolve permissions, optionally inside one channel and optionally as
+ *  another member or as a hypothetical holder of one role. Inspecting someone
+ *  else requires manage_roles. */
+export async function apiGetMyPermissions(
+  roomId: string,
+  channelId?: string,
+  as?: { role?: string; user?: string }
+) {
   const params = new URLSearchParams();
   if (channelId) params.set("channel_id", channelId);
+  if (as?.role) params.set("as_role", as.role);
+  if (as?.user) params.set("as_user", as.user);
   const res = await authenticatedFetch(
     `/api/rooms/${encodeURIComponent(roomId)}/permissions?${params}`
   );
@@ -943,7 +956,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; overwrites?: PermissionOverwrite[]; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; overwrites?: PermissionOverwrite[]; inherit_category_permissions?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),
@@ -980,7 +993,7 @@ export async function apiCreateCategory(roomId: string, name: string) {
   return res.json() as Promise<{ category_id: string }>;
 }
 
-export async function apiUpdateCategory(roomId: string, categoryId: string, data: { name?: string; position?: number }) {
+export async function apiUpdateCategory(roomId: string, categoryId: string, data: { name?: string; position?: number; overwrites?: PermissionOverwrite[] }) {
   const res = await authenticatedFetch(`/api/rooms/${roomId}/categories/${categoryId}`, {
     method: "PUT",
     body: JSON.stringify(data),

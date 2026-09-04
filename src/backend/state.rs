@@ -403,6 +403,10 @@ pub(crate) struct ChannelCategoryRecord {
     pub(crate) category_id: String,
     pub(crate) room_id: String,
     pub(crate) name: String,
+    /// Overwrites inherited by the channels in this category, unless a channel
+    /// opts out with `inherit_category_permissions = false`.
+    #[serde(default)]
+    pub(crate) overwrites: Vec<PermissionOverwrite>,
     #[serde(default)]
     pub(crate) position: i32,
     pub(crate) created_by: String,
@@ -424,9 +428,14 @@ pub(crate) struct ChannelRecord {
     pub(crate) category_id: String,
     #[serde(default)]
     pub(crate) read_only: bool,
-    /// Per-channel permission overwrites, applied over the room-level set.
+    /// Per-channel permission overwrites, applied over the room-level set and
+    /// after any inherited from the channel's category.
     #[serde(default)]
     pub(crate) overwrites: Vec<PermissionOverwrite>,
+    /// When true (the default) the category's overwrites apply first and this
+    /// channel's refine them; set false to ignore the category entirely.
+    #[serde(default = "default_true")]
+    pub(crate) inherit_category_permissions: bool,
     /// Set once the legacy view_roles/write_roles have been folded into
     /// `overwrites`, so the one-time migration never runs twice.
     #[serde(default)]
@@ -565,6 +574,27 @@ impl RolePermissions {
         "ban_members",
         "mention_everyone",
     ];
+
+    pub(crate) fn get(&self, name: &str) -> bool {
+        match name {
+            "view_channel" => self.view_channel,
+            "send_messages" => self.send_messages,
+            "attach_files" => self.attach_files,
+            "embed_links" => self.embed_links,
+            "add_reactions" => self.add_reactions,
+            "connect" => self.connect,
+            "speak" => self.speak,
+            "manage_channels" => self.manage_channels,
+            "manage_roles" => self.manage_roles,
+            "manage_messages" => self.manage_messages,
+            "manage_webhooks" => self.manage_webhooks,
+            "manage_emojis" => self.manage_emojis,
+            "kick_members" => self.kick_members,
+            "ban_members" => self.ban_members,
+            "mention_everyone" => self.mention_everyone,
+            _ => false,
+        }
+    }
 
     pub(crate) fn set(&mut self, name: &str, value: bool) {
         match name {

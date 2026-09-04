@@ -7,7 +7,10 @@ use super::super::{
         broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
         get_user_custom_role_ids, get_user_from_token, get_user_role, now_millis,
     },
-    state::{AppState, ChannelCategoryRecord, ChannelRecord, RolePermissions, RoomRecord},
+    state::{
+        AppState, ChannelCategoryRecord, ChannelRecord, PermissionOverwrite, RolePermissions,
+        RoomRecord,
+    },
 };
 use axum::{
     extract::{Path, State},
@@ -74,6 +77,7 @@ pub(crate) async fn list_channels(
             "category_id": ch.category_id,
             "read_only": ch.read_only,
             "overwrites": serde_json::to_value(&ch.overwrites).unwrap_or_default(),
+            "inherit_category_permissions": ch.inherit_category_permissions,
             "view_roles": ch.view_roles,
             "write_roles": ch.write_roles,
             "showcase_write_roles": ch.showcase_write_roles,
@@ -101,12 +105,43 @@ pub(crate) async fn list_channels(
             "category_id": cat.category_id,
             "name": cat.name,
             "position": cat.position,
+            "overwrites": serde_json::to_value(&cat.overwrites).unwrap_or_default(),
         }));
     }
 
     Ok(Json(
         json!({ "channels": channels, "categories": categories }),
     ))
+}
+
+/// Reject unknown permission names and target kinds rather than storing rules
+/// that would silently never apply.
+fn validate_overwrites(
+    overwrites: &[PermissionOverwrite],
+) -> Result<(), (StatusCode, Json<Value>)> {
+    for ow in overwrites {
+        if !matches!(ow.target_type.as_str(), "everyone" | "role" | "user") {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Overwrite target_type must be everyone, role or user",
+            ));
+        }
+        if ow.target_type != "everyone" && ow.target_id.is_empty() {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Role and user overwrites need a target_id",
+            ));
+        }
+        for name in ow.allow.iter().chain(ow.deny.iter()) {
+            if !RolePermissions::NAMES.contains(&name.as_str()) {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    "Unknown permission in overwrite",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) async fn create_channel(
@@ -230,6 +265,7 @@ pub(crate) async fn create_channel(
         read_only: false,
         overwrites: vec![],
         overwrites_migrated: true,
+        inherit_category_permissions: true,
         view_roles: vec![],
         write_roles: vec![],
         showcase_write_roles: vec![],
@@ -334,30 +370,7 @@ pub(crate) async fn update_channel(
         content.insert("read_only".to_string(), json!(read_only));
     }
     if let Some(ref overwrites) = req.overwrites {
-        // Reject unknown permission names and target kinds rather than storing
-        // rules that would silently never apply.
-        for ow in overwrites {
-            if !matches!(ow.target_type.as_str(), "everyone" | "role" | "user") {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "Overwrite target_type must be everyone, role or user",
-                ));
-            }
-            if ow.target_type != "everyone" && ow.target_id.is_empty() {
-                return Err(error_response(
-                    StatusCode::BAD_REQUEST,
-                    "Role and user overwrites need a target_id",
-                ));
-            }
-            for name in ow.allow.iter().chain(ow.deny.iter()) {
-                if !RolePermissions::NAMES.contains(&name.as_str()) {
-                    return Err(error_response(
-                        StatusCode::BAD_REQUEST,
-                        "Unknown permission in overwrite",
-                    ));
-                }
-            }
-        }
+        validate_overwrites(overwrites)?;
         let bson = mongodb::bson::to_bson(overwrites)
             .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid overwrites"))?;
         set_doc.insert("overwrites", bson);
@@ -367,6 +380,11 @@ pub(crate) async fn update_channel(
             "overwrites".to_string(),
             serde_json::to_value(overwrites).unwrap_or_default(),
         );
+    }
+
+    if let Some(inherit) = req.inherit_category_permissions {
+        set_doc.insert("inherit_category_permissions", inherit);
+        content.insert("inherit_category_permissions".to_string(), json!(inherit));
     }
 
     if let Some(ref view_roles) = req.view_roles {
@@ -560,6 +578,7 @@ pub(crate) async fn ensure_default_channels(
             read_only: false,
             overwrites: vec![],
             overwrites_migrated: true,
+            inherit_category_permissions: true,
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],
@@ -586,6 +605,7 @@ pub(crate) async fn ensure_default_channels(
             read_only: false,
             overwrites: vec![],
             overwrites_migrated: true,
+            inherit_category_permissions: true,
             view_roles: vec![],
             write_roles: vec![],
             showcase_write_roles: vec![],
@@ -645,6 +665,7 @@ pub(crate) async fn create_category(
         category_id: category_id.clone(),
         room_id: room_id.clone(),
         name: name.clone(),
+        overwrites: vec![],
         position: max_pos,
         created_by: user_id.clone(),
         created_at: now_millis(),
@@ -716,6 +737,16 @@ pub(crate) async fn update_category(
     if let Some(position) = req.position {
         set_doc.insert("position", position);
         content.insert("position".to_string(), json!(position));
+    }
+    if let Some(ref overwrites) = req.overwrites {
+        validate_overwrites(overwrites)?;
+        let bson = mongodb::bson::to_bson(overwrites)
+            .map_err(|_| error_response(StatusCode::BAD_REQUEST, "Invalid overwrites"))?;
+        set_doc.insert("overwrites", bson);
+        content.insert(
+            "overwrites".to_string(),
+            serde_json::to_value(overwrites).unwrap_or_default(),
+        );
     }
 
     if !set_doc.is_empty() {

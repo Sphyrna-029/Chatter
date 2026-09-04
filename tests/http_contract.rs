@@ -1162,3 +1162,312 @@ async fn channel_overwrite_contract_denies_allows_and_precedence() {
         .unwrap();
     assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn role_hierarchy_contract_blocks_self_escalation() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_owner_id, owner_token) = register_user(&client, &server.base_url, "owner", "pw").await;
+    let (member_id, member_token) = register_user(&client, &server.base_url, "member", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &owner_token,
+        "Hierarchy",
+        Some(vec![member_id.clone()]),
+        false,
+    )
+    .await;
+
+    let make_role = |name: &'static str, perms: Value| {
+        let client = client.clone();
+        let base_url = server.base_url.clone();
+        let room_id = room_id.clone();
+        let token = owner_token.clone();
+        async move {
+            client
+                .post(format!("{}/api/rooms/{}/roles", base_url, room_id))
+                .header("authorization", bearer(&token))
+                .json(&json!({ "name": name, "permissions": perms }))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()["role_id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+
+    // Created first, so it sits at position 0 — the strongest custom role.
+    let senior = make_role("Senior", json!({ "ban_members": true })).await;
+    // Created second: position 1, weaker, and holds manage_roles.
+    let junior = make_role("Junior", json!({ "manage_roles": true })).await;
+
+    let assign = client
+        .put(format!(
+            "{}/api/rooms/{}/members/{}/custom-roles",
+            server.base_url, room_id, member_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "role_ids": [junior] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(assign.status(), StatusCode::OK);
+
+    // manage_roles must not become a route to every other permission:
+    // the holder cannot grant themselves something they do not hold.
+    let escalate = client
+        .post(format!("{}/api/rooms/{}/roles", server.base_url, room_id))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({ "name": "Sneaky", "permissions": { "ban_members": true } }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(escalate.status(), StatusCode::FORBIDDEN);
+
+    // Nor edit a role above their own.
+    let edit_senior = client
+        .put(format!(
+            "{}/api/rooms/{}/roles/{}",
+            server.base_url, room_id, senior
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({ "name": "Hijacked" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(edit_senior.status(), StatusCode::FORBIDDEN);
+
+    // Nor delete it.
+    let delete_senior = client
+        .delete(format!(
+            "{}/api/rooms/{}/roles/{}",
+            server.base_url, room_id, senior
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(delete_senior.status(), StatusCode::FORBIDDEN);
+
+    // Nor assign it to themselves.
+    let grab_senior = client
+        .put(format!(
+            "{}/api/rooms/{}/members/{}/custom-roles",
+            server.base_url, room_id, member_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .json(&json!({ "role_ids": [senior] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(grab_senior.status(), StatusCode::FORBIDDEN);
+
+    // The owner outranks everything and is unaffected.
+    let owner_edit = client
+        .put(format!(
+            "{}/api/rooms/{}/roles/{}",
+            server.base_url, room_id, senior
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "name": "Senior Staff" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(owner_edit.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn category_permissions_are_inherited_until_a_channel_opts_out() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_owner_id, owner_token) = register_user(&client, &server.base_url, "owner", "pw").await;
+    let (member_id, member_token) = register_user(&client, &server.base_url, "member", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &owner_token,
+        "Categories",
+        Some(vec![member_id.clone()]),
+        false,
+    )
+    .await;
+
+    let category_id = client
+        .post(format!(
+            "{}/api/rooms/{}/categories",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "name": "Staff" }))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["category_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let channel_id = client
+        .post(format!(
+            "{}/api/rooms/{}/channels",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "name": "staff-chat",
+            "channel_type": "text",
+            "category_id": category_id
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["channel_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let perms = |token: String, channel: String| {
+        let client = client.clone();
+        let base_url = server.base_url.clone();
+        let room_id = room_id.clone();
+        async move {
+            client
+                .get(format!(
+                    "{}/api/rooms/{}/permissions?channel_id={}",
+                    base_url, room_id, channel
+                ))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap()["permissions"]
+                .clone()
+        }
+    };
+
+    assert_eq!(
+        perms(member_token.clone(), channel_id.clone()).await["send_messages"],
+        true
+    );
+
+    // Deny on the category, and the channel inherits it.
+    let deny_on_category = client
+        .put(format!(
+            "{}/api/rooms/{}/categories/{}",
+            server.base_url, room_id, category_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "everyone", "target_id": "", "allow": [], "deny": ["send_messages"] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deny_on_category.status(), StatusCode::OK);
+
+    assert_eq!(
+        perms(member_token.clone(), channel_id.clone()).await["send_messages"],
+        false,
+        "a channel should inherit its category's overwrites"
+    );
+
+    // The channel's own overwrite refines what it inherits.
+    let allow_on_channel = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({
+            "overwrites": [
+                { "target_type": "user", "target_id": member_id, "allow": ["send_messages"], "deny": [] }
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(allow_on_channel.status(), StatusCode::OK);
+
+    assert_eq!(
+        perms(member_token.clone(), channel_id.clone()).await["send_messages"],
+        true,
+        "the channel's own overwrite should win over the inherited one"
+    );
+
+    // Opting out drops the category rules entirely.
+    let opt_out = client
+        .put(format!(
+            "{}/api/rooms/{}/channels/{}",
+            server.base_url, room_id, channel_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "inherit_category_permissions": false, "overwrites": [] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(opt_out.status(), StatusCode::OK);
+
+    assert_eq!(
+        perms(member_token.clone(), channel_id.clone()).await["send_messages"],
+        true,
+        "opting out should ignore the category's deny"
+    );
+
+    // "View as" resolves for a role without assigning it to anyone.
+    let role_id = client
+        .post(format!("{}/api/rooms/{}/roles", server.base_url, room_id))
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "name": "Guest", "permissions": { "send_messages": false } }))
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap()["role_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let as_role: Value = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions?channel_id={}&as_role={}",
+            server.base_url, room_id, channel_id, role_id
+        ))
+        .header("authorization", bearer(&owner_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(as_role["permissions"]["send_messages"], false);
+
+    // Inspecting someone else's access is itself gated.
+    let peeking = client
+        .get(format!(
+            "{}/api/rooms/{}/permissions?as_user={}",
+            server.base_url, room_id, "@owner:localhost"
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(peeking.status(), StatusCode::FORBIDDEN);
+}
