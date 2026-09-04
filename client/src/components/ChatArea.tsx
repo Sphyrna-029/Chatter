@@ -1062,7 +1062,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         </div>
       )}
       {/* Header — compact on mobile since MobileHeader shows room name */}
-      <div className={`flex items-center justify-between border-b px-4 ${isMobile ? "py-1.5" : "py-3"}`}>
+      <div className={`flex items-center justify-between border-b ${isMobile ? "px-1 py-0.5" : "px-4 py-3"}`}>
         <div className={isMobile ? "w-0" : "w-8"} />
         <div className={`flex-1 min-w-0 text-center ${isMobile ? "hidden" : ""}`}>
           {roomInfo?.is_direct && editingDMName ? (

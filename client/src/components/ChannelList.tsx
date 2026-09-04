@@ -35,6 +35,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
 
 interface ChannelListProps {
+  /** Renders full-bleed inside the mobile drawer instead of as a resizable column. */
+  asDrawer?: boolean;
+  /** Called after the user picks a channel, so the mobile drawer can close. */
+  onChannelSelected?: () => void;
   onJoinVoiceChannel: (channelId: string) => void;
   onLeaveVoice?: () => void;
   onToggleMute?: () => void;
@@ -79,7 +83,7 @@ function VoiceTimer({ since }: { since: number }) {
   return <span className="text-green-400 text-[10px] font-mono ml-1 shrink-0">{str}</span>;
 }
 
-export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
+export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel } = useAppContext();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -149,7 +153,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   const bannerInputRef = useRef<HTMLInputElement>(null);
 
   // Mobile collapse — default collapsed on small screens
-  const [panelCollapsed, setPanelCollapsed] = useState(() => window.innerWidth < 768);
+  const [panelCollapsed, setPanelCollapsed] = useState(() => !asDrawer && window.innerWidth < 768);
 
   // Drag state
   const [dragChannelId, setDragChannelId] = useState<string | null>(null);
@@ -441,6 +445,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
               } else {
                 selectChannel(ch.channel_id);
               }
+              onChannelSelected?.();
             }}
             onEdit={() => openEditDialog(ch)}
             onDelete={() => handleDelete(ch.channel_id)}
@@ -673,7 +678,14 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
   }, [width]);
 
   return (
-    <div className="rounded-lg overflow-hidden border border-border bg-sidebar relative transition-[width] duration-200 mr-2 flex flex-col h-full shrink-0" style={{ width: panelCollapsed ? 40 : width }}>
+    <div
+      className={
+        asDrawer
+          ? "w-full h-full overflow-hidden bg-sidebar relative flex flex-col"
+          : "rounded-lg overflow-hidden border border-border bg-sidebar relative transition-[width] duration-200 mr-2 flex flex-col h-full shrink-0"
+      }
+      style={asDrawer ? undefined : { width: panelCollapsed ? 40 : width }}
+    >
       {/* Room name header */}
       <div className="flex items-center justify-between px-3 py-2 border-b">
         {panelCollapsed ? (
@@ -715,7 +727,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
               )}
               <button
                 onClick={() => setPanelCollapsed(true)}
-                className="p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors md:hidden"
+                className={`p-0.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors md:hidden ${asDrawer ? "hidden" : ""}`}
                 title="Hide channels"
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
@@ -1173,7 +1185,7 @@ export function ChannelList({ onJoinVoiceChannel, onLeaveVoice, onToggleMute, on
       <RoleManagementDialog open={rolesOpen} onOpenChange={setRolesOpen} />
 
       {/* Resize handle */}
-      {!panelCollapsed && (
+      {!panelCollapsed && !asDrawer && (
         <div
           onMouseDown={onResizeStart}
           className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors"

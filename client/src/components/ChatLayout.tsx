@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { WifiOff, ChevronRight, Menu, Users, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
+import { WifiOff, ChevronRight, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { AdminDashboard } from "./AdminDashboard";
@@ -71,28 +71,50 @@ function LeftPanelRestoreButton() {
 /** Mobile top bar with sidebar toggle + room name + members */
 function MobileHeader({
   roomName,
+  channelName,
+  onChannelsToggle,
+  showChannels,
   onMembersToggle,
   showMembers,
 }: {
   roomName: string;
+  channelName?: string;
+  onChannelsToggle: () => void;
+  showChannels: boolean;
   onMembersToggle: () => void;
   showMembers: boolean;
 }) {
   const { toggleSidebar } = useSidebar();
   return (
-    <div className="flex items-center gap-3 border-b px-3 py-2.5 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
+    <div className="flex items-center gap-1 border-b px-2 py-1.5 shrink-0 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 z-10">
       <button
         onClick={toggleSidebar}
-        className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
         title="Open sidebar"
       >
         <Menu className="h-6 w-6" />
       </button>
-      <h1 className="flex-1 truncate text-base font-semibold">{roomName}</h1>
+      {showChannels && (
+        <button
+          onClick={onChannelsToggle}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
+          title="Show channels"
+        >
+          <Hash className="h-5 w-5" />
+        </button>
+      )}
+      {/* Room above channel: the channel column is a drawer on mobile, so this
+          is the only place the current channel is named. */}
+      <div className="flex-1 min-w-0 px-1 leading-tight">
+        <h1 className="truncate text-sm font-semibold">{roomName}</h1>
+        {channelName && (
+          <p className="truncate text-[11px] text-muted-foreground">#{channelName}</p>
+        )}
+      </div>
       {showMembers && (
         <button
           onClick={onMembersToggle}
-          className="flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors active:bg-accent"
           title="Show members"
         >
           <Users className="h-6 w-6" />
@@ -108,7 +130,9 @@ export function ChatLayout() {
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);
-  const [mobileMembersOpen, setMobileMembersOpen] = useState(false);
+  // Which mobile drawer is open, and the room it was opened for — a room switch
+  // then closes it by derivation rather than by an effect.
+  const [mobileDrawer, setMobileDrawer] = useState<{ kind: "channels" | "members"; roomId: string | null } | null>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const joinVoiceRef = useRef<((channelId?: string) => void) | null>(null);
@@ -329,6 +353,41 @@ export function ChatLayout() {
     : "voice channel";
   const showPipBanner = hasActiveScreenShare && !isOnVoiceRoom && (isPiP || pipWanted);
 
+  // On a phone the channel column would eat most of the viewport, so it moves
+  // into a drawer and the chat gets the full width.
+  const showChannelColumn = hasChannels && !isTankWarRoom && !isTugOfWarRoom;
+
+  const renderChannelList = (asDrawer: boolean) => (
+    <ChannelList
+      asDrawer={asDrawer}
+      onChannelSelected={asDrawer ? () => setMobileDrawer(null) : undefined}
+      onJoinVoiceChannel={(channelId) => {
+        const ch = state.channels.find((c) => c.channel_id === channelId);
+        if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
+        joinVoiceRef.current?.(channelId);
+      }}
+      onLeaveVoice={() => leaveVoiceRef.current?.()}
+      onToggleMute={() => toggleMuteRef.current?.()}
+      onToggleDeafen={() => toggleDeafenRef.current?.()}
+      onToggleScreenShare={() => {
+        if (state.isScreenSharing) {
+          stopScreenShareRef.current?.();
+        } else {
+          startScreenShareRef.current?.();
+        }
+      }}
+      isScreenSharing={state.isScreenSharing}
+      onToggleWebcam={() => {
+        if (state.isWebcamActive) stopWebcamRef.current?.();
+        else startWebcamRef.current?.();
+      }}
+      isWebcamActive={state.isWebcamActive}
+      connQualityRef={connQualityRef}
+      setUserVolumeRef={setUserVolumeRef}
+      speakingUsersRef={speakingUsersRef}
+    />
+  );
+
   return (
     <>
       {/* Persistent hidden video for PiP — never unmounted by React */}
@@ -341,13 +400,13 @@ export function ChatLayout() {
       />
 
       <SidebarProvider>
-        <div className="flex h-dvh w-full gap-2 p-2 bg-muted">
+        <div className={`flex h-dvh w-full bg-muted ${isMobile ? "" : "gap-2 p-2"}`}>
           <AppSidebar
             onCreateRoom={() => setCreateOpen(true)}
             onJoinRoom={() => setJoinOpen(true)}
           />
 
-          <SidebarInset className="flex flex-1 flex-col min-w-0 rounded-lg overflow-hidden border border-border">
+          <SidebarInset className={`flex flex-1 flex-col min-w-0 overflow-hidden ${isMobile ? "" : "rounded-lg border border-border"}`}>
             {/* Floating restore button — only visible when left sidebar is collapsed (desktop only) */}
             {!isMobile && <LeftPanelRestoreButton />}
 
@@ -361,7 +420,14 @@ export function ChatLayout() {
                     ? "Admin Dashboard"
                     : "Activity"
                 }
-                onMembersToggle={() => setMobileMembersOpen(true)}
+                channelName={
+                  state.currentChannelId
+                    ? state.channels.find((c) => c.channel_id === state.currentChannelId)?.name
+                    : undefined
+                }
+                onChannelsToggle={() => setMobileDrawer({ kind: "channels", roomId: state.currentRoomId })}
+                showChannels={showChannelColumn}
+                onMembersToggle={() => setMobileDrawer({ kind: "members", roomId: state.currentRoomId })}
                 showMembers={!!state.currentRoomId && !state.adminDashboardOpen}
               />
             )}
@@ -463,34 +529,7 @@ export function ChatLayout() {
                 <ActivityPage />
               ) : (
               <>
-                {hasChannels && !isTankWarRoom && !isTugOfWarRoom && (
-                  <ChannelList
-                    onJoinVoiceChannel={(channelId) => {
-                      const ch = state.channels.find((c) => c.channel_id === channelId);
-                      if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
-                      joinVoiceRef.current?.(channelId);
-                    }}
-                    onLeaveVoice={() => leaveVoiceRef.current?.()}
-                    onToggleMute={() => toggleMuteRef.current?.()}
-                    onToggleDeafen={() => toggleDeafenRef.current?.()}
-                    onToggleScreenShare={() => {
-                      if (state.isScreenSharing) {
-                        stopScreenShareRef.current?.();
-                      } else {
-                        startScreenShareRef.current?.();
-                      }
-                    }}
-                    isScreenSharing={state.isScreenSharing}
-                    onToggleWebcam={() => {
-                      if (state.isWebcamActive) stopWebcamRef.current?.();
-                      else startWebcamRef.current?.();
-                    }}
-                    isWebcamActive={state.isWebcamActive}
-                    connQualityRef={connQualityRef}
-                    setUserVolumeRef={setUserVolumeRef}
-                    speakingUsersRef={speakingUsersRef}
-                  />
-                )}
+                {showChannelColumn && !isMobile && renderChannelList(false)}
                 {isTankWarRoom ? (
                   <TankWarArea onJoinVoice={() => joinVoiceRef.current?.()} />
                 ) : isTugOfWarRoom ? (
@@ -547,8 +586,10 @@ export function ChatLayout() {
               </>
               )}
             </div>
-            {/* Voice bar when user is in voice but viewing a different room */}
-            {state.inVoiceChannel && !isOnVoiceRoom && (
+            {/* Voice bar: shown when in voice while viewing a different room, and
+                always on mobile — the channel column's voice controls live in a
+                drawer there, so this is the only reachable mute/hang-up. */}
+            {state.inVoiceChannel && (!isOnVoiceRoom || isMobile) && (
               <VoiceBar
                 channelName={state.voiceChannelName || "Voice"}
                 roomName={voiceRoomName}
@@ -575,16 +616,44 @@ export function ChatLayout() {
         </div>
       </SidebarProvider>
 
+      {/* Mobile channels drawer */}
+      {isMobile && (
+        <Sheet
+          open={
+            mobileDrawer?.kind === "channels" &&
+            mobileDrawer.roomId === state.currentRoomId &&
+            showChannelColumn
+          }
+          onOpenChange={(open) => !open && setMobileDrawer(null)}
+        >
+          <SheetContent side="left" className="w-72 p-0 flex flex-col overflow-hidden">
+            <SheetHeader className="sr-only">
+              <SheetTitle>Channels</SheetTitle>
+              <SheetDescription>Channels in this room</SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 min-h-0 overflow-hidden">
+              {showChannelColumn && renderChannelList(true)}
+            </div>
+          </SheetContent>
+        </Sheet>
+      )}
+
       {/* Mobile members drawer */}
       {isMobile && (
-        <Sheet open={mobileMembersOpen} onOpenChange={setMobileMembersOpen}>
+        <Sheet
+          open={
+            mobileDrawer?.kind === "members" &&
+            mobileDrawer.roomId === state.currentRoomId
+          }
+          onOpenChange={(open) => !open && setMobileDrawer(null)}
+        >
           <SheetContent side="right" className="w-72 p-0 flex flex-col overflow-hidden">
             <SheetHeader className="sr-only">
               <SheetTitle>Members</SheetTitle>
               <SheetDescription>Room members list</SheetDescription>
             </SheetHeader>
             <div className="flex-1 min-h-0 overflow-hidden">
-              <MembersPanel collapsed={false} onToggle={() => setMobileMembersOpen(false)} />
+              <MembersPanel collapsed={false} onToggle={() => setMobileDrawer(null)} />
             </div>
           </SheetContent>
         </Sheet>

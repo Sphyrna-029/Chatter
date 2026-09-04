@@ -554,7 +554,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
           <AuthImage
             src={thumbUrl}
             alt=""
-            className="max-w-[640px] max-h-[480px] rounded-md object-contain"
+            className="max-w-[min(640px,100%)] max-h-[480px] rounded-md object-contain"
             onError={(e) => {
               const el = e.currentTarget as HTMLImageElement;
               el.style.display = "none";
@@ -566,7 +566,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
           <video
             src={url}
             preload="metadata"
-            className="max-w-[640px] max-h-[480px] rounded-md pointer-events-none"
+            className="max-w-[min(640px,100%)] max-h-[480px] rounded-md pointer-events-none"
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/15 to-transparent pointer-events-none" />
@@ -612,7 +612,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
         src={authSrc}
         controls
         preload="auto"
-        className="max-w-[640px] max-h-[480px] rounded-md cursor-pointer"
+        className="max-w-[min(640px,100%)] max-h-[480px] rounded-md cursor-pointer"
         onClick={(e) => {
           const video = e.currentTarget;
           video.pause();
@@ -774,7 +774,7 @@ function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
   };
 
   return (
-    <div className="max-w-[520px] rounded overflow-hidden mt-1 flex" style={{ borderLeft: `4px solid ${borderColor}` }}>
+    <div className="max-w-[min(520px,100%)] rounded overflow-hidden mt-1 flex" style={{ borderLeft: `4px solid ${borderColor}` }}>
       <div className="bg-secondary/50 p-3 flex-1 min-w-0">
         {embed.author && (
           <div className="flex items-center gap-1.5 mb-1">

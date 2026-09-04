@@ -16,7 +16,14 @@ function ScrollArea({
     >
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+        // Radix wraps the content in a `display: table` div so it can grow
+        // horizontally. No ScrollArea here renders a horizontal scrollbar, so
+        // the viewport is overflow-x: hidden and that growth is unreachable:
+        // one wide child stretches the table, every sibling — every message —
+        // lays out at that width, and the overflow is clipped off the right
+        // edge. Forcing the wrapper back to a block wraps content to the
+        // viewport instead. Overrides Radix's inline style, hence `!`.
+        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:!block"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>
