@@ -655,7 +655,16 @@ export async function apiGetVoiceMembers(roomId: string) {
   if (!res.ok) throw new Error("Failed to load voice members");
   return res.json() as Promise<{
     voice_members: VoiceMember[];
-    voice_channels?: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]>;
+    // Snake_case, matching what presence.rs actually serialises. Older callers
+    // cast this away and read `m.user_id || m.userId`.
+    voice_channels?: Record<string, {
+      user_id: string;
+      muted: boolean;
+      deafened: boolean;
+      screen_sharing: boolean;
+      force_muted?: boolean;
+      channel_id?: string;
+    }[]>;
     occupied_since?: Record<string, number>;
   }>;
 }

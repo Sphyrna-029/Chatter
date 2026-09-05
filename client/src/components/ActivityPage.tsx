@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiSync, apiGetAllRooms, apiListUploads, type RoomSummary } from "@/lib/api";
+import {
+  apiSync,
+  apiGetAllRooms,
+  apiListUploads,
+  apiGetVoiceMembers,
+  apiGetChannels,
+  apiGetUnreads,
+  apiMarkRead,
+  type RoomSummary,
+} from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash, HardDrive } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash, HardDrive, Radio, Volume2, Monitor, MicOff, CheckCheck, Music, Gamepad2 } from "lucide-react";
 
 interface RoomActivity {
   roomId: string;
@@ -25,6 +34,30 @@ interface RoomStat {
   messageCount: number;
 }
 
+interface LiveVoiceMember {
+  userId: string;
+  muted: boolean;
+  deafened: boolean;
+  screenSharing: boolean;
+}
+
+interface LiveVoiceChannel {
+  channelId: string;
+  name: string;
+  members: LiveVoiceMember[];
+}
+
+interface LiveVoiceRoom {
+  roomId: string;
+  channels: LiveVoiceChannel[];
+}
+
+/** Voice occupancy is not in the store here — it is only tracked for the room
+ *  you are viewing, and on this page there is none — so it is polled. */
+const LIVE_REFRESH_MS = 15_000;
+/** The sync-derived digest is far heavier, so it refreshes lazily. */
+const DIGEST_REFRESH_MS = 60_000;
+
 function relativeTime(ts: number): string {
   const diff = Date.now() - ts;
   const seconds = Math.floor(diff / 1000);
@@ -35,6 +68,16 @@ function relativeTime(ts: number): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+/** Steam reports the session start in seconds, matching UserProfileDialog. */
+function playingFor(startSecs: number): string {
+  const elapsed = Math.floor(Date.now() / 1000 - startSecs);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return "just started";
 }
 
 function formatFileSize(bytes: number): string {
@@ -52,7 +95,7 @@ function statusColor(status: string) {
 }
 
 export function ActivityPage() {
-  const { state, selectRoom, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser } = useAppContext();
+  const { state, selectRoom, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser, loadUnreads } = useAppContext();
   const [activities, setActivities] = useState<RoomActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [blockedExpanded, setBlockedExpanded] = useState(false);
@@ -60,6 +103,8 @@ export function ActivityPage() {
   const [topPeople, setTopPeople] = useState<PersonStat[]>([]);
   const [topRooms, setTopRooms] = useState<RoomStat[]>([]);
   const [storageUsed, setStorageUsed] = useState(0);
+  const [liveVoice, setLiveVoice] = useState<LiveVoiceRoom[]>([]);
+  const [markingRead, setMarkingRead] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -155,12 +200,102 @@ export function ActivityPage() {
     }
 
     fetchActivity();
-    return () => { cancelled = true; };
-  }, [state.joinedRoomIds, state.userId]);
+    // The reducer keeps unread counts live over the socket, but a resync picks
+    // up reads that happened on another device.
+    void loadUnreads();
+    const interval = setInterval(() => {
+      fetchActivity();
+      void loadUnreads();
+    }, DIGEST_REFRESH_MS);
+    // Coming back to the tab is exactly when a stale digest is most obvious.
+    const onFocus = () => { if (!document.hidden) fetchActivity(); };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [state.joinedRoomIds, state.userId, loadUnreads]);
+
+  // Who is in voice, and who is streaming, across every room you have joined.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchLiveVoice() {
+      try {
+        const { rooms } = await apiGetAllRooms();
+        const joined = new Set(state.joinedRoomIds);
+        const active = rooms.filter((r) => joined.has(r.room_id) && r.voice_count > 0);
+        if (active.length === 0) {
+          if (!cancelled) setLiveVoice([]);
+          return;
+        }
+
+        const detailed = await Promise.all(
+          active.map(async (room): Promise<LiveVoiceRoom> => {
+            const [voice, channelData] = await Promise.all([
+              apiGetVoiceMembers(room.room_id),
+              apiGetChannels(room.room_id).catch(() => ({ channels: [], categories: [] })),
+            ]);
+            const channelNames: Record<string, string> = {};
+            for (const ch of channelData.channels) channelNames[ch.channel_id] = ch.name;
+
+            const channels: LiveVoiceChannel[] = Object.entries(voice.voice_channels ?? {})
+              .map(([channelId, members]) => ({
+                channelId,
+                // Rooms predating channels key their members by room id instead.
+                name: channelNames[channelId] || "Voice",
+                members: members.map((m) => ({
+                  userId: m.user_id,
+                  muted: !!m.muted,
+                  deafened: !!m.deafened,
+                  screenSharing: !!m.screen_sharing,
+                })),
+              }))
+              .filter((c) => c.members.length > 0);
+
+            return { roomId: room.room_id, channels };
+          }),
+        );
+
+        if (!cancelled) setLiveVoice(detailed.filter((r) => r.channels.length > 0));
+      } catch {
+        // Keep showing the last known state rather than blanking the section.
+      }
+    }
+
+    fetchLiveVoice();
+    const interval = setInterval(fetchLiveVoice, LIVE_REFRESH_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [state.joinedRoomIds]);
+
+  // Read markers are per channel, so clearing a room means clearing each of
+  // its channels — the unread rows already carry the pairs to mark.
+  const markAllRead = useCallback(async () => {
+    setMarkingRead(true);
+    try {
+      const { unreads } = await apiGetUnreads();
+      await Promise.all(
+        unreads.map((u) => apiMarkRead(u.room_id, u.channel_id).catch(() => {})),
+      );
+      await loadUnreads();
+    } catch {
+      // Nothing to undo — the next refresh reflects whatever landed.
+    } finally {
+      setMarkingRead(false);
+    }
+  }, [loadUnreads]);
 
   const mentionedRooms = Object.entries(state.roomMentions).filter(
     ([, count]) => count > 0
   );
+
+  const unreadRooms = Object.entries(state.roomUnreadCounts).filter(
+    ([, count]) => count > 0
+  );
+  const totalUnread = unreadRooms.reduce((sum, [, count]) => sum + count, 0);
 
   // Sort friends: online first
   const sortedFriends = [...state.friends].sort((a, b) => {
@@ -181,6 +316,107 @@ export function ActivityPage() {
             Your rooms and recent conversations
           </p>
         </div>
+
+        {/* Happening Now — live voice and screen shares across your rooms */}
+        {liveVoice.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              <Radio className="h-4 w-4 text-success" />
+              Happening Now
+            </h2>
+            <div className="grid gap-2">
+              {liveVoice.map((room) => {
+                const info = state.roomInfoMap[room.roomId];
+                const name = info?.name || "Unnamed";
+                return (
+                  <button
+                    key={room.roomId}
+                    onClick={() => selectRoom(room.roomId)}
+                    className="flex flex-col gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-3 text-left transition-colors hover:bg-success/10 cursor-pointer w-full overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">
+                        {info?.icon_url ? (
+                          <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
+                        ) : (
+                          name.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                      <span className="font-medium truncate">{name}</span>
+                    </div>
+
+                    {room.channels.map((channel) => {
+                      const sharers = channel.members.filter((m) => m.screenSharing);
+                      return (
+                        <div key={channel.channelId} className="flex items-center gap-2 pl-8 min-w-0">
+                          <Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-xs text-muted-foreground truncate max-w-[8rem]">
+                            {channel.name}
+                          </span>
+                          <div className="flex items-center -space-x-1.5 shrink-0">
+                            {channel.members.slice(0, 5).map((member) => {
+                              const presence = state.userPresence[member.userId];
+                              const label = presence?.displayName || displayUserId(member.userId);
+                              return (
+                                <span key={member.userId} className="relative" title={label}>
+                                  <Avatar className="h-6 w-6 border-2 border-background">
+                                    <AuthAvatarImage src={presence?.avatarUrl || ""} />
+                                    <AvatarFallback className="text-3xs bg-secondary">
+                                      {label[0]?.toUpperCase() || "?"}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  {member.muted && (
+                                    <MicOff className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-background p-[1px] text-destructive" />
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          {channel.members.length > 5 && (
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              +{channel.members.length - 5}
+                            </span>
+                          )}
+                          {sharers.length > 0 && (
+                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-purple-500/20 text-purple-400 shrink-0">
+                              <Monitor className="h-3 w-3" />
+                              {sharers.length === 1
+                                ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`
+                                : `${sharers.length} streaming`}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Unread summary */}
+        {totalUnread > 0 && (
+          <section className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+            <p className="text-sm min-w-0">
+              <span className="font-semibold">{totalUnread}</span>
+              {" unread message"}{totalUnread !== 1 ? "s" : ""}
+              {" across "}
+              <span className="font-semibold">{unreadRooms.length}</span>
+              {" room"}{unreadRooms.length !== 1 ? "s" : ""}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs shrink-0"
+              onClick={markAllRead}
+              disabled={markingRead}
+            >
+              <CheckCheck className="h-3.5 w-3.5 mr-1" />
+              {markingRead ? "Marking…" : "Mark all read"}
+            </Button>
+          </section>
+        )}
 
         {/* Storage Usage */}
         {!loading && state.storageLimitBytes > 0 && (
@@ -349,6 +585,7 @@ export function ActivityPage() {
                     const info = state.roomInfoMap[roomId];
                     const name = info?.name || "Unnamed";
                     const hasMention = !!state.roomMentions[roomId];
+                    const unreadCount = state.roomUnreadCounts[roomId] || 0;
 
                     return (
                       <button
@@ -395,6 +632,11 @@ export function ActivityPage() {
 
                         {/* Meta */}
                         <div className="flex flex-col items-end gap-1 shrink-0 text-xs text-muted-foreground">
+                          {unreadCount > 0 && (
+                            <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-2xs font-bold text-primary-foreground">
+                              {unreadCount > 99 ? "99+" : unreadCount}
+                            </span>
+                          )}
                           {lastMessage && (
                             <span>{relativeTime(lastMessage.timestamp)}</span>
                           )}
@@ -479,11 +721,17 @@ export function ActivityPage() {
                     const avatarUrl = presence?.avatarUrl || "";
                     const initial = displayName[0]?.toUpperCase() || "?";
 
+                    const isOffline = status === "offline";
+                    // Rich presence arrives on the global presence_update event,
+                    // so it is as live here as it is in the members panel.
+                    const spotify = !isOffline && presence?.spotifyTrack;
+                    const steam = !isOffline && !spotify && presence?.steamGame;
+
                     return (
                       <button
                         key={friendId}
                         onClick={() => setProfileUserId(friendId)}
-                        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full min-w-0"
                       >
                         <div className="relative shrink-0">
                           <Avatar className="h-7 w-7">
@@ -492,7 +740,37 @@ export function ActivityPage() {
                           </Avatar>
                           <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-background ${statusColor(status)}`} />
                         </div>
-                        <span className="font-medium text-sm truncate">{displayName}</span>
+                        <div className="min-w-0 flex-1">
+                          <span className="block font-medium text-sm truncate">{displayName}</span>
+                          {spotify && (
+                            <span className="flex items-center gap-1 text-2xs text-muted-foreground truncate">
+                              {presence?.spotifyAlbumArt ? (
+                                <img
+                                  src={presence.spotifyAlbumArt}
+                                  alt=""
+                                  className="h-3 w-3 rounded-[2px] object-cover shrink-0"
+                                />
+                              ) : (
+                                <Music className="h-3 w-3 shrink-0 text-success" />
+                              )}
+                              <span className="truncate">
+                                {presence?.spotifyTrack}
+                                {presence?.spotifyArtist ? ` — ${presence.spotifyArtist}` : ""}
+                              </span>
+                            </span>
+                          )}
+                          {steam && (
+                            <span className="flex items-center gap-1 text-2xs text-muted-foreground truncate">
+                              <Gamepad2 className="h-3 w-3 shrink-0 text-blue-400" />
+                              <span className="truncate">
+                                {presence?.steamGame}
+                                {presence?.gameSessionStart
+                                  ? ` · ${playingFor(presence.gameSessionStart)}`
+                                  : ""}
+                              </span>
+                            </span>
+                          )}
+                        </div>
                       </button>
                     );
                   })}
