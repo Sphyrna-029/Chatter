@@ -25,6 +25,13 @@ const DRIFT_CHECK_MS = 3000;
 const END_EPSILON_SECS = 0.35;
 /** A player position older than this is not trusted for drift correction. */
 const PLAYER_POSITION_STALE_MS = 10_000;
+/** HTMLMediaElement.HAVE_FUTURE_DATA — enough buffered to advance a frame. */
+const HAVE_FUTURE_DATA = 3;
+/** Leave a correction this long to land before considering another. A seek into
+ *  an unbuffered stretch takes seconds, and re-seeking restarts it. */
+const DRIFT_SETTLE_MS = 5000;
+/** Give up waiting on a seek that never reports landing. */
+const SEEK_ABANDON_MS = 15_000;
 /** Offered on the reaction bar. Any emoji is storable; these are the shortcuts. */
 const REACTION_EMOJI = ["😂", "😮", "❤️", "🔥", "👀", "💀"] as const;
 /** A reaction floats over the video when it lands this close to where we are,
@@ -78,6 +85,7 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     return saved ? parseFloat(saved) : 1.0;
   });
   const [isMuted, setIsMuted] = useState(false);
+  const [autoplayMuted, setAutoplayMuted] = useState(false);
   const [reactions, setReactions] = useState<WatchPartyReaction[]>([]);
   // Reactions currently animating over the video, keyed so repeats of the same
   // emoji do not collapse into one node.
@@ -134,7 +142,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       }
     } else if (videoRef.current) {
       videoRef.current.volume = vol;
-      videoRef.current.muted = muted;
+      // Only muting because autoplay demanded it: unmuting here would have the
+      // browser pause the video, which is the "audio but no picture, or
+      // neither" late joiners were seeing. It stays muted until a gesture.
+      videoRef.current.muted = muted || autoplayMutedRef.current;
     }
   }, []);
 
@@ -171,6 +182,15 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   const reportEndedRef = useRef<(() => void) | null>(null);
   // Store pending sync so onCanPlay can apply it when the video is actually ready.
   const pendingSyncRef = useRef<{ position: number; playing: boolean } | null>(null);
+  // A seek we have issued that has not landed yet. Seeking again before it
+  // lands restarts the fetch, which is how a late joiner ends up stuck on a
+  // black frame for ever.
+  const seekPendingRef = useRef<number | null>(null);
+  // When we last moved the player, so corrections cannot stack up.
+  const lastCorrectionAtRef = useRef(0);
+  // Set when autoplay was only permitted because we muted. Unmuting such a
+  // video without a user gesture makes the browser pause it outright.
+  const autoplayMutedRef = useRef(false);
 
   const applySync = useCallback((positionSecs: number, playing: boolean) => {
     isApplyingSync.current = true;
@@ -193,12 +213,36 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         displayPositionRef.current = positionSecs;
         return;
       }
-      videoRef.current.currentTime = positionSecs;
-      if (playing && videoRef.current.paused) {
-        videoRef.current.muted = true; // ensure muted so autoplay is allowed
-        videoRef.current.play().catch(() => {});
-      } else if (!playing && !videoRef.current.paused) {
-        videoRef.current.pause();
+      const video = videoRef.current;
+      // Re-issuing a seek that is already on its way restarts the fetch and the
+      // decode, so a player that is still fetching never reaches a keyframe.
+      const alreadySeekingHere =
+        seekPendingRef.current !== null &&
+        Math.abs(seekPendingRef.current - positionSecs) < DRIFT_TOLERANCE_SECS;
+      if (!alreadySeekingHere && Math.abs(video.currentTime - positionSecs) > 0.25) {
+        seekPendingRef.current = positionSecs;
+        video.currentTime = positionSecs;
+        // If `seeked` never arrives — a source that will not serve the range,
+        // say — release the guard eventually so one retry is possible. Long
+        // enough that it cannot become the thrash it exists to prevent.
+        const target = positionSecs;
+        setTimeout(() => {
+          if (seekPendingRef.current === target) seekPendingRef.current = null;
+        }, SEEK_ABANDON_MS);
+      }
+      lastCorrectionAtRef.current = Date.now();
+
+      if (playing && video.paused) {
+        // Try with sound first. Muting up front guarantees playback but leaves
+        // everyone silent, and unmuting afterwards is what stopped the video.
+        video.play().catch(() => {
+          autoplayMutedRef.current = true;
+          setAutoplayMuted(true);
+          video.muted = true;
+          video.play().catch(() => {});
+        });
+      } else if (!playing && !video.paused) {
+        video.pause();
       }
     }
     setDisplayPosition(positionSecs);
@@ -215,6 +259,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     endReportedRef.current = false;
     playerPositionRef.current = 0;
     playerPositionAtRef.current = 0;
+    seekPendingRef.current = null;
+    lastCorrectionAtRef.current = 0;
+    autoplayMutedRef.current = false;
+    setAutoplayMuted(false);
   }, [watchState.videoUrl]);
 
   // Listen for YouTube player postMessages: duration detection and onReady sync.
@@ -456,6 +504,18 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
       // embed that never reports currentTime would otherwise be seeked on every
       // pass.
       if (Date.now() - playerPositionAtRef.current > PLAYER_POSITION_STALE_MS) return;
+      // Never correct a player that is mid-seek or starved of data. It is
+      // behind precisely because it is still fetching, and seeking again
+      // restarts that fetch — which is how a late joiner seeking into an
+      // unbuffered stretch could be held on a black frame indefinitely.
+      if (seekPendingRef.current !== null) return;
+      const video = videoRef.current;
+      if (!isYoutubeRef.current) {
+        if (!video || video.seeking) return;
+        if (video.readyState < HAVE_FUTURE_DATA) return;
+      }
+      // Give a correction time to take effect before judging it again.
+      if (Date.now() - lastCorrectionAtRef.current < DRIFT_SETTLE_MS) return;
       if (Math.abs(expected - playerPositionRef.current) > DRIFT_TOLERANCE_SECS) {
         applySync(expected, true);
       }
@@ -530,9 +590,19 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   // button, seekbar) broadcast controls to prevent cross-user feedback loops.
   const handleVideoPlay = useCallback(() => {}, []);
   const handleVideoPause = useCallback(() => {}, []);
-  const handleVideoSeeked = useCallback(() => {}, []);
+  // A landed seek clears the in-flight guard, so drift correction may resume.
+  const handleVideoSeeked = useCallback(() => {
+    seekPendingRef.current = null;
+    const t = videoRef.current?.currentTime;
+    if (typeof t === "number" && isFinite(t)) {
+      playerPositionRef.current = t;
+      playerPositionAtRef.current = Date.now();
+    }
+  }, []);
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    autoplayMutedRef.current = false;
+    setAutoplayMuted(false);
     const vol = parseFloat(e.target.value);
     setVolume(vol);
     volumeRef.current = vol;
@@ -544,6 +614,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   };
 
   const handleToggleMute = () => {
+    // A click is the gesture the autoplay policy wants, so the forced mute
+    // no longer applies.
+    autoplayMutedRef.current = false;
+    setAutoplayMuted(false);
     const newMuted = !isMuted;
     setIsMuted(newMuted);
     isMutedRef.current = newMuted;
@@ -598,14 +672,17 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   }}
                 />
               ) : (
+                // Deliberately carries neither autoPlay nor muted. Autoplay
+                // would start at zero only to be seeked away, and a hardcoded
+                // muted attribute meant every load began muted and was unmuted
+                // by applyVolume moments later — which is what made the browser
+                // stop playback for late joiners. applySync starts it instead.
                 <video
                   ref={videoRef}
                   key={watchState.videoUrl}
                   className="w-full h-full object-contain"
                   src={videoSrc}
                   controls={false}
-                  autoPlay
-                  muted
                   playsInline
                   preload="auto"
                   onPlay={handleVideoPlay}
@@ -619,6 +696,11 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     }
                   }}
                   onEnded={() => reportEndedRef.current?.()}
+                  onSeeking={() => {
+                    if (seekPendingRef.current === null && videoRef.current) {
+                      seekPendingRef.current = videoRef.current.currentTime;
+                    }
+                  }}
                   onLoadedMetadata={() => {
                     const dur = videoRef.current?.duration;
                     if (dur && isFinite(dur)) {
@@ -646,6 +728,25 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     applyVolume(volumeRef.current, isMutedRef.current);
                   }}
                 />
+              )}
+
+              {/* Autoplay only went through because we muted; say so, since
+                  otherwise the video simply has no sound and nothing explains
+                  why. Clicking is the gesture that lifts the restriction. */}
+              {autoplayMuted && (
+                <button
+                  onClick={() => {
+                    autoplayMutedRef.current = false;
+                    setAutoplayMuted(false);
+                    setIsMuted(false);
+                    isMutedRef.current = false;
+                    applyVolume(volumeRef.current, false);
+                  }}
+                  className="absolute top-2 left-2 z-30 flex items-center gap-1.5 rounded-full bg-background/85 backdrop-blur px-3 py-1.5 text-xs font-medium text-foreground hover:bg-background transition-colors cursor-pointer"
+                >
+                  <VolumeX className="w-3.5 h-3.5" />
+                  Muted to start playback — click for sound
+                </button>
               )}
 
               {/* Reactions landing near the current position */}
