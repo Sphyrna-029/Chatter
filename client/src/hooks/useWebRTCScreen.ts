@@ -7,6 +7,8 @@ import {
   VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
   getScreenSharePublishProfile,
+  loadScreenShareFps,
+  storeScreenShareFps,
   mungeScreenAudioSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
@@ -62,7 +64,7 @@ export function useWebRTCScreen() {
   const screenSubPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
-  const [screenFps, setScreenFps] = useState<30 | 60>(30);
+  const [screenFps, setScreenFpsState] = useState<30 | 60>(loadScreenShareFps);
   const screenShareStartingRef = useRef(false);
 
   // Ref for frozen detection external stats
@@ -413,6 +415,37 @@ export function useWebRTCScreen() {
   // Method to update external stats for frozen detection
   const updateConnStats = useCallback((stats: Record<string, PeerStats>) => {
     connStatsRef.current = stats;
+  }, []);
+
+  // Changing the frame rate mid-share used to only take effect on the next
+  // share. Both halves of the change apply live, so no renegotiation is needed:
+  // applyConstraints retimes the capture, and setParameters retimes the encoder.
+  const setScreenFps = useCallback(async (fps: 30 | 60) => {
+    setScreenFpsState(fps);
+    storeScreenShareFps(fps);
+
+    const stream = screenStreamRef.current;
+    const pc = screenPubPcRef.current;
+    // Not sharing — the new value is picked up by the next startScreenShare.
+    if (!stream || !pc) return;
+
+    const profile = getScreenSharePublishProfile(fps);
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      try {
+        // `max` as well as `ideal`: without an upper bound a capture already
+        // running at 60 has no reason to come back down to 30.
+        await track.applyConstraints({
+          frameRate: { ideal: profile.targetFps, max: profile.targetFps },
+        });
+      } catch {
+        // Some capture sources refuse a live frame rate change. The sender
+        // cap below still bounds what we actually encode and send.
+      }
+    }
+    const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
+    if (videoSender) await tuneScreenVideoSender(videoSender, profile);
+    toast.success(`Screen share set to ${profile.targetFps} FPS`);
   }, []);
 
   // ─── Screen share publish/stop ─────────────────────────────────────────────

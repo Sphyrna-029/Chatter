@@ -148,6 +148,27 @@ export function getScreenSharePublishProfile(
   return fps === 60 ? SCREEN_PROFILE_60FPS : SCREEN_PROFILE_30FPS;
 }
 
+// The chosen frame rate is a per-device preference, so it outlives the tab that
+// set it. Storage throws in private mode and with site data blocked, so every
+// access is guarded — a lost preference is not worth breaking screen share for.
+export const SCREEN_FPS_STORAGE_KEY = "chatter_screen_share_fps";
+
+export function loadScreenShareFps(): 30 | 60 {
+  try {
+    return localStorage.getItem(SCREEN_FPS_STORAGE_KEY) === "60" ? 60 : 30;
+  } catch {
+    return 30;
+  }
+}
+
+export function storeScreenShareFps(fps: 30 | 60): void {
+  try {
+    localStorage.setItem(SCREEN_FPS_STORAGE_KEY, String(fps));
+  } catch {
+    // The preference just will not survive the reload.
+  }
+}
+
 // Munge the SDP for the screen share publisher audio to keep system audio clear
 // without consuming more congestion budget than needed.
 export function mungeScreenAudioSdp(
