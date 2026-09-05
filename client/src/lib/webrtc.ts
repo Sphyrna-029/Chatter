@@ -169,3 +169,30 @@ export function mungeScreenAudioSdp(
     `$1${highQualityFmtp}\r\n`,
   );
 }
+
+// ─── Webcam publish profiles ────────────────────────────────────────────────
+// The camera equivalent of the screen share profiles above. Cameras run at a
+// lower resolution than a shared desktop, so they need far less bitrate to hold
+// the same quality — but 60fps still needs noticeably more than 30fps to avoid
+// the encoder trading detail away for the extra frames.
+export interface WebcamPublishProfile {
+  targetFps: 30 | 60;
+  contentHint: "motion";
+  maxBitrateBps: number;
+}
+
+const WEBCAM_PROFILE_30FPS: WebcamPublishProfile = {
+  targetFps: 30,
+  contentHint: "motion",
+  maxBitrateBps: 2_500_000,
+};
+
+const WEBCAM_PROFILE_60FPS: WebcamPublishProfile = {
+  targetFps: 60,
+  contentHint: "motion",
+  maxBitrateBps: 4_000_000,
+};
+
+export function getWebcamPublishProfile(fps: 30 | 60): WebcamPublishProfile {
+  return fps === 60 ? WEBCAM_PROFILE_60FPS : WEBCAM_PROFILE_30FPS;
+}

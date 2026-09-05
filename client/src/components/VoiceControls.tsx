@@ -211,7 +211,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
       <CameraSelectModal
         open={cameraModalOpen}
         onClose={() => setCameraModalOpen(false)}
-        onStart={(deviceId) => webcam.startWebcam(deviceId)}
+        onStart={(deviceId, fps) => webcam.startWebcam(deviceId, fps)}
       />
 
       {/* Controls at bottom */}

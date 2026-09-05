@@ -10,15 +10,25 @@ import { Button } from "@/components/ui/button";
 interface CameraSelectModalProps {
   open: boolean;
   onClose: () => void;
-  onStart: (deviceId: string) => void;
+  onStart: (deviceId: string, fps: 30 | 60) => void;
 }
+
+const FPS_OPTIONS: Array<30 | 60> = [30, 60];
 
 export function CameraSelectModal({ open, onClose, onStart }: CameraSelectModalProps) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string>("");
+  const [fps, setFps] = useState<30 | 60>(30);
+  // null while unknown — browsers that do not report track capabilities get
+  // both options rather than a silently missing one.
+  const [maxDeviceFps, setMaxDeviceFps] = useState<number | null>(null);
   const [previewStream, setPreviewStream] = useState<MediaStream | null>(null);
   const [permissionError, setPermissionError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Cameras often report 59.94 (NTSC) rather than a flat 60, so allow a
+  // little slack instead of hiding the option from them.
+  const supports60 = maxDeviceFps === null || maxDeviceFps >= 59;
 
   // When modal opens, request permission then enumerate devices
   useEffect(() => {
@@ -58,9 +68,13 @@ export function CameraSelectModal({ open, onClose, onStart }: CameraSelectModalP
       .getUserMedia(constraints)
       .then((stream) => {
         setPreviewStream(stream);
+        const track = stream.getVideoTracks()[0];
+        const max = track?.getCapabilities?.().frameRate?.max;
+        setMaxDeviceFps(typeof max === "number" ? max : null);
       })
       .catch(() => {
         setPreviewStream(null);
+        setMaxDeviceFps(null);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDeviceId, open]);
@@ -82,7 +96,7 @@ export function CameraSelectModal({ open, onClose, onStart }: CameraSelectModalP
 
   function handleStart() {
     stopPreview();
-    onStart(selectedDeviceId);
+    onStart(selectedDeviceId, supports60 ? fps : 30);
     onClose();
   }
 
@@ -121,6 +135,33 @@ export function CameraSelectModal({ open, onClose, onStart }: CameraSelectModalP
                   </select>
                 </div>
               )}
+
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-muted-foreground">Frame rate</label>
+                <div className="flex gap-2">
+                  {FPS_OPTIONS.map((option) => {
+                    const disabled = option === 60 && !supports60;
+                    return (
+                      <Button
+                        key={option}
+                        type="button"
+                        size="sm"
+                        variant={fps === option && !disabled ? "default" : "outline"}
+                        disabled={disabled}
+                        onClick={() => setFps(option)}
+                        className="flex-1 text-xs"
+                      >
+                        {option} FPS
+                      </Button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {supports60
+                    ? "60 FPS is smoother but uses more bandwidth."
+                    : "This camera only reports support for 30 FPS."}
+                </p>
+              </div>
 
               <div className="relative bg-black rounded-lg overflow-hidden aspect-video">
                 {previewStream ? (

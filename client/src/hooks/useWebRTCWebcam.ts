@@ -6,8 +6,44 @@ import {
   VOICE_SUB_STUCK_NEW_MS,
   VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
+  getWebcamPublishProfile,
 } from "@/lib/webrtc";
+import type { WebcamPublishProfile } from "@/lib/webrtc";
 import { toast } from "sonner";
+
+function buildWebcamVideoConstraints(
+  profile: WebcamPublishProfile,
+  deviceId?: string,
+): MediaTrackConstraints {
+  const constraints: MediaTrackConstraints = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: profile.targetFps },
+  };
+  if (deviceId) constraints.deviceId = { exact: deviceId };
+  return constraints;
+}
+
+async function tuneWebcamVideoSender(
+  sender: RTCRtpSender,
+  profile: WebcamPublishProfile,
+) {
+  try {
+    const params = sender.getParameters();
+    const baseEncoding = params.encodings?.[0] ?? {};
+    params.encodings = [{
+      ...baseEncoding,
+      maxBitrate: profile.maxBitrateBps,
+      maxFramerate: profile.targetFps,
+    }];
+    // A camera picked for 60fps is being picked for smooth motion, so shed
+    // resolution before frames when the network tightens.
+    params.degradationPreference = "maintain-framerate";
+    await sender.setParameters(params);
+  } catch {
+    // Browsers differ in which sender parameters are writable.
+  }
+}
 
 export function useWebRTCWebcam() {
   const { state, dispatch, wsRef } = useAppContext();
@@ -18,6 +54,9 @@ export function useWebRTCWebcam() {
   const webcamRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingWebcamSubsRef = useRef<Set<string>>(new Set());
   const webcamStartingRef = useRef(false);
+  // Profile of the stream currently being published, so the publish answer
+  // handler can re-apply sender parameters browsers reset on renegotiation.
+  const webcamProfileRef = useRef<WebcamPublishProfile>(getWebcamPublishProfile(30));
 
   const currentRoomRef = useRef(state.currentRoomId);
   const voiceRoomIdRef = useRef(state.voiceRoomId);
@@ -157,6 +196,13 @@ export function useWebRTCWebcam() {
       if (msg.type === "webcam_webrtc_publish_answer" && webcamPubPcRef.current) {
         try {
           await webcamPubPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          // Some browsers reset encodings when the answer is applied.
+          const videoSender = webcamPubPcRef.current.getSenders().find(
+            (s) => s.track?.kind === "video",
+          );
+          if (videoSender) {
+            await tuneWebcamVideoSender(videoSender, webcamProfileRef.current);
+          }
         } catch { /* noop */ }
       } else if (msg.type === "webcam_webrtc_publish_candidate" && webcamPubPcRef.current) {
         try { await webcamPubPcRef.current.addIceCandidate(msg.candidate); } catch { /* noop */ }
@@ -258,17 +304,14 @@ export function useWebRTCWebcam() {
     }
   }, [state.activeWebcamStreamers]);
 
-  const startWebcam = useCallback(async (deviceId?: string) => {
+  const startWebcam = useCallback(async (deviceId?: string, fps: 30 | 60 = 30) => {
     if (!state.inVoiceChannel || !canSignal(wsRef)) return;
     if (webcamStartingRef.current) return;
     webcamStartingRef.current = true;
+    const profile = getWebcamPublishProfile(fps);
+    webcamProfileRef.current = profile;
     try {
-      const videoConstraints: MediaTrackConstraints = {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30 },
-      };
-      if (deviceId) videoConstraints.deviceId = { exact: deviceId };
+      const videoConstraints = buildWebcamVideoConstraints(profile, deviceId);
 
       const stream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints });
       webcamStreamRef.current = stream;
@@ -286,13 +329,17 @@ export function useWebRTCWebcam() {
       }
 
       const videoTrack = stream.getVideoTracks()[0];
+      if ("contentHint" in videoTrack) {
+        videoTrack.contentHint = profile.contentHint;
+      }
       videoTrack.onended = () => {
         if (webcamStreamRef.current === stream) stopWebcam();
       };
 
       const pc = new RTCPeerConnection(getWebRTCConfig());
       webcamPubPcRef.current = pc;
-      pc.addTrack(videoTrack, stream);
+      const videoSender = pc.addTrack(videoTrack, stream);
+      await tuneWebcamVideoSender(videoSender, profile);
 
       pc.onicecandidate = (ev) => {
         if (!ev.candidate || !canSignal(wsRef)) return;
@@ -306,6 +353,7 @@ export function useWebRTCWebcam() {
 
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
+      await tuneWebcamVideoSender(videoSender, profile);
 
       if (canSignal(wsRef)) {
         wsRef.current!.send(JSON.stringify({
