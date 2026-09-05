@@ -410,6 +410,28 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
   }, [state.messageReactions, state.messages, scrollToBottom]);
 
+  // Hold the viewport at the newest message while the channel settles.
+  //
+  // Scrolling once when messages arrive is not enough: avatars, images, link
+  // embeds and code blocks all resolve their height afterwards and push the
+  // content down, leaving the viewport short of the bottom — which is what
+  // "it doesn't take me to the most recent message" looks like. This re-pins
+  // on every height change, but only for a reader who is already at the
+  // bottom, so it never fights someone reading history.
+  useEffect(() => {
+    const viewport = getViewport();
+    const content = viewport?.firstElementChild;
+    if (!viewport || !content) return;
+
+    const observer = new ResizeObserver(() => {
+      if (!isNearBottomRef.current) return;
+      if (state.loadingOlderMessages) return;
+      viewport.scrollTop = viewport.scrollHeight;
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [getViewport, state.currentChannelId, state.loadingOlderMessages]);
+
   // Scroll to bottom on channel switch
   useEffect(() => {
     if (state.currentChannelId) {
