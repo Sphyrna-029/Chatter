@@ -7,11 +7,11 @@ import {
   type MatrixMessage,
 } from "@/lib/api";
 import { AuthImage } from "@/components/AuthImage";
+import { requestForumPost } from "@/lib/pendingForumPost";
 import { MessagesSquare, MessageSquareText } from "lucide-react";
 
 interface RecentDiscussionsProps {
   refreshKey: number;
-  onSelectRoom: (roomId: string) => void;
 }
 
 interface Discussion {
@@ -21,6 +21,11 @@ interface Discussion {
   title: string;
   replies: number;
   ts: number;
+  /** The post to open, for a forum entry. */
+  postId?: string;
+  /** The thread root, and the channel it lives in, for a thread entry. */
+  eventId?: string;
+  channelId?: string;
 }
 
 const MAX_SHOWN = 6;
@@ -37,8 +42,8 @@ function relativeTime(ts: number): string {
 
 /** Forum posts and threads are invisible from the room list, so the newest of
  *  them are surfaced here. */
-export function RecentDiscussions({ refreshKey, onSelectRoom }: RecentDiscussionsProps) {
-  const { state } = useAppContext();
+export function RecentDiscussions({ refreshKey }: RecentDiscussionsProps) {
+  const { state, selectRoom, selectChannel, openThread } = useAppContext();
   const [items, setItems] = useState<Discussion[]>([]);
 
   useEffect(() => {
@@ -74,6 +79,7 @@ export function RecentDiscussions({ refreshKey, onSelectRoom }: RecentDiscussion
           title: post.title,
           replies: post.comment_count,
           ts: post.last_activity || post.created_at,
+          postId: post.post_id,
         })),
         ...threadPages.flat().map(({ roomId, thread }) => ({
           key: `thread:${thread.event_id}`,
@@ -82,6 +88,10 @@ export function RecentDiscussions({ refreshKey, onSelectRoom }: RecentDiscussion
           title: thread.thread_name || thread.content.body || "Thread",
           replies: thread.thread_reply_count ?? 0,
           ts: thread.origin_server_ts,
+          // The listing returns thread roots, keyed by event_id — the same id
+          // MessagePanel hands to openThread.
+          eventId: thread.event_id,
+          channelId: thread.channel_id,
         })),
       ]
         .sort((a, b) => b.ts - a.ts)
@@ -93,6 +103,24 @@ export function RecentDiscussions({ refreshKey, onSelectRoom }: RecentDiscussion
     load().catch(() => { /* keep what is already listed */ });
     return () => { cancelled = true; };
   }, [refreshKey, state.joinedRoomIds, state.roomInfoMap]);
+
+  // Landing in the room is not the same as landing in the discussion, so open
+  // the post or thread itself once the room is selected.
+  async function openDiscussion(item: Discussion) {
+    if (item.roomId !== state.currentRoomId) {
+      await selectRoom(item.roomId);
+    }
+    if (item.kind === "forum") {
+      if (item.postId) requestForumPost(item.roomId, item.postId);
+      return;
+    }
+    // selectRoom lands on the room's first text channel, which may not be the
+    // one holding the thread.
+    if (item.channelId && item.channelId !== state.currentChannelId) {
+      await selectChannel(item.channelId);
+    }
+    if (item.eventId) await openThread(item.eventId);
+  }
 
   if (items.length === 0) return null;
 
@@ -109,7 +137,7 @@ export function RecentDiscussions({ refreshKey, onSelectRoom }: RecentDiscussion
           return (
             <button
               key={item.key}
-              onClick={() => onSelectRoom(item.roomId)}
+              onClick={() => { void openDiscussion(item); }}
               className="flex items-center gap-3 w-full px-4 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
             >
               <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">

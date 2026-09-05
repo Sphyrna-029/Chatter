@@ -10,6 +10,7 @@ import {
 } from "@/lib/api";
 import { ForumPostCard } from "./ForumPostCard";
 import { ForumPostView } from "./ForumPostView";
+import { FORUM_POST_OPEN_EVENT, takePendingForumPost } from "@/lib/pendingForumPost";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -206,12 +207,23 @@ export function ForumArea() {
       }
     };
 
+    const onOpenPost = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail.roomId !== roomId) return;
+      // Clear the parked request too, so returning to this room later does not
+      // re-open the post.
+      takePendingForumPost(roomId);
+      setSelectedPostId(detail.postId);
+    };
+
+    window.addEventListener(FORUM_POST_OPEN_EVENT, onOpenPost);
     window.addEventListener("forum.post.created", onPostCreated);
     window.addEventListener("forum.post.deleted", onPostDeleted);
     window.addEventListener("forum.post.edited", onPostEdited);
     window.addEventListener("forum.comment.created", onCommentCreated);
     window.addEventListener("forum.comment.deleted", onCommentDeleted);
     return () => {
+      window.removeEventListener(FORUM_POST_OPEN_EVENT, onOpenPost);
       window.removeEventListener("forum.post.created", onPostCreated);
       window.removeEventListener("forum.post.deleted", onPostDeleted);
       window.removeEventListener("forum.post.edited", onPostEdited);
@@ -219,6 +231,13 @@ export function ForumArea() {
       window.removeEventListener("forum.comment.deleted", onCommentDeleted);
     };
   }, [roomId, selectedPostId, isSearching, sortMode]);
+
+  // A request that arrived before this component mounted — selecting the room
+  // is what mounts it, so the event above would have had no listener.
+  useEffect(() => {
+    const postId = takePendingForumPost(roomId);
+    if (postId) setSelectedPostId(postId);
+  }, [roomId]);
 
   const handleDeletePost = async (postId: string) => {
     if (!roomId) return;

@@ -665,7 +665,7 @@ export function ActivityPage() {
           </section>
         )}
 
-        <RecentDiscussions refreshKey={refreshKey} onSelectRoom={selectRoom} />
+        <RecentDiscussions refreshKey={refreshKey} />
 
         <StorageManager refreshKey={refreshKey} />
 
