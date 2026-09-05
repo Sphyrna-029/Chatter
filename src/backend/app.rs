@@ -112,6 +112,16 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
+    // watchparty_reactions: one video's timeline, ordered by position
+    let _ = db
+        .collection::<mongodb::bson::Document>("watchparty_reactions")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "video_url": 1, "position_secs": 1 })
+                .build(),
+        )
+        .await;
+
     // read_markers: lookup of every marker belonging to one user
     let _ = db
         .collection::<mongodb::bson::Document>("read_markers")

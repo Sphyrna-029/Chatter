@@ -315,6 +315,22 @@ export async function apiGetWatchPartyState(roomId: string): Promise<{
   return res.json();
 }
 
+export interface WatchPartyReaction {
+  reaction_id: string;
+  user_id: string;
+  emoji: string;
+  /** Position in the video, not wall clock — this is what makes a mark survive
+   *  a rewatch. */
+  position_secs: number;
+  created_at: number;
+}
+
+export async function apiGetWatchPartyReactions(roomId: string) {
+  const res = await authenticatedFetch(`/api/watchparty/${roomId}/reactions`);
+  if (!res.ok) throw new Error("Failed to load watch party reactions");
+  return res.json() as Promise<{ video_url: string; reactions: WatchPartyReaction[] }>;
+}
+
 export async function apiGetAccountStatus() {
   const res = await authenticatedFetch("/api/account/status");
   if (!res.ok) {

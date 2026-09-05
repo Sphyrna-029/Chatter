@@ -442,6 +442,32 @@ em, i {
   animation: marquee 12s linear infinite;
 }
 
+/* A watch-party reaction drifting up over the video as it lands. */
+@keyframes watchparty-float {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.7);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-90px) scale(1);
+  }
+}
+
+.watchparty-float {
+  animation: watchparty-float 2.6s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watchparty-float {
+    animation: watchparty-float 2.6s step-end forwards;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

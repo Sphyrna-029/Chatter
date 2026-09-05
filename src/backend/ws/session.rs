@@ -1814,6 +1814,108 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
         }
+        "watchparty_reaction" => {
+            if !room_id.is_empty() {
+                let emoji = msg.get("emoji").and_then(|v| v.as_str()).unwrap_or("");
+                let position_secs = msg
+                    .get("position_secs")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
+                    .max(0.0);
+                // A short non-empty string keeps a stray payload out of storage
+                // without restricting which emoji anyone may use.
+                let emoji_ok = !emoji.is_empty() && emoji.len() <= 16;
+
+                let (video_url, duration_secs) = {
+                    let wp = state.watch_party_rooms.read().await;
+                    wp.get(room_id)
+                        .map(|s| (s.video_url.clone(), s.duration_secs))
+                        .unwrap_or_default()
+                };
+
+                if emoji_ok && !video_url.is_empty() {
+                    // Past the end is meaningless on the timeline.
+                    let position_secs = if duration_secs > 0.0 {
+                        position_secs.min(duration_secs)
+                    } else {
+                        position_secs
+                    };
+                    let coll = state
+                        .db
+                        .collection::<mongodb::bson::Document>("watchparty_reactions");
+                    let existing = coll
+                        .count_documents(
+                            mongodb::bson::doc! { "room_id": room_id, "video_url": &video_url },
+                        )
+                        .await
+                        .unwrap_or(0);
+
+                    // Bound what one video's timeline can accumulate.
+                    if (existing as i64)
+                        < crate::backend::routes::watchparty::WATCHPARTY_REACTION_LIMIT
+                    {
+                        let reaction_id = generate_id("wpr");
+                        let created_at = now_millis();
+                        let doc = mongodb::bson::doc! {
+                            "_id": &reaction_id,
+                            "room_id": room_id,
+                            "video_url": &video_url,
+                            "user_id": user_id,
+                            "emoji": emoji,
+                            "position_secs": position_secs,
+                            "created_at": created_at,
+                        };
+                        let _ = coll.insert_one(doc).await;
+
+                        let event = json!({
+                            "type": "watchparty_reaction_added",
+                            "room_id": room_id,
+                            "video_url": video_url,
+                            "reaction_id": reaction_id,
+                            "user_id": user_id,
+                            "emoji": emoji,
+                            "position_secs": position_secs,
+                            "created_at": created_at,
+                        });
+                        broadcast_to_room(&state, room_id, &event).await;
+                    }
+                }
+            }
+        }
+        "watchparty_ended" => {
+            if !room_id.is_empty() {
+                // Every viewer reaches the end at once and reports it, so this
+                // has to be idempotent: the first report settles the state and
+                // the rest are no-ops. Unlike watchparty_control it writes no
+                // chat notification — nobody paused anything.
+                let settled = {
+                    let mut wp = state.watch_party_rooms.write().await;
+                    match wp.get_mut(room_id) {
+                        Some(s) if s.playing => {
+                            s.playing = false;
+                            if s.duration_secs > 0.0 {
+                                s.position_secs = s.duration_secs;
+                            }
+                            s.position_updated_at = now_secs();
+                            Some((s.position_secs, s.position_updated_at, s.duration_secs))
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some((position_secs, updated_at, duration_secs)) = settled {
+                    let event = json!({
+                        "type": "watchparty_sync",
+                        "room_id": room_id,
+                        "playing": false,
+                        "position_secs": position_secs,
+                        "position_updated_at": updated_at,
+                        "duration_secs": duration_secs,
+                        "sender_user_id": Value::Null,
+                    });
+                    broadcast_to_room(&state, room_id, &event).await;
+                }
+            }
+        }
         "watchparty_request_sync" => {
             if !room_id.is_empty() {
                 let wp = state.watch_party_rooms.read().await;

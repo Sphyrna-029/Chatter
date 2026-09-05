@@ -63,7 +63,7 @@ use super::{
             steam_status, steam_unlink,
         },
         sync::sync,
-        watchparty::get_watchparty_state,
+        watchparty::{get_watchparty_reactions, get_watchparty_state},
         webhooks::{create_webhook, delete_webhook, execute_webhook, list_webhooks},
         whiteboard::get_strokes,
     },
@@ -303,6 +303,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/activity/feed", get(activity_feed))
         // Watch Party
         .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
+        .route(
+            "/api/watchparty/{room_id}/reactions",
+            get(get_watchparty_reactions),
+        )
         // Whiteboard
         .route(
             "/api/whiteboard/{room_id}/{channel_id}/strokes",

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
-import { apiGetWatchPartyState } from "@/lib/api";
+import { apiGetWatchPartyState, apiGetWatchPartyReactions, type WatchPartyReaction } from "@/lib/api";
 import { ChatArea } from "./ChatArea";
 import {
   ResizablePanelGroup,
@@ -13,6 +13,25 @@ import { Play, Pause, Film, RefreshCw, Volume2, VolumeX } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
 import { displayUserId } from "@/lib/utils";
+
+/** Re-seek once a player is further than this from the shared timeline. Above
+ *  a second or so the drift is visible; below it, correcting is worse than the
+ *  drift because every correction is a visible jump. */
+const DRIFT_TOLERANCE_SECS = 1.5;
+/** How often each client checks itself against the timeline. */
+const DRIFT_CHECK_MS = 3000;
+/** Treat the video as finished slightly early — browsers rarely report a
+ *  currentTime exactly equal to duration. */
+const END_EPSILON_SECS = 0.35;
+/** A player position older than this is not trusted for drift correction. */
+const PLAYER_POSITION_STALE_MS = 10_000;
+/** Offered on the reaction bar. Any emoji is storable; these are the shortcuts. */
+const REACTION_EMOJI = ["😂", "😮", "❤️", "🔥", "👀", "💀"] as const;
+/** A reaction floats over the video when it lands this close to where we are,
+ *  so viewers in step see each other react live. */
+const LIVE_REACTION_WINDOW_SECS = 4;
+/** How long a floating reaction stays on screen. */
+const FLOAT_LIFETIME_MS = 2600;
 
 function extractYouTubeId(url: string): string | null {
   const m = url.match(
@@ -59,6 +78,10 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     return saved ? parseFloat(saved) : 1.0;
   });
   const [isMuted, setIsMuted] = useState(false);
+  const [reactions, setReactions] = useState<WatchPartyReaction[]>([]);
+  // Reactions currently animating over the video, keyed so repeats of the same
+  // emoji do not collapse into one node.
+  const [floating, setFloating] = useState<{ id: string; emoji: string; offset: number }[]>([]);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -135,6 +158,17 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   // Track whether the <video> element is ready to accept commands.
   // Reset when the video URL changes; set when onCanPlay fires.
   const videoReadyRef = useRef(false);
+  // What the player is actually showing, as opposed to where the shared
+  // timeline says it should be. Drift correction compares the two.
+  const playerPositionRef = useRef(0);
+  // When that reading was taken. Drift correction needs a *fresh* one: acting
+  // on a stale or never-delivered position would seek the player continuously.
+  const playerPositionAtRef = useRef(0);
+  // Guards the end-of-video report so it is sent once per playthrough.
+  const endReportedRef = useRef(false);
+  // Held in a ref because the YouTube message listener is installed before the
+  // callback exists.
+  const reportEndedRef = useRef<(() => void) | null>(null);
   // Store pending sync so onCanPlay can apply it when the video is actually ready.
   const pendingSyncRef = useRef<{ position: number; playing: boolean } | null>(null);
 
@@ -178,6 +212,9 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   useEffect(() => {
     videoReadyRef.current = false;
     pendingSyncRef.current = null;
+    endReportedRef.current = false;
+    playerPositionRef.current = 0;
+    playerPositionAtRef.current = 0;
   }, [watchState.videoUrl]);
 
   // Listen for YouTube player postMessages: duration detection and onReady sync.
@@ -198,6 +235,17 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
             : ws.positionSecs;
           applySync(compensated, ws.playing);
           applyVolume(volumeRef.current, isMutedRef.current);
+        }
+        // YouTube reports playback position on its info feed; this is the only
+        // way to know where its player actually is.
+        const cur: unknown = data?.info?.currentTime;
+        if (typeof cur === "number" && isFinite(cur)) {
+          playerPositionRef.current = cur;
+          playerPositionAtRef.current = Date.now();
+        }
+        // playerState 0 is "ended".
+        if (data?.info?.playerState === 0 || data?.info?.playerState === "0") {
+          reportEndedRef.current?.();
         }
         // Duration detection
         const dur: unknown = data?.info?.duration;
@@ -242,6 +290,68 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
+  // The timeline belongs to a video, not to the room, so it reloads whenever
+  // the video does.
+  useEffect(() => {
+    if (!watchState.videoUrl) {
+      setReactions([]);
+      return;
+    }
+    let cancelled = false;
+    apiGetWatchPartyReactions(roomId)
+      .then((data) => {
+        // A late response for a video we have already moved on from would put
+        // marks at meaningless positions.
+        if (cancelled || data.video_url !== watchStateRef.current.videoUrl) return;
+        setReactions(data.reactions);
+      })
+      .catch(() => { /* the bar still works, it just starts empty */ });
+    return () => { cancelled = true; };
+  }, [roomId, watchState.videoUrl]);
+
+  // Live reactions from everyone, including our own echo, so what we send looks
+  // the same to us as it does to everyone else.
+  useEffect(() => {
+    const handle = (e: Event) => {
+      const msg = (e as CustomEvent).detail as WatchPartyReaction & {
+        room_id: string;
+        video_url: string;
+      };
+      if (msg.room_id !== roomId) return;
+      if (msg.video_url !== watchStateRef.current.videoUrl) return;
+
+      setReactions((prev) =>
+        prev.some((r) => r.reaction_id === msg.reaction_id) ? prev : [...prev, msg],
+      );
+
+      if (Math.abs(msg.position_secs - displayPositionRef.current) <= LIVE_REACTION_WINDOW_SECS) {
+        const id = `${msg.reaction_id}:${Date.now()}`;
+        setFloating((prev) => [
+          ...prev,
+          { id, emoji: msg.emoji, offset: Math.random() * 60 },
+        ]);
+        setTimeout(
+          () => setFloating((prev) => prev.filter((f) => f.id !== id)),
+          FLOAT_LIFETIME_MS,
+        );
+      }
+    };
+    window.addEventListener("watchparty_reaction_added", handle);
+    return () => window.removeEventListener("watchparty_reaction_added", handle);
+  }, [roomId]);
+
+  const sendReaction = useCallback(
+    (emoji: string) => {
+      if (!watchStateRef.current.videoUrl) return;
+      send({
+        type: "watchparty_reaction",
+        emoji,
+        position_secs: Math.max(0, displayPositionRef.current),
+      });
+    },
+    [send],
+  );
+
   // Listen for WS sync events
   useEffect(() => {
     const handle = (e: Event) => {
@@ -278,7 +388,15 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
         pendingSyncRef.current = { position: compensated, playing: msg.playing };
       } else if (!iAmSender) {
         const playStateChanged = msg.playing !== watchStateRef.current.playing;
-        if (playStateChanged) {
+        // A seek keeps the play state and only moves the position, so gating on
+        // playStateChanged alone dropped every seek: the progress bar jumped to
+        // the new spot while the video carried on from the old one, and nothing
+        // ever reconciled the two.
+        const havePosition = playerPositionAtRef.current > 0;
+        const drifted =
+          !havePosition ||
+          Math.abs(compensated - playerPositionRef.current) > DRIFT_TOLERANCE_SECS;
+        if (playStateChanged || drifted) {
           applySync(compensated, msg.playing);
         }
       }
@@ -297,13 +415,77 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
     if (!watchState.playing) return;
     const startPos = watchState.positionSecs;
     const startTime = watchState.positionUpdatedAt;
+    // Starting anywhere before the end re-arms the end report, so replaying or
+    // seeking backwards is noticed again.
+    const startDuration = videoDurationRef.current;
+    if (!(startDuration > 0) || startPos < startDuration - END_EPSILON_SECS) {
+      endReportedRef.current = false;
+    }
+
     const interval = setInterval(() => {
-      const pos = startPos + (Date.now() / 1000 - startTime);
+      const raw = startPos + (Date.now() / 1000 - startTime);
+      const duration = videoDurationRef.current;
+      // The readout is pure extrapolation from the last sync, and nothing used
+      // to bound it — so once the video finished the clock kept climbing past
+      // the runtime for ever.
+      const pos = duration > 0 ? Math.min(raw, duration) : raw;
       setDisplayPosition(pos);
       displayPositionRef.current = pos;
+      if (duration > 0 && raw >= duration - END_EPSILON_SECS) {
+        reportEndedRef.current?.();
+      }
     }, 500);
     return () => clearInterval(interval);
   }, [watchState.playing, watchState.positionSecs, watchState.positionUpdatedAt]);
+
+  // Pull a drifting player back onto the shared timeline.
+  //
+  // Nothing corrected drift before: a client that stalled buffering fell behind
+  // and stayed behind, because controls are only broadcast on an explicit
+  // action and the server's heartbeat branch never receives one.
+  useEffect(() => {
+    if (!watchState.playing) return;
+    const interval = setInterval(() => {
+      if (isApplyingSync.current) return;
+      const ws = watchStateRef.current;
+      if (!ws.playing) return;
+      const expected = ws.positionSecs + (Date.now() / 1000 - ws.positionUpdatedAt);
+      const duration = videoDurationRef.current;
+      if (duration > 0 && expected >= duration - END_EPSILON_SECS) return;
+      // No fresh reading means we cannot tell where the player is — a YouTube
+      // embed that never reports currentTime would otherwise be seeked on every
+      // pass.
+      if (Date.now() - playerPositionAtRef.current > PLAYER_POSITION_STALE_MS) return;
+      if (Math.abs(expected - playerPositionRef.current) > DRIFT_TOLERANCE_SECS) {
+        applySync(expected, true);
+      }
+    }, DRIFT_CHECK_MS);
+    return () => clearInterval(interval);
+  }, [watchState.playing, applySync]);
+
+  // Settle playback at the end of the video. The server call is idempotent, so
+  // every viewer reporting at once costs one state change and one broadcast.
+  const reportEnded = useCallback(() => {
+    if (endReportedRef.current) return;
+    if (!watchStateRef.current.playing) return;
+    endReportedRef.current = true;
+
+    const duration = videoDurationRef.current;
+    const finalPos = duration > 0 ? duration : displayPositionRef.current;
+    setWatchState((prev) => ({
+      ...prev,
+      playing: false,
+      positionSecs: finalPos,
+      positionUpdatedAt: Date.now() / 1000,
+    }));
+    setDisplayPosition(finalPos);
+    displayPositionRef.current = finalPos;
+    send({ type: "watchparty_ended" });
+  }, [send]);
+
+  useEffect(() => {
+    reportEndedRef.current = reportEnded;
+  }, [reportEnded]);
 
   const handleLoadVideo = () => {
     const url = urlInput.trim();
@@ -429,6 +611,14 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   onPlay={handleVideoPlay}
                   onPause={handleVideoPause}
                   onSeeked={handleVideoSeeked}
+                  onTimeUpdate={() => {
+                    const t = videoRef.current?.currentTime;
+                    if (typeof t === "number" && isFinite(t)) {
+                      playerPositionRef.current = t;
+                      playerPositionAtRef.current = Date.now();
+                    }
+                  }}
+                  onEnded={() => reportEndedRef.current?.()}
                   onLoadedMetadata={() => {
                     const dur = videoRef.current?.duration;
                     if (dur && isFinite(dur)) {
@@ -456,6 +646,21 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     applyVolume(volumeRef.current, isMutedRef.current);
                   }}
                 />
+              )}
+
+              {/* Reactions landing near the current position */}
+              {floating.length > 0 && (
+                <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden">
+                  {floating.map((f) => (
+                    <span
+                      key={f.id}
+                      className="absolute bottom-10 text-3xl watchparty-float select-none"
+                      style={{ right: `${8 + f.offset}px` }}
+                    >
+                      {f.emoji}
+                    </span>
+                  ))}
+                </div>
               )}
 
               {/* Viewer count + avatar overlay */}
@@ -498,16 +703,40 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                   <span className="shrink-0 tabular-nums w-10 text-right">
                     {formatTime(Math.max(0, displayPosition))}
                   </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={videoDuration || 14400}
-                    step={1}
-                    value={Math.max(0, displayPosition)}
-                    onChange={handleSeekDrag}
-                    onPointerUp={handleSeekCommit}
-                    className="flex-1 accent-purple-500 cursor-pointer h-1"
-                  />
+                  <div className="relative flex-1">
+                    {/* Reaction marks, positioned by where in the video they
+                        were left. Only meaningful once the runtime is known. */}
+                    {videoDuration > 0 && reactions.length > 0 && (
+                      <div className="pointer-events-none absolute -top-3 left-0 right-0 h-3">
+                        {reactions.map((r) => {
+                          const who =
+                            userPresence[r.user_id]?.displayName || displayUserId(r.user_id);
+                          return (
+                            <span
+                              key={r.reaction_id}
+                              className="absolute -translate-x-1/2 text-[11px] leading-none opacity-70 hover:opacity-100"
+                              style={{
+                                left: `${Math.min(100, Math.max(0, (r.position_secs / videoDuration) * 100))}%`,
+                              }}
+                              title={`${who} at ${formatTime(r.position_secs)}`}
+                            >
+                              {r.emoji}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <input
+                      type="range"
+                      min={0}
+                      max={videoDuration || 14400}
+                      step={1}
+                      value={Math.max(0, displayPosition)}
+                      onChange={handleSeekDrag}
+                      onPointerUp={handleSeekCommit}
+                      className="w-full accent-purple-500 cursor-pointer h-1"
+                    />
+                  </div>
                   {/* Volume */}
                   <button
                     onClick={handleToggleMute}
@@ -530,6 +759,27 @@ export function WatchPartyArea({ onJoinVoice }: { onJoinVoice: () => void }) {
                     className="w-16 shrink-0 accent-primary cursor-pointer h-1"
                     title={`Volume: ${Math.round((isMuted ? 0 : volume) * 100)}%`}
                   />
+                </div>
+              )}
+
+              {/* Reaction bar */}
+              {watchState.videoUrl && (
+                <div className="flex items-center gap-1">
+                  {REACTION_EMOJI.map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => sendReaction(emoji)}
+                      className="rounded px-1.5 py-0.5 text-base leading-none transition-transform hover:scale-125 cursor-pointer"
+                      title={`React at ${formatTime(Math.max(0, displayPosition))}`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                  {reactions.length > 0 && (
+                    <span className="ml-1 ui-meta text-muted-foreground">
+                      {reactions.length} reaction{reactions.length !== 1 ? "s" : ""}
+                    </span>
+                  )}
                 </div>
               )}
 

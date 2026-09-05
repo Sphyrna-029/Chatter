@@ -690,7 +690,11 @@ export function createWsMessageHandler(
       );
     }
     // Watch Party real-time events
-    else if (msg.type === "watchparty_sync" || msg.type === "watchparty_video_changed") {
+    else if (
+      msg.type === "watchparty_sync" ||
+      msg.type === "watchparty_video_changed" ||
+      msg.type === "watchparty_reaction_added"
+    ) {
       window.dispatchEvent(new CustomEvent(msg.type, { detail: msg }));
     }
     else if (msg.type === "watchparty_viewer_joined" || msg.type === "watchparty_viewer_left") {
