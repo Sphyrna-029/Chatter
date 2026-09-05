@@ -1978,6 +1978,15 @@ export async function apiGetFriends() {
   }>;
 }
 
+/** Presence and profile for the caller's friends and pending requesters.
+ *  Room presence only covers people who share a room with the caller, so a
+ *  friend list rendered outside a room has no other source for avatars. */
+export async function apiGetFriendsPresence() {
+  const res = await authenticatedFetch("/api/friends/presence");
+  if (!res.ok) throw new Error("Failed to load friend presence");
+  return res.json() as Promise<{ presence: Record<string, unknown> }>;
+}
+
 export async function apiGetFriendStatus(userId: string) {
   const res = await authenticatedFetch(`/api/friends/status/${userId}`);
   if (!res.ok) throw new Error("Failed to get friend status");

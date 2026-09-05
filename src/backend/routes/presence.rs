@@ -1,6 +1,6 @@
 use super::super::{
     helpers::{error_response, extract_token, get_user_from_token, now_secs},
-    state::{AppState, RoomRecord, UserRecord},
+    state::{AppState, PresenceRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -94,6 +94,94 @@ pub(crate) async fn get_voice_channel_status(
 // Presence
 // ---------------------------------------------------------------------------
 
+/// The presence record the client expects for one user: their live status when
+/// the server has seen them, and their stored profile either way, so an offline
+/// user still renders with their avatar and display name.
+///
+/// Shared with the friends endpoint, which reports on people the caller may not
+/// share a room with — the two must not drift apart.
+pub(crate) async fn build_presence_entry(
+    state: &AppState,
+    up: &std::collections::HashMap<String, PresenceRecord>,
+    user_id: &str,
+    current_time: f64,
+) -> Value {
+    let users_coll = state.db.collection::<UserRecord>("users");
+    let user_record = users_coll
+        .find_one(doc! { "_id": user_id })
+        .await
+        .ok()
+        .flatten();
+    let avatar_url = user_record
+        .as_ref()
+        .map(|u| u.avatar_url.as_str())
+        .unwrap_or("");
+    let about = user_record.as_ref().map(|u| u.about.as_str()).unwrap_or("");
+    let banner_url = user_record
+        .as_ref()
+        .map(|u| u.banner_url.as_str())
+        .unwrap_or("");
+    let display_name = user_record
+        .as_ref()
+        .map(|u| u.display_name.as_str())
+        .unwrap_or("");
+    let name_font_url = user_record
+        .as_ref()
+        .map(|u| u.name_font_url.as_str())
+        .unwrap_or("");
+
+    match up.get(user_id) {
+        Some(presence) => {
+            let time_since_active = current_time - presence.last_active;
+            let status = if !presence.connected {
+                "offline"
+            } else if let Some(ref ms) = presence.manual_status {
+                ms.as_str()
+            } else if time_since_active < 300.0 {
+                "active"
+            } else {
+                "idle"
+            };
+
+            json!({
+                "status": status,
+                "last_active": presence.last_active,
+                "last_typing": presence.last_typing,
+                "custom_status": presence.custom_status,
+                "avatar_url": avatar_url,
+                "about": about,
+                "banner_url": banner_url,
+                "display_name": display_name,
+                "name_font_url": name_font_url,
+                "is_mobile": presence.is_mobile,
+                "steam_game": presence.steam_game,
+                "steam_appid": presence.steam_appid,
+                "game_session_start": presence.game_session_start,
+                "spotify_track": presence.spotify_track,
+                "spotify_artist": presence.spotify_artist,
+                "spotify_album_art": presence.spotify_album_art,
+            })
+        }
+        None => json!({
+            "status": "offline",
+            "last_active": 0,
+            "last_typing": 0,
+            "avatar_url": avatar_url,
+            "about": about,
+            "banner_url": banner_url,
+            "display_name": display_name,
+            "name_font_url": name_font_url,
+            "is_mobile": false,
+            "steam_game": null,
+            "steam_appid": null,
+            "game_session_start": null,
+            "spotify_track": null,
+            "spotify_artist": null,
+            "spotify_album_art": null,
+        }),
+    }
+}
+
 pub(crate) async fn get_room_presence(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
@@ -119,91 +207,14 @@ pub(crate) async fn get_room_presence(
     let rm = state.room_members.read().await;
     let up = state.user_presence.read().await;
 
-    // Fetch user records from MongoDB for avatar/about info
-    let users_coll = state.db.collection::<UserRecord>("users");
-
     let mut presence_data = serde_json::Map::new();
 
     if let Some(members) = rm.get(&room_id) {
         for member_id in members {
-            let user_record = users_coll
-                .find_one(doc! { "_id": member_id })
-                .await
-                .ok()
-                .flatten();
-            let avatar_url = user_record
-                .as_ref()
-                .map(|u| u.avatar_url.as_str())
-                .unwrap_or("");
-            let about = user_record.as_ref().map(|u| u.about.as_str()).unwrap_or("");
-            let banner_url = user_record
-                .as_ref()
-                .map(|u| u.banner_url.as_str())
-                .unwrap_or("");
-            let display_name = user_record
-                .as_ref()
-                .map(|u| u.display_name.as_str())
-                .unwrap_or("");
-            let name_font_url = user_record
-                .as_ref()
-                .map(|u| u.name_font_url.as_str())
-                .unwrap_or("");
-
-            if let Some(presence) = up.get(member_id) {
-                let time_since_active = current_time - presence.last_active;
-                let status = if !presence.connected {
-                    "offline"
-                } else if let Some(ref ms) = presence.manual_status {
-                    ms.as_str()
-                } else if time_since_active < 300.0 {
-                    "active"
-                } else {
-                    "idle"
-                };
-
-                presence_data.insert(
-                    member_id.clone(),
-                    json!({
-                        "status": status,
-                        "last_active": presence.last_active,
-                        "last_typing": presence.last_typing,
-                        "custom_status": presence.custom_status,
-                        "avatar_url": avatar_url,
-                        "about": about,
-                        "banner_url": banner_url,
-                        "display_name": display_name,
-                        "name_font_url": name_font_url,
-                        "is_mobile": presence.is_mobile,
-                        "steam_game": presence.steam_game,
-                        "steam_appid": presence.steam_appid,
-                        "game_session_start": presence.game_session_start,
-                        "spotify_track": presence.spotify_track,
-                        "spotify_artist": presence.spotify_artist,
-                        "spotify_album_art": presence.spotify_album_art,
-                    }),
-                );
-            } else {
-                presence_data.insert(
-                    member_id.clone(),
-                    json!({
-                        "status": "offline",
-                        "last_active": 0,
-                        "last_typing": 0,
-                        "avatar_url": avatar_url,
-                        "about": about,
-                        "banner_url": banner_url,
-                        "display_name": display_name,
-                        "name_font_url": name_font_url,
-                        "is_mobile": false,
-                        "steam_game": null,
-                        "steam_appid": null,
-                        "game_session_start": null,
-                        "spotify_track": null,
-                        "spotify_artist": null,
-                        "spotify_album_art": null,
-                    }),
-                );
-            }
+            presence_data.insert(
+                member_id.clone(),
+                build_presence_entry(&state, &up, member_id, current_time).await,
+            );
         }
     }
 

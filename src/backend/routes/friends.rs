@@ -1,10 +1,12 @@
 use super::super::{
     dto::FriendActionRequest,
     helpers::{
-        error_response, extract_token, generate_id, get_user_from_token, now_millis, send_to_user,
+        error_response, extract_token, generate_id, get_user_from_token, now_millis, now_secs,
+        send_to_user,
     },
     state::{AppState, BlockRecord, FriendRequestRecord, FriendshipRecord, UserRecord},
 };
+use super::presence::build_presence_entry;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -29,6 +31,59 @@ fn sorted_pair(a: &str, b: &str) -> (String, String) {
     } else {
         (b.to_string(), a.to_string())
     }
+}
+
+/// GET /api/friends/presence — presence and profile for the caller's friends
+/// and anyone with a pending request to them.
+///
+/// /api/friends returns bare user ids, and room presence only covers people who
+/// share a room with the caller, so a friend list rendered outside a room had no
+/// source for avatars or display names.
+pub(crate) async fn get_friends_presence(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Only people the caller already has a relationship with — this exposes no
+    // profile they could not open from the friend list itself.
+    let mut subjects: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let friendships_coll = state.db.collection::<FriendshipRecord>("friendships");
+    if let Ok(mut cursor) = friendships_coll
+        .find(doc! { "$or": [{ "user_a": &user_id }, { "user_b": &user_id }] })
+        .await
+    {
+        while let Ok(Some(f)) = cursor.try_next().await {
+            subjects.insert(if f.user_a == user_id {
+                f.user_b
+            } else {
+                f.user_a
+            });
+        }
+    }
+
+    let requests_coll = state
+        .db
+        .collection::<FriendRequestRecord>("friend_requests");
+    if let Ok(mut cursor) = requests_coll.find(doc! { "to_user": &user_id }).await {
+        while let Ok(Some(r)) = cursor.try_next().await {
+            subjects.insert(r.from_user);
+        }
+    }
+
+    let current_time = now_secs();
+    let up = state.user_presence.read().await;
+    let mut presence_data = serde_json::Map::new();
+    for subject in subjects {
+        let entry = build_presence_entry(&state, &up, &subject, current_time).await;
+        presence_data.insert(subject, entry);
+    }
+
+    Ok(Json(json!({ "presence": Value::Object(presence_data) })))
 }
 
 /// GET /api/friends — returns friends, incoming_requests, outgoing_requests, blocked

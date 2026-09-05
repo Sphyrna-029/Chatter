@@ -22,8 +22,9 @@ use super::{
             get_post, list_posts, search_posts,
         },
         friends::{
-            accept_friend_request, block_user, get_friend_status, get_friends, get_mutual_friends,
-            reject_friend_request, remove_friend, send_friend_request, unblock_user,
+            accept_friend_request, block_user, get_friend_status, get_friends,
+            get_friends_presence, get_mutual_friends, reject_friend_request, remove_friend,
+            send_friend_request, unblock_user,
         },
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{
@@ -341,6 +342,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         )
         // Friends
         .route("/api/friends", get(get_friends))
+        .route("/api/friends/presence", get(get_friends_presence))
         .route("/api/friends/status/{user_id}", get(get_friend_status))
         .route("/api/friends/mutuals/{user_id}", get(get_mutual_friends))
         .route("/api/friends/request", post(send_friend_request))
