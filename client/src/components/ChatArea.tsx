@@ -98,6 +98,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const isNearBottomRef = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const prevScrollHeightRef = useRef<number>(0);
+  const wasLoadingOlderRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -341,6 +342,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         showNewDividerRef.current = false;
         setShowNewDivider(false);
         setFirstUnreadEventId(null);
+        // Opening a caught-up channel puts us at the newest message. Without
+        // this, a switch made while reading history would leave the ref false
+        // and the channel's messages would render above the viewport.
+        isNearBottomRef.current = true;
       }
       prevChannelIdRef.current = channelId;
     }
@@ -380,8 +385,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     return () => viewport.removeEventListener("scroll", handleScroll);
   }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch, markChannelRead]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages, but only for a reader who is already
+  // there. state.messages changes for reasons other than a new arrival — an
+  // older page prepended while scrolling up, an edit, a deletion — and pulling
+  // the viewport to the newest message loses the reader's place every time.
   useEffect(() => {
+    if (!isNearBottomRef.current) return;
     scrollToBottom("smooth");
   }, [state.messages, scrollToBottom]);
 
@@ -430,13 +439,21 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
   }, [firstUnreadEventId]);
 
-  // Preserve scroll position after prepending older messages
+  // Preserve scroll position after prepending older messages.
+  //
+  // Only a completed older-page load may move scrollTop. PREPEND_MESSAGES sets
+  // the messages and clears loadingOlderMessages in one action, so that
+  // transition marks the render where content appeared *above* the viewport.
+  // Any other growth is a message appended below, where the browser already
+  // holds position — compensating there would nudge the reader downwards.
   useLayoutEffect(() => {
     const viewport = getViewport();
     if (!viewport) return;
-    if (prevScrollHeightRef.current > 0 && state.loadingOlderMessages === false) {
-      const newScrollHeight = viewport.scrollHeight;
-      const delta = newScrollHeight - prevScrollHeightRef.current;
+    const finishedLoadingOlder =
+      wasLoadingOlderRef.current && state.loadingOlderMessages === false;
+    wasLoadingOlderRef.current = state.loadingOlderMessages;
+    if (finishedLoadingOlder && prevScrollHeightRef.current > 0) {
+      const delta = viewport.scrollHeight - prevScrollHeightRef.current;
       if (delta > 0) {
         viewport.scrollTop += delta;
       }
@@ -446,6 +463,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Scroll to bottom on initial room load
   useEffect(() => {
+    isNearBottomRef.current = true;
     scrollToBottom();
   }, [state.currentRoomId, scrollToBottom]);
 
@@ -466,6 +484,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     if (displayLength > MAX_MESSAGE_LENGTH) return;
     const replyEventId = state.replyingTo?.event_id;
     const spoiler = isSpoiler;
+    // Posting is an explicit intent to rejoin the live conversation, so follow
+    // the sent message down even if the user was reading back through history.
+    isNearBottomRef.current = true;
     if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
     setDisplayLength(0);
