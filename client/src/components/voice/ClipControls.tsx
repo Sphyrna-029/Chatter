@@ -96,7 +96,12 @@ export function ClipControls() {
         );
         return;
       }
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      // Readable in a file list, and free of the colons that would break a path.
+      const stamp = new Date()
+        .toISOString()
+        .slice(0, 19)
+        .replace("T", "-")
+        .replace(/:/g, "-");
       const ext = clip.blob.type.includes("mp4") ? "mp4" : "webm";
       const file = new File([clip.blob], `clip-${stamp}.${ext}`, { type: clip.blob.type });
       const { url } = await apiUploadFile(file);

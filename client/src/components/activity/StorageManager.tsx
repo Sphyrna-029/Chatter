@@ -32,13 +32,18 @@ export function StorageManager({ refreshKey }: StorageManagerProps) {
     return () => { cancelled = true; };
   }, [refreshKey]);
 
+  // 0 means unlimited, which is the default. Returning null on that hid the
+  // whole section — file list included — on every server without a quota, so
+  // there was nowhere to tidy uploads from at all.
   const limit = state.storageLimitBytes;
-  if (limit <= 0) return null;
-
+  const hasQuota = limit > 0;
   const used = uploads.reduce((sum, f) => sum + (f.size || 0), 0);
-  const ratio = used / limit;
-  // Biggest first — reclaiming space means starting at the top.
-  const largest = [...uploads].sort((a, b) => b.size - a.size).slice(0, 10);
+  const ratio = hasQuota ? used / limit : 0;
+  // Biggest first — reclaiming space means starting at the top. All of them,
+  // not a top ten: the point of the list is cleaning up.
+  const largest = [...uploads].sort((a, b) => b.size - a.size);
+
+  if (uploads.length === 0) return null;
 
   async function handleDelete(file: UploadRecord) {
     setDeleting(file.url);
@@ -61,21 +66,27 @@ export function StorageManager({ refreshKey }: StorageManagerProps) {
           Storage
         </h2>
         <span className="text-xs text-muted-foreground">
-          {formatFileSize(used)} / {formatFileSize(limit)}
+          {hasQuota
+            ? `${formatFileSize(used)} / ${formatFileSize(limit)}`
+            : formatFileSize(used)}
         </span>
       </div>
 
-      <div className="bg-muted rounded-full h-3 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${
-            ratio > 0.9 ? "bg-destructive" : ratio > 0.7 ? "bg-orange-500" : "bg-primary"
-          }`}
-          style={{ width: `${Math.min(100, ratio * 100)}%` }}
-        />
-      </div>
+      {hasQuota && (
+        <div className="bg-muted rounded-full h-3 overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all ${
+              ratio > 0.9 ? "bg-destructive" : ratio > 0.7 ? "bg-orange-500" : "bg-primary"
+            }`}
+            style={{ width: `${Math.min(100, ratio * 100)}%` }}
+          />
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">{Math.round(ratio * 100)}% used</p>
+        <p className="text-xs text-muted-foreground">
+          {hasQuota ? `${Math.round(ratio * 100)}% used` : "No storage limit set"}
+        </p>
         {uploads.length > 0 && (
           <button
             onClick={() => setExpanded((o) => !o)}
@@ -88,9 +99,9 @@ export function StorageManager({ refreshKey }: StorageManagerProps) {
       </div>
 
       {expanded && (
-        <div className="pt-1 space-y-1">
+        <div className="pt-1 space-y-1 max-h-72 overflow-y-auto">
           <p className="text-3xs text-muted-foreground uppercase tracking-wide">
-            Largest files
+            Largest first
           </p>
           {largest.map((file) => (
             <div
