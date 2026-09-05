@@ -287,151 +287,6 @@ export function ActivityPage() {
 
         <CrossRoomSearch onSelectRoom={selectRoom} />
 
-        {/* Happening Now — live voice and screen shares across your rooms */}
-        {liveVoice.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              <Radio className="h-4 w-4 text-success" />
-              Happening Now
-            </h2>
-            <div className="grid gap-2">
-              {liveVoice.map((room) => {
-                const info = state.roomInfoMap[room.roomId];
-                const name = info?.name || "Unnamed";
-                return (
-                  <button
-                    key={room.roomId}
-                    onClick={() => selectRoom(room.roomId)}
-                    className="flex flex-col gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-3 text-left transition-colors hover:bg-success/10 cursor-pointer w-full overflow-hidden"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">
-                        {info?.icon_url ? (
-                          <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
-                        ) : (
-                          name.charAt(0).toUpperCase()
-                        )}
-                      </span>
-                      <span className="font-medium truncate">{name}</span>
-                    </div>
-
-                    {room.channels.map((channel) => {
-                      const sharers = channel.members.filter((m) => m.screenSharing);
-                      return (
-                        <div key={channel.channelId} className="flex items-center gap-2 pl-8 min-w-0">
-                          <Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="text-xs text-muted-foreground truncate max-w-[8rem]">
-                            {channel.name}
-                          </span>
-                          <div className="flex items-center -space-x-1.5 shrink-0">
-                            {channel.members.slice(0, 5).map((member) => {
-                              const presence = state.userPresence[member.userId];
-                              const label = presence?.displayName || displayUserId(member.userId);
-                              return (
-                                <span key={member.userId} className="relative" title={label}>
-                                  <Avatar className="h-6 w-6 border-2 border-background">
-                                    <AuthAvatarImage src={presence?.avatarUrl || ""} />
-                                    <AvatarFallback className="text-3xs bg-secondary">
-                                      {label[0]?.toUpperCase() || "?"}
-                                    </AvatarFallback>
-                                  </Avatar>
-                                  {member.muted && (
-                                    <MicOff className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-background p-[1px] text-destructive" />
-                                  )}
-                                </span>
-                              );
-                            })}
-                          </div>
-                          {channel.members.length > 5 && (
-                            <span className="text-xs text-muted-foreground shrink-0">
-                              +{channel.members.length - 5}
-                            </span>
-                          )}
-                          {sharers.length > 0 && (
-                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-purple-500/20 text-purple-400 shrink-0">
-                              <Monitor className="h-3 w-3" />
-                              {sharers.length === 1
-                                ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`
-                                : `${sharers.length} streaming`}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Unread summary */}
-        {totalUnread > 0 && (
-          <section className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
-            <p className="text-sm min-w-0">
-              <span className="font-semibold">{totalUnread}</span>
-              {" unread message"}{totalUnread !== 1 ? "s" : ""}
-              {" across "}
-              <span className="font-semibold">{unreadRooms.length}</span>
-              {" room"}{unreadRooms.length !== 1 ? "s" : ""}
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs shrink-0"
-              onClick={markAllRead}
-              disabled={markingRead}
-            >
-              <CheckCheck className="h-3.5 w-3.5 mr-1" />
-              {markingRead ? "Marking…" : "Mark all read"}
-            </Button>
-          </section>
-        )}
-
-        <ActivityStats
-          refreshKey={refreshKey}
-          onSelectRoom={selectRoom}
-          onSelectUser={setProfileUserId}
-        />
-
-        <RecentDiscussions refreshKey={refreshKey} onSelectRoom={selectRoom} />
-
-        <ActivityFeed refreshKey={refreshKey} onSelectRoom={selectRoom} />
-
-        {/* Unread Mentions — full width above the two-column layout */}
-        {mentionedRooms.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-              <AtSign className="h-4 w-4" />
-              Unread Mentions
-            </h2>
-            <div className="grid gap-2">
-              {mentionedRooms.map(([roomId, count]) => {
-                const info = state.roomInfoMap[roomId];
-                return (
-                  <button
-                    key={roomId}
-                    onClick={() => selectRoom(roomId)}
-                    className="flex items-center justify-between rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-left transition-colors hover:bg-blue-500/10 cursor-pointer"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/20 text-blue-400 text-sm font-bold shrink-0">
-                        {info?.name?.charAt(0).toUpperCase() || "?"}
-                      </span>
-                      <span className="font-medium truncate">
-                        {info?.name || roomId}
-                      </span>
-                    </div>
-                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-2xs font-bold text-white shrink-0">
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
         {/* Two-column layout: Rooms left, Friends right */}
         <div className="flex flex-col md:flex-row gap-6 md:gap-8 items-start">
           {/* Left column — Your Rooms */}
@@ -724,7 +579,152 @@ export function ActivityPage() {
           </div>
         </div>
 
+        {/* Happening Now — live voice and screen shares across your rooms */}
+        {liveVoice.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              <Radio className="h-4 w-4 text-success" />
+              Happening Now
+            </h2>
+            <div className="grid gap-2">
+              {liveVoice.map((room) => {
+                const info = state.roomInfoMap[room.roomId];
+                const name = info?.name || "Unnamed";
+                return (
+                  <button
+                    key={room.roomId}
+                    onClick={() => selectRoom(room.roomId)}
+                    className="flex flex-col gap-2 rounded-lg border border-success/30 bg-success/5 px-4 py-3 text-left transition-colors hover:bg-success/10 cursor-pointer w-full overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">
+                        {info?.icon_url ? (
+                          <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
+                        ) : (
+                          name.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                      <span className="font-medium truncate">{name}</span>
+                    </div>
+
+                    {room.channels.map((channel) => {
+                      const sharers = channel.members.filter((m) => m.screenSharing);
+                      return (
+                        <div key={channel.channelId} className="flex items-center gap-2 pl-8 min-w-0">
+                          <Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                          <span className="text-xs text-muted-foreground truncate max-w-[8rem]">
+                            {channel.name}
+                          </span>
+                          <div className="flex items-center -space-x-1.5 shrink-0">
+                            {channel.members.slice(0, 5).map((member) => {
+                              const presence = state.userPresence[member.userId];
+                              const label = presence?.displayName || displayUserId(member.userId);
+                              return (
+                                <span key={member.userId} className="relative" title={label}>
+                                  <Avatar className="h-6 w-6 border-2 border-background">
+                                    <AuthAvatarImage src={presence?.avatarUrl || ""} />
+                                    <AvatarFallback className="text-3xs bg-secondary">
+                                      {label[0]?.toUpperCase() || "?"}
+                                    </AvatarFallback>
+                                  </Avatar>
+                                  {member.muted && (
+                                    <MicOff className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-background p-[1px] text-destructive" />
+                                  )}
+                                </span>
+                              );
+                            })}
+                          </div>
+                          {channel.members.length > 5 && (
+                            <span className="text-xs text-muted-foreground shrink-0">
+                              +{channel.members.length - 5}
+                            </span>
+                          )}
+                          {sharers.length > 0 && (
+                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-purple-500/20 text-purple-400 shrink-0">
+                              <Monitor className="h-3 w-3" />
+                              {sharers.length === 1
+                                ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`
+                                : `${sharers.length} streaming`}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {/* Unread summary */}
+        {totalUnread > 0 && (
+          <section className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+            <p className="text-sm min-w-0">
+              <span className="font-semibold">{totalUnread}</span>
+              {" unread message"}{totalUnread !== 1 ? "s" : ""}
+              {" across "}
+              <span className="font-semibold">{unreadRooms.length}</span>
+              {" room"}{unreadRooms.length !== 1 ? "s" : ""}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-xs shrink-0"
+              onClick={markAllRead}
+              disabled={markingRead}
+            >
+              <CheckCheck className="h-3.5 w-3.5 mr-1" />
+              {markingRead ? "Marking…" : "Mark all read"}
+            </Button>
+          </section>
+        )}
+
+        {/* Unread Mentions — full width */}
+        {mentionedRooms.length > 0 && (
+          <section className="space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
+              <AtSign className="h-4 w-4" />
+              Unread Mentions
+            </h2>
+            <div className="grid gap-2">
+              {mentionedRooms.map(([roomId, count]) => {
+                const info = state.roomInfoMap[roomId];
+                return (
+                  <button
+                    key={roomId}
+                    onClick={() => selectRoom(roomId)}
+                    className="flex items-center justify-between rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-left transition-colors hover:bg-blue-500/10 cursor-pointer"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/20 text-blue-400 text-sm font-bold shrink-0">
+                        {info?.name?.charAt(0).toUpperCase() || "?"}
+                      </span>
+                      <span className="font-medium truncate">
+                        {info?.name || roomId}
+                      </span>
+                    </div>
+                    <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-500 px-1.5 text-2xs font-bold text-white shrink-0">
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <RecentDiscussions refreshKey={refreshKey} onSelectRoom={selectRoom} />
+
+        <ActivityFeed refreshKey={refreshKey} onSelectRoom={selectRoom} />
+
         <StorageManager refreshKey={refreshKey} />
+
+        <ActivityStats
+          refreshKey={refreshKey}
+          onSelectRoom={selectRoom}
+          onSelectUser={setProfileUserId}
+        />
       </div>
       {profileUserId && (
         <UserProfileDialog
