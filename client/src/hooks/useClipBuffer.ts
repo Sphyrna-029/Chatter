@@ -25,6 +25,9 @@ const TIMESLICE_MS = 1000;
 /** If nothing has been recorded by now, something is wrong — say so rather than
  *  letting the user wait for footage that will never arrive. */
 const FIRST_CHUNK_TIMEOUT_MS = 6000;
+/** How soon to try again when a leg fails to start. Rotation alone would leave
+ *  a transient failure — a track not live yet — stuck for a whole window. */
+const RETRY_MS = 2000;
 /** Cap what a viewer re-encode may spend; the source is already capped lower. */
 const CLIP_BITS_PER_SECOND = 8_000_000;
 
@@ -138,6 +141,12 @@ export function useClipBuffer(
       setBufferedSecs(oldest ? (oldest.chunks.length * TIMESLICE_MS) / 1000 : 0);
     };
 
+    const scheduleRetry = () => {
+      if (stopped) return;
+      const t = setTimeout(() => startLeg(), RETRY_MS);
+      watchdogs.push(t);
+    };
+
     const startLeg = () => {
       if (stopped) return;
 
@@ -164,6 +173,7 @@ export function useClipBuffer(
       if (!recordingStream) {
         setStartError("The share has no live video track yet");
         setArmed(false);
+        scheduleRetry();
         return;
       }
       let recorder: MediaRecorder;
@@ -210,6 +220,7 @@ export function useClipBuffer(
       } catch (err) {
         setStartError(err instanceof Error ? err.message : "Could not start recording");
         setArmed(false);
+        scheduleRetry();
         return;
       }
 

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,8 +35,24 @@ export function ClipControls() {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
 
+  // screenStreamsMap is a plain module-level Map, so a track arriving in it
+  // triggers no render on its own. ScreenShareViewer subscribes to this event
+  // for the same reason; without it this component can sit on a stale null and
+  // never notice the share it is meant to be buffering.
+  const [streamVersion, setStreamVersion] = useState(0);
+  useEffect(() => {
+    const bump = () => setStreamVersion((v) => v + 1);
+    window.addEventListener("screen-stream-update", bump);
+    return () => window.removeEventListener("screen-stream-update", bump);
+  }, []);
+
   const sharerId = state.selectedScreenSharer;
-  const stream = sharerId ? screenStreamsMap.get(sharerId) ?? null : null;
+  const stream = useMemo(
+    () => (sharerId ? screenStreamsMap.get(sharerId) ?? null : null),
+    // streamVersion is the subscription; the map itself is not reactive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sharerId, streamVersion],
+  );
   const { armed, bufferedSecs, error, takeClip } = useClipBuffer(stream, enabled, lengthSecs);
 
   // Everyone in the channel is told, so a buffer of someone's screen is never
@@ -122,11 +138,14 @@ export function ClipControls() {
           )}
         </Button>
       )}
-      {/* Shown whenever armed clipping is failing, including a recorder that
-          started and then produced nothing. */}
+      {/* The reason, not a euphemism for it — hiding it in a tooltip meant the
+          one useful piece of information needed a hover to find. */}
       {enabled && error && (
-        <span className="text-2xs text-destructive" title={error}>
-          Clipping unavailable
+        <span
+          className="max-w-[16rem] truncate text-2xs text-destructive"
+          title={error}
+        >
+          {error}
         </span>
       )}
       <DropdownMenu>
