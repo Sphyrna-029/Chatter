@@ -462,6 +462,35 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     }
   }, [state.currentRoomId, state.voiceChannelId, state.channels, createVoicePublisher, loadVoiceMembers, dispatch]);
 
+  // Announce the departure while the socket is still open.
+  //
+  // Closing a tab otherwise leaves it to the server noticing the socket die,
+  // which can lag by up to the read timeout, and the whole room goes on showing
+  // someone who has gone. pagehide covers tab close, navigation and mobile
+  // backgrounding, where beforeunload does not.
+  useEffect(() => {
+    const announceLeave = () => {
+      if (!inVoiceRef.current) return;
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const roomId = voiceRoomIdRef.current || currentRoomRef.current;
+      if (!roomId) return;
+      try {
+        ws.send(
+          JSON.stringify({
+            type: "voice_leave",
+            room_id: roomId,
+            channel_id: voiceChannelIdRef.current || undefined,
+          }),
+        );
+      } catch {
+        // The socket was already going down; the server falls back to noticing.
+      }
+    };
+    window.addEventListener("pagehide", announceLeave);
+    return () => window.removeEventListener("pagehide", announceLeave);
+  }, [wsRef]);
+
   const leaveVoice = useCallback(async () => {
     // Stop screen sharing via the screen hook cleanup
     await cleanupScreenRef.current();

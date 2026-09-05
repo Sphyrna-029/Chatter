@@ -458,6 +458,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         screen_sharing: false,
                         force_muted,
                         clipping: false,
+                        room_id: room_id.to_string(),
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
@@ -2111,13 +2112,21 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
     let webcam_publisher_room = teardown_webcam_publisher(state, user_id).await;
 
     // Remove from voice channels and broadcast leaves
-    let voice_rooms: Vec<(String, bool, Vec<String>)> = {
+    // (room, channel, was_sharing, who is left). The map is keyed by channel, so
+    // the room has to come off the member record.
+    let voice_rooms: Vec<(String, String, bool, Vec<String>)> = {
         let mut vc = state.voice_channels.write().await;
         let mut results = Vec::new();
-        for (room_id, members) in vc.iter_mut() {
+        for (channel_key, members) in vc.iter_mut() {
             if let Some(member) = members.remove(user_id) {
                 let remaining: Vec<String> = members.keys().cloned().collect();
-                results.push((room_id.clone(), member.screen_sharing, remaining));
+                // Rooms that predate channels key themselves by room id.
+                let room = if member.room_id.is_empty() {
+                    channel_key.clone()
+                } else {
+                    member.room_id.clone()
+                };
+                results.push((room, channel_key.clone(), member.screen_sharing, remaining));
             }
         }
         results
@@ -2147,42 +2156,47 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 
     let mut stopped_screen_rooms = HashSet::new();
 
-    for (room_or_channel_id, was_screen_sharing, voice_members) in voice_rooms {
+    for (room_id_for_channel, channel_key, was_screen_sharing, voice_members) in voice_rooms {
         // Clear occupied_since if channel is now empty
         let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
             state
                 .voice_channel_occupied_since
                 .write()
                 .await
-                .remove(&room_or_channel_id);
+                .remove(&channel_key);
             None
         } else {
             state
                 .voice_channel_occupied_since
                 .read()
                 .await
-                .get(&room_or_channel_id)
+                .get(&channel_key)
                 .copied()
         };
 
+        // Addressed to the room. This used to carry — and broadcast to — the
+        // channel id, so room_members held no such key, broadcast_to_room
+        // returned without sending, and everyone went on showing the departed
+        // user in the channel until something happened to refetch.
         let event = json!({
             "type": "voice_user_left",
-            "room_id": room_or_channel_id,
-            "channel_id": room_or_channel_id,
+            "room_id": room_id_for_channel,
+            "channel_id": channel_key,
             "user_id": user_id,
             "voice_members": voice_members,
             "occupied_since": occupied_since_ms
         });
-        broadcast_to_room(state, &room_or_channel_id, &event).await;
+        broadcast_to_room(state, &room_id_for_channel, &event).await;
 
         if was_screen_sharing {
             let event = json!({
                 "type": "screen_share_stopped",
-                "room_id": room_or_channel_id,
+                "room_id": room_id_for_channel,
+                "channel_id": channel_key,
                 "user_id": user_id
             });
-            broadcast_to_room(state, &room_or_channel_id, &event).await;
-            stopped_screen_rooms.insert(room_or_channel_id);
+            broadcast_to_room(state, &room_id_for_channel, &event).await;
+            stopped_screen_rooms.insert(room_id_for_channel);
         }
     }
 

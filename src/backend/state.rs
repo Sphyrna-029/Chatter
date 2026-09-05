@@ -737,6 +737,10 @@ pub(crate) struct VoiceMemberState {
     /// Holding a rolling buffer of a screen share, ready to save the last few
     /// seconds. Broadcast so nobody's screen is being recorded unannounced.
     pub(crate) clipping: bool,
+    /// The room this channel belongs to. `voice_channels` is keyed by channel
+    /// id, so a disconnect has no other way back to the room whose members need
+    /// telling — and broadcasting to a channel id reaches nobody at all.
+    pub(crate) room_id: String,
 }
 
 #[derive(Clone)]
