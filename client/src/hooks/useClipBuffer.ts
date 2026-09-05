@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * A rolling buffer of the last N seconds of a screen share, kept encoded.
@@ -69,29 +69,46 @@ export function clipBufferSupported(): boolean {
 interface Leg {
   recorder: MediaRecorder;
   chunks: Blob[];
-  /** When this leg started, so we know whether it spans the whole window. */
+  /** When this leg started, so we know how much it covers. */
   startedAt: number;
+}
+
+export interface ClipBuffer {
+  /** A recorder is genuinely running — not merely requested. */
+  armed: boolean;
+  /** Roughly how much footage is available right now. */
+  bufferedSecs: number;
+  /** Why arming failed, when it did. */
+  error: string | null;
+  takeClip: () => Promise<{ blob: Blob; seconds: number } | null>;
 }
 
 export function useClipBuffer(
   stream: MediaStream | null,
   enabled: boolean,
   lengthSecs: number,
-) {
+): ClipBuffer {
   const legsRef = useRef<Leg[]>([]);
   const mimeRef = useRef<string | undefined>(undefined);
-  // Derived rather than tracked: buffering is exactly "asked for, with a stream,
-  // on a browser that can record". A recorder that fails to start leaves the
-  // buffer empty, which takeClip already reports.
-  const armed = enabled && stream !== null && clipBufferSupported();
+  const [armed, setArmed] = useState(false);
+  const [bufferedSecs, setBufferedSecs] = useState(0);
+  const [startError, setStartError] = useState<string | null>(null);
+  // A fixed property of the browser, so it is derived rather than tracked.
+  const supported = clipBufferSupported();
+  const error = supported ? startError : "This browser cannot record video";
 
   useEffect(() => {
-    if (!armed) return;
+    if (!enabled || !stream || !supported) return;
 
     const mime = pickMimeType();
     mimeRef.current = mime;
     let stopped = false;
-    let rotateTimer: ReturnType<typeof setInterval> | null = null;
+
+    /** Oldest leg's coverage, which is what a clip is taken from. */
+    const publishBuffered = () => {
+      const oldest = legsRef.current[0];
+      setBufferedSecs(oldest ? (Date.now() - oldest.startedAt) / 1000 : 0);
+    };
 
     const startLeg = () => {
       if (stopped) return;
@@ -101,63 +118,74 @@ export function useClipBuffer(
           mimeType: mime,
           videoBitsPerSecond: CLIP_BITS_PER_SECOND,
         });
-      } catch {
+      } catch (err) {
+        // Silently swallowing this used to leave the UI offering a clip while
+        // nothing was recording, so saving reported an empty buffer for ever.
+        setStartError(err instanceof Error ? err.message : "Could not start recording");
+        setArmed(false);
         return;
       }
+
       const leg: Leg = { recorder, chunks: [], startedAt: Date.now() };
+      // onstart is the only proof a recorder is actually running.
+      recorder.onstart = () => {
+        setArmed(true);
+        setStartError(null);
+      };
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) leg.chunks.push(e.data);
-        // Trim to a little over the window; a leg older than two windows has
-        // already been replaced by its successor.
-        const maxChunks = Math.ceil((lengthSecs * 2000) / TIMESLICE_MS);
-        if (leg.chunks.length > maxChunks) {
-          leg.chunks.splice(0, leg.chunks.length - maxChunks);
-        }
+        publishBuffered();
       };
-      recorder.onerror = () => { /* the other leg carries on */ };
+      recorder.onerror = () => {
+        setStartError("Recording stopped unexpectedly");
+      };
+
       try {
         recorder.start(TIMESLICE_MS);
-      } catch {
+      } catch (err) {
+        setStartError(err instanceof Error ? err.message : "Could not start recording");
+        setArmed(false);
         return;
       }
+
       legsRef.current.push(leg);
-      // Keep only the current leg and the one before it.
+      // Keep the current leg and its predecessor. A new leg every window means
+      // the predecessor is always between one and two windows old, so it alone
+      // covers the full clip. Rotating twice per window — as this did — threw
+      // away the only leg with any footage and left two empty ones behind it.
       while (legsRef.current.length > 2) {
         const old = legsRef.current.shift();
         try { old?.recorder.stop(); } catch { /* already stopped */ }
       }
+      publishBuffered();
     };
 
     startLeg();
-    // Stagger the second leg by half a window, so at any moment one of them has
-    // been running for at least a full window.
-    const stagger = setTimeout(startLeg, (lengthSecs * 1000) / 2);
-    rotateTimer = setInterval(startLeg, (lengthSecs * 1000) / 2);
+    const rotate = setInterval(startLeg, lengthSecs * 1000);
 
     return () => {
       stopped = true;
-      clearTimeout(stagger);
-      if (rotateTimer) clearInterval(rotateTimer);
+      clearInterval(rotate);
       for (const leg of legsRef.current) {
         try { leg.recorder.stop(); } catch { /* already stopped */ }
       }
       legsRef.current = [];
+      setArmed(false);
+      setBufferedSecs(0);
     };
-  }, [stream, armed, lengthSecs]);
+  }, [stream, enabled, lengthSecs, supported]);
 
-  /** The longest-running leg's output — a complete, decodable recording. */
-  const takeClip = useCallback(async (): Promise<Blob | null> => {
-    const legs = legsRef.current;
-    if (legs.length === 0) return null;
+  const takeClip = useCallback(async () => {
+    // Whichever leg covers the most; before the first rotation there is only one.
+    const leg = legsRef.current[0];
+    if (!leg) return null;
 
-    // Oldest leg covers the most time. Flush it so the final partial chunk is
-    // included before we read.
-    const leg = legs[0];
+    // Flush the partial chunk so the clip runs right up to now.
     await new Promise<void>((resolve) => {
       try {
         if (leg.recorder.state === "recording") {
           leg.recorder.requestData();
-          setTimeout(resolve, 120);
+          setTimeout(resolve, 150);
         } else {
           resolve();
         }
@@ -167,14 +195,21 @@ export function useClipBuffer(
     });
 
     if (leg.chunks.length === 0) return null;
-    // Trim from the front to about the requested window. The header lives in
-    // the first chunk, so that one is always kept.
+
+    // Trim from the front to about the requested window, always keeping the
+    // first chunk: it carries the container header, without which nothing can
+    // decode the rest.
     const wanted = Math.ceil((lengthSecs * 1000) / TIMESLICE_MS);
-    const body = leg.chunks.length > wanted
-      ? [leg.chunks[0], ...leg.chunks.slice(leg.chunks.length - wanted + 1)]
-      : leg.chunks;
-    return new Blob(body, { type: mimeRef.current || "video/webm" });
+    const body =
+      leg.chunks.length > wanted
+        ? [leg.chunks[0], ...leg.chunks.slice(leg.chunks.length - wanted + 1)]
+        : leg.chunks;
+    const seconds = Math.min(lengthSecs, (body.length * TIMESLICE_MS) / 1000);
+    return {
+      blob: new Blob(body, { type: mimeRef.current || "video/webm" }),
+      seconds,
+    };
   }, [lengthSecs]);
 
-  return { armed, takeClip };
+  return { armed, bufferedSecs, error, takeClip };
 }

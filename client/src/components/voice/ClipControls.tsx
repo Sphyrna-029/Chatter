@@ -37,7 +37,7 @@ export function ClipControls() {
 
   const sharerId = state.selectedScreenSharer;
   const stream = sharerId ? screenStreamsMap.get(sharerId) ?? null : null;
-  const { armed, takeClip } = useClipBuffer(stream, enabled, lengthSecs);
+  const { armed, bufferedSecs, error, takeClip } = useClipBuffer(stream, enabled, lengthSecs);
 
   // Everyone in the channel is told, so a buffer of someone's screen is never
   // running unannounced.
@@ -73,23 +73,28 @@ export function ClipControls() {
     savingRef.current = true;
     setSaving(true);
     try {
-      const blob = await takeClip();
-      if (!blob || blob.size === 0) {
-        toast.error("Nothing buffered yet — give it a few seconds");
+      const clip = await takeClip();
+      if (!clip || clip.blob.size === 0) {
+        toast.error(
+          error ?? "Nothing buffered yet — give it a few seconds",
+        );
         return;
       }
       const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const file = new File([blob], `clip-${stamp}.webm`, { type: blob.type });
+      const ext = clip.blob.type.includes("mp4") ? "mp4" : "webm";
+      const file = new File([clip.blob], `clip-${stamp}.${ext}`, { type: clip.blob.type });
       const { url } = await apiUploadFile(file);
       await sendMessage(url);
-      toast.success("Clip posted");
+      // Say the real length: before the buffer has filled it is shorter than
+      // the setting, and silently posting a stub would look like a bug.
+      toast.success(`Clip posted (${Math.round(clip.seconds)}s)`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not save the clip");
     } finally {
       savingRef.current = false;
       setSaving(false);
     }
-  }, [takeClip, sendMessage]);
+  }, [takeClip, sendMessage, error]);
 
   // Nothing to clip without a share on screen, and nothing to offer on a
   // browser that cannot record.
@@ -103,11 +108,24 @@ export function ClipControls() {
           variant="ghost"
           className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
           onClick={save}
-          disabled={saving}
-          title={`Save the last ${lengthSecs} seconds to this channel`}
+          disabled={saving || bufferedSecs < 1}
+          title={
+            bufferedSecs < lengthSecs
+              ? `Buffering — ${Math.floor(bufferedSecs)}s of ${lengthSecs}s so far`
+              : `Save the last ${lengthSecs} seconds to this channel`
+          }
         >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Clip ${lengthSecs}s`}
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            `Clip ${Math.min(lengthSecs, Math.floor(bufferedSecs))}s`
+          )}
         </Button>
+      )}
+      {enabled && !armed && error && (
+        <span className="text-2xs text-destructive" title={error}>
+          Clipping unavailable
+        </span>
       )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
