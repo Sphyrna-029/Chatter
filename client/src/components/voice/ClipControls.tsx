@@ -122,7 +122,9 @@ export function ClipControls() {
           )}
         </Button>
       )}
-      {enabled && !armed && error && (
+      {/* Shown whenever armed clipping is failing, including a recorder that
+          started and then produced nothing. */}
+      {enabled && error && (
         <span className="text-2xs text-destructive" title={error}>
           Clipping unavailable
         </span>

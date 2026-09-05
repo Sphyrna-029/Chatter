@@ -22,6 +22,9 @@ export const DEFAULT_CLIP_LENGTH: ClipLength = 30;
 
 /** Chunk cadence. Small enough to trim close to the requested window. */
 const TIMESLICE_MS = 1000;
+/** If nothing has been recorded by now, something is wrong — say so rather than
+ *  letting the user wait for footage that will never arrive. */
+const FIRST_CHUNK_TIMEOUT_MS = 6000;
 /** Cap what a viewer re-encode may spend; the source is already capped lower. */
 const CLIP_BITS_PER_SECOND = 8_000_000;
 
@@ -60,6 +63,26 @@ function pickMimeType(): string | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * The tracks worth recording from a received share.
+ *
+ * A remote track stays `muted` until media actually flows, and MediaRecorder
+ * muxes every track in the stream it is given — so one silent audio track that
+ * never delivers a frame stalls the muxer and no data is emitted at all, for
+ * video included. Screen shares frequently negotiate audio that carries
+ * nothing, so audio joins only once it is demonstrably live.
+ */
+function buildRecordingStream(source: MediaStream): MediaStream | null {
+  const video = source.getVideoTracks().find((t) => t.readyState === "live");
+  if (!video) return null;
+  const tracks: MediaStreamTrack[] = [video];
+  const audio = source
+    .getAudioTracks()
+    .find((t) => t.readyState === "live" && !t.muted);
+  if (audio) tracks.push(audio);
+  return new MediaStream(tracks);
 }
 
 export function clipBufferSupported(): boolean {
@@ -103,18 +126,49 @@ export function useClipBuffer(
     const mime = pickMimeType();
     mimeRef.current = mime;
     let stopped = false;
+    let waitingForUnmute = false;
+    const watchdogs: ReturnType<typeof setTimeout>[] = [];
+    const unmuteCleanups: (() => void)[] = [];
 
     /** Oldest leg's coverage, which is what a clip is taken from. */
+    // Measured from recorded chunks, not from elapsed time: a recorder that
+    // starts and produces nothing would otherwise look like a filling buffer.
     const publishBuffered = () => {
       const oldest = legsRef.current[0];
-      setBufferedSecs(oldest ? (Date.now() - oldest.startedAt) / 1000 : 0);
+      setBufferedSecs(oldest ? (oldest.chunks.length * TIMESLICE_MS) / 1000 : 0);
     };
 
     const startLeg = () => {
       if (stopped) return;
+
+      // A remote track is `muted` until media actually flows through it, and
+      // recording one in that state stalls the muxer exactly as a dead audio
+      // track does. Wait for it rather than starting a recorder that will
+      // silently produce nothing.
+      const videoTrack = stream.getVideoTracks().find((t) => t.readyState === "live");
+      if (videoTrack && videoTrack.muted) {
+        if (!waitingForUnmute) {
+          waitingForUnmute = true;
+          const onUnmute = () => {
+            waitingForUnmute = false;
+            videoTrack.removeEventListener("unmute", onUnmute);
+            startLeg();
+          };
+          videoTrack.addEventListener("unmute", onUnmute);
+          unmuteCleanups.push(() => videoTrack.removeEventListener("unmute", onUnmute));
+        }
+        return;
+      }
+
+      const recordingStream = buildRecordingStream(stream);
+      if (!recordingStream) {
+        setStartError("The share has no live video track yet");
+        setArmed(false);
+        return;
+      }
       let recorder: MediaRecorder;
       try {
-        recorder = new MediaRecorder(stream, {
+        recorder = new MediaRecorder(recordingStream, {
           mimeType: mime,
           videoBitsPerSecond: CLIP_BITS_PER_SECOND,
         });
@@ -132,10 +186,21 @@ export function useClipBuffer(
         setArmed(true);
         setStartError(null);
       };
+      // A recorder can start and then emit nothing at all. Without this the
+      // only symptom is an empty buffer that looks like impatience.
+      const watchdog = setTimeout(() => {
+        if (!stopped && leg.chunks.length === 0) {
+          setStartError("The recorder produced no data from this stream");
+        }
+      }, FIRST_CHUNK_TIMEOUT_MS);
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) leg.chunks.push(e.data);
+        if (e.data && e.data.size > 0) {
+          leg.chunks.push(e.data);
+          clearTimeout(watchdog);
+        }
         publishBuffered();
       };
+      watchdogs.push(watchdog);
       recorder.onerror = () => {
         setStartError("Recording stopped unexpectedly");
       };
@@ -166,6 +231,8 @@ export function useClipBuffer(
     return () => {
       stopped = true;
       clearInterval(rotate);
+      for (const w of watchdogs) clearTimeout(w);
+      for (const c of unmuteCleanups) c();
       for (const leg of legsRef.current) {
         try { leg.recorder.stop(); } catch { /* already stopped */ }
       }
