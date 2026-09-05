@@ -67,6 +67,7 @@ pub(crate) async fn get_voice_channel_status(
                     "muted": vs.muted,
                     "deafened": vs.deafened,
                     "screen_sharing": vs.screen_sharing,
+                    "clipping": vs.clipping,
                     "force_muted": vs.force_muted,
                     "channel_id": key
                 });

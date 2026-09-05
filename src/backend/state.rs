@@ -734,6 +734,9 @@ pub(crate) struct VoiceMemberState {
     /// publish path refuses their audio while it is set, so a patched client
     /// cannot talk around it.
     pub(crate) force_muted: bool,
+    /// Holding a rolling buffer of a screen share, ready to save the last few
+    /// seconds. Broadcast so nobody's screen is being recorded unannounced.
+    pub(crate) clipping: bool,
 }
 
 #[derive(Clone)]

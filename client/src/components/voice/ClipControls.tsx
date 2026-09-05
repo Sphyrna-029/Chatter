@@ -1,0 +1,151 @@
+import { useCallback, useRef, useState } from "react";
+import { useAppContext, screenStreamsMap } from "@/lib/store";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@/components/ui/dropdown-menu";
+import { Scissors, Loader2 } from "lucide-react";
+import { apiUploadFile } from "@/lib/api";
+import { toast } from "sonner";
+import {
+  CLIP_LENGTH_OPTIONS,
+  clipBufferSupported,
+  loadClipLength,
+  storeClipLength,
+  useClipBuffer,
+  type ClipLength,
+} from "@/hooks/useClipBuffer";
+
+/**
+ * Arm a rolling buffer over the focused screen share and save the last stretch
+ * of it into the channel.
+ *
+ * Off by default: it runs a second video encoder for as long as it is armed,
+ * which is a real cost to pay for a button nobody may press.
+ */
+export function ClipControls() {
+  const { state, wsRef, sendMessage } = useAppContext();
+  const [lengthSecs, setLengthSecs] = useState<ClipLength>(loadClipLength);
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+
+  const sharerId = state.selectedScreenSharer;
+  const stream = sharerId ? screenStreamsMap.get(sharerId) ?? null : null;
+  const { armed, takeClip } = useClipBuffer(stream, enabled, lengthSecs);
+
+  // Everyone in the channel is told, so a buffer of someone's screen is never
+  // running unannounced.
+  const announce = useCallback(
+    (clipping: boolean) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(
+        JSON.stringify({
+          type: "voice_clipping",
+          room_id: state.voiceRoomId || state.currentRoomId,
+          channel_id: state.voiceChannelId || undefined,
+          clipping,
+        }),
+      );
+    },
+    [wsRef, state.voiceRoomId, state.currentRoomId, state.voiceChannelId],
+  );
+
+  const toggle = useCallback(() => {
+    setEnabled((prev) => {
+      const next = !prev;
+      announce(next);
+      if (next) {
+        toast.info(`Clipping armed — the last ${lengthSecs}s stays buffered`);
+      }
+      return next;
+    });
+  }, [announce, lengthSecs]);
+
+  const save = useCallback(async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const blob = await takeClip();
+      if (!blob || blob.size === 0) {
+        toast.error("Nothing buffered yet — give it a few seconds");
+        return;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const file = new File([blob], `clip-${stamp}.webm`, { type: blob.type });
+      const { url } = await apiUploadFile(file);
+      await sendMessage(url);
+      toast.success("Clip posted");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save the clip");
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }, [takeClip, sendMessage]);
+
+  // Nothing to clip without a share on screen, and nothing to offer on a
+  // browser that cannot record.
+  if (!sharerId || !stream || !clipBufferSupported()) return null;
+
+  return (
+    <div className="flex items-center gap-1">
+      {armed && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+          onClick={save}
+          disabled={saving}
+          title={`Save the last ${lengthSecs} seconds to this channel`}
+        >
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Clip ${lengthSecs}s`}
+        </Button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="ghost"
+            className={`h-7 w-7 p-0 ${armed ? "text-destructive" : "text-muted-foreground hover:text-foreground"}`}
+            title={armed ? "Clipping armed" : "Arm clipping"}
+          >
+            <Scissors className="h-3.5 w-3.5" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Clip buffer</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={enabled ? "on" : "off"}
+            onValueChange={() => toggle()}
+          >
+            <DropdownMenuRadioItem value="on">Armed</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="off">Off</DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuLabel>Length</DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={String(lengthSecs)}
+            onValueChange={(v) => {
+              const next = Number(v) as ClipLength;
+              setLengthSecs(next);
+              storeClipLength(next);
+            }}
+          >
+            {CLIP_LENGTH_OPTIONS.map((secs) => (
+              <DropdownMenuRadioItem key={secs} value={String(secs)}>
+                {secs} seconds
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}

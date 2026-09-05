@@ -457,6 +457,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         deafened: false,
                         screen_sharing: false,
                         force_muted,
+                        clipping: false,
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
@@ -677,6 +678,33 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 "channel_id": channel_id,
                 "user_id": user_id,
                 "muted": muted
+            });
+            broadcast_to_room(&state, room_id, &event).await;
+        }
+        "voice_clipping" => {
+            // Someone is holding a rolling buffer of a screen share. Everyone in
+            // the channel is told, because a recording nobody can see is exactly
+            // the thing people should be able to see.
+            let clipping = msg
+                .get("clipping")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
+            {
+                let mut vc = state.voice_channels.write().await;
+                if let Some(member) = vc.get_mut(channel_id).and_then(|c| c.get_mut(user_id)) {
+                    member.clipping = clipping;
+                }
+            }
+            let event = json!({
+                "type": "voice_user_clipping",
+                "room_id": room_id,
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "clipping": clipping,
             });
             broadcast_to_room(&state, room_id, &event).await;
         }

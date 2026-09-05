@@ -437,6 +437,15 @@ export function createWsMessageHandler(
           playLeaveSound();
         }
       }
+    } else if (msg.type === "voice_user_clipping") {
+      // Someone armed or disarmed a clip buffer on a screen share in this
+      // channel. Surfaced on their voice tile so it is never silent.
+      if (msg.channel_id) {
+        const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
+          m.userId === msg.user_id ? { ...m, clipping: !!msg.clipping } : m
+        );
+        dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
+      }
     } else if (msg.type === "voice_user_muted") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {

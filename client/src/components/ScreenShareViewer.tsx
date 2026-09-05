@@ -5,6 +5,7 @@ import { Slider } from "@/components/ui/slider";
 import { cn, displayUserId } from "@/lib/utils";
 import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
+import { ClipControls } from "./voice/ClipControls";
 
 
 /** Header bar shown above the resizable panel group — always visible */
@@ -110,6 +111,7 @@ export function ScreenShareHeader({
             ))}
           </div>
         )}
+        <ClipControls />
         {state.isScreenSharing && (
           <ScreenFpsMenu>
             <Button

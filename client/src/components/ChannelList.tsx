@@ -3,7 +3,7 @@ import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X,
+  Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X, Scissors,
   Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
@@ -546,6 +546,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                         >
                           <Monitor className="h-3 w-3 text-purple-400" />
                         </button>
+                      )}
+                      {m.clipping && (
+                        <span
+                          className="shrink-0 p-0.5"
+                          title={`${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))} is buffering clips of the screen share`}
+                        >
+                          <Scissors className="h-3 w-3 text-destructive" />
+                        </span>
                       )}
                       {canManage && !isMe && roomId && (
                         <DropdownMenu>

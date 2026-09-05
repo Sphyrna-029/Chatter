@@ -43,7 +43,7 @@ export interface AppState {
   channelCategories: ChannelCategory[];
   currentChannelId: string | null;
   // Voice channels: channel_id -> list of user_ids in that voice channel
-  voiceChannelMembers: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]>;
+  voiceChannelMembers: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean; clipping?: boolean }[]>;
   voiceChannelId: string | null;
   // Voice
   inVoiceChannel: boolean;
@@ -213,8 +213,8 @@ export type Action =
   | { type: "ADD_CHANNEL"; payload: Channel }
   | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
   | { type: "REMOVE_CHANNEL"; payload: string }
-  | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean }[]> }
-  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[] } }
+  | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; clipping?: boolean }[]> }
+  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean; clipping?: boolean }[] } }
   | { type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: Record<string, number> }
   | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
