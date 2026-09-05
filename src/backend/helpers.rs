@@ -914,6 +914,18 @@ pub(crate) async fn do_join_room(
     Ok(true)
 }
 
+/// Send a JSON message to one specific connection of a user.
+///
+/// `send_to_user` fans out to every device they have open, which is wrong for
+/// anything addressed to the device that did something — telling all of them
+/// that their voice session was taken over would tell the device that took it.
+pub(crate) async fn send_to_conn(state: &AppState, user_id: &str, conn_id: u64, message: &Value) {
+    let ws_map = state.active_websockets.read().await;
+    if let Some(tx) = ws_map.get(user_id).and_then(|conns| conns.get(&conn_id)) {
+        let _ = tx.send(Message::Text(message.to_string().into()));
+    }
+}
+
 /// Send a JSON message to a single WebSocket-connected user (all their active connections).
 pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Value) {
     let ws_map = state.active_websockets.read().await;

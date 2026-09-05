@@ -741,6 +741,13 @@ pub(crate) struct VoiceMemberState {
     /// id, so a disconnect has no other way back to the room whose members need
     /// telling — and broadcasting to a channel id reaches nobody at all.
     pub(crate) room_id: String,
+    /// Which of the user's websocket connections holds this voice session.
+    ///
+    /// A user can have several connections open — a desktop and a phone — but
+    /// only one of them is in the call. Without this, closing any spare tab
+    /// evicted the call running on another device, and a `voice_leave` from
+    /// one device ended another's.
+    pub(crate) conn_id: u64,
 }
 
 #[derive(Clone)]

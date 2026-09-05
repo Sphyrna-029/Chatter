@@ -33,6 +33,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // to the WS effect's dependencies.
   const joinVoiceRef = useRef<(channelId?: string) => Promise<void>>(async () => {});
   const leaveVoiceRef = useRef<() => Promise<void>>(async () => {});
+  const releaseVoiceRef = useRef<() => Promise<void>>(async () => {});
 
   // Refs to avoid stale closures
   const inVoiceRef = useRef(state.inVoiceChannel);
@@ -369,6 +370,18 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         // The server has already moved us in its own state; rebuild the peer
         // connections for the new channel.
         if (msg.channel_id) await joinVoiceRef.current(msg.channel_id);
+      } else if (msg.type === "voice_session_taken") {
+        // The same account joined this call from somewhere else. The server has
+        // already moved the session and torn our media down on its side; drop
+        // the local half quietly rather than announcing a leave, which would be
+        // this device answering for a call it no longer holds.
+        //
+        // The member list is left alone: the account is still in the call, on
+        // another device, so nothing about the room has changed.
+        if (inVoiceRef.current) {
+          await releaseVoiceRef.current();
+          toast.info("You joined this call from another device");
+        }
       } else if (msg.type === "voice_force_disconnected") {
         if (inVoiceRef.current) await leaveVoiceRef.current();
       } else if (msg.type === "voice_webrtc_error") {
@@ -491,7 +504,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     return () => window.removeEventListener("pagehide", announceLeave);
   }, [wsRef]);
 
-  const leaveVoice = useCallback(async () => {
+  /** Shut the local half of a voice session down, telling nobody.
+   *
+   *  On its own this is what a device does when it has already lost the
+   *  session — announcing a leave for a call it no longer holds is at best
+   *  noise, and would have been an eviction before the server started
+   *  scoping membership to a connection. */
+  const teardownLocalVoice = useCallback(async () => {
     // Stop screen sharing via the screen hook cleanup
     await cleanupScreenRef.current();
 
@@ -517,7 +536,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     }
 
     dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null, voiceChannelName: null } });
+    // Cleared so a refresh on this device does not auto-rejoin and take the
+    // session straight back off whichever device is holding it.
     try { sessionStorage.removeItem("voiceSession"); } catch {}
+  }, [dispatch, cleanupScreenRef]);
+
+  const leaveVoice = useCallback(async () => {
+    await teardownLocalVoice();
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };
@@ -525,7 +550,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       wsRef.current.send(JSON.stringify(leaveMsg));
     }
     await loadVoiceMembers();
-  }, [state.currentRoomId, state.voiceChannelId, dispatch, loadVoiceMembers]);
+  }, [teardownLocalVoice, state.currentRoomId, state.voiceChannelId, loadVoiceMembers]);
 
   // ─── Mute ─────────────────────────────────────────────────────────────────
   const toggleMute = useCallback(() => {
@@ -632,6 +657,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
   joinVoiceRef.current = joinVoice;
   leaveVoiceRef.current = leaveVoice;
+  releaseVoiceRef.current = teardownLocalVoice;
 
   return {
     localStreamRef,

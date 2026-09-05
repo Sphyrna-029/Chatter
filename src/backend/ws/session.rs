@@ -21,7 +21,7 @@ use super::{
 use crate::backend::{
     helpers::{
         broadcast_to_room, channel_permissions, generate_id, get_user_from_token, get_user_role,
-        now_millis, now_secs, send_to_user,
+        now_millis, now_secs, send_to_conn, send_to_user,
     },
     state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
 };
@@ -44,6 +44,37 @@ pub(crate) async fn ws_upgrade(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_websocket(state, socket))
+}
+
+/// The connection holding this user's voice session, when it is not `conn_id`.
+///
+/// A user may have several websockets open — a desktop and a phone — but only
+/// one of them is ever in a call. `Some(other)` means this join is a handover
+/// and `other` is the device about to lose it; `None` means there is nothing to
+/// take, including when the same connection is simply rejoining.
+fn displaced_voice_conn(
+    channels: &HashMap<String, HashMap<String, VoiceMemberState>>,
+    user_id: &str,
+    conn_id: u64,
+) -> Option<u64> {
+    channels
+        .values()
+        .filter_map(|members| members.get(user_id))
+        .map(|member| member.conn_id)
+        .find(|held_by| *held_by != conn_id)
+}
+
+/// Whether `conn_id` is the connection that owns this user's membership of a
+/// channel. Anything that ends a call — a leave, a socket closing — has to ask
+/// this first, or one device's exit takes another's call down with it.
+fn holds_voice_session(
+    members: &HashMap<String, VoiceMemberState>,
+    user_id: &str,
+    conn_id: u64,
+) -> bool {
+    members
+        .get(user_id)
+        .is_some_and(|member| member.conn_id == conn_id)
 }
 
 pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
@@ -289,7 +320,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         match tokio::time::timeout(recv_timeout, ws_stream.next()).await {
             Ok(Some(Ok(msg))) => match msg {
                 Message::Text(text) => {
-                    handle_ws_text(recv_state.clone(), &recv_user_id, &text).await;
+                    handle_ws_text(recv_state.clone(), &recv_user_id, conn_id, &text).await;
                 }
                 Message::Binary(data) => {
                     handle_ws_binary(&recv_state, &recv_user_id, &data).await;
@@ -310,7 +341,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     sink_task.abort();
 }
 
-pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &str) {
+pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id: u64, text: &str) {
     let msg: Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => return,
@@ -399,27 +430,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
 
-            // Reject if this user is already in the target channel from another device.
-            {
+            // A voice session belongs to one connection, and the newest join wins.
+            // The user may be in this very channel from another device: that is a
+            // handover, not a second membership. The room is told nothing — from
+            // its side the same person stays in the call throughout — but the
+            // device losing it has to be told, and only that device.
+            let displaced_conn = {
                 let vc = state.voice_channels.read().await;
-                if vc
-                    .get(channel_id)
-                    .map(|ch| ch.contains_key(user_id))
-                    .unwrap_or(false)
-                {
-                    send_to_user(
-                        &state,
-                        user_id,
-                        &json!({
-                            "type": "error",
-                            "error": "already_in_channel",
-                            "message": "You are already in this voice channel on another device"
-                        }),
-                    )
-                    .await;
-                    return;
-                }
-            }
+                displaced_voice_conn(&vc, user_id, conn_id)
+            };
 
             // A server mute is room-scoped and outlives channel membership, so a
             // rejoin must not hand the user their microphone back.
@@ -459,6 +478,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                         force_muted,
                         clipping: false,
                         room_id: room_id.to_string(),
+                        conn_id,
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
@@ -530,6 +550,55 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
                 }
             }
 
+            // Hand the session over from whichever device held it. The loop above
+            // covers a move between channels; this also covers a rejoin of the
+            // same channel, where there was no old channel to leave.
+            //
+            // Media is keyed by user id, so this has to run before the joining
+            // device publishes. It does: that offer is a later message on the
+            // socket this one arrived on.
+            if let Some(displaced) = displaced_conn {
+                teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                let _ = teardown_voice_publisher(&state, user_id).await;
+                teardown_screen_subscriptions_for_viewer(&state, user_id).await;
+                let screen_room = teardown_screen_publisher(&state, user_id).await;
+                teardown_webcam_subscriptions_for_viewer(&state, user_id).await;
+                let webcam_room = teardown_webcam_publisher(&state, user_id).await;
+
+                // Already announced by the loop above when the device was moving
+                // between channels; `teardown` answers None the second time.
+                if let Some(ref rid) = screen_room {
+                    let event = json!({
+                        "type": "screen_share_stopped",
+                        "room_id": rid,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, rid, &event).await;
+                }
+                if let Some(ref rid) = webcam_room {
+                    let event = json!({
+                        "type": "webcam_share_stopped",
+                        "room_id": rid,
+                        "user_id": user_id
+                    });
+                    broadcast_to_room(&state, rid, &event).await;
+                }
+
+                // Only the device that lost it. `send_to_user` would tell the
+                // device that just took the session that it had lost one.
+                send_to_conn(
+                    &state,
+                    user_id,
+                    displaced,
+                    &json!({
+                        "type": "voice_session_taken",
+                        "room_id": room_id,
+                        "channel_id": channel_id,
+                    }),
+                )
+                .await;
+            }
+
             let event = json!({
                 "type": "voice_user_joined",
                 "room_id": room_id,
@@ -581,12 +650,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, text: &s
             let result = {
                 let mut vc = state.voice_channels.write().await;
                 if let Some(chan_vc) = vc.get_mut(channel_id) {
-                    chan_vc.remove(user_id).map(|member| {
-                        (
-                            chan_vc.keys().cloned().collect::<Vec<_>>(),
-                            member.screen_sharing,
-                        )
-                    })
+                    // Only the connection holding the session can end it. A device
+                    // that was handed over, or a second tab tidying up on close,
+                    // would otherwise drop the call running elsewhere.
+                    if holds_voice_session(chan_vc, user_id, conn_id) {
+                        chan_vc.remove(user_id).map(|member| {
+                            (
+                                chan_vc.keys().cloned().collect::<Vec<_>>(),
+                                member.screen_sharing,
+                            )
+                        })
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -2118,6 +2194,11 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
         let mut vc = state.voice_channels.write().await;
         let mut results = Vec::new();
         for (channel_key, members) in vc.iter_mut() {
+            // Another device may hold this session — closing a spare tab used to
+            // end a call running on a different machine.
+            if !holds_voice_session(members, user_id, conn_id) {
+                continue;
+            }
             if let Some(member) = members.remove(user_id) {
                 let remaining: Vec<String> = members.keys().cloned().collect();
                 // Rooms that predate channels key themselves by room id.
@@ -2270,5 +2351,89 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
                 broadcast_to_room(state, &rid, &event).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{displaced_voice_conn, holds_voice_session};
+    use crate::backend::state::VoiceMemberState;
+    use std::collections::HashMap;
+
+    const DESKTOP: u64 = 11;
+    const PHONE: u64 = 22;
+    const USER: &str = "@ada:localhost";
+
+    fn member(conn_id: u64) -> VoiceMemberState {
+        VoiceMemberState {
+            muted: false,
+            deafened: false,
+            screen_sharing: false,
+            force_muted: false,
+            clipping: false,
+            room_id: "!room:localhost".to_string(),
+            conn_id,
+        }
+    }
+
+    fn channels(
+        entries: &[(&str, &[(&str, u64)])],
+    ) -> HashMap<String, HashMap<String, VoiceMemberState>> {
+        entries
+            .iter()
+            .map(|(channel, members)| {
+                (
+                    (*channel).to_string(),
+                    members
+                        .iter()
+                        .map(|(user, conn)| ((*user).to_string(), member(*conn)))
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rejoining_from_a_second_device_displaces_the_first() {
+        let vc = channels(&[("#general", &[(USER, DESKTOP)])]);
+        assert_eq!(displaced_voice_conn(&vc, USER, PHONE), Some(DESKTOP));
+    }
+
+    #[test]
+    fn a_device_in_any_other_channel_is_displaced_too() {
+        // One call per account, not one per channel — so the search covers
+        // every channel, not just the one being joined. Looking only at the
+        // target channel would leave the desktop publishing into #gaming
+        // while the phone joined #general under the same account.
+        let vc = channels(&[
+            ("#general", &[("@grace:localhost", PHONE)]),
+            ("#gaming", &[(USER, DESKTOP)]),
+        ]);
+        assert_eq!(displaced_voice_conn(&vc, USER, PHONE), Some(DESKTOP));
+    }
+
+    #[test]
+    fn the_same_connection_rejoining_displaces_nobody() {
+        // A client re-sending voice_join — switching channels, or reconnecting
+        // its own session — must not be told it took the call off itself.
+        let vc = channels(&[("#general", &[(USER, DESKTOP)])]);
+        assert_eq!(displaced_voice_conn(&vc, USER, DESKTOP), None);
+    }
+
+    #[test]
+    fn other_peoples_sessions_are_not_displaced() {
+        let vc = channels(&[("#general", &[("@grace:localhost", DESKTOP)])]);
+        assert_eq!(displaced_voice_conn(&vc, USER, PHONE), None);
+    }
+
+    #[test]
+    fn only_the_owning_connection_can_end_the_call() {
+        // The check that stopped a spare tab closing — or a handed-over device
+        // tidying up — from ending a call running on another machine.
+        let members: HashMap<String, VoiceMemberState> =
+            [(USER.to_string(), member(PHONE))].into_iter().collect();
+        assert!(holds_voice_session(&members, USER, PHONE));
+        assert!(!holds_voice_session(&members, USER, DESKTOP));
+        assert!(!holds_voice_session(&members, "@grace:localhost", PHONE));
     }
 }
