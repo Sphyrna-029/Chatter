@@ -99,6 +99,8 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const prevScrollHeightRef = useRef<number>(0);
   const wasLoadingOlderRef = useRef(false);
+  // Set on a channel switch so the landing scroll is instant rather than smooth.
+  const justSwitchedChannelRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -330,11 +332,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
       const count = state.channelUnreadCounts[channelId ?? ""] || 0;
       unreadCountRef.current = count;
       if (state.currentRoomId) markChannelRead(state.currentRoomId, channelId ?? undefined);
+      // Either way we open at the newest message, so the tracking ref agrees.
+      isNearBottomRef.current = true;
+      justSwitchedChannelRef.current = true;
       if (count > 0) {
         pendingDividerRef.current = true;
         showNewDividerRef.current = true;
         setShowNewDivider(true);
-        isNearBottomRef.current = false;
         // Clear the badge immediately — count is already captured in unreadCountRef for the divider
         dispatch({ type: "CLEAR_CHANNEL_UNREAD", payload: channelId! });
       } else {
@@ -342,10 +346,6 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         showNewDividerRef.current = false;
         setShowNewDivider(false);
         setFirstUnreadEventId(null);
-        // Opening a caught-up channel puts us at the newest message. Without
-        // this, a switch made while reading history would leave the ref false
-        // and the channel's messages would render above the viewport.
-        isNearBottomRef.current = true;
       }
       prevChannelIdRef.current = channelId;
     }
@@ -391,6 +391,13 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   // the viewport to the newest message loses the reader's place every time.
   useEffect(() => {
     if (!isNearBottomRef.current) return;
+    // A channel's first render starts at the top, so gliding down through it
+    // would be a visible swoop. Only later arrivals animate.
+    if (justSwitchedChannelRef.current) {
+      justSwitchedChannelRef.current = false;
+      scrollToBottom();
+      return;
+    }
     scrollToBottom("smooth");
   }, [state.messages, scrollToBottom]);
 
@@ -432,12 +439,12 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
   }, [state.messages]);
 
-  // Scroll to the "New" divider after it renders
-  useLayoutEffect(() => {
-    if (firstUnreadEventId && newDividerRef.current) {
-      newDividerRef.current.scrollIntoView({ block: "start" });
-    }
-  }, [firstUnreadEventId]);
+  // The "New" divider is a marker to scroll up to, not a scroll target.
+  //
+  // It used to pull the viewport to itself, and its index is
+  // messages.length - unreadCount: once the backlog exceeds the loaded page —
+  // routinely — that clamps to zero and dropped you at the very top of history
+  // instead of the newest message.
 
   // Preserve scroll position after prepending older messages.
   //
