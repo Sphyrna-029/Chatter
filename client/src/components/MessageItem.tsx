@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X, MoreHorizontal } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import {
@@ -28,6 +28,7 @@ import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
 import { useChromecast } from "@/hooks/useChromecast";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { UserProfileDialog } from "./UserProfileDialog";
@@ -1014,6 +1015,35 @@ interface MessageItemProps {
   hidePinControls?: boolean;
 }
 
+/** One labelled row in the touch action sheet. Icon-only buttons work in a
+ *  hover bubble, where a tooltip is a hover away; in a sheet they would be a
+ *  guessing game. */
+function ActionRow({
+  icon: Icon,
+  label,
+  onSelect,
+  destructive,
+}: {
+  icon: typeof Reply;
+  label: string;
+  onSelect: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cn(
+        "flex w-full items-center gap-3 px-4 py-3 text-sm active:bg-accent",
+        destructive ? "text-destructive" : "text-foreground",
+      )}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
+  );
+}
+
 function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
   const confirm = useConfirm();
   const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
@@ -1033,6 +1063,9 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
   const [emojiTip, setEmojiTip] = useState<{ name: string; x: number; y: number } | null>(null);
   const [reactionsDetailOpen, setReactionsDetailOpen] = useState(false);
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  // Touch-only: the same actions, behind one button.
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [sheetView, setSheetView] = useState<"actions" | "emoji">("actions");
 
   // Reverse map of custom emoji URL → alias for hover tooltips
   const urlToAlias = useMemo(() => {
@@ -1608,8 +1641,26 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           )}
         </div>
 
+        {/* Touch has no hover, so the bubble below never hid itself and every
+            message in the timeline carried its own row of buttons. One trigger
+            instead, opening the same actions as a sheet. Laid out in the row
+            rather than positioned over it, so it cannot land on the text. */}
+        {!isDeleted && isMobile && (
+          <button
+            type="button"
+            aria-label="Message actions"
+            onClick={() => {
+              setSheetView("actions");
+              setActionsOpen(true);
+            }}
+            className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground/60 active:bg-accent"
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        )}
+
         {/* Floating action bubble, revealed on hover over the message */}
-        {!isDeleted && (
+        {!isDeleted && !isMobile && (
           <div
             className={cn(
               "absolute right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-md transition-opacity",
@@ -1714,6 +1765,113 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           </div>
         )}
       </div>
+      {!isDeleted && isMobile && (
+        <Sheet
+          open={actionsOpen}
+          onOpenChange={(open) => {
+            setActionsOpen(open);
+            // Next open starts on the action list, not wherever it was left.
+            if (!open) setSheetView("actions");
+          }}
+        >
+          <SheetContent side="bottom" className="gap-0 pb-4" showCloseButton={false}>
+            <SheetHeader className="pb-1">
+              <SheetTitle className="text-sm">
+                {sheetView === "emoji" ? "Add reaction" : "Message"}
+              </SheetTitle>
+            </SheetHeader>
+            {sheetView === "emoji" ? (
+              <div className="flex justify-center">
+                <EmojiPicker
+                  onSelect={(emoji) => {
+                    addReaction(message.event_id, emoji);
+                    setActionsOpen(false);
+                  }}
+                  roomCustomEmojis={
+                    state.currentRoomId
+                      ? (state.roomInfoMap[state.currentRoomId]?.custom_emojis ?? [])
+                      : []
+                  }
+                  emojiAliases={
+                    state.currentRoomId
+                      ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
+                      : {}
+                  }
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                <ActionRow
+                  icon={Reply}
+                  label="Reply"
+                  onSelect={() => {
+                    setActionsOpen(false);
+                    handleReply();
+                  }}
+                />
+                {!inThread && !isExternal && message.content.msgtype !== "m.system" && (
+                  <ActionRow
+                    icon={MessagesSquare}
+                    label="Open thread"
+                    onSelect={() => {
+                      setActionsOpen(false);
+                      openThread(message.event_id);
+                    }}
+                  />
+                )}
+                {canPin && (
+                  <ActionRow
+                    icon={isPinned ? PinOff : Pin}
+                    label={isPinned ? "Unpin message" : "Pin message"}
+                    onSelect={() => {
+                      setActionsOpen(false);
+                      togglePin();
+                    }}
+                  />
+                )}
+                {canReact && (
+                  // Stays open: the picker is the sheet's other half, not a
+                  // popover on top of it.
+                  <ActionRow
+                    icon={SmilePlus}
+                    label="Add reaction"
+                    onSelect={() => setSheetView("emoji")}
+                  />
+                )}
+                {isOwn && (
+                  <ActionRow
+                    icon={Pencil}
+                    label="Edit"
+                    onSelect={() => {
+                      setActionsOpen(false);
+                      setIsEditing(true);
+                    }}
+                  />
+                )}
+                {(isOwn || canDeleteOthers) && (
+                  <ActionRow
+                    icon={Trash2}
+                    label="Delete"
+                    destructive
+                    onSelect={async () => {
+                      setActionsOpen(false);
+                      if (
+                        await confirm({
+                          title: "Delete this message?",
+                          confirmLabel: "Delete",
+                          destructive: true,
+                        })
+                      ) {
+                        deleteMessage(message.event_id);
+                      }
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </SheetContent>
+        </Sheet>
+      )}
       {!isExternal && <UserProfileDialog open={profileOpen} onOpenChange={setProfileOpen} userId={message.sender} displayName={sender} />}
     </div>
   );
