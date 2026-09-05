@@ -9,9 +9,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * nothing can play. With two, one has always been running long enough to cover
  * the whole window on its own, so a clip is one recorder's complete output.
  *
+ * A clip is therefore one recorder's entire output, never a splice: WebM cannot
+ * be cut at arbitrary chunk boundaries, so the result runs between one and two
+ * windows and ends at the moment it was taken. Longer than asked for, rather
+ * than corrupt — and the saved length is reported so it is not a surprise.
+ *
  * The cost is real: a second video encoder runs for as long as this is armed,
- * and the buffer holds roughly bitrate x window bytes (~45MB for 30s of a
- * 12Mbps 1080p60 share, doubled by the overlap). It stays off until asked for.
+ * and at 12Mbps the two legs hold up to three windows between them — roughly
+ * 135MB for a 30s setting. It stays off until asked for.
  */
 
 export const CLIP_LENGTH_OPTIONS = [15, 30, 60] as const;
@@ -28,8 +33,10 @@ const FIRST_CHUNK_TIMEOUT_MS = 6000;
 /** How soon to try again when a leg fails to start. Rotation alone would leave
  *  a transient failure — a track not live yet — stuck for a whole window. */
 const RETRY_MS = 2000;
-/** Cap what a viewer re-encode may spend; the source is already capped lower. */
-const CLIP_BITS_PER_SECOND = 8_000_000;
+/** Match the 60fps screen-share cap in lib/webrtc.ts. Encoding below what the
+ *  source was allowed to send loses detail a second time, on top of the loss
+ *  already taken by re-encoding a decoded stream. */
+const CLIP_BITS_PER_SECOND = 12_000_000;
 
 export function loadClipLength(): ClipLength {
   try {
@@ -227,6 +234,8 @@ export function useClipBuffer(
       }, FIRST_CHUNK_TIMEOUT_MS);
       recorder.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) {
+          // Never dropped from the front: chunk 0 carries the container header,
+          // and the rotation below already bounds how long a leg lives.
           leg.chunks.push(e.data);
           clearTimeout(watchdog);
         }
@@ -296,20 +305,23 @@ export function useClipBuffer(
 
     if (leg.chunks.length === 0) return null;
 
-    // Trim from the front to about the requested window, always keeping the
-    // first chunk: it carries the container header, without which nothing can
-    // decode the rest.
-    const wanted = Math.ceil((lengthSecs * 1000) / TIMESLICE_MS);
-    const body =
-      leg.chunks.length > wanted
-        ? [leg.chunks[0], ...leg.chunks.slice(leg.chunks.length - wanted + 1)]
-        : leg.chunks;
-    const seconds = Math.min(lengthSecs, (body.length * TIMESLICE_MS) / 1000);
+    // Every chunk, in order, untouched.
+    //
+    // Trimming the front to hit the requested length exactly is what the
+    // staggered recorders exist to avoid: keeping chunk 0 for its header and
+    // then skipping to the tail hands the decoder clusters whose reference
+    // frames have been thrown away, and it renders artefacts until it happens
+    // upon a keyframe. Cutting WebM at arbitrary chunk boundaries is not a
+    // thing you can do, so the clip is one recorder's whole output — a window
+    // to twice a window long, ending now.
+    const seconds = (leg.chunks.length * TIMESLICE_MS) / 1000;
     return {
-      blob: new Blob(body, { type: mimeRef.current || "video/webm" }),
+      blob: new Blob(leg.chunks, { type: mimeRef.current || "video/webm" }),
       seconds,
     };
-  }, [lengthSecs]);
+    // No dependency on lengthSecs any more: the clip is whatever the leg
+    // holds, not a slice measured against the setting.
+  }, []);
 
   return { armed, bufferedSecs, error, takeClip };
 }
