@@ -13,8 +13,9 @@ use axum::{
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 async fn check_storage_quota(
     state: &AppState,
@@ -83,6 +84,9 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
         if let Some(tmp_path) = remux_with_subs(path).await {
             let _ = tokio::fs::rename(&tmp_path, &new_path).await;
             let _ = tokio::fs::remove_file(path).await;
+            // The remux already wrote the moov atom up front, so the MP4 does
+            // not need a faststart pass the first time it is played.
+            let _ = tokio::fs::write(format!("{}.faststarted", new_path), b"").await;
             let new_filename = new_filename_from_path(&new_path);
             return (new_path, new_filename);
         }
@@ -93,32 +97,71 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
 
     // For MP4/MOV, apply faststart
     if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
-        let tmp = format!("{}.faststart.tmp", path);
-        let result = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-i",
-                path,
-                "-c",
-                "copy",
-                "-movflags",
-                "+faststart",
-                &tmp,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await;
-        if let Ok(status) = result {
-            if status.success() {
-                let _ = tokio::fs::rename(&tmp, path).await;
-                return (path.to_string(), filename.to_string());
-            }
-        }
-        let _ = tokio::fs::remove_file(&tmp).await;
+        faststart_in_place(path, &ext).await;
     }
 
     (path.to_string(), filename.to_string())
+}
+
+/// Serializes the in-place ffmpeg passes (faststart, MKV→MP4) per file. A
+/// `<video>` element opens a source with several parallel range requests;
+/// without this each would start its own ffmpeg writing the same temp path,
+/// and the first to finish would rename a half-written file into place.
+static MEDIA_JOBS: LazyLock<tokio::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    LazyLock::new(|| tokio::sync::Mutex::new(HashMap::new()));
+
+async fn media_job_lock(path: &str) -> Arc<tokio::sync::Mutex<()>> {
+    MEDIA_JOBS
+        .lock()
+        .await
+        .entry(path.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone()
+}
+
+/// Move the moov atom to the front of an MP4/MOV so the browser can start
+/// playing (and seek) before the whole file has arrived. Rewrites the file in
+/// place; on failure the original is left untouched.
+///
+/// The temp output ends in `.tmp`, an extension ffmpeg cannot map to a muxer,
+/// so the container has to be named explicitly with `-f`.
+///
+/// Runs at most once per file: the `.faststarted` marker is written whether or
+/// not ffmpeg succeeded, so a file it cannot process is not retried on every
+/// request.
+async fn faststart_in_place(path: &str, ext: &str) -> bool {
+    let job = media_job_lock(path).await;
+    let _guard = job.lock().await;
+
+    let marker = format!("{}.faststarted", path);
+    if tokio::fs::metadata(&marker).await.is_ok() {
+        return true; // another request already ran the pass
+    }
+
+    let format = if ext == "mov" { "mov" } else { "mp4" };
+    let tmp = format!("{}.faststart.tmp", path);
+    let result = tokio::process::Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-i",
+            path,
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            "-f",
+            format,
+            &tmp,
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await;
+    let ok = matches!(result, Ok(status) if status.success())
+        && tokio::fs::rename(&tmp, path).await.is_ok();
+    let _ = tokio::fs::remove_file(&tmp).await;
+    let _ = tokio::fs::write(&marker, b"").await;
+    ok
 }
 
 fn new_filename_from_path(path: &str) -> String {
@@ -160,6 +203,10 @@ async fn remux_with_subs(src: &str) -> Option<String> {
             "mov_text",
             "-movflags",
             "+faststart",
+            // The destination ends in `.tmp`, which ffmpeg cannot map to a
+            // muxer, so the container has to be named explicitly.
+            "-f",
+            "mp4",
             &dst,
         ])
         .stdout(std::process::Stdio::null())
@@ -1974,35 +2021,11 @@ pub(crate) async fn upload_guard(
     if matches!(ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
         let disk_path = external_disk_path(&uri_path).unwrap_or_default();
 
-        if !disk_path.is_empty() && matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
-            let marker = format!("{}.faststarted", disk_path);
-            if tokio::fs::metadata(&marker).await.is_err()
-                && tokio::fs::metadata(&disk_path).await.is_ok()
-            {
-                let tmp = format!("{}.faststart.tmp", disk_path);
-                let result = tokio::process::Command::new("ffmpeg")
-                    .args([
-                        "-y",
-                        "-i",
-                        &disk_path,
-                        "-c",
-                        "copy",
-                        "-movflags",
-                        "+faststart",
-                        &tmp,
-                    ])
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .status()
-                    .await;
-                if let Ok(status) = result {
-                    if status.success() {
-                        let _ = tokio::fs::rename(&tmp, &disk_path).await;
-                    }
-                }
-                let _ = tokio::fs::remove_file(&tmp).await;
-                let _ = tokio::fs::write(&marker, b"").await;
-            }
+        if !disk_path.is_empty()
+            && matches!(ext.as_str(), "mp4" | "mov" | "m4v")
+            && tokio::fs::metadata(&disk_path).await.is_ok()
+        {
+            faststart_in_place(&disk_path, &ext).await;
         }
 
         // Lazily generate thumbnail + subtitle sidecars for existing videos
@@ -2034,12 +2057,20 @@ pub(crate) async fn upload_guard(
             extract_subtitles(&disk_path).await;
         }
 
-        // Convert if the cached MP4 doesn't exist yet
+        // Convert if the cached MP4 doesn't exist yet. Parallel range requests
+        // all land here at once, so only one of them gets to run the remux;
+        // the rest wait and then find the finished MP4.
         if tokio::fs::metadata(&mp4_disk).await.is_err()
             && tokio::fs::metadata(&disk_path).await.is_ok()
         {
-            if let Some(tmp_path) = remux_with_subs(&disk_path).await {
-                let _ = tokio::fs::rename(&tmp_path, &mp4_disk).await;
+            let job = media_job_lock(&disk_path).await;
+            let _guard = job.lock().await;
+            if tokio::fs::metadata(&mp4_disk).await.is_err() {
+                if let Some(tmp_path) = remux_with_subs(&disk_path).await {
+                    let _ = tokio::fs::rename(&tmp_path, &mp4_disk).await;
+                    // Already faststarted by the remux.
+                    let _ = tokio::fs::write(format!("{}.faststarted", mp4_disk), b"").await;
+                }
             }
         }
 
@@ -2259,6 +2290,159 @@ mod tests {
         assert_eq!(tracks[0]["label"], "Track 1");
 
         for p in [&video, &vtt_path, &manifest] {
+            let _ = tokio::fs::remove_file(p).await;
+        }
+    }
+
+    /// Report the container ffprobe detects for a file, or "" when it cannot
+    /// be opened at all.
+    async fn probe_format(path: &str) -> String {
+        tokio::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "format=format_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                path,
+            ])
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    }
+
+    /// Build an MKV shaped like an ordinary rip: H.264 video, AC-3 audio the
+    /// MP4 container will not take as-is, and a SubRip caption track.
+    async fn build_mkv_fixture() -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_mkv_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let mkv = dir.join("movie.mkv").to_string_lossy().to_string();
+        let subs = dir.join("movie_src.vtt").to_string_lossy().to_string();
+        for suffix in ["", ".cc.tmp", ".faststarted", ".faststart.tmp"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", mkv, suffix)).await;
+        }
+        tokio::fs::write(
+            &subs,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello world\n",
+        )
+        .await
+        .unwrap();
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=5:size=320x240:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=5",
+                "-i",
+                &subs,
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-c:a",
+                "ac3",
+                "-c:s",
+                "srt",
+                "-shortest",
+                &mkv,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "mkv fixture build failed");
+        mkv
+    }
+
+    #[tokio::test]
+    async fn remux_writes_a_real_mp4_not_just_a_tmp_file() {
+        let mkv = build_mkv_fixture().await;
+
+        // Regression: the destination is `{src}.cc.tmp`, and ffmpeg picks its
+        // muxer from the output extension. `.tmp` matches no format, so every
+        // MKV conversion died with "Unable to choose an output format" before
+        // reading a frame. The upload fell back to keeping the Matroska file,
+        // the browser was handed a container it cannot play, and the video
+        // spun on "loading" forever — while the captions, extracted by a
+        // separate `-f webvtt` pass, worked fine.
+        let tmp = remux_with_subs(&mkv).await.expect("remux should succeed");
+
+        let format = probe_format(&tmp).await;
+        assert!(
+            format.contains("mp4"),
+            "converted file is not an MP4: {format:?}"
+        );
+
+        let streams = tokio::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                &tmp,
+            ])
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        assert!(streams.contains("h264"), "video stream lost: {streams}");
+        assert!(streams.contains("aac"), "audio not transcoded: {streams}");
+        assert!(streams.contains("mov_text"), "captions lost: {streams}");
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&mkv).await;
+    }
+
+    #[tokio::test]
+    async fn faststart_rewrites_the_file_and_runs_once() {
+        let dir = std::env::temp_dir().join(format!("chatter_fs_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let mp4 = dir.join("clip.mp4").to_string_lossy().to_string();
+        let marker = format!("{}.faststarted", mp4);
+        let _ = tokio::fs::remove_file(&marker).await;
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=3:size=320x240:rate=10",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                &mp4,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "mp4 fixture build failed");
+
+        // Same `.tmp` output bug as the remux: the pass silently did nothing,
+        // so uploaded MP4s kept their moov atom at the tail.
+        assert!(faststart_in_place(&mp4, "mp4").await);
+        assert!(probe_format(&mp4).await.contains("mp4"));
+        assert!(
+            tokio::fs::metadata(&marker).await.is_ok(),
+            "marker not written; the pass would rerun on every request"
+        );
+        // The marker short-circuits the second call, so parallel range
+        // requests do not each re-encode the file.
+        assert!(faststart_in_place(&mp4, "mp4").await);
+
+        for p in [&mp4, &marker] {
             let _ = tokio::fs::remove_file(p).await;
         }
     }
