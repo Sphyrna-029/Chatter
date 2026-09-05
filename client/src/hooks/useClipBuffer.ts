@@ -19,12 +19,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * 135MB for a 30s setting. It stays off until asked for.
  */
 
-export const CLIP_LENGTH_OPTIONS = [15, 30, 60] as const;
-export type ClipLength = (typeof CLIP_LENGTH_OPTIONS)[number];
-
-export const CLIP_LENGTH_STORAGE_KEY = "chatter_clip_length_secs";
-export const DEFAULT_CLIP_LENGTH: ClipLength = 30;
-
 /** Chunk cadence. Small enough to trim close to the requested window. */
 const TIMESLICE_MS = 1000;
 /** If nothing has been recorded by now, something is wrong — say so rather than
@@ -37,25 +31,6 @@ const RETRY_MS = 2000;
  *  source was allowed to send loses detail a second time, on top of the loss
  *  already taken by re-encoding a decoded stream. */
 const CLIP_BITS_PER_SECOND = 12_000_000;
-
-export function loadClipLength(): ClipLength {
-  try {
-    const raw = Number(localStorage.getItem(CLIP_LENGTH_STORAGE_KEY));
-    return (CLIP_LENGTH_OPTIONS as readonly number[]).includes(raw)
-      ? (raw as ClipLength)
-      : DEFAULT_CLIP_LENGTH;
-  } catch {
-    return DEFAULT_CLIP_LENGTH;
-  }
-}
-
-export function storeClipLength(secs: ClipLength): void {
-  try {
-    localStorage.setItem(CLIP_LENGTH_STORAGE_KEY, String(secs));
-  } catch {
-    // The preference just will not survive the reload.
-  }
-}
 
 /**
  * The first MIME type the browser will record, matched to the tracks on hand.

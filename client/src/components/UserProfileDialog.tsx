@@ -8,6 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { clipBufferSupported } from "@/hooks/useClipBuffer";
+import {
+  CLIP_LENGTH_OPTIONS,
+  useClipSettings,
+  type ClipLength,
+} from "@/hooks/useClipSettings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -189,6 +197,7 @@ export function UserProfileDialog({
     ensureFontFace(userId, presence.nameFontUrl);
   }
   const [activeTab, setActiveTab] = useState("profile");
+  const { settings: clipSettings, updateSettings: updateClipSettings } = useClipSettings();
 
   // My Files state
   const [uploads, setUploads] = useState<UploadRecord[]>([]);
@@ -738,6 +747,53 @@ export function UserProfileDialog({
           >
             {uploading ? "Saving..." : "Save"}
           </Button>
+
+          {/* Below the Save button on purpose: these apply the moment they are
+              changed, and are kept on this device rather than on the server. */}
+          {clipBufferSupported() && (
+            <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Clip streams automatically
+                  </label>
+                  <p className="text-3xs text-muted-foreground">
+                    Arm the clip buffer on whichever stream you have focused,
+                    including one already running when you join a call.
+                  </p>
+                </div>
+                <Switch
+                  checked={clipSettings.autoArm}
+                  onCheckedChange={(v) => updateClipSettings({ autoArm: v })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">Clip Length</label>
+                <ToggleGroup
+                  type="single"
+                  value={String(clipSettings.lengthSecs)}
+                  onValueChange={(val) => {
+                    if (val) updateClipSettings({ lengthSecs: Number(val) as ClipLength });
+                  }}
+                  className="w-full rounded-md border border-border p-0.5 bg-muted"
+                >
+                  {CLIP_LENGTH_OPTIONS.map((secs) => (
+                    <ToggleGroupItem
+                      key={secs}
+                      value={String(secs)}
+                      className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                    >
+                      {secs} seconds
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </div>
+              <p className="text-3xs text-muted-foreground">
+                Buffering runs a second video encoder, and everyone in the
+                channel is told while it is armed.
+              </p>
+            </div>
+          )}
         </div>
       ) : (
         <>

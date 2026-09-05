@@ -12,25 +12,25 @@ import {
 import { Scissors, Loader2 } from "lucide-react";
 import { apiUploadFile } from "@/lib/api";
 import { toast } from "sonner";
+import { clipBufferSupported, useClipBuffer } from "@/hooks/useClipBuffer";
 import {
   CLIP_LENGTH_OPTIONS,
-  clipBufferSupported,
-  loadClipLength,
-  storeClipLength,
-  useClipBuffer,
+  useClipSettings,
   type ClipLength,
-} from "@/hooks/useClipBuffer";
+} from "@/hooks/useClipSettings";
 
 /**
  * Arm a rolling buffer over the focused screen share and save the last stretch
  * of it into the channel.
  *
- * Off by default: it runs a second video encoder for as long as it is armed,
- * which is a real cost to pay for a button nobody may press.
+ * Off unless the user's profile says otherwise: it runs a second video encoder
+ * for as long as it is armed, which is a real cost to pay for a button nobody
+ * may press.
  */
 export function ClipControls() {
   const { state, wsRef, sendMessage } = useAppContext();
-  const [lengthSecs, setLengthSecs] = useState<ClipLength>(loadClipLength);
+  const { settings, updateSettings } = useClipSettings();
+  const lengthSecs = settings.lengthSecs;
   const [enabled, setEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
@@ -54,6 +54,7 @@ export function ClipControls() {
     [sharerId, streamVersion],
   );
   const { armed, bufferedSecs, error, takeClip } = useClipBuffer(stream, enabled, lengthSecs);
+  const supported = clipBufferSupported();
 
   // Everyone in the channel is told, so a buffer of someone's screen is never
   // running unannounced.
@@ -73,7 +74,47 @@ export function ClipControls() {
     [wsRef, state.voiceRoomId, state.currentRoomId, state.voiceChannelId],
   );
 
+  // Nothing else retracts the announcement: the server holds `clipping` on the
+  // voice member until they leave the call outright, so closing the viewer or
+  // watching the share end would leave the channel told that a recording is
+  // running when it stopped with this component. Read through refs so the
+  // cleanup runs on unmount only, rather than on every state change.
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const announceRef = useRef(announce);
+  announceRef.current = announce;
+  useEffect(
+    () => () => {
+      if (enabledRef.current) announceRef.current(false);
+    },
+    [],
+  );
+
+  // The saved default follows the focused share: whichever stream lands in the
+  // main slot — on joining a call that already has one up, or on switching to
+  // another — gets the user's clipping settings without being asked for.
+  //
+  // It only ever arms. Disarming here as well would silently cancel a buffer
+  // the user armed by hand just because they looked at a different share.
+  const autoArmedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!sharerId) {
+      // The share ended; focusing it again later should arm again.
+      autoArmedFor.current = null;
+      return;
+    }
+    if (!settings.autoArm || !stream || !supported) return;
+    if (autoArmedFor.current === sharerId) return;
+    autoArmedFor.current = sharerId;
+    setEnabled(true);
+    announce(true);
+    toast.info(`Clipping armed — the last ${lengthSecs}s stays buffered`);
+  }, [sharerId, stream, settings.autoArm, supported, lengthSecs, announce]);
+
   const toggle = useCallback(() => {
+    // Whatever the user picks by hand stands for this share; the effect above
+    // is keyed on the same sharer and will not override it.
+    autoArmedFor.current = sharerId;
     setEnabled((prev) => {
       const next = !prev;
       announce(next);
@@ -82,7 +123,7 @@ export function ClipControls() {
       }
       return next;
     });
-  }, [announce, lengthSecs]);
+  }, [announce, lengthSecs, sharerId]);
 
   const save = useCallback(async () => {
     if (savingRef.current) return;
@@ -119,7 +160,7 @@ export function ClipControls() {
 
   // Nothing to clip without a share on screen, and nothing to offer on a
   // browser that cannot record.
-  if (!sharerId || !stream || !clipBufferSupported()) return null;
+  if (!sharerId || !stream || !supported) return null;
 
   return (
     <div className="flex items-center gap-1">
@@ -176,11 +217,9 @@ export function ClipControls() {
           <DropdownMenuLabel>Length</DropdownMenuLabel>
           <DropdownMenuRadioGroup
             value={String(lengthSecs)}
-            onValueChange={(v) => {
-              const next = Number(v) as ClipLength;
-              setLengthSecs(next);
-              storeClipLength(next);
-            }}
+            onValueChange={(v) =>
+              updateSettings({ lengthSecs: Number(v) as ClipLength })
+            }
           >
             {CLIP_LENGTH_OPTIONS.map((secs) => (
               <DropdownMenuRadioItem key={secs} value={String(secs)}>
