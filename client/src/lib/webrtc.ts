@@ -152,6 +152,9 @@ export function getScreenSharePublishProfile(
 // set it. Storage throws in private mode and with site data blocked, so every
 // access is guarded — a lost preference is not worth breaking screen share for.
 export const SCREEN_FPS_STORAGE_KEY = "chatter_screen_share_fps";
+// Broadcast so every surface showing the control (voice panel, share viewer,
+// voice toolbar) and the publisher itself stay in step without prop drilling.
+export const SCREEN_FPS_CHANGE_EVENT = "screen-share-fps-change";
 
 export function loadScreenShareFps(): 30 | 60 {
   try {

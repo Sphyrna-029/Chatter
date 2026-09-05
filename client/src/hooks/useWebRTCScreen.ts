@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect, useState } from "react";
+import { useCallback, useRef, useEffect } from "react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import {
   getWebRTCConfig,
@@ -7,11 +7,10 @@ import {
   VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
   getScreenSharePublishProfile,
-  loadScreenShareFps,
-  storeScreenShareFps,
   mungeScreenAudioSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
+import { useScreenShareFps } from "./useScreenShareFps";
 import { toast } from "sonner";
 
 function buildDisplayVideoConstraints(
@@ -64,7 +63,7 @@ export function useWebRTCScreen() {
   const screenSubPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
-  const [screenFps, setScreenFpsState] = useState<30 | 60>(loadScreenShareFps);
+  const { screenFps } = useScreenShareFps();
   const screenShareStartingRef = useRef(false);
 
   // Ref for frozen detection external stats
@@ -417,13 +416,10 @@ export function useWebRTCScreen() {
     connStatsRef.current = stats;
   }, []);
 
-  // Changing the frame rate mid-share used to only take effect on the next
+  // A frame rate change while sharing used to only take effect on the next
   // share. Both halves of the change apply live, so no renegotiation is needed:
   // applyConstraints retimes the capture, and setParameters retimes the encoder.
-  const setScreenFps = useCallback(async (fps: 30 | 60) => {
-    setScreenFpsState(fps);
-    storeScreenShareFps(fps);
-
+  const applyScreenFpsToActiveShare = useCallback(async (fps: 30 | 60) => {
     const stream = screenStreamRef.current;
     const pc = screenPubPcRef.current;
     // Not sharing — the new value is picked up by the next startScreenShare.
@@ -447,6 +443,15 @@ export function useWebRTCScreen() {
     if (videoSender) await tuneScreenVideoSender(videoSender, profile);
     toast.success(`Screen share set to ${profile.targetFps} FPS`);
   }, []);
+
+  // Skip the first run: mounting is not a frame rate change, and re-applying on
+  // every share would fight startScreenShare, which already set the profile.
+  const lastAppliedFpsRef = useRef(screenFps);
+  useEffect(() => {
+    if (lastAppliedFpsRef.current === screenFps) return;
+    lastAppliedFpsRef.current = screenFps;
+    void applyScreenFpsToActiveShare(screenFps);
+  }, [screenFps, applyScreenFpsToActiveShare]);
 
   // ─── Screen share publish/stop ─────────────────────────────────────────────
   const startScreenShare = useCallback(async () => {
@@ -552,8 +557,6 @@ export function useWebRTCScreen() {
   return {
     screenPubPcRef,
     screenSubPcsRef,
-    screenFps,
-    setScreenFps,
     startScreenShare,
     stopScreenShare,
     watchUser,

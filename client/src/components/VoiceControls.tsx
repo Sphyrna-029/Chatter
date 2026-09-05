@@ -221,7 +221,6 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         isDeafened={state.isDeafened}
         voiceInputMode={state.voiceInputMode}
         isScreenSharing={state.isScreenSharing}
-        screenFps={screen.screenFps}
         isWebcamActive={state.isWebcamActive}
         debugOpen={debugOpen}
         hideScreenShare={
@@ -238,7 +237,6 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
         onToggleInputMode={voice.toggleInputMode}
         onStartScreenShare={screen.startScreenShare}
         onStopScreenShare={screen.stopScreenShare}
-        onSetScreenFps={screen.setScreenFps}
         onStartWebcam={() => setCameraModalOpen(true)}
         onStopWebcam={webcam.stopWebcam}
         onToggleDebug={() => setDebugOpen((o) => !o)}

@@ -3,6 +3,8 @@ import { useAppContext, screenStreamsMap, webcamStreamsMap } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { cn, displayUserId } from "@/lib/utils";
+import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
+import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 
 
 /** Header bar shown above the resizable panel group — always visible */
@@ -16,6 +18,7 @@ export function ScreenShareHeader({
   onTogglePiP?: () => void;
 }) {
   const { state, dispatch } = useAppContext();
+  const { screenFps } = useScreenShareFps();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const supportsPiP = (() => { try { return !!document.pictureInPictureEnabled; } catch { return false; } })();
 
@@ -106,6 +109,18 @@ export function ScreenShareHeader({
               </button>
             ))}
           </div>
+        )}
+        {state.isScreenSharing && (
+          <ScreenFpsMenu>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              title="Screen share quality"
+            >
+              {screenFps} FPS
+            </Button>
+          </ScreenFpsMenu>
         )}
         {onTogglePiP && supportsPiP && (
           <Button

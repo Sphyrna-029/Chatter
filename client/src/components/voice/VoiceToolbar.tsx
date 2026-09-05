@@ -1,5 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu";
+import { ScreenFpsMenu } from "./ScreenFpsMenu";
+import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 
 interface VoiceToolbarProps {
   inVoiceChannel: boolean;
@@ -7,7 +8,6 @@ interface VoiceToolbarProps {
   isDeafened: boolean;
   voiceInputMode: "open" | "ptt";
   isScreenSharing: boolean;
-  screenFps: 30 | 60;
   isWebcamActive: boolean;
   debugOpen: boolean;
   onJoinVoice: () => void;
@@ -18,7 +18,6 @@ interface VoiceToolbarProps {
   hideScreenShare?: boolean;
   onStartScreenShare: () => void;
   onStopScreenShare: () => void;
-  onSetScreenFps: (fps: 30 | 60) => void;
   onStartWebcam: () => void;
   onStopWebcam: () => void;
   onToggleDebug: () => void;
@@ -30,7 +29,6 @@ export function VoiceToolbar({
   isDeafened,
   voiceInputMode,
   isScreenSharing,
-  screenFps,
   isWebcamActive,
   debugOpen,
   onJoinVoice,
@@ -41,11 +39,11 @@ export function VoiceToolbar({
   hideScreenShare,
   onStartScreenShare,
   onStopScreenShare,
-  onSetScreenFps,
   onStartWebcam,
   onStopWebcam,
   onToggleDebug,
 }: VoiceToolbarProps) {
+  const { screenFps } = useScreenShareFps();
   if (!inVoiceChannel) return null;
 
   return (
@@ -113,23 +111,16 @@ export function VoiceToolbar({
             >
               {isScreenSharing ? "🖥️ Stop" : `🖥️ Share (${screenFps}fps)`}
             </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  size="sm"
-                  variant={isScreenSharing ? "destructive" : "outline"}
-                  className="text-xs rounded-l-none border-l-0 px-1.5"
-                >
-                  ▾
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuRadioGroup value={String(screenFps)} onValueChange={(v) => onSetScreenFps(Number(v) as 30 | 60)}>
-                  <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <ScreenFpsMenu>
+              <Button
+                size="sm"
+                variant={isScreenSharing ? "destructive" : "outline"}
+                className="text-xs rounded-l-none border-l-0 px-1.5"
+                title="Screen share quality"
+              >
+                ▾
+              </Button>
+            </ScreenFpsMenu>
           </div>
         )}
       </div>

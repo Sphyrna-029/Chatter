@@ -36,6 +36,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RoleManagementDialog } from "./RoleManagementDialog";
 import { NotificationSettingsPopover, NotificationBell } from "./NotificationSettingsPopover";
 import { resolveNotificationLevel } from "@/lib/notifications";
+import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
+import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { clickable } from "@/lib/a11y";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -92,6 +94,7 @@ function VoiceTimer({ since }: { since: number }) {
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const confirm = useConfirm();
   const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel, moderateVoice } = useAppContext();
+  const { screenFps } = useScreenShareFps();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
@@ -953,17 +956,31 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               </button>
             )}
             {onToggleScreenShare && (
-              <button
-                onClick={onToggleScreenShare}
-                className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
-                  isScreenSharing
-                    ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
-                    : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                }`}
-                title={isScreenSharing ? "Stop sharing" : "Share screen"}
-              >
-                <Monitor className="h-3.5 w-3.5" />
-              </button>
+              <div className="flex-1 flex">
+                <button
+                  onClick={onToggleScreenShare}
+                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-l-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                    isScreenSharing
+                      ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                      : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  }`}
+                  title={isScreenSharing ? "Stop sharing" : "Share screen"}
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                </button>
+                <ScreenFpsMenu>
+                  <button
+                    className={`flex items-center justify-center rounded-r-md border-l border-background/40 px-1 py-1.5 text-[10px] font-medium leading-none transition-colors ${
+                      isScreenSharing
+                        ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                        : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                    }`}
+                    title="Screen share quality"
+                  >
+                    {screenFps}
+                  </button>
+                </ScreenFpsMenu>
+              </div>
             )}
             <button
               onClick={onLeaveVoice}
