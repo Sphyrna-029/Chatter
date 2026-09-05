@@ -50,14 +50,28 @@ export function storeClipLength(secs: ClipLength): void {
   }
 }
 
-/** The first MIME type the browser will actually record. */
-function pickMimeType(): string | undefined {
-  const candidates = [
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-    "video/mp4",
-  ];
+/**
+ * The first MIME type the browser will record, matched to the tracks on hand.
+ *
+ * The codec list has to agree with the stream. Asking for `...,opus` while
+ * recording a video-only stream is accepted by isTypeSupported — the *type* is
+ * supported — and the recorder then starts and emits nothing at all, having
+ * been told to mux an audio stream with no source behind it.
+ */
+function pickMimeType(hasAudio: boolean): string | undefined {
+  const candidates = hasAudio
+    ? [
+        "video/webm;codecs=vp9,opus",
+        "video/webm;codecs=vp8,opus",
+        "video/webm",
+        "video/mp4",
+      ]
+    : [
+        "video/webm;codecs=vp9",
+        "video/webm;codecs=vp8",
+        "video/webm",
+        "video/mp4",
+      ];
   for (const type of candidates) {
     try {
       if (MediaRecorder.isTypeSupported(type)) return type;
@@ -89,7 +103,7 @@ function buildRecordingStream(source: MediaStream): MediaStream | null {
 }
 
 export function clipBufferSupported(): boolean {
-  return typeof MediaRecorder !== "undefined" && pickMimeType() !== undefined;
+  return typeof MediaRecorder !== "undefined" && pickMimeType(false) !== undefined;
 }
 
 interface Leg {
@@ -126,8 +140,6 @@ export function useClipBuffer(
   useEffect(() => {
     if (!enabled || !stream || !supported) return;
 
-    const mime = pickMimeType();
-    mimeRef.current = mime;
     let stopped = false;
     let waitingForUnmute = false;
     const watchdogs: ReturnType<typeof setTimeout>[] = [];
@@ -176,18 +188,28 @@ export function useClipBuffer(
         scheduleRetry();
         return;
       }
+      // Chosen per leg, from the tracks actually going in.
+      const mime = pickMimeType(recordingStream.getAudioTracks().length > 0);
+      mimeRef.current = mime;
+
       let recorder: MediaRecorder;
       try {
         recorder = new MediaRecorder(recordingStream, {
           mimeType: mime,
           videoBitsPerSecond: CLIP_BITS_PER_SECOND,
         });
-      } catch (err) {
-        // Silently swallowing this used to leave the UI offering a clip while
-        // nothing was recording, so saving reported an empty buffer for ever.
-        setStartError(err instanceof Error ? err.message : "Could not start recording");
-        setArmed(false);
-        return;
+      } catch {
+        // Last resort: let the browser pick everything. A clip in a format we
+        // did not choose beats no clip at all.
+        try {
+          recorder = new MediaRecorder(recordingStream);
+          mimeRef.current = recorder.mimeType || undefined;
+        } catch (err) {
+          setStartError(err instanceof Error ? err.message : "Could not start recording");
+          setArmed(false);
+          scheduleRetry();
+          return;
+        }
       }
 
       const leg: Leg = { recorder, chunks: [], startedAt: Date.now() };
