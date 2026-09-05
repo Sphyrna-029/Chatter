@@ -5,8 +5,6 @@ import {
   apiGetAllRooms,
   apiGetVoiceMembers,
   apiGetChannels,
-  apiGetUnreads,
-  apiMarkRead,
   type RoomSummary,
 } from "@/lib/api";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -15,7 +13,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, CheckCheck, Music, Gamepad2, MessageCircle } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, Music, Gamepad2, MessageCircle } from "lucide-react";
 import { ActivityStats } from "./activity/ActivityStats";
 import { StorageManager } from "./activity/StorageManager";
 import { RecentDiscussions } from "./activity/RecentDiscussions";
@@ -89,7 +87,6 @@ export function ActivityPage() {
   const [blockedExpanded, setBlockedExpanded] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [liveVoice, setLiveVoice] = useState<LiveVoiceRoom[]>([]);
-  const [markingRead, setMarkingRead] = useState(false);
   // Bumped on each digest tick; the self-fetching sections refresh off it.
   const [refreshKey, setRefreshKey] = useState(0);
   const [friendToAdd, setFriendToAdd] = useState("");
@@ -226,23 +223,6 @@ export function ActivityPage() {
     return () => { cancelled = true; clearInterval(interval); };
   }, [state.joinedRoomIds]);
 
-  // Read markers are per channel, so clearing a room means clearing each of
-  // its channels — the unread rows already carry the pairs to mark.
-  const markAllRead = useCallback(async () => {
-    setMarkingRead(true);
-    try {
-      const { unreads } = await apiGetUnreads();
-      await Promise.all(
-        unreads.map((u) => apiMarkRead(u.room_id, u.channel_id).catch(() => {})),
-      );
-      await loadUnreads();
-    } catch {
-      // Nothing to undo — the next refresh reflects whatever landed.
-    } finally {
-      setMarkingRead(false);
-    }
-  }, [loadUnreads]);
-
   const addFriend = useCallback(async () => {
     const target = friendToAdd.trim();
     if (!target) return;
@@ -258,11 +238,6 @@ export function ActivityPage() {
   const mentionedRooms = Object.entries(state.roomMentions).filter(
     ([, count]) => count > 0
   );
-
-  const unreadRooms = Object.entries(state.roomUnreadCounts).filter(
-    ([, count]) => count > 0
-  );
-  const totalUnread = unreadRooms.reduce((sum, [, count]) => sum + count, 0);
 
   // Sort friends: online first
   const sortedFriends = [...state.friends].sort((a, b) => {
@@ -653,29 +628,6 @@ export function ActivityPage() {
                 );
               })}
             </div>
-          </section>
-        )}
-
-        {/* Unread summary */}
-        {totalUnread > 0 && (
-          <section className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
-            <p className="text-sm min-w-0">
-              <span className="font-semibold">{totalUnread}</span>
-              {" unread message"}{totalUnread !== 1 ? "s" : ""}
-              {" across "}
-              <span className="font-semibold">{unreadRooms.length}</span>
-              {" room"}{unreadRooms.length !== 1 ? "s" : ""}
-            </p>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 text-xs shrink-0"
-              onClick={markAllRead}
-              disabled={markingRead}
-            >
-              <CheckCheck className="h-3.5 w-3.5 mr-1" />
-              {markingRead ? "Marking…" : "Mark all read"}
-            </Button>
           </section>
         )}
 
