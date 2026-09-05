@@ -17,7 +17,6 @@ import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
 import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, CheckCheck, Music, Gamepad2, MessageCircle } from "lucide-react";
 import { ActivityStats } from "./activity/ActivityStats";
-import { ActivityFeed } from "./activity/ActivityFeed";
 import { StorageManager } from "./activity/StorageManager";
 import { RecentDiscussions } from "./activity/RecentDiscussions";
 import { CrossRoomSearch } from "./activity/CrossRoomSearch";
@@ -715,8 +714,6 @@ export function ActivityPage() {
         )}
 
         <RecentDiscussions refreshKey={refreshKey} onSelectRoom={selectRoom} />
-
-        <ActivityFeed refreshKey={refreshKey} onSelectRoom={selectRoom} />
 
         <StorageManager refreshKey={refreshKey} />
 
