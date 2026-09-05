@@ -2105,6 +2105,45 @@ export interface UnreadEntry {
 }
 
 /** Unread + mention counts for every joined room, derived from stored read markers. */
+// ─── Activity page ──────────────────────────────────────────────────────────
+
+export interface ActivityStats {
+  /** Days the counts cover; every figure below is bounded by it. */
+  window_days: number;
+  total: number;
+  mine: number;
+  daily: { date: string; count: number }[];
+  /** 24 entries, index = hour of day in the caller's local time. */
+  hourly: number[];
+  top_people: { user_id: string; count: number }[];
+  top_rooms: { room_id: string; count: number }[];
+}
+
+export async function apiGetActivityStats(): Promise<ActivityStats> {
+  // Minutes east of UTC, so the server can bucket days and hours in the
+  // viewer's local time rather than its own.
+  const tzOffset = -new Date().getTimezoneOffset();
+  const res = await authenticatedFetch(`/api/activity/stats?tz_offset=${tzOffset}`);
+  if (!res.ok) throw new Error("Failed to load activity stats");
+  return res.json() as Promise<ActivityStats>;
+}
+
+export interface ActivityEvent {
+  event_id: string;
+  room_id: string;
+  channel_id: string;
+  sender: string;
+  body: string;
+  ts: number;
+}
+
+export async function apiGetActivityFeed(limit = 25): Promise<ActivityEvent[]> {
+  const res = await authenticatedFetch(`/api/activity/feed?limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to load activity feed");
+  const data = await res.json();
+  return (data.events ?? []) as ActivityEvent[];
+}
+
 export async function apiGetUnreads() {
   const res = await authenticatedFetch("/api/unreads");
   if (!res.ok) throw new Error("Failed to load unread counts");

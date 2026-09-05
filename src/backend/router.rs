@@ -1,6 +1,7 @@
 use super::{
     constants::CHUNK_SIZE,
     routes::{
+        activity::{activity_feed, activity_stats},
         admin::{
             admin_delete_room, admin_delete_user, admin_disable_user, admin_enable_user,
             admin_get_settings, admin_list_rooms, admin_list_users, admin_refresh_invite,
@@ -297,6 +298,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // Read markers / unread counts
         .route("/api/rooms/{room_id}/read", post(mark_read))
         .route("/api/unreads", get(get_unreads))
+        .route("/api/activity/stats", get(activity_stats))
+        .route("/api/activity/feed", get(activity_feed))
         // Watch Party
         .route("/api/watchparty/{room_id}/state", get(get_watchparty_state))
         // Whiteboard

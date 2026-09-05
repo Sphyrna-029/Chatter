@@ -3,7 +3,6 @@ import { useAppContext } from "@/lib/store";
 import {
   apiSync,
   apiGetAllRooms,
-  apiListUploads,
   apiGetVoiceMembers,
   apiGetChannels,
   apiGetUnreads,
@@ -16,22 +15,19 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, BarChart3, Hash, HardDrive, Radio, Volume2, Monitor, MicOff, CheckCheck, Music, Gamepad2 } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, CheckCheck, Music, Gamepad2, MessageCircle } from "lucide-react";
+import { ActivityStats } from "./activity/ActivityStats";
+import { ActivityFeed } from "./activity/ActivityFeed";
+import { StorageManager } from "./activity/StorageManager";
+import { RecentDiscussions } from "./activity/RecentDiscussions";
+import { CrossRoomSearch } from "./activity/CrossRoomSearch";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
 
 interface RoomActivity {
   roomId: string;
   lastMessage?: { sender: string; body: string; timestamp: number };
   memberCount: number;
-}
-
-interface PersonStat {
-  userId: string;
-  messageCount: number;
-}
-
-interface RoomStat {
-  roomId: string;
-  messageCount: number;
 }
 
 interface LiveVoiceMember {
@@ -80,13 +76,6 @@ function playingFor(startSecs: number): string {
   return "just started";
 }
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
 function statusColor(status: string) {
   if (status === "active" || status === "online") return "bg-success";
   if (status === "idle" || status === "away") return "bg-warning";
@@ -95,26 +84,25 @@ function statusColor(status: string) {
 }
 
 export function ActivityPage() {
-  const { state, selectRoom, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser, loadUnreads } = useAppContext();
+  const { state, selectRoom, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser, loadUnreads, sendFriendRequest } = useAppContext();
   const [activities, setActivities] = useState<RoomActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [blockedExpanded, setBlockedExpanded] = useState(false);
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
-  const [topPeople, setTopPeople] = useState<PersonStat[]>([]);
-  const [topRooms, setTopRooms] = useState<RoomStat[]>([]);
-  const [storageUsed, setStorageUsed] = useState(0);
   const [liveVoice, setLiveVoice] = useState<LiveVoiceRoom[]>([]);
   const [markingRead, setMarkingRead] = useState(false);
+  // Bumped on each digest tick; the self-fetching sections refresh off it.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [friendToAdd, setFriendToAdd] = useState("");
 
   useEffect(() => {
     let cancelled = false;
 
     async function fetchActivity() {
       try {
-        const [syncData, summaryData, uploads] = await Promise.all([
+        const [syncData, summaryData] = await Promise.all([
           apiSync(),
           apiGetAllRooms(),
-          apiListUploads().catch(() => []),
         ]);
 
         const summaryMap: Record<string, RoomSummary> = {};
@@ -157,41 +145,8 @@ export function ActivityPage() {
           return tb - ta;
         });
 
-        // Compute stats: top people and top rooms
-        const myUserId = state.userId;
-        const peopleCounts: Record<string, number> = {};
-        const roomCounts: Record<string, number> = {};
-
-        for (const roomId of state.joinedRoomIds) {
-          const roomData = roomJoin[roomId];
-          if (!roomData?.timeline?.events) continue;
-          const msgs = roomData.timeline.events.filter(
-            (e: any) => e.type === "m.room.message" && e.content?.body
-          );
-          roomCounts[roomId] = msgs.length;
-          for (const msg of msgs) {
-            const sender = msg.sender;
-            if (sender && sender !== myUserId && !sender.startsWith("webhook:")) {
-              peopleCounts[sender] = (peopleCounts[sender] || 0) + 1;
-            }
-          }
-        }
-
-        const sortedPeople = Object.entries(peopleCounts)
-          .map(([userId, messageCount]) => ({ userId, messageCount }))
-          .sort((a, b) => b.messageCount - a.messageCount)
-          .slice(0, 5);
-
-        const sortedRooms = Object.entries(roomCounts)
-          .map(([roomId, messageCount]) => ({ roomId, messageCount }))
-          .sort((a, b) => b.messageCount - a.messageCount)
-          .slice(0, 3);
-
         if (!cancelled) {
           setActivities(result);
-          setTopPeople(sortedPeople);
-          setTopRooms(sortedRooms);
-          setStorageUsed(uploads.reduce((sum, f) => sum + (f.size || 0), 0));
           setLoading(false);
         }
       } catch {
@@ -206,6 +161,7 @@ export function ActivityPage() {
     const interval = setInterval(() => {
       fetchActivity();
       void loadUnreads();
+      setRefreshKey((k) => k + 1);
     }, DIGEST_REFRESH_MS);
     // Coming back to the tab is exactly when a stale digest is most obvious.
     const onFocus = () => { if (!document.hidden) fetchActivity(); };
@@ -217,7 +173,7 @@ export function ActivityPage() {
       document.removeEventListener("visibilitychange", onFocus);
       window.removeEventListener("focus", onFocus);
     };
-  }, [state.joinedRoomIds, state.userId, loadUnreads]);
+  }, [state.joinedRoomIds, loadUnreads]);
 
   // Who is in voice, and who is streaming, across every room you have joined.
   useEffect(() => {
@@ -288,6 +244,18 @@ export function ActivityPage() {
     }
   }, [loadUnreads]);
 
+  const addFriend = useCallback(async () => {
+    const target = friendToAdd.trim();
+    if (!target) return;
+    try {
+      await sendFriendRequest(target);
+      setFriendToAdd("");
+      toast.success(`Friend request sent to ${target}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send friend request");
+    }
+  }, [friendToAdd, sendFriendRequest]);
+
   const mentionedRooms = Object.entries(state.roomMentions).filter(
     ([, count]) => count > 0
   );
@@ -316,6 +284,8 @@ export function ActivityPage() {
             Your rooms and recent conversations
           </p>
         </div>
+
+        <CrossRoomSearch onSelectRoom={selectRoom} />
 
         {/* Happening Now — live voice and screen shares across your rooms */}
         {liveVoice.length > 0 && (
@@ -418,113 +388,15 @@ export function ActivityPage() {
           </section>
         )}
 
-        {/* Storage Usage */}
-        {!loading && state.storageLimitBytes > 0 && (
-          <section className="rounded-lg border border-border p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                <HardDrive className="h-4 w-4" />
-                Storage
-              </h2>
-              <span className="text-xs text-muted-foreground">
-                {formatFileSize(storageUsed)} / {formatFileSize(state.storageLimitBytes)}
-              </span>
-            </div>
-            <div className="bg-muted rounded-full h-3 overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all ${
-                  storageUsed / state.storageLimitBytes > 0.9
-                    ? "bg-destructive"
-                    : storageUsed / state.storageLimitBytes > 0.7
-                      ? "bg-orange-500"
-                      : "bg-primary"
-                }`}
-                style={{ width: `${Math.min(100, (storageUsed / state.storageLimitBytes) * 100)}%` }}
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {Math.round((storageUsed / state.storageLimitBytes) * 100)}% used
-            </p>
-          </section>
-        )}
+        <ActivityStats
+          refreshKey={refreshKey}
+          onSelectRoom={selectRoom}
+          onSelectUser={setProfileUserId}
+        />
 
-        {/* Stats — Top People & Top Rooms */}
-        {!loading && (topPeople.length > 0 || topRooms.length > 0) && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Top People */}
-            {topPeople.length > 0 && (
-              <section className="rounded-lg border border-border p-4 space-y-3">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                  <BarChart3 className="h-4 w-4" />
-                  Top People
-                </h2>
-                <div className="space-y-1.5">
-                  {topPeople.map((person, i) => {
-                    const presence = state.userPresence[person.userId];
-                    const displayName = presence?.displayName || displayUserId(person.userId);
-                    const avatarUrl = presence?.avatarUrl || "";
-                    const initial = displayName[0]?.toUpperCase() || "?";
-                    return (
-                      <button
-                        key={person.userId}
-                        onClick={() => setProfileUserId(person.userId)}
-                        className="flex items-center gap-2.5 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
-                      >
-                        <span className="text-xs text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
-                        <div className="relative shrink-0">
-                          <Avatar className="h-6 w-6">
-                            <AuthAvatarImage src={avatarUrl} />
-                            <AvatarFallback className="text-3xs bg-secondary">{initial}</AvatarFallback>
-                          </Avatar>
-                        </div>
-                        <span className="text-sm font-medium truncate flex-1">{displayName}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {person.messageCount} msg{person.messageCount !== 1 ? "s" : ""}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+        <RecentDiscussions refreshKey={refreshKey} onSelectRoom={selectRoom} />
 
-            {/* Top Rooms */}
-            {topRooms.length > 0 && (
-              <section className="rounded-lg border border-border p-4 space-y-3">
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-                  <Hash className="h-4 w-4" />
-                  Most Active Rooms
-                </h2>
-                <div className="space-y-1.5">
-                  {topRooms.map((room, i) => {
-                    const info = state.roomInfoMap[room.roomId];
-                    const name = info?.name || "Unnamed";
-                    return (
-                      <button
-                        key={room.roomId}
-                        onClick={() => selectRoom(room.roomId)}
-                        className="flex items-center gap-2.5 w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
-                      >
-                        <span className="text-xs text-muted-foreground w-4 text-right shrink-0">{i + 1}</span>
-                        <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-3xs font-bold shrink-0">
-                          {info?.icon_url ? (
-                            <AuthImage src={info.icon_url} alt="" className="h-6 w-6 rounded-md object-cover" />
-                          ) : (
-                            name.charAt(0).toUpperCase()
-                          )}
-                        </span>
-                        <span className="text-sm font-medium truncate flex-1">{name}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {room.messageCount} msg{room.messageCount !== 1 ? "s" : ""}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
+        <ActivityFeed refreshKey={refreshKey} onSelectRoom={selectRoom} />
 
         {/* Unread Mentions — full width above the two-column layout */}
         {mentionedRooms.length > 0 && (
@@ -731,7 +603,7 @@ export function ActivityPage() {
                       <button
                         key={friendId}
                         onClick={() => setProfileUserId(friendId)}
-                        className="flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full min-w-0"
+                        className="group flex items-center gap-2.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full min-w-0"
                       >
                         <div className="relative shrink-0">
                           <Avatar className="h-7 w-7">
@@ -771,11 +643,46 @@ export function ActivityPage() {
                             </span>
                           )}
                         </div>
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          title={`Message ${displayName}`}
+                          onClick={(e) => { e.stopPropagation(); openDM(friendId); }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openDM(friendId);
+                            }
+                          }}
+                          className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <MessageCircle className="h-3.5 w-3.5" />
+                        </span>
                       </button>
                     );
                   })}
                 </div>
               )}
+
+              <div className="flex gap-1.5 pt-1">
+                <Input
+                  value={friendToAdd}
+                  onChange={(e) => setFriendToAdd(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") addFriend(); }}
+                  placeholder="Add friend by username"
+                  className="h-7 text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-2xs px-2 shrink-0"
+                  onClick={addFriend}
+                  disabled={!friendToAdd.trim()}
+                >
+                  Add
+                </Button>
+              </div>
             </section>
 
             {/* Blocked Users */}
@@ -816,6 +723,8 @@ export function ActivityPage() {
             )}
           </div>
         </div>
+
+        <StorageManager refreshKey={refreshKey} />
       </div>
       {profileUserId && (
         <UserProfileDialog
