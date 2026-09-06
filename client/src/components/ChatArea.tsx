@@ -1323,14 +1323,14 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
       {/* Unread messages banner */}
       {roomUnreadBannerCount > 0 && (
-        <div className="flex items-center justify-between px-4 py-2 bg-purple-600 text-white text-sm font-medium shrink-0">
+        <div className="flex items-center justify-between px-4 py-2 bg-info text-background text-sm font-medium shrink-0">
           <span>{roomUnreadBannerCount} unread message{roomUnreadBannerCount !== 1 ? "s" : ""} since your last visit</span>
           <button
             onClick={() => {
               roomUnreadBannerRef.current = 0;
               setRoomUnreadBannerCount(0);
             }}
-            className="ml-4 rounded px-2 py-0.5 text-xs text-white/90 hover:text-white border border-white/30 hover:border-white/60 transition-colors cursor-pointer"
+            className="ml-4 rounded px-2 py-0.5 text-xs text-background/90 hover:text-background border border-background/30 hover:border-background/60 transition-colors cursor-pointer"
           >
             Read
           </button>
