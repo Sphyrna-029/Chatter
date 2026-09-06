@@ -324,11 +324,9 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 Message::Text(text) => {
                     handle_ws_text(recv_state.clone(), &recv_user_id, conn_id, &text).await;
                 }
-                Message::Binary(data) => {
-                    handle_ws_binary(&recv_state, &recv_user_id, &data).await;
-                }
                 Message::Pong(_) => {} // connection alive, reset timeout
                 Message::Close(_) => break,
+                // Nothing else is part of the protocol — every client message is JSON.
                 _ => {}
             },
             Ok(Some(Err(_))) => break, // WebSocket error
@@ -2194,37 +2192,6 @@ async fn get_user_profile(
             String::new(),
             String::new(),
         ),
-    }
-}
-
-pub(crate) async fn handle_ws_binary(state: &AppState, user_id: &str, data: &[u8]) {
-    // Every binary frame is relayed verbatim; relay_audio does not inspect any
-    // prefix, so there is nothing to branch on.
-    relay_audio(state, user_id, data).await;
-}
-pub(crate) async fn relay_audio(state: &AppState, user_id: &str, data: &[u8]) {
-    let vc = state.voice_channels.read().await;
-    for (_room_id, members) in vc.iter() {
-        if let Some(member) = members.get(user_id) {
-            if !member.muted {
-                let targets: Vec<String> = members
-                    .keys()
-                    .filter(|mid| mid.as_str() != user_id)
-                    .cloned()
-                    .collect();
-                drop(vc);
-
-                let ws_map = state.active_websockets.read().await;
-                for mid in &targets {
-                    if let Some(conns) = ws_map.get(mid) {
-                        for tx in conns.values() {
-                            let _ = tx.send(Message::Binary(data.to_vec().into()));
-                        }
-                    }
-                }
-                return;
-            }
-        }
     }
 }
 

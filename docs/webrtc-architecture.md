@@ -59,6 +59,11 @@ it to every subscriber via individual peer connections.
 
 ## ICE Connectivity Flow
 
+Both ends of a media connection are ICE agents: the browser and the **SFU**. "Direct"
+below means the media reaches the SFU without passing through a relay — it never means
+browser-to-browser. Every stream terminates on the server, as the overview above
+describes; TURN only changes the route a stream takes to get there.
+
 ```
                      ┌──────────────┐
                      │  STUN Server  │
@@ -90,7 +95,7 @@ it to every subscriber via individual peer connections.
           │  candidate pair until one works   │
           │                                  │
           │     ╔═══════════════════╗        │
-          ├────►║  Direct P2P path  ║◄───────┤
+          ├────►║ Direct path to SFU║◄───────┤
           │     ║  (host or srflx)  ║        │
           │     ╚═══════════════════╝        │
           │              OR                  │
