@@ -1,3 +1,5 @@
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AuthAvatarImage } from "@/components/AuthImage";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
@@ -17,7 +19,10 @@ interface VoiceMemberListProps {
   connStats: Record<string, PeerStats>;
   speakingUsers: Set<string>;
   volumes: Record<string, number>;
-  userPresence: Record<string, { displayName?: string; [key: string]: unknown }>;
+  userPresence: Record<
+    string,
+    { displayName?: string; avatarUrl?: string; [key: string]: unknown }
+  >;
   onSetUserVolume: (userId: string, vol: number) => void;
   onWatchUser: (sharerId: string) => void;
 }
@@ -90,6 +95,12 @@ export function VoiceMemberList({
                     </TooltipProvider>
                   );
                 })()}
+                <Avatar className="h-5 w-5 shrink-0">
+                  <AuthAvatarImage src={userPresence[memberId]?.avatarUrl} />
+                  <AvatarFallback className="text-3xs bg-secondary">
+                    {name[0]?.toUpperCase() || "?"}
+                  </AvatarFallback>
+                </Avatar>
                 <span className={cn("truncate", isSpeaking && "text-success font-semibold")}>
                   {name}{isSelf && " (You)"}
                 </span>

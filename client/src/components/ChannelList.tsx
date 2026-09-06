@@ -7,7 +7,8 @@ import {
   Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff, MessagesSquare,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
-import { AuthImage } from "./AuthImage";
+import { AuthImage, AuthAvatarImage } from "./AuthImage";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   apiCreateCategory, apiUpdateCategory, apiDeleteCategory,
   apiUpdateChannel, apiUploadFile, apiUpdateRoomSettings,
@@ -562,6 +563,12 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                     {m.force_muted && (
                       <ShieldOff className="h-3 w-3 shrink-0 text-destructive" aria-label="Muted by a moderator" />
                     )}
+                    <Avatar className="h-4 w-4 shrink-0">
+                      <AuthAvatarImage src={state.userPresence[m.userId]?.avatarUrl} />
+                      <AvatarFallback className="text-3xs bg-secondary">
+                        {(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))[0]?.toUpperCase() || "?"}
+                      </AvatarFallback>
+                    </Avatar>
                     <span className={`truncate ${isLocalMuted && !isMe ? "line-through opacity-50" : ""}`}>{state.userPresence[m.userId]?.displayName || displayUserId(m.userId)}</span>
                     <div className="ml-auto flex items-center gap-1 shrink-0">
                       {state.activeWebcamStreamers.includes(m.userId) && (
