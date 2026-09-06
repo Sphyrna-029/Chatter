@@ -28,7 +28,6 @@ export function reducer(state: AppState, action: Action): AppState {
         channelCategories: [],
         messages: [],
         hasMoreMessages: false,
-        oldestMessageIndex: null,
         loadingOlderMessages: false,
         roomMembers: [],
         voiceMembers: preserveVoice ? state.voiceMembers : [],
@@ -60,14 +59,12 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         messages: action.payload.messages,
-        oldestMessageIndex: action.payload.start,
         hasMoreMessages: action.payload.hasMore,
       };
     case "PREPEND_MESSAGES":
       return {
         ...state,
         messages: [...action.payload.messages, ...state.messages],
-        oldestMessageIndex: action.payload.start,
         hasMoreMessages: action.payload.hasMore,
         loadingOlderMessages: false,
       };
@@ -595,7 +592,6 @@ export function reducer(state: AppState, action: Action): AppState {
         currentChannelId: action.payload,
         messages: [],
         hasMoreMessages: false,
-        oldestMessageIndex: null,
         loadingOlderMessages: false,
         myPermissions: null,
         pinnedMessages: [],

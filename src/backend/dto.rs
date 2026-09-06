@@ -87,12 +87,17 @@ pub(crate) struct SyncQuery {
 #[derive(Deserialize)]
 pub(crate) struct MessagesQuery {
     pub(crate) limit: Option<usize>,
-    pub(crate) before: Option<usize>,
+    /// Scroll back: everything strictly older than this cursor, which is the
+    /// oldest message the client already holds. Paired with `before_event_id`
+    /// because timestamps are milliseconds and collide.
+    pub(crate) before_ts: Option<i64>,
+    pub(crate) before_event_id: Option<String>,
     pub(crate) around_ts: Option<i64>,
-    /// Everything newer than this timestamp, oldest first. Used to close the
-    /// gap after a dropped WebSocket, where the client knows exactly how far
-    /// it got and needs what came after — not another page from the end.
+    /// Everything newer than this cursor, oldest first. Used to close the gap
+    /// after a dropped WebSocket, where the client knows exactly how far it
+    /// got and needs what came after — not another page from the end.
     pub(crate) after_ts: Option<i64>,
+    pub(crate) after_event_id: Option<String>,
     pub(crate) channel_id: Option<String>,
     pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
 }

@@ -6,7 +6,9 @@
 
 use super::super::{
     audit::AuditEntry,
-    helpers::{error_response, extract_token, get_user_from_token, is_moderator_or_owner},
+    helpers::{
+        error_response, extract_token, get_user_from_token, is_moderator_or_owner, regex_escape,
+    },
     state::AppState,
 };
 use axum::{
@@ -98,18 +100,6 @@ pub(crate) async fn list_audit_log(
         "has_more": next_offset < total,
         "next_offset": next_offset,
     })))
-}
-
-/// Escape regex metacharacters so an action filter is matched literally.
-fn regex_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if "\\.+*?()|[]{}^$".contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 // ─── Backup ──────────────────────────────────────────────────────────────────
@@ -215,14 +205,6 @@ pub(crate) async fn admin_export(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn action_filters_are_matched_literally() {
-        // The filter is interpolated into a $regex, so it must be escaped.
-        assert_eq!(regex_escape("member.kicked"), "member\\.kicked");
-        assert_eq!(regex_escape("a+b(c)"), "a\\+b\\(c\\)");
-        assert_eq!(regex_escape("member"), "member");
-    }
 
     #[test]
     fn session_material_is_not_exported() {

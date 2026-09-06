@@ -272,26 +272,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // With nothing loaded there is no gap to close — opening the channel will
     // fetch it. Only a timeline that already has a tail can have lost one.
-    let newestTs = 0;
+    //
+    // The cursor carries the event id as well as the timestamp: two messages
+    // can share a millisecond, and asking only for "newer than this time"
+    // would step straight over the second one.
+    let cursor: { ts: number; eventId: string } | null = null;
     for (const message of messages) {
-      if (message.origin_server_ts > newestTs) newestTs = message.origin_server_ts;
+      if (
+        !cursor ||
+        message.origin_server_ts > cursor.ts ||
+        (message.origin_server_ts === cursor.ts && message.event_id > cursor.eventId)
+      ) {
+        cursor = { ts: message.origin_server_ts, eventId: message.event_id };
+      }
     }
-    if (newestTs === 0) return;
+    if (!cursor) return;
 
     try {
       // Bounded: a socket down for days should not walk the whole history.
       for (let page = 0; page < 20; page++) {
         const data = await apiGetMessagesAfter(
           currentRoomId,
-          newestTs,
+          cursor.ts,
           currentChannelId ?? undefined,
+          undefined,
+          cursor.eventId,
         );
         const chunk = data.chunk || [];
         if (chunk.length === 0) return;
         for (const message of chunk) {
           dispatch({ type: "ADD_MESSAGE", payload: message });
-          if (message.origin_server_ts > newestTs) newestTs = message.origin_server_ts;
         }
+        // Continue from the last message of this page, in the server's order.
+        const last = chunk[chunk.length - 1];
+        cursor = { ts: last.origin_server_ts, eventId: last.event_id };
         if (!data.has_more) return;
       }
     } catch {
@@ -728,7 +742,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         type: "SET_MESSAGES",
         payload: {
           messages,
-          start: msgData.start,
           hasMore: msgData.has_more,
         },
       });
@@ -824,16 +837,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadOlderMessages = useCallback(async () => {
     const cur = stateRef.current;
     if (!cur.currentRoomId || cur.loadingOlderMessages || !cur.hasMoreMessages) return;
-    if (cur.oldestMessageIndex === null || cur.oldestMessageIndex <= 0) return;
+    // The cursor is the oldest message on screen, so nothing separate has to
+    // be tracked — and it stays correct even if messages arrive meanwhile.
+    const oldest = cur.messages[0];
+    if (!oldest) return;
     dispatch({ type: "SET_LOADING_OLDER", payload: true });
     try {
-      const msgData = await apiGetMessages(cur.currentRoomId, 50, cur.oldestMessageIndex, undefined, cur.currentChannelId || undefined);
+      const msgData = await apiGetMessages(
+        cur.currentRoomId,
+        50,
+        { ts: oldest.origin_server_ts, eventId: oldest.event_id },
+        undefined,
+        cur.currentChannelId || undefined,
+      );
       const olderMessages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
         type: "PREPEND_MESSAGES",
         payload: {
           messages: olderMessages,
-          start: msgData.start,
           hasMore: msgData.has_more,
         },
       });
@@ -858,7 +879,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       type: "SET_MESSAGES",
       payload: {
         messages,
-        start: msgData.start,
         hasMore: msgData.has_more,
       },
     });
@@ -1144,7 +1164,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       type: "SET_MESSAGES",
       payload: {
         messages,
-        start: msgData.start,
         hasMore: msgData.has_more,
       },
     });

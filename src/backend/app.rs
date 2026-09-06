@@ -101,14 +101,25 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
-    // messages: compound {room_id, origin_server_ts}
+    // messages: compound {room_id, origin_server_ts, event_id}. The event_id
+    // is part of the key because paging sorts on the pair — a timestamp alone
+    // does not order two messages sent in the same millisecond, and a cursor
+    // that cannot order them cannot page past them reliably.
     let _ = db
         .collection::<mongodb::bson::Document>("messages")
         .create_index(
             IndexModel::builder()
-                .keys(doc! { "room_id": 1, "origin_server_ts": -1 })
+                .keys(doc! { "room_id": 1, "origin_server_ts": -1, "event_id": -1 })
                 .build(),
         )
+        .await;
+
+    // messages: event_id on its own. Redacting, editing, pinning and quoting
+    // all look a message up by it, and until now every one of those was a
+    // collection scan.
+    let _ = db
+        .collection::<mongodb::bson::Document>("messages")
+        .create_index(IndexModel::builder().keys(doc! { "event_id": 1 }).build())
         .await;
 
     // messages: compound {room_id, channel_id, origin_server_ts} — backs the
@@ -117,7 +128,9 @@ async fn create_indexes(db: &mongodb::Database) {
         .collection::<mongodb::bson::Document>("messages")
         .create_index(
             IndexModel::builder()
-                .keys(doc! { "room_id": 1, "channel_id": 1, "origin_server_ts": -1 })
+                .keys(
+                    doc! { "room_id": 1, "channel_id": 1, "origin_server_ts": -1, "event_id": -1 },
+                )
                 .build(),
         )
         .await;

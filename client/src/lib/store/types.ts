@@ -33,7 +33,6 @@ export interface AppState {
   messages: MatrixMessage[];
   messageReactions: Record<string, Record<string, string[]>>;
   hasMoreMessages: boolean;
-  oldestMessageIndex: number | null;
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
@@ -144,8 +143,8 @@ export type Action =
   | { type: "LOGOUT" }
   | { type: "SET_ROOMS"; payload: { roomIds: string[]; roomInfoMap: Record<string, RoomInfo> } }
   | { type: "SELECT_ROOM"; payload: string | null }
-  | { type: "SET_MESSAGES"; payload: { messages: MatrixMessage[]; start: number; hasMore: boolean } }
-  | { type: "PREPEND_MESSAGES"; payload: { messages: MatrixMessage[]; start: number; hasMore: boolean } }
+  | { type: "SET_MESSAGES"; payload: { messages: MatrixMessage[]; hasMore: boolean } }
+  | { type: "PREPEND_MESSAGES"; payload: { messages: MatrixMessage[]; hasMore: boolean } }
   | { type: "SET_LOADING_OLDER"; payload: boolean }
   | { type: "ADD_MESSAGE"; payload: MatrixMessage }
   | { type: "REDACT_MESSAGE"; payload: string }
@@ -253,7 +252,6 @@ export const initialState: AppState = {
   messages: [],
   messageReactions: {},
   hasMoreMessages: false,
-  oldestMessageIndex: null,
   loadingOlderMessages: false,
   roomMembers: [],
   userPresence: {},

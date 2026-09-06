@@ -9,7 +9,7 @@ use super::super::{
         error_response, extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
         get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
         get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, rate_limited,
-        send_to_user,
+        regex_escape, send_to_user,
     },
     push::{spawn_message_push, MessageNotification},
     ratelimit,
@@ -525,6 +525,46 @@ pub(crate) async fn send_message(
     Ok(Json(json!({"event_id": event_id})))
 }
 
+/// Combine the visibility filter with a cursor predicate.
+///
+/// `$and` rather than merging keys: the base filter already carries its own
+/// `$or` for channel visibility, and a second `$or` written alongside it would
+/// silently replace the first — handing back messages from channels the caller
+/// cannot see.
+fn and_filter(
+    base: &mongodb::bson::Document,
+    extra: mongodb::bson::Document,
+) -> mongodb::bson::Document {
+    if extra.is_empty() {
+        return base.clone();
+    }
+    doc! { "$and": [base.clone(), extra] }
+}
+
+/// One page of messages, already stripped of Mongo's `_id`.
+async fn fetch_page(
+    coll: &mongodb::Collection<mongodb::bson::Document>,
+    filter: mongodb::bson::Document,
+    sort: mongodb::bson::Document,
+    limit: i64,
+) -> Result<Vec<Value>, (StatusCode, Json<Value>)> {
+    let mut cursor = coll
+        .find(filter)
+        .sort(sort)
+        .limit(limit)
+        .await
+        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+
+    let mut out = Vec::new();
+    while let Ok(Some(mut doc)) = cursor.try_next().await {
+        doc.remove("_id");
+        if let Ok(value) = serde_json::to_value(&doc) {
+            out.push(value);
+        }
+    }
+    Ok(out)
+}
+
 pub(crate) async fn get_room_messages(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
@@ -606,76 +646,94 @@ pub(crate) async fn get_room_messages(
         }
     };
 
-    // Get total count for this room (excluding thread messages)
-    let total = msg_coll
-        .count_documents(base_filter.clone())
-        .await
-        .unwrap_or(0) as usize;
-
-    let (start, end, has_more) = if let Some(around_ts) = query.around_ts {
-        // Count messages with timestamp <= around_ts to find the position
-        let around_filter = if let Some(ref cid) = query.channel_id {
-            if let Some(ref pane) = query.showcase_pane {
-                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid, "content.showcase_pane": pane }
-            } else {
-                doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "channel_id": cid }
-            }
-        } else if let Some(ref ids) = allowed_channels {
-            let bson_ids: Vec<mongodb::bson::Bson> = ids
-                .iter()
-                .map(|s| mongodb::bson::Bson::String(s.clone()))
-                .collect();
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts }, "$or": [
-                { "channel_id": { "$in": bson_ids } },
-                { "channel_id": { "$exists": false } }
-            ]}
-        } else {
-            doc! { "room_id": &room_id, "thread_id": { "$exists": false }, "redacted": { "$ne": true }, "origin_server_ts": { "$lte": around_ts } }
-        };
-        let pos = msg_coll.count_documents(around_filter).await.unwrap_or(0) as usize;
-        let half = (limit as usize) / 2;
-        let s = pos.saturating_sub(half);
-        let e = (s + limit as usize).min(total);
-        (s, e, s > 0)
-    } else {
-        let e = query.before.unwrap_or(total).min(total);
-        let s = e.saturating_sub(limit as usize);
-        (s, e, s > 0)
-    };
-
-    // `after_ts` is a different question from the paging above: not "give me a
-    // page from the end" but "give me everything I missed". It is answered by
-    // a range on the timestamp rather than an offset, so a client that was
-    // disconnected for a while does not have to guess how many pages back the
-    // gap started.
-    let mut cursor = if let Some(after_ts) = query.after_ts {
-        let mut after_filter = base_filter.clone();
-        after_filter.insert("origin_server_ts", doc! { "$gt": after_ts });
-        msg_coll
-            .find(after_filter)
-            .sort(doc! { "origin_server_ts": 1 })
-            .limit(limit)
-            .await
-    } else {
-        // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
-        let fetch_count = (end - start) as i64;
-        msg_coll
-            .find(base_filter)
-            .sort(doc! { "origin_server_ts": 1 })
-            .skip(start as u64)
-            .limit(fetch_count)
-            .await
-    }
-    .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+    // ─── Paging ──────────────────────────────────────────────────────────
+    //
+    // Keyset, not offset. `skip(n)` makes Mongo walk n documents, so scrolling
+    // back through a long channel got slower the further back you went, and
+    // the `total` this used to need was a second full count on every read.
+    //
+    // The cursor is the pair (origin_server_ts, event_id). The timestamp alone
+    // is not enough: it is milliseconds and two messages regularly share one,
+    // and a page boundary landing between them would silently skip or repeat
+    // whichever the sort happened to put second.
+    let fetch = limit + 1; // one extra: its presence is the has_more answer
 
     let mut chunk: Vec<Value> = Vec::new();
-    while let Ok(Some(doc)) = cursor.try_next().await {
-        // Remove MongoDB _id field
-        let mut doc = doc;
-        doc.remove("_id");
-        if let Ok(val) = serde_json::to_value(&doc) {
-            chunk.push(val);
-        }
+    let has_more;
+
+    if let Some(around_ts) = query.around_ts {
+        // Jump-to-message: a page centred on an anchor. Two ranges from the
+        // anchor outwards, which is the same index walk in both directions —
+        // where this previously counted the anchor's ordinal position first.
+        let half = (limit / 2).max(1);
+
+        let older = fetch_page(
+            &msg_coll,
+            and_filter(
+                &base_filter,
+                doc! { "origin_server_ts": { "$lte": around_ts } },
+            ),
+            doc! { "origin_server_ts": -1, "event_id": -1 },
+            half + 1,
+        )
+        .await?;
+        has_more = older.len() as i64 > half;
+        let mut older: Vec<Value> = older.into_iter().take(half as usize).collect();
+        older.reverse();
+
+        let newer = fetch_page(
+            &msg_coll,
+            and_filter(
+                &base_filter,
+                doc! { "origin_server_ts": { "$gt": around_ts } },
+            ),
+            doc! { "origin_server_ts": 1, "event_id": 1 },
+            half,
+        )
+        .await?;
+
+        chunk.extend(older);
+        chunk.extend(newer);
+    } else if let Some(after_ts) = query.after_ts {
+        // Gap recovery: everything the client missed, oldest first.
+        let cursor_filter = match query.after_event_id.as_deref() {
+            Some(event_id) if !event_id.is_empty() => doc! { "$or": [
+                { "origin_server_ts": { "$gt": after_ts } },
+                { "origin_server_ts": after_ts, "event_id": { "$gt": event_id } },
+            ]},
+            _ => doc! { "origin_server_ts": { "$gt": after_ts } },
+        };
+        let page = fetch_page(
+            &msg_coll,
+            and_filter(&base_filter, cursor_filter),
+            doc! { "origin_server_ts": 1, "event_id": 1 },
+            fetch,
+        )
+        .await?;
+        // Here "more" means the gap was wider than one page, so the client
+        // should ask again from the last message it just received.
+        has_more = page.len() as i64 > limit;
+        chunk = page.into_iter().take(limit as usize).collect();
+    } else {
+        // The newest page, or the one before whatever the client already holds.
+        let cursor_filter = match (query.before_ts, query.before_event_id.as_deref()) {
+            (Some(ts), Some(event_id)) if !event_id.is_empty() => doc! { "$or": [
+                { "origin_server_ts": { "$lt": ts } },
+                { "origin_server_ts": ts, "event_id": { "$lt": event_id } },
+            ]},
+            (Some(ts), _) => doc! { "origin_server_ts": { "$lt": ts } },
+            _ => doc! {},
+        };
+        let page = fetch_page(
+            &msg_coll,
+            and_filter(&base_filter, cursor_filter),
+            doc! { "origin_server_ts": -1, "event_id": -1 },
+            fetch,
+        )
+        .await?;
+        has_more = page.len() as i64 > limit;
+        // Read newest-first so the cursor works, rendered oldest-first.
+        chunk = page.into_iter().take(limit as usize).rev().collect();
     }
 
     // Batch-fetch reactions and thread reply counts for all messages in the chunk
@@ -712,18 +770,7 @@ pub(crate) async fn get_room_messages(
         }
     }
 
-    // For a gap fetch, "more" means the gap was wider than one page and the
-    // client should ask again from the last message it just received —
-    // the opposite direction from the has_more the paging above reports.
-    let has_more = if query.after_ts.is_some() {
-        chunk.len() as i64 == limit
-    } else {
-        has_more
-    };
-
     Ok(Json(json!({
-        "start": start,
-        "end": end,
         "has_more": has_more,
         "chunk": chunk
     })))
@@ -1671,7 +1718,11 @@ pub(crate) async fn search_messages(
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = query.offset.unwrap_or(0);
     let filter = query.filter.as_deref().unwrap_or("all");
-    let q = &query.q;
+    // Every use of this reaches a `$regex`. Escaped once here so no branch can
+    // forget: unescaped, searching for "a.b" quietly matches "axb", and a term
+    // like "(a+)+b" makes the server backtrack over every message in the room.
+    let q = regex_escape(&query.q);
+    let q = &q;
 
     let channel_scope = query.channel_id.filter(|c| !c.is_empty());
     if let Some(ref cid) = channel_scope {
@@ -1698,7 +1749,7 @@ pub(crate) async fn search_messages(
             doc! {
                 "room_id": &room_id,
                 "redacted": { "$ne": true },
-                "sender": { "$regex": q, "$options": "i" }
+                "sender": { "$regex": format!("^@{q}"), "$options": "i" }
             }
         }
         "file" => {
@@ -1790,4 +1841,49 @@ pub(crate) async fn search_messages(
         "has_more": has_more,
         "next_offset": next_offset
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cursor_is_anded_with_the_visibility_filter() {
+        // The base filter carries its own $or for channel visibility. Merging
+        // a cursor's $or in as a key would replace it, handing back messages
+        // from channels the caller cannot see — so it has to be an $and.
+        let base = doc! { "room_id": "!r", "$or": [
+            { "channel_id": { "$in": ["#a"] } },
+            { "channel_id": { "$exists": false } },
+        ]};
+        let cursor = doc! { "$or": [
+            { "origin_server_ts": { "$lt": 100 } },
+            { "origin_server_ts": 100, "event_id": { "$lt": "$x" } },
+        ]};
+
+        let combined = and_filter(&base, cursor);
+        let clauses = combined.get_array("$and").expect("combined under $and");
+        assert_eq!(clauses.len(), 2);
+        // Both survive intact, so neither can silently drop the other.
+        assert!(clauses[0].as_document().unwrap().contains_key("$or"));
+        assert!(clauses[1].as_document().unwrap().contains_key("$or"));
+        assert_eq!(
+            clauses[0]
+                .as_document()
+                .unwrap()
+                .get_str("room_id")
+                .unwrap(),
+            "!r"
+        );
+    }
+
+    #[test]
+    fn an_empty_cursor_leaves_the_filter_alone() {
+        // The newest page has no cursor; wrapping it in a pointless $and would
+        // only make the query harder for the planner to match to an index.
+        let base = doc! { "room_id": "!r" };
+        let combined = and_filter(&base, doc! {});
+        assert_eq!(combined, base);
+        assert!(!combined.contains_key("$and"));
+    }
 }

@@ -425,17 +425,38 @@ export async function apiGetMessagesAfter(
   afterTs: number,
   channelId?: string,
   limit = 100,
+  afterEventId?: string,
 ) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}&after_ts=${afterTs}`;
+  // The tiebreaker: two messages can share a millisecond, and without it the
+  // second one is skipped as though it never arrived.
+  if (afterEventId) url += `&after_event_id=${encodeURIComponent(afterEventId)}`;
   if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
   const res = await authenticatedFetch(url);
   if (!res.ok) throw new Error("Failed to load missed messages");
   return res.json() as Promise<{ chunk: MatrixMessage[]; has_more: boolean }>;
 }
 
-export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number, channelId?: string, showcasePane?: string) {
+/**
+ * A page of a channel's messages, oldest first.
+ *
+ * With no cursor this is the newest page. `before` is the oldest message the
+ * caller already holds, and asks for the page immediately older than it —
+ * a keyset cursor rather than an offset, so scrolling back does not get
+ * slower the further back it goes.
+ */
+export async function apiGetMessages(
+  roomId: string,
+  limit = 50,
+  before?: { ts: number; eventId: string },
+  aroundTs?: number,
+  channelId?: string,
+  showcasePane?: string,
+) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
-  if (before !== undefined) url += `&before=${before}`;
+  if (before) {
+    url += `&before_ts=${before.ts}&before_event_id=${encodeURIComponent(before.eventId)}`;
+  }
   if (aroundTs !== undefined) url += `&around_ts=${aroundTs}`;
   if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
   if (showcasePane) url += `&showcase_pane=${encodeURIComponent(showcasePane)}`;
@@ -443,8 +464,6 @@ export async function apiGetMessages(roomId: string, limit = 50, before?: number
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json() as Promise<{
     chunk: MatrixMessage[];
-    start: number;
-    end: number;
     has_more: boolean;
   }>;
 }

@@ -112,6 +112,23 @@ pub(crate) fn format_user_id(username: &str) -> String {
     format!("@{}:localhost", username)
 }
 
+/// Escape regex metacharacters so a value is matched literally.
+///
+/// Anything user-supplied that reaches a `$regex` has to come through here.
+/// Unescaped it is two bugs at once: searching for `a.b` quietly matches
+/// `axb`, and a crafted pattern like `(a+)+b` makes the server walk a whole
+/// room's messages backtracking on each one.
+pub(crate) fn regex_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if "\\.+*?()|[]{}^$".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// The `@name` a message body would contain to mention this user.
 ///
 /// Shared by the unread mention counts and by push delivery, so both agree on
@@ -1043,6 +1060,15 @@ pub(crate) async fn get_reactions_for_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn regex_escape_neutralizes_metacharacters() {
+        assert_eq!(regex_escape("@a.b"), "@a\\.b");
+        assert_eq!(regex_escape("@a+b(c)"), "@a\\+b\\(c\\)");
+        assert_eq!(regex_escape("@plain"), "@plain");
+        // The shape that makes a regex engine backtrack forever.
+        assert_eq!(regex_escape("(a+)+b"), "\\(a\\+\\)\\+b");
+    }
 
     #[test]
     fn mention_token_uses_the_localpart() {

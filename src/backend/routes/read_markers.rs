@@ -7,7 +7,7 @@
 use super::super::{
     helpers::{
         error_response, extract_token, get_allowed_channel_ids, get_user_from_token, mention_token,
-        now_millis,
+        now_millis, regex_escape,
     },
     state::{AppState, ChannelRecord},
 };
@@ -205,29 +205,9 @@ pub(crate) async fn get_unreads(
     Ok(Json(json!({ "unreads": unreads })))
 }
 
-/// Escape regex metacharacters so a username is matched literally.
-fn regex_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if "\\.+*?()|[]{}^$".contains(c) {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn regex_escape_neutralizes_metacharacters() {
-        // A username is interpolated into a $regexMatch, so it must be literal.
-        assert_eq!(regex_escape("@a.b"), "@a\\.b");
-        assert_eq!(regex_escape("@a+b(c)"), "@a\\+b\\(c\\)");
-        assert_eq!(regex_escape("@plain"), "@plain");
-    }
 
     #[test]
     fn marker_id_is_scoped_per_user_and_channel() {
