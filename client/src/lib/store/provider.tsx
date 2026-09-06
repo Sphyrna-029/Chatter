@@ -27,6 +27,9 @@ import {
   apiGetUnreads,
   apiMarkRead,
   apiGetNotificationSettings,
+  apiGetContinuity,
+  apiSetDraft,
+  apiSetResumePoint,
   apiSetNotificationLevel,
   apiSync,
   apiCreateRoom,
@@ -91,7 +94,7 @@ import {
 } from "../api";
 import { fetchIceServers } from "../webrtc";
 import { AppActionsContext, AppStateContext, type AppActions } from "./context";
-import { initialState } from "./types";
+import { initialState, resumePointsMap } from "./types";
 import { reducer } from "./reducer";
 import { createWsMessageHandler } from "./wsHandler";
 
@@ -534,6 +537,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
         payload: { roomId, channelId: channelId ?? "", level },
       });
       await apiSetNotificationLevel(roomId, level, channelId);
+    },
+    [],
+  );
+
+  const loadContinuity = useCallback(async () => {
+    try {
+      const data = await apiGetContinuity();
+      const drafts: Record<string, string> = {};
+      for (const entry of data.drafts || []) {
+        drafts[`${entry.room_id}|${entry.channel_id}`] = entry.text;
+      }
+      resumePointsMap.clear();
+      for (const entry of data.resume || []) {
+        resumePointsMap.set(entry.url, {
+          positionSecs: entry.position_secs,
+          durationSecs: entry.duration_secs,
+        });
+      }
+      dispatch({ type: "SET_CONTINUITY", payload: { drafts } });
+    } catch {
+      // Nothing carried over; the composer just starts empty.
+    }
+  }, []);
+
+  const saveDraft = useCallback(
+    async (roomId: string, channelId: string, text: string) => {
+      // Optimistic, and deliberately not awaited by the composer: typing must
+      // never wait on a round trip.
+      dispatch({ type: "SET_DRAFT", payload: { roomId, channelId, text } });
+      try {
+        await apiSetDraft(roomId, channelId, text);
+      } catch {
+        // The local draft still stands; it just will not reach another device.
+      }
+    },
+    [],
+  );
+
+  const saveResumePoint = useCallback(
+    async (url: string, positionSecs: number, durationSecs: number) => {
+      resumePointsMap.set(url, { positionSecs, durationSecs });
+      try {
+        await apiSetResumePoint(url, positionSecs, durationSecs);
+      } catch {
+        // Playback is unaffected by a failed bookmark.
+      }
     },
     [],
   );
@@ -1351,6 +1400,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadUnreads,
       markChannelRead,
       loadNotificationSettings,
+      loadContinuity,
+      saveDraft,
+      saveResumePoint,
       setNotificationLevel,
       moderateVoice,
       sendFriendRequest,
@@ -1360,7 +1412,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

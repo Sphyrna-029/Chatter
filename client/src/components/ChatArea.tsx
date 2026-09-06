@@ -3,6 +3,7 @@ import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
+import { composerLength, emojiImage, getComposerText, setComposerText } from "@/lib/composer";
 import { MessageItem } from "./MessageItem";
 import { MessagePanel, type PanelMode } from "./MessagePanel";
 import { can } from "@/lib/permissions";
@@ -74,7 +75,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead } = useAppContext();
+  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead, saveDraft } = useAppContext();
   const isMobile = useIsMobile();
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
@@ -167,53 +168,9 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
   // Extract the text/emoji content from the contenteditable div.
   // Image emojis are replaced with their data-emoji-url attribute value.
-  const getDivContent = (): string => {
-    const div = inputRef.current;
-    if (!div) return "";
-    const walk = (node: Node): string => {
-      let result = "";
-      node.childNodes.forEach((child) => {
-        if (child.nodeType === Node.TEXT_NODE) {
-          result += child.textContent ?? "";
-        } else if ((child as Element).tagName === "IMG") {
-          const url = (child as HTMLImageElement).dataset.emojiUrl ?? "";
-          result += `:emoji{${url}}:`;
-        } else if ((child as Element).tagName === "BR") {
-          result += "\n";
-        } else {
-          const tag = (child as Element).tagName;
-          result += walk(child);
-          if (tag === "DIV" || tag === "P") result += "\n";
-        }
-      });
-      return result;
-    };
-    return walk(div).replace(/\n+$/, "");
-  };
+  const getDivContent = (): string => getComposerText(inputRef.current);
 
-  // Count visible characters — each custom emoji counts as 1 character.
-  const computeDisplayLength = (): number => {
-    const div = inputRef.current;
-    if (!div) return 0;
-    let len = 0;
-    const walk = (node: Node) => {
-      node.childNodes.forEach((child) => {
-        if (child.nodeType === Node.TEXT_NODE) {
-          len += (child.textContent ?? "").length;
-        } else if ((child as Element).tagName === "IMG") {
-          len += 1;
-        } else if ((child as Element).tagName === "BR") {
-          len += 1;
-        } else {
-          walk(child);
-          const tag = (child as Element).tagName;
-          if (tag === "DIV" || tag === "P") len += 1;
-        }
-      });
-    };
-    walk(div);
-    return len;
-  };
+  const computeDisplayLength = (): number => composerLength(inputRef.current);
 
   // Sync both input state and display length from the div content.
   const syncFromDiv = () => {
@@ -520,6 +477,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     setInput("");
     setDisplayLength(0);
     setIsSpoiler(false);
+    // The message is on its way, so it is no longer a draft anywhere.
+    if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+    pendingDraftRef.current = null;
+    void saveDraft(state.currentRoomId, state.currentChannelId ?? "", "");
     dispatch({ type: "SET_REPLYING_TO", payload: null });
 
     // Grab and clear staged files before any async work
@@ -667,6 +628,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
 
     setInput(content);
     setDisplayLength(computeDisplayLength());
+    scheduleDraftSave(content);
     sendTyping();
 
     // Mention detection using Selection API
@@ -836,12 +798,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
     }
     const isImageUrl = emoji.startsWith("/") || emoji.startsWith("http");
     if (isImageUrl) {
-      const img = document.createElement("img");
-      img.src = emoji;
-      img.dataset.emojiUrl = emoji;
-      img.alt = `:emoji{${emoji}}:`;
-      img.className = "inline-block h-5 w-5 object-contain align-middle mx-0.5";
-      insertAtCursor(img);
+      insertAtCursor(emojiImage(emoji));
     } else {
       insertAtCursor(document.createTextNode(emoji));
     }
@@ -1010,11 +967,76 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
   useEffect(() => {
     clearPendingFiles();
     // Search is reset on room switch by the provider (see client/src/lib/store/provider.tsx)
-    // Clear the input div on room switch
-    if (inputRef.current) inputRef.current.innerHTML = "";
-    setInput("");
-    setDisplayLength(0);
   }, [state.currentRoomId]);
+
+  // ─── Drafts ───────────────────────────────────────────────────────────────
+  // An unsent message belongs to the channel it was being written in, and
+  // follows the user to their other devices. Leaving a channel banks whatever
+  // is in the composer; arriving restores it.
+
+  const draftKey = `${state.currentRoomId ?? ""}|${state.currentChannelId ?? ""}`;
+  // Read through a ref: the swap effect must fire when the *channel* changes,
+  // never when some other channel's draft is saved, or an incoming save would
+  // reset the composer under the user's cursor.
+  const draftsRef = useRef(state.drafts);
+  draftsRef.current = state.drafts;
+  const draftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The composer is uncontrolled, so the save has to read the div rather than
+  // the `input` state, which lags a keystroke behind on the way out.
+  const pendingDraftRef = useRef<{ key: string; text: string } | null>(null);
+
+  const flushDraft = useCallback(() => {
+    if (draftTimerRef.current) {
+      clearTimeout(draftTimerRef.current);
+      draftTimerRef.current = null;
+    }
+    const pending = pendingDraftRef.current;
+    pendingDraftRef.current = null;
+    if (!pending) return;
+    const [roomId, channelId] = pending.key.split("|");
+    if (!roomId) return;
+    void saveDraft(roomId, channelId, pending.text);
+  }, [saveDraft]);
+
+  /** Queue the composer's current contents as this channel's draft. */
+  const scheduleDraftSave = useCallback(
+    (text: string) => {
+      pendingDraftRef.current = { key: draftKey, text };
+      if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
+      // Long enough that a sentence is one write, short enough that picking up
+      // a phone straight after typing finds the draft already there.
+      draftTimerRef.current = setTimeout(flushDraft, 800);
+    },
+    [draftKey, flushDraft],
+  );
+
+  // Swap composer contents when the channel changes, banking the outgoing
+  // draft first so nothing is lost between the two.
+  const lastDraftKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (lastDraftKeyRef.current === draftKey) return;
+    if (lastDraftKeyRef.current !== null) flushDraft();
+    lastDraftKeyRef.current = draftKey;
+
+    const draft = draftsRef.current[draftKey] ?? "";
+    setComposerText(inputRef.current, draft);
+    setInput(draft);
+    setDisplayLength(computeDisplayLength());
+    // Deliberately keyed on the channel alone: this effect must not re-run when
+    // some other draft is saved, or it would reset the composer mid-edit.
+  }, [draftKey, flushDraft]);
+
+  // A draft is worth saving even if the tab is closed mid-sentence.
+  useEffect(() => {
+    const onHide = () => flushDraft();
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onHide);
+      flushDraft();
+    };
+  }, [flushDraft]);
 
   // Debounced search execution now lives in the provider (client/src/lib/store/provider.tsx)
 

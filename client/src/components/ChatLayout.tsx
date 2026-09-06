@@ -125,7 +125,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, selectRoom, selectChannel, closeThread } = useAppContext();
+  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity, selectRoom, selectChannel, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -163,7 +163,20 @@ export function ChatLayout() {
     loadRoomGroups();
     loadUnreads();
     loadNotificationSettings();
-  }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings]);
+    loadContinuity();
+  }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity]);
+
+  // Refetch what should follow the user between devices when this tab comes
+  // back to the foreground: a draft written on a phone should be here when
+  // they turn back to the desktop, without needing a reload. Only an empty
+  // composer is hydrated, so this can never overwrite what is being typed.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadContinuity();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [loadContinuity]);
 
   // Clicking a desktop notification should land on the message it was about.
   // The WS handler cannot navigate on its own, so it raises this event.

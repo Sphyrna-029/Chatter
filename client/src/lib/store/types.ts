@@ -75,6 +75,9 @@ export interface AppState {
   roomMentions: Record<string, number>;
   /** Notification level keyed by `${room_id}|${channel_id}`; see lib/notifications.ts */
   notificationSettings: NotificationSettings;
+  /** Unsent composer text keyed by `${room_id}|${channel_id}`, synced per user
+   *  so a draft started on one device can be finished on another. */
+  drafts: Record<string, string>;
   roomUnreadCounts: Record<string, number>;
   channelUnreadCounts: Record<string, number>;
   channelMentions: Record<string, number>;
@@ -125,6 +128,16 @@ export interface AppState {
 // (MediaStream is not serializable so it can't live in React state)
 export const screenStreamsMap = new Map<string, MediaStream>();
 export const webcamStreamsMap = new Map<string, MediaStream>();
+
+/** How far through a video this user got, keyed by its URL.
+ *
+ *  Kept out of reducer state deliberately: a playing video reports its
+ *  position every few seconds, and routing that through a dispatch would
+ *  re-render every message in the room for something nothing renders. */
+export const resumePointsMap = new Map<
+  string,
+  { positionSecs: number; durationSecs: number }
+>();
 
 export type Action =
   | { type: "LOGIN"; payload: { accessToken: string; userId: string } }
@@ -221,6 +234,8 @@ export type Action =
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: string }
   | { type: "SET_NOTIFICATION_SETTINGS"; payload: NotificationSettings }
+  | { type: "SET_CONTINUITY"; payload: { drafts: Record<string, string> } }
+  | { type: "SET_DRAFT"; payload: { roomId: string; channelId: string; text: string } }
   | { type: "SET_NOTIFICATION_LEVEL"; payload: { roomId: string; channelId: string; level: NotificationLevel | "default" } }
   | { type: "SET_UNREADS"; payload: { room_id: string; channel_id: string; count: number; mentions: number }[] }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
@@ -267,6 +282,7 @@ export const initialState: AppState = {
   watchViewers: {},
   roomMentions: {},
   notificationSettings: {},
+  drafts: {},
   roomUnreadCounts: {},
   channelUnreadCounts: {},
   channelMentions: {},
@@ -380,6 +396,11 @@ export interface AppContextValue {
   ) => void;
   /** Load stored notification levels for every room/channel the user has set. */
   loadNotificationSettings: () => Promise<void>;
+  loadContinuity: () => Promise<void>;
+  /** Save (or, with empty text, clear) the draft for a channel. Debounced by the caller. */
+  saveDraft: (roomId: string, channelId: string, text: string) => Promise<void>;
+  /** Bookmark a playback position. Throttled by the caller; see resumePointsMap. */
+  saveResumePoint: (url: string, positionSecs: number, durationSecs: number) => Promise<void>;
   /** Persist a level; "default" clears the override. */
   setNotificationLevel: (roomId: string, level: NotificationLevel | "default", channelId?: string) => Promise<void>;
   sendFriendRequest: (userId: string) => Promise<void>;

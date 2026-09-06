@@ -2102,6 +2102,56 @@ export async function apiGetNotificationSettings() {
   return res.json() as Promise<{ settings: NotificationSettingEntry[] }>;
 }
 
+// ─── Cross-device continuity ─────────────────────────────────────────────────
+
+export interface DraftEntry {
+  room_id: string;
+  channel_id: string;
+  text: string;
+  updated_at: number;
+}
+
+export interface ResumeEntry {
+  url: string;
+  position_secs: number;
+  duration_secs: number;
+  updated_at: number;
+}
+
+/** Everything that should follow this user to another device, in one call. */
+export async function apiGetContinuity() {
+  const res = await authenticatedFetch("/api/continuity");
+  if (!res.ok) throw new Error("Failed to load continuity state");
+  return res.json() as Promise<{ drafts: DraftEntry[]; resume: ResumeEntry[] }>;
+}
+
+/** Empty text clears the draft rather than storing a blank one. */
+export async function apiSetDraft(roomId: string, channelId: string, text: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/draft`,
+    { method: "PUT", body: JSON.stringify({ channel_id: channelId, text }) },
+  );
+  if (!res.ok) throw new Error("Failed to save draft");
+  return res.json() as Promise<{ saved: boolean }>;
+}
+
+export async function apiSetResumePoint(
+  url: string,
+  positionSecs: number,
+  durationSecs: number,
+) {
+  const res = await authenticatedFetch("/api/media/resume", {
+    method: "PUT",
+    body: JSON.stringify({
+      url,
+      position_secs: positionSecs,
+      duration_secs: durationSecs,
+    }),
+  });
+  if (!res.ok) throw new Error("Failed to save playback position");
+  return res.json() as Promise<{ saved: boolean }>;
+}
+
 // ─── Web Push ────────────────────────────────────────────────────────────────
 
 /** The server's VAPID public key. `enabled` is false when it has none. */

@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X, MoreHorizontal } from "lucide-react";
 import { useAppContext } from "@/lib/store";
+import { useVideoResume } from "@/hooks/useVideoResume";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import {
   apiGetLinkPreview,
@@ -538,6 +539,7 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
   const didAutoPlay = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { tracks, selected, setSelected, trackEls } = useVideoSubtitles(videoRef, url);
+  useVideoResume(videoRef, url);
 
   let filename = "";
   try {
@@ -691,6 +693,7 @@ function LightboxVideo({
   const didAutoPlay = useRef(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const { tracks, selected, setSelected, trackEls } = useVideoSubtitles(videoRef, url);
+  useVideoResume(videoRef, url);
   const showCast = castState && castState !== "unavailable";
   return (
     <div className="relative group">

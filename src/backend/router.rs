@@ -17,6 +17,7 @@ use super::{
             create_category, create_channel, delete_category, delete_channel, list_channels,
             update_category, update_channel,
         },
+        continuity::{get_continuity, set_draft, set_resume_point},
         forum::{
             create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post,
             get_post, list_posts, search_posts,
@@ -334,6 +335,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/push/public-key", get(push_public_key))
         .route("/api/push/subscribe", post(push_subscribe))
         .route("/api/push/unsubscribe", post(push_unsubscribe))
+        // Cross-device continuity: unsent drafts and video resume points
+        .route("/api/continuity", get(get_continuity))
+        .route("/api/rooms/{room_id}/draft", put(set_draft))
+        .route("/api/media/resume", put(set_resume_point))
         // Read markers / unread counts
         .route("/api/rooms/{room_id}/read", post(mark_read))
         .route("/api/unreads", get(get_unreads))

@@ -673,6 +673,16 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_NOTIFICATION_SETTINGS":
       return { ...state, notificationSettings: action.payload };
+    case "SET_CONTINUITY":
+      return { ...state, drafts: action.payload.drafts };
+    case "SET_DRAFT": {
+      const key = `${action.payload.roomId}|${action.payload.channelId}`;
+      const next = { ...state.drafts };
+      // An empty draft is the absence of one, matching what the server stores.
+      if (action.payload.text.trim() === "") delete next[key];
+      else next[key] = action.payload.text;
+      return { ...state, drafts: next };
+    }
     case "SET_NOTIFICATION_LEVEL": {
       const key = `${action.payload.roomId}|${action.payload.channelId}`;
       const next = { ...state.notificationSettings };

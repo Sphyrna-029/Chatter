@@ -196,6 +196,33 @@ async fn create_indexes(db: &mongodb::Database) {
         .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
 
+    // drafts: index on user_id — the continuity fetch reads a user's whole set
+    let _ = db
+        .collection::<mongodb::bson::Document>("drafts")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await;
+
+    // media_resume: index on user_id, plus a TTL on expires_at so a video
+    // someone never went back to stops being remembered rather than
+    // accumulating forever
+    let _ = db
+        .collection::<mongodb::bson::Document>("media_resume")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await;
+    let _ = db
+        .collection::<mongodb::bson::Document>("media_resume")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "expires_at": 1 })
+                .options(
+                    IndexOptions::builder()
+                        .expire_after(std::time::Duration::from_secs(0))
+                        .build(),
+                )
+                .build(),
+        )
+        .await;
+
     // push_subscriptions: index on user_id — every push resolves a room's
     // members to their devices through this
     let _ = db

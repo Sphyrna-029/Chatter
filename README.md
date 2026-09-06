@@ -30,6 +30,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Message Pins
 - Webhooks
 - Push Notifications and Installable App (PWA, requires HTTPS)
+- Synced Drafts and Video Resume Across Devices
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard
 

@@ -3,6 +3,7 @@ pub(crate) mod admin;
 pub(crate) mod auth;
 pub(crate) mod bots;
 pub(crate) mod channels;
+pub(crate) mod continuity;
 pub(crate) mod forum;
 pub(crate) mod friends;
 pub(crate) mod invites;
