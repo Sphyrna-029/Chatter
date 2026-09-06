@@ -27,6 +27,7 @@ import {
   apiGetUnreads,
   apiMarkRead,
   apiGetNotificationSettings,
+  apiGetMessagesAfter,
   apiGetContinuity,
   apiSetDraft,
   apiSetResumePoint,
@@ -238,11 +239,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // Keep a ref to loadRooms so WS handler can call it without stale closure
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  // Defined further down, but needed by the reconnect handler above it.
+  const loadUnreadsRef = useRef<() => Promise<void>>(() => Promise.resolve());
 
   const handleWsMessage = useCallback(
     createWsMessageHandler(dispatch, stateRef, typingTimeoutsRef, loadRoomsRef),
     []
   );
+
+  /** False until the socket has connected once, so the first open is not
+   *  mistaken for a reconnection. */
+  const hasConnectedRef = useRef(false);
+
+  /**
+   * Replay whatever arrived while the socket was down.
+   *
+   * Live events are the only way a message reaches an open channel, so a
+   * dropped connection silently leaves a hole in the timeline — the client
+   * keeps rendering, the banner clears, and nothing says that anything is
+   * missing. This closes the hole from the newest message actually held,
+   * looping when the gap was wider than one page.
+   *
+   * Messages are replayed through ADD_MESSAGE, which ignores an event_id it
+   * already has, so an overlap with what arrived live is harmless.
+   */
+  const recoverMissedMessages = useCallback(async () => {
+    // Server-computed, so these are right even where the timeline is not.
+    void loadUnreadsRef.current();
+
+    const { currentRoomId, currentChannelId, messages } = stateRef.current;
+    if (!currentRoomId) return;
+
+    // With nothing loaded there is no gap to close — opening the channel will
+    // fetch it. Only a timeline that already has a tail can have lost one.
+    let newestTs = 0;
+    for (const message of messages) {
+      if (message.origin_server_ts > newestTs) newestTs = message.origin_server_ts;
+    }
+    if (newestTs === 0) return;
+
+    try {
+      // Bounded: a socket down for days should not walk the whole history.
+      for (let page = 0; page < 20; page++) {
+        const data = await apiGetMessagesAfter(
+          currentRoomId,
+          newestTs,
+          currentChannelId ?? undefined,
+        );
+        const chunk = data.chunk || [];
+        if (chunk.length === 0) return;
+        for (const message of chunk) {
+          dispatch({ type: "ADD_MESSAGE", payload: message });
+          if (message.origin_server_ts > newestTs) newestTs = message.origin_server_ts;
+        }
+        if (!data.has_more) return;
+      }
+    } catch {
+      // The socket is back and live messages are flowing again; the hole stays
+      // until the channel is reopened, which is no worse than before.
+    }
+  }, []);
 
   // WebSocket connection — refreshes expired token before connecting
   const connectWebSocket = useCallback(async () => {
@@ -275,6 +331,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
       ws.send(JSON.stringify({ access_token: getAccessToken() ?? token, is_mobile: isMobileDevice }));
       dispatch({ type: "SET_WS_CONNECTED", payload: true });
+
+      // Live events only exist while the socket does. Anything sent while it
+      // was down reached nobody, so the first connection is a load and every
+      // one after it is a repair.
+      if (hasConnectedRef.current) void recoverMissedMessages();
+      hasConnectedRef.current = true;
     };
 
     ws.onmessage = async (event) => {
@@ -496,6 +558,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Leave whatever the session has accumulated.
     }
   }, []);
+  loadUnreadsRef.current = loadUnreads;
 
   const markChannelRead = useCallback((roomId: string, channelId?: string) => {
     void apiMarkRead(roomId, channelId).catch(() => {});

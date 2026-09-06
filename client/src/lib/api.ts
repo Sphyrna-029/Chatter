@@ -412,6 +412,27 @@ export async function apiGetAllRooms() {
 
 // ─── Messages ───────────────────────────────────────────────────────────────
 
+/**
+ * Everything in a channel newer than `afterTs`, oldest first.
+ *
+ * Distinct from the paged read below: this answers "what did I miss" after a
+ * dropped connection, where the client knows exactly how far it got. `has_more`
+ * means the gap was wider than one page — call again with the last timestamp
+ * received.
+ */
+export async function apiGetMessagesAfter(
+  roomId: string,
+  afterTs: number,
+  channelId?: string,
+  limit = 100,
+) {
+  let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}&after_ts=${afterTs}`;
+  if (channelId) url += `&channel_id=${encodeURIComponent(channelId)}`;
+  const res = await authenticatedFetch(url);
+  if (!res.ok) throw new Error("Failed to load missed messages");
+  return res.json() as Promise<{ chunk: MatrixMessage[]; has_more: boolean }>;
+}
+
 export async function apiGetMessages(roomId: string, limit = 50, before?: number, aroundTs?: number, channelId?: string, showcasePane?: string) {
   let url = `/_matrix/client/r0/rooms/${roomId}/messages?limit=${limit}`;
   if (before !== undefined) url += `&before=${before}`;

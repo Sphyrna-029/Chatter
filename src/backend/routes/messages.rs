@@ -604,15 +604,30 @@ pub(crate) async fn get_room_messages(
         (s, e, s > 0)
     };
 
-    // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
-    let fetch_count = (end - start) as i64;
-    let mut cursor = msg_coll
-        .find(base_filter)
-        .sort(doc! { "origin_server_ts": 1 })
-        .skip(start as u64)
-        .limit(fetch_count)
-        .await
-        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+    // `after_ts` is a different question from the paging above: not "give me a
+    // page from the end" but "give me everything I missed". It is answered by
+    // a range on the timestamp rather than an offset, so a client that was
+    // disconnected for a while does not have to guess how many pages back the
+    // gap started.
+    let mut cursor = if let Some(after_ts) = query.after_ts {
+        let mut after_filter = base_filter.clone();
+        after_filter.insert("origin_server_ts", doc! { "$gt": after_ts });
+        msg_coll
+            .find(after_filter)
+            .sort(doc! { "origin_server_ts": 1 })
+            .limit(limit)
+            .await
+    } else {
+        // Query messages sorted by timestamp ascending, skip `start`, limit `end - start`
+        let fetch_count = (end - start) as i64;
+        msg_coll
+            .find(base_filter)
+            .sort(doc! { "origin_server_ts": 1 })
+            .skip(start as u64)
+            .limit(fetch_count)
+            .await
+    }
+    .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
 
     let mut chunk: Vec<Value> = Vec::new();
     while let Ok(Some(doc)) = cursor.try_next().await {
@@ -657,6 +672,15 @@ pub(crate) async fn get_room_messages(
             }
         }
     }
+
+    // For a gap fetch, "more" means the gap was wider than one page and the
+    // client should ask again from the last message it just received —
+    // the opposite direction from the has_more the paging above reports.
+    let has_more = if query.after_ts.is_some() {
+        chunk.len() as i64 == limit
+    } else {
+        has_more
+    };
 
     Ok(Json(json!({
         "start": start,

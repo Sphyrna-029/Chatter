@@ -89,6 +89,10 @@ pub(crate) struct MessagesQuery {
     pub(crate) limit: Option<usize>,
     pub(crate) before: Option<usize>,
     pub(crate) around_ts: Option<i64>,
+    /// Everything newer than this timestamp, oldest first. Used to close the
+    /// gap after a dropped WebSocket, where the client knows exactly how far
+    /// it got and needs what came after — not another page from the end.
+    pub(crate) after_ts: Option<i64>,
     pub(crate) channel_id: Option<String>,
     pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
 }
