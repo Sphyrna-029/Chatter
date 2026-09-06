@@ -13,7 +13,9 @@ use super::super::{
     },
     push::{spawn_message_push, MessageNotification},
     ratelimit,
-    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, UserRecord},
+    state::{
+        AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, ThreadRecord, UserRecord,
+    },
 };
 use axum::{
     extract::{Path, Query, State},
@@ -1115,26 +1117,22 @@ pub(crate) async fn get_thread_messages(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread root message not found"))?;
 
-    // Check channel-level view permissions on the root message
+    // A thread is as private as the channel it hangs in, judged the same way
+    // that channel's own messages are. This used to read the legacy
+    // `view_roles` array directly, which the overwrite migration leaves empty
+    // on any channel made private through the current UI — so a private
+    // channel's messages were hidden while its threads were not.
     if let Some(ch_id) = root_doc
         .get_str("channel_id")
         .ok()
         .filter(|s| !s.is_empty())
     {
-        let role = get_user_role(&state, &room_id, &user_id).await;
-        if role != "owner" && role != "moderator" {
-            let channels_coll = state.db.collection::<ChannelRecord>("channels");
-            if let Ok(Some(ch)) = channels_coll.find_one(doc! { "_id": ch_id }).await {
-                if !ch.view_roles.is_empty() {
-                    let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                    if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
-                        return Err(error_response(
-                            StatusCode::FORBIDDEN,
-                            "You do not have access to this channel",
-                        ));
-                    }
-                }
-            }
+        let perms = channel_permissions(&state, &room_id, ch_id, &user_id).await;
+        if !perms.view_channel {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have access to this channel",
+            ));
         }
     }
 
@@ -1243,42 +1241,32 @@ pub(crate) async fn send_thread_message(
         }
     }
 
-    // Check channel-level view/write permissions on the thread's root message
+    // Posting into a thread is posting into its channel, so it is judged by
+    // that channel's permissions — the same check the channel's own composer
+    // gets. See the note in get_thread_messages about the legacy arrays this
+    // replaces.
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
-    if let Ok(Some(root_doc)) = msg_coll
+    let root_channel_id = msg_coll
         .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
         .await
-    {
-        if let Ok(ch_id) = root_doc.get_str("channel_id") {
-            if !ch_id.is_empty() {
-                let channels_coll = state.db.collection::<ChannelRecord>("channels");
-                if let Ok(Some(ch)) = channels_coll.find_one(doc! { "_id": ch_id }).await {
-                    let role = get_user_role(&state, &room_id, &user_id).await;
-                    let is_privileged = role == "owner" || role == "moderator";
-                    if !is_privileged {
-                        if !ch.view_roles.is_empty() {
-                            let user_roles =
-                                get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                            if !ch.view_roles.iter().any(|r| user_roles.contains(r)) {
-                                return Err(error_response(
-                                    StatusCode::FORBIDDEN,
-                                    "You do not have access to this channel",
-                                ));
-                            }
-                        }
-                        if !ch.write_roles.is_empty() {
-                            let user_roles =
-                                get_user_custom_role_ids(&state, &room_id, &user_id).await;
-                            if !ch.write_roles.iter().any(|r| user_roles.contains(r)) {
-                                return Err(error_response(
-                                    StatusCode::FORBIDDEN,
-                                    "You do not have permission to send messages in this channel",
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
+        .ok()
+        .flatten()
+        .and_then(|root| root.get_str("channel_id").ok().map(String::from))
+        .unwrap_or_default();
+
+    if !root_channel_id.is_empty() {
+        let perms = channel_permissions(&state, &room_id, &root_channel_id, &user_id).await;
+        if !perms.view_channel {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have access to this channel",
+            ));
+        }
+        if !perms.send_messages {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "You do not have permission to send messages in this channel",
+            ));
         }
     }
 
@@ -1374,6 +1362,33 @@ pub(crate) async fn send_thread_message(
         )
         .await;
 
+    // The thread's own record: what a listing reads instead of recomputing it.
+    // Upserted rather than inserted because a thread comes into existence with
+    // its first reply, not with the message it hangs off.
+    {
+        let mut add_participants: Vec<&str> = vec![user_id.as_str()];
+        add_participants.extend(added_participants.iter().map(String::as_str));
+        let root_channel = root_channel_id.clone();
+        let _ = state
+            .db
+            .collection::<ThreadRecord>("threads")
+            .update_one(
+                doc! { "_id": &thread_event_id },
+                doc! {
+                    "$set": {
+                        "room_id": &room_id,
+                        "channel_id": &root_channel,
+                        "last_activity_ts": timestamp,
+                    },
+                    "$inc": { "reply_count": 1_i64 },
+                    "$addToSet": { "participants": { "$each": &add_participants } },
+                    "$setOnInsert": { "created_at": timestamp },
+                },
+            )
+            .upsert(true)
+            .await;
+    }
+
     // Broadcast to all room members so they can update thread reply counts
     let broadcast_event = json!({
         "type": "m.thread.message",
@@ -1434,6 +1449,15 @@ pub(crate) async fn set_thread_name(
     }
 
     let name = req.name.trim().to_string();
+
+    let _ = state
+        .db
+        .collection::<ThreadRecord>("threads")
+        .update_one(
+            doc! { "_id": &thread_event_id },
+            doc! { "$set": { "name": &name } },
+        )
+        .await;
 
     msg_coll
         .update_one(
@@ -1513,6 +1537,12 @@ pub(crate) async fn delete_thread(
         .delete_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
         .await;
 
+    let _ = state
+        .db
+        .collection::<ThreadRecord>("threads")
+        .delete_one(doc! { "_id": &thread_event_id })
+        .await;
+
     let broadcast = json!({
         "type": "m.thread.deleted",
         "room_id": room_id,
@@ -1549,116 +1579,118 @@ pub(crate) async fn get_room_threads(
         }
     }
 
-    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    // Read the thread records rather than deriving threads from messages. This
+    // used to run a `distinct()` over every message in the room, then a count
+    // per thread, then filter and page in memory — and it sorted by the root
+    // message's timestamp, which is when a thread *started*, not when anyone
+    // last spoke in it.
+    let threads_coll = state.db.collection::<ThreadRecord>("threads");
 
-    // Collect all distinct thread_ids used in this room
-    let raw_ids = msg_coll
-        .distinct(
-            "thread_id",
-            doc! { "room_id": &room_id, "thread_id": { "$exists": true } },
-        )
-        .await
-        .unwrap_or_default();
-
-    let thread_ids: Vec<String> = raw_ids
-        .into_iter()
-        .filter_map(|v| v.as_str().map(String::from))
-        .collect();
-
-    if thread_ids.is_empty() {
-        return Ok(Json(
-            json!({ "threads": [], "has_more": false, "next_offset": 0 }),
-        ));
+    let mut filter = doc! { "room_id": &room_id };
+    if let Some(cid) = query.channel_id.as_deref().filter(|c| !c.is_empty()) {
+        filter.insert("channel_id", cid);
+    } else if query.no_channel_only.unwrap_or(false) {
+        filter.insert("channel_id", "");
+    }
+    // Only threads still counted as active, when the caller asks for a window.
+    if let Some(active_within_ms) = query.active_within_ms.filter(|ms| *ms > 0) {
+        filter.insert(
+            "last_activity_ts",
+            doc! { "$gt": now_millis() - active_within_ms },
+        );
     }
 
-    // Fetch the root messages for those thread ids
-    let mut cursor = msg_coll
-        .find(doc! { "event_id": { "$in": &thread_ids }, "room_id": &room_id })
-        .sort(doc! { "origin_server_ts": -1 })
-        .await
-        .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB query failed"))?;
+    let limit = query.limit.unwrap_or(50).clamp(1, 100) as i64;
+    let offset = query.offset.unwrap_or(0) as u64;
 
-    let mut root_msgs: Vec<Value> = Vec::new();
-    while let Ok(Some(doc)) = cursor.try_next().await {
-        let mut doc = doc;
-        doc.remove("_id");
-        if let Ok(val) = serde_json::to_value(&doc) {
-            root_msgs.push(val);
+    let mut records: Vec<ThreadRecord> = Vec::new();
+    if let Ok(mut cursor) = threads_coll
+        .find(filter)
+        .sort(doc! { "last_activity_ts": -1 })
+        .skip(offset)
+        // One past the page, so has_more costs no second query.
+        .limit(limit + 1)
+        .await
+    {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            records.push(record);
+        }
+    }
+    let has_more = records.len() as i64 > limit;
+    records.truncate(limit as usize);
+
+    // Drop threads in channels this caller cannot see. Judged by
+    // channel_permissions, the same rule the channel list uses — a thread is
+    // exactly as private as the channel it hangs in.
+    let mut visible: Vec<ThreadRecord> = Vec::new();
+    let mut checked: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+    for record in records {
+        if record.channel_id.is_empty() {
+            visible.push(record);
+            continue;
+        }
+        let allowed = match checked.get(&record.channel_id) {
+            Some(known) => *known,
+            None => {
+                let perms =
+                    channel_permissions(&state, &room_id, &record.channel_id, &user_id).await;
+                checked.insert(record.channel_id.clone(), perms.view_channel);
+                perms.view_channel
+            }
+        };
+        if allowed {
+            visible.push(record);
         }
     }
 
-    // Scope thread search to a single channel (or the general/no-channel feed).
-    if let Some(cid) = query.channel_id.as_deref().filter(|c| !c.is_empty()) {
-        root_msgs.retain(|msg| msg.get("channel_id").and_then(|v| v.as_str()) == Some(cid));
-    } else if query.no_channel_only.unwrap_or(false) {
-        root_msgs.retain(|msg| msg.get("channel_id").is_none());
-    }
-
-    // Filter out threads from channels the user cannot view
-    let role = get_user_role(&state, &room_id, &user_id).await;
-    let is_privileged = role == "owner" || role == "moderator";
-    if !is_privileged {
-        let channels_coll = state.db.collection::<ChannelRecord>("channels");
-        // Collect channel_ids referenced by root messages
-        let channel_ids: Vec<String> = root_msgs
-            .iter()
-            .filter_map(|m| {
-                m.get("channel_id")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-        // Fetch channels with view_roles restrictions
-        let mut restricted_channels: std::collections::HashMap<String, Vec<String>> =
-            std::collections::HashMap::new();
-        if !channel_ids.is_empty() {
-            let mut ch_cursor = channels_coll
-                .find(doc! { "_id": { "$in": &channel_ids }, "view_roles": { "$ne": [] } })
-                .await
-                .ok();
-            if let Some(ref mut cursor) = ch_cursor {
-                while let Ok(Some(ch)) = cursor.try_next().await {
-                    if !ch.view_roles.is_empty() {
-                        restricted_channels.insert(ch.channel_id.clone(), ch.view_roles.clone());
+    // The root messages for this page, for the preview the client renders.
+    let root_ids: Vec<String> = visible.iter().map(|r| r.thread_id.clone()).collect();
+    let mut roots: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    if !root_ids.is_empty() {
+        let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+        if let Ok(mut cursor) = msg_coll
+            .find(doc! { "event_id": { "$in": &root_ids }, "room_id": &room_id })
+            .await
+        {
+            while let Ok(Some(mut doc)) = cursor.try_next().await {
+                doc.remove("_id");
+                if let Ok(event_id) = doc.get_str("event_id").map(String::from) {
+                    if let Ok(value) = serde_json::to_value(&doc) {
+                        roots.insert(event_id, value);
                     }
                 }
             }
         }
-        if !restricted_channels.is_empty() {
-            let user_roles = get_user_custom_role_ids(&state, &room_id, &user_id).await;
-            root_msgs.retain(|msg| {
-                let ch_id = msg.get("channel_id").and_then(|v| v.as_str()).unwrap_or("");
-                if let Some(view_roles) = restricted_channels.get(ch_id) {
-                    view_roles.iter().any(|r| user_roles.contains(r))
-                } else {
-                    true // no restriction or no channel_id
-                }
-            });
-        }
     }
 
-    // Attach reply counts
-    let event_ids: Vec<String> = root_msgs
-        .iter()
-        .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
-        .collect();
-    let counts = get_thread_counts_for_events(&state, &event_ids).await;
-    for msg in root_msgs.iter_mut() {
-        if let Some(eid) = msg.get("event_id").and_then(|v| v.as_str()) {
-            let count = counts.get(eid).copied().unwrap_or(0);
-            msg.as_object_mut()
-                .unwrap()
-                .insert("thread_reply_count".to_string(), json!(count));
+    let mut page: Vec<Value> = Vec::new();
+    for record in visible {
+        // A thread whose root has been deleted has nothing to preview.
+        let Some(mut root) = roots.remove(&record.thread_id) else {
+            continue;
+        };
+        if let Some(obj) = root.as_object_mut() {
+            obj.insert("thread_reply_count".to_string(), json!(record.reply_count));
+            obj.insert(
+                "thread_last_activity_ts".to_string(),
+                json!(record.last_activity_ts),
+            );
+            obj.insert(
+                "thread_participants".to_string(),
+                json!(record.participants),
+            );
+            if !record.name.is_empty() {
+                obj.insert("thread_name".to_string(), json!(record.name));
+            }
         }
+        page.push(root);
     }
 
-    // Optional text filter against thread_name and content.body
+    // Optional text filter against the thread's name and its root body.
     if let Some(q) = query.q.as_deref() {
         let q = q.to_lowercase();
         if !q.is_empty() {
-            root_msgs.retain(|msg| {
+            page.retain(|msg| {
                 let name_match = msg
                     .get("thread_name")
                     .and_then(|v| v.as_str())
@@ -1675,13 +1707,7 @@ pub(crate) async fn get_room_threads(
         }
     }
 
-    // Threads are filtered in memory above, so the page is taken at the end.
-    let limit = query.limit.unwrap_or(50).clamp(1, 100);
-    let offset = query.offset.unwrap_or(0);
-    let total = root_msgs.len();
-    let page: Vec<Value> = root_msgs.into_iter().skip(offset).take(limit).collect();
-    let next_offset = offset.saturating_add(page.len());
-    let has_more = next_offset < total;
+    let next_offset = offset as usize + page.len();
 
     Ok(Json(json!({
         "threads": page,

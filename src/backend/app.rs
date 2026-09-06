@@ -37,6 +37,9 @@ pub async fn build_state() -> Arc<AppState> {
     // Fold legacy channel view_roles/write_roles into the overwrite model
     migrate_channel_overwrites(&db).await;
 
+    // Build thread records for threads that predate the collection
+    backfill_thread_records(&db).await;
+
     // Load caches from MongoDB
     let (room_members, room_roles) = load_room_members_cache(&db).await;
     let banned_users = load_banned_users_cache(&db).await;
@@ -237,6 +240,17 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
+    // threads: the channel list asks for "this channel, most recently active
+    // first", which is exactly this key
+    let _ = db
+        .collection::<mongodb::bson::Document>("threads")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "channel_id": 1, "last_activity_ts": -1 })
+                .build(),
+        )
+        .await;
+
     // audit_log: newest-first listing per room
     let _ = db
         .collection::<mongodb::bson::Document>("audit_log")
@@ -353,6 +367,86 @@ async fn migrate_channel_overwrites(db: &mongodb::Database) {
             )
             .await;
     }
+}
+
+/// Build a `ThreadRecord` for every thread that existed before the collection
+/// did, so an established server's channel list is not empty on first boot
+/// after upgrading.
+///
+/// Runs once: a room whose threads are already recorded is skipped, and the
+/// records are keyed by root event id so a re-run would only rewrite them.
+async fn backfill_thread_records(db: &mongodb::Database) {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::{doc, Document};
+
+    let threads = db.collection::<super::state::ThreadRecord>("threads");
+    if threads.count_documents(doc! {}).await.unwrap_or(0) > 0 {
+        return;
+    }
+
+    // One pass over every thread reply, folded per thread. Threads are a small
+    // fraction of messages, and this runs once.
+    let msgs = db.collection::<Document>("messages");
+    let Ok(mut cursor) = msgs
+        .find(doc! { "thread_id": { "$exists": true } })
+        .sort(doc! { "origin_server_ts": 1 })
+        .await
+    else {
+        return;
+    };
+
+    let mut built: HashMap<String, super::state::ThreadRecord> = HashMap::new();
+    while let Ok(Some(reply)) = cursor.try_next().await {
+        let (Ok(thread_id), Ok(room_id)) = (reply.get_str("thread_id"), reply.get_str("room_id"))
+        else {
+            continue;
+        };
+        let ts = reply
+            .get_i64("origin_server_ts")
+            .or_else(|_| reply.get_i32("origin_server_ts").map(i64::from))
+            .unwrap_or(0);
+        let sender = reply.get_str("sender").unwrap_or("").to_string();
+
+        let entry =
+            built
+                .entry(thread_id.to_string())
+                .or_insert_with(|| super::state::ThreadRecord {
+                    thread_id: thread_id.to_string(),
+                    room_id: room_id.to_string(),
+                    channel_id: String::new(),
+                    name: String::new(),
+                    reply_count: 0,
+                    participants: Vec::new(),
+                    last_activity_ts: ts,
+                    created_at: ts,
+                });
+        entry.reply_count += 1;
+        entry.last_activity_ts = entry.last_activity_ts.max(ts);
+        if !sender.is_empty() && !entry.participants.contains(&sender) {
+            entry.participants.push(sender);
+        }
+    }
+
+    if built.is_empty() {
+        return;
+    }
+
+    // The channel and name live on the root message, not on the replies.
+    let root_ids: Vec<String> = built.keys().cloned().collect();
+    if let Ok(mut roots) = msgs.find(doc! { "event_id": { "$in": &root_ids } }).await {
+        while let Ok(Some(root)) = roots.try_next().await {
+            let Ok(event_id) = root.get_str("event_id") else {
+                continue;
+            };
+            if let Some(record) = built.get_mut(event_id) {
+                record.channel_id = root.get_str("channel_id").unwrap_or("").to_string();
+                record.name = root.get_str("thread_name").unwrap_or("").to_string();
+            }
+        }
+    }
+
+    let records: Vec<super::state::ThreadRecord> = built.into_values().collect();
+    let _ = threads.insert_many(records).await;
 }
 
 async fn load_room_members_cache(

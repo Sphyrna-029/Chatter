@@ -193,6 +193,36 @@ pub(crate) struct RoomRecord {
     pub(crate) entrance_sounds_enabled: bool,
 }
 
+/// A thread, kept as its own record rather than derived from its messages.
+///
+/// Everything about a thread that a listing needs — when it was last active,
+/// how many replies it has, who is in it — used to be recomputed on every
+/// read: a `distinct()` over every message in the room, then a count per
+/// thread. That cannot answer "active in the last three days" without a scan,
+/// which is exactly what the channel list asks for.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ThreadRecord {
+    /// The root message's `event_id`.
+    #[serde(rename = "_id")]
+    pub(crate) thread_id: String,
+    pub(crate) room_id: String,
+    /// Empty for rooms whose messages carry no channel (DMs).
+    #[serde(default)]
+    pub(crate) channel_id: String,
+    #[serde(default)]
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) reply_count: i64,
+    #[serde(default)]
+    pub(crate) participants: Vec<String>,
+    /// When the newest reply landed. The channel list's preview turns on this
+    /// alone, and it is why the record exists — the root message's own
+    /// timestamp says when the thread *started*, which for a listing sorted by
+    /// activity is the wrong number entirely.
+    pub(crate) last_activity_ts: i64,
+    pub(crate) created_at: i64,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct ForumPostRecord {
     #[serde(rename = "_id")]

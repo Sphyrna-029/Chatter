@@ -280,6 +280,10 @@ pub(crate) struct ThreadListQuery {
     pub(crate) q: Option<String>,
     pub(crate) channel_id: Option<String>,
     pub(crate) no_channel_only: Option<bool>,
+    /// Only threads with a reply newer than this many milliseconds ago. The
+    /// channel list's preview asks for a 3-day window; the thread browser
+    /// omits it and sees everything.
+    pub(crate) active_within_ms: Option<i64>,
     pub(crate) limit: Option<usize>,
     pub(crate) offset: Option<usize>,
 }
