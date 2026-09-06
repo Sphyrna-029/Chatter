@@ -77,6 +77,9 @@ export interface AppState {
   /** Unsent composer text keyed by `${room_id}|${channel_id}`, synced per user
    *  so a draft started on one device can be finished on another. */
   drafts: Record<string, string>;
+  /** Recently active threads, keyed by the channel they hang in. What the
+   *  channel list previews beneath each channel; see THREAD_PREVIEW_LIMIT. */
+  channelThreads: Record<string, ThreadPreview[]>;
   roomUnreadCounts: Record<string, number>;
   channelUnreadCounts: Record<string, number>;
   channelMentions: Record<string, number>;
@@ -122,6 +125,24 @@ export interface AppState {
   outgoingFriendRequests: { userId: string; requestId: string }[];
   blockedUsers: string[];
 }
+
+/** A thread as the channel list shows it: enough to name it and sort it. */
+export interface ThreadPreview {
+  threadId: string;
+  channelId: string;
+  name: string;
+  replyCount: number;
+  lastActivityTs: number;
+}
+
+/** How many threads a channel previews before the rest are left to the
+ *  thread browser. One busy afternoon must not make the sidebar unusable. */
+export const THREAD_PREVIEW_LIMIT = 5;
+
+/** A thread drops off the preview once it has been quiet this long. The list
+ *  is a recency preview, not an inbox — an unread mention is carried by the
+ *  notification and the room's own badge, not by staying in this list. */
+export const THREAD_ACTIVE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 
 // Module-level shared maps for MediaStreams
 // (MediaStream is not serializable so it can't live in React state)
@@ -235,6 +256,8 @@ export type Action =
   | { type: "SET_NOTIFICATION_SETTINGS"; payload: NotificationSettings }
   | { type: "SET_CONTINUITY"; payload: { drafts: Record<string, string> } }
   | { type: "SET_DRAFT"; payload: { roomId: string; channelId: string; text: string } }
+  | { type: "SET_CHANNEL_THREADS"; payload: Record<string, ThreadPreview[]> }
+  | { type: "THREAD_ACTIVITY"; payload: ThreadPreview }
   | { type: "SET_NOTIFICATION_LEVEL"; payload: { roomId: string; channelId: string; level: NotificationLevel | "default" } }
   | { type: "SET_UNREADS"; payload: { room_id: string; channel_id: string; count: number; mentions: number }[] }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
@@ -281,6 +304,7 @@ export const initialState: AppState = {
   roomMentions: {},
   notificationSettings: {},
   drafts: {},
+  channelThreads: {},
   roomUnreadCounts: {},
   channelUnreadCounts: {},
   channelMentions: {},
@@ -395,6 +419,7 @@ export interface AppContextValue {
   /** Load stored notification levels for every room/channel the user has set. */
   loadNotificationSettings: () => Promise<void>;
   loadContinuity: () => Promise<void>;
+  loadActiveThreads: (roomId: string) => Promise<void>;
   /** Save (or, with empty text, clear) the draft for a channel. Debounced by the caller. */
   saveDraft: (roomId: string, channelId: string, text: string) => Promise<void>;
   /** Bookmark a playback position. Throttled by the caller; see resumePointsMap. */

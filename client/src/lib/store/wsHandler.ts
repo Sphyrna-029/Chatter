@@ -344,6 +344,21 @@ export function createWsMessageHandler(
       // the event was dropped entirely.
       notifyThreadReply(msg, stateRef, dispatch);
 
+      // Keep the channel list's preview live. The broadcast already carries
+      // everything a row needs, so this costs no request.
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({
+          type: "THREAD_ACTIVITY",
+          payload: {
+            threadId: msg.thread_id,
+            channelId: msg.channel_id ?? "",
+            name: msg.thread_name || msg.content?.body || "Thread",
+            replyCount: msg.thread_reply_count ?? 0,
+            lastActivityTs: msg.origin_server_ts,
+          },
+        });
+      }
+
       if (msg.room_id === stateRef.current.currentRoomId) {
         // Update thread reply count on the root message
         dispatch({

@@ -4,7 +4,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X, Scissors,
-  Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff,
+  Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff, MessagesSquare,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "./AuthImage";
@@ -106,7 +106,7 @@ function VoiceTimer({ since }: { since: number }) {
 
 export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceChannel, onLeaveVoice, onToggleMute, onToggleDeafen, onToggleScreenShare, isScreenSharing, onToggleWebcam, isWebcamActive, connQualityRef, setUserVolumeRef, speakingUsersRef }: ChannelListProps) {
   const confirm = useConfirm();
-  const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel, moderateVoice } = useAppContext();
+  const { state, dispatch, selectChannel, createChannel, updateChannel, deleteChannel, moderateVoice, openThread } = useAppContext();
   const { screenFps } = useScreenShareFps();
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -509,6 +509,33 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             badge={occupiedSince ? <VoiceTimer since={occupiedSince} /> : undefined}
           />
         </div>
+        {!isVoice && ch.channel_type === "text" && (state.channelThreads[ch.channel_id]?.length ?? 0) > 0 && (
+          <div className="ml-7 space-y-0.5 pb-1">
+            {state.channelThreads[ch.channel_id].map((thread) => (
+              <button
+                key={thread.threadId}
+                onClick={() => {
+                  // Threads live in their channel, so land there first.
+                  if (state.currentChannelId !== ch.channel_id) selectChannel(ch.channel_id);
+                  void openThread(thread.threadId);
+                  onChannelSelected?.();
+                }}
+                title={thread.name}
+                className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/50 ${
+                  state.activeThreadEventId === thread.threadId
+                    ? "text-foreground"
+                    : "text-muted-foreground"
+                }`}
+              >
+                <MessagesSquare className="h-3 w-3 shrink-0" />
+                <span className="flex-1 truncate">{thread.name}</span>
+                {thread.replyCount > 0 && (
+                  <span className="shrink-0 tabular-nums opacity-70">{thread.replyCount}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
         {isVoice && members.length > 0 && (
           <div className="ml-7 space-y-0.5 pb-1">
             {members.map((m) => {

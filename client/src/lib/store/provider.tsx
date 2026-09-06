@@ -95,7 +95,13 @@ import {
 } from "../api";
 import { fetchIceServers } from "../webrtc";
 import { AppActionsContext, AppStateContext, type AppActions } from "./context";
-import { initialState, resumePointsMap } from "./types";
+import {
+  initialState,
+  resumePointsMap,
+  THREAD_ACTIVE_WINDOW_MS,
+  THREAD_PREVIEW_LIMIT,
+  type ThreadPreview,
+} from "./types";
 import { reducer } from "./reducer";
 import { createWsMessageHandler } from "./wsHandler";
 
@@ -241,6 +247,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Defined further down, but needed by the reconnect handler above it.
   const loadUnreadsRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const loadActiveThreadsRef = useRef<(roomId: string) => Promise<void>>(() =>
+    Promise.resolve(),
+  );
 
   const handleWsMessage = useCallback(
     createWsMessageHandler(dispatch, stateRef, typingTimeoutsRef, loadRoomsRef),
@@ -626,6 +635,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /**
+   * The recently active threads a room's channel list previews.
+   *
+   * One request for the room rather than one per channel: the server already
+   * sorts by activity, so grouping the answer is cheaper than asking N times.
+   */
+  const loadActiveThreads = useCallback(async (roomId: string) => {
+    try {
+      const data = await apiGetRoomThreads(
+        roomId,
+        undefined,
+        undefined,
+        false,
+        0,
+        // Enough to fill several channels' previews from one call.
+        50,
+        THREAD_ACTIVE_WINDOW_MS,
+      );
+      const grouped: Record<string, ThreadPreview[]> = {};
+      for (const root of data.items || []) {
+        const channelId = root.channel_id ?? "";
+        const list = (grouped[channelId] ??= []);
+        if (list.length >= THREAD_PREVIEW_LIMIT) continue;
+        list.push({
+          threadId: root.event_id,
+          channelId,
+          name: root.thread_name || root.content?.body || "Thread",
+          replyCount: root.thread_reply_count ?? 0,
+          lastActivityTs: root.thread_last_activity_ts ?? root.origin_server_ts,
+        });
+      }
+      dispatch({ type: "SET_CHANNEL_THREADS", payload: grouped });
+    } catch {
+      // The channel list simply shows no threads.
+    }
+  }, []);
+  loadActiveThreadsRef.current = loadActiveThreads;
+
   const loadContinuity = useCallback(async () => {
     try {
       const data = await apiGetContinuity();
@@ -675,6 +722,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectRoom = useCallback(
     async (roomId: string) => {
       dispatch({ type: "SELECT_ROOM", payload: roomId });
+      void loadActiveThreadsRef.current(roomId);
 
       // Load channels for non-DM rooms and auto-select default text channel
       const roomInfo = stateRef.current.roomInfoMap[roomId];
@@ -1492,6 +1540,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       markChannelRead,
       loadNotificationSettings,
       loadContinuity,
+      loadActiveThreads,
       saveDraft,
       saveResumePoint,
       setNotificationLevel,
@@ -1503,7 +1552,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

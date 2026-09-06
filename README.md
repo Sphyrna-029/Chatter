@@ -33,6 +33,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Synced Drafts and Video Resume Across Devices
 - Per-Room Sound Packs and Entrance Sounds
 - Rate Limiting and Per-Channel Slow Mode
+- Active Threads in the Channel List
 - Moderation Audit Log
 - Full Server Backup Export
 - GIF Search (requires Klipy API key)

@@ -637,9 +637,12 @@ export async function apiGetRoomThreads(
   channelId?: string,
   noChannelOnly?: boolean,
   offset = 0,
-  limit = PAGE_SIZE
+  limit = PAGE_SIZE,
+  /** Only threads with a reply newer than this. Omit to see every thread. */
+  activeWithinMs?: number,
 ): Promise<Page<MatrixMessage>> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  if (activeWithinMs) params.set("active_within_ms", String(activeWithinMs));
   if (query) params.set("q", query);
   if (channelId) {
     params.set("channel_id", channelId);
@@ -832,6 +835,8 @@ export interface MatrixMessage {
   edited_at?: number;
   reactions?: Record<string, string[]>;
   thread_participants?: string[];
+  /** Newest reply in the thread, from the thread record. */
+  thread_last_activity_ts?: number;
 }
 
 export interface VoiceMember {

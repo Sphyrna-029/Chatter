@@ -1,5 +1,5 @@
 import type { AppState, Action } from "./types";
-import { initialState } from "./types";
+import { initialState, THREAD_PREVIEW_LIMIT } from "./types";
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -669,6 +669,21 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_NOTIFICATION_SETTINGS":
       return { ...state, notificationSettings: action.payload };
+    case "SET_CHANNEL_THREADS":
+      return { ...state, channelThreads: action.payload };
+    case "THREAD_ACTIVITY": {
+      // Applied live rather than refetched: the broadcast already carries
+      // everything a preview row needs.
+      const preview = action.payload;
+      const existing = state.channelThreads[preview.channelId] ?? [];
+      const merged = [preview, ...existing.filter((t) => t.threadId !== preview.threadId)]
+        .sort((a, b) => b.lastActivityTs - a.lastActivityTs)
+        .slice(0, THREAD_PREVIEW_LIMIT);
+      return {
+        ...state,
+        channelThreads: { ...state.channelThreads, [preview.channelId]: merged },
+      };
+    }
     case "SET_CONTINUITY":
       return { ...state, drafts: action.payload.drafts };
     case "SET_DRAFT": {
