@@ -1,6 +1,7 @@
 use crate::backend::{
     constants::WEBCAM_RTP_BUFFER_SIZE,
     helpers::{broadcast_to_room, send_to_user},
+    metrics::{MediaKind, METRICS},
     state::{AppState, WebcamPublisherState, WebcamSubscriberState},
     webrtc::{
         create_peer_connection, ice_candidate_to_json, parse_ice_candidate,
@@ -23,6 +24,7 @@ use webrtc::{
         track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter},
         track_remote::TrackRemote,
     },
+    util::MarshalSize,
 };
 
 pub(crate) fn subscriber_key(viewer_user_id: &str, sharer_user_id: &str) -> String {
@@ -302,6 +304,7 @@ pub(crate) async fn handle_webcam_webrtc_publish_offer(
 
                 tokio::spawn(async move {
                     while let Ok((rtp_packet, _)) = track.read_rtp().await {
+                        METRICS.record_in(MediaKind::Webcam, rtp_packet.marshal_size());
                         let _ = rtp_sender.send(rtp_packet);
                     }
                 });
@@ -673,12 +676,12 @@ pub(crate) async fn handle_webcam_webrtc_subscribe_offer(
             }
 
             match rtp_receiver.recv().await {
-                Ok(rtp_packet) => {
-                    if local_track.write_rtp(&rtp_packet).await.is_err() {
-                        break;
-                    }
-                }
+                Ok(rtp_packet) => match local_track.write_rtp(&rtp_packet).await {
+                    Ok(bytes) => METRICS.record_out(MediaKind::Webcam, bytes),
+                    Err(_) => break,
+                },
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    METRICS.record_lagged(MediaKind::Webcam, skipped);
                     if skipped >= LAGGED_PACKET_THRESHOLD_FOR_PLI
                         && last_pli_request.elapsed() >= pli_cooldown
                     {

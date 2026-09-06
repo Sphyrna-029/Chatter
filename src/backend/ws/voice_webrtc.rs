@@ -2,6 +2,7 @@ use super::screen_webrtc::user_in_voice_room;
 use crate::backend::{
     constants::VOICE_RTP_BUFFER_SIZE,
     helpers::{broadcast_to_voice_channel, channel_permissions, send_to_user},
+    metrics::{MediaKind, METRICS},
     state::{AppState, PendingVoiceSubscribe, VoicePublisherState, VoiceSubscriberState},
     webrtc::{create_peer_connection, ice_candidate_to_json, parse_ice_candidate},
 };
@@ -18,6 +19,7 @@ use webrtc::{
         track_local::{track_local_static_rtp::TrackLocalStaticRTP, TrackLocal, TrackLocalWriter},
         track_remote::TrackRemote,
     },
+    util::MarshalSize,
 };
 
 pub(crate) fn voice_subscriber_key(listener_user_id: &str, speaker_user_id: &str) -> String {
@@ -361,6 +363,7 @@ pub(crate) async fn handle_voice_webrtc_publish_offer(
                     loop {
                         match track.read_rtp().await {
                             Ok((rtp_packet, _)) => {
+                                METRICS.record_in(MediaKind::Voice, rtp_packet.marshal_size());
                                 let _ = rtp_sender.send(rtp_packet);
                             }
                             Err(e) => {
@@ -677,12 +680,12 @@ pub(crate) async fn handle_voice_webrtc_subscribe_offer(
     let forward_task = tokio::spawn(async move {
         loop {
             match rtp_receiver.recv().await {
-                Ok(rtp_packet) => {
-                    if local_track.write_rtp(&rtp_packet).await.is_err() {
-                        break;
-                    }
-                }
+                Ok(rtp_packet) => match local_track.write_rtp(&rtp_packet).await {
+                    Ok(bytes) => METRICS.record_out(MediaKind::Voice, bytes),
+                    Err(_) => break,
+                },
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    METRICS.record_lagged(MediaKind::Voice, skipped);
                     eprintln!(
                         "voice-fwd: subscriber lagged by {} packets, continuing",
                         skipped

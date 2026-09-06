@@ -2,7 +2,7 @@ use super::super::{
     constants::CHUNK_SIZE,
     dto::{GifSearchQuery, LinkPreviewQuery},
     helpers::{error_response, extract_token, get_user_from_token, rate_limited},
-    ratelimit,
+    metrics, ratelimit,
     state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
@@ -139,6 +139,7 @@ async fn faststart_in_place(path: &str, ext: &str) -> bool {
         return true; // another request already ran the pass
     }
 
+    let _job = metrics::media_job();
     let format = if ext == "mov" { "mov" } else { "mp4" };
     let tmp = format!("{}.faststart.tmp", path);
     let result = tokio::process::Command::new("ffmpeg")
@@ -181,6 +182,7 @@ fn is_text_subtitle_codec(codec: &str) -> bool {
 /// (video/audio copied, subtitles as mov_text). Output is written to
 /// `{src}.cc.tmp`; the caller renames into place. Returns the tmp path.
 async fn remux_with_subs(src: &str) -> Option<String> {
+    let _job = metrics::media_job();
     let dst = format!("{}.cc.tmp", src);
     let _ = tokio::fs::remove_file(&dst).await;
     let result = tokio::process::Command::new("ffmpeg")
@@ -232,6 +234,7 @@ async fn generate_thumbnail(path: &str) {
     if tokio::fs::metadata(&thumb_path).await.is_ok() {
         return; // already exists
     }
+    let _job = metrics::media_job();
 
     async fn run_ffmpeg(args: &[String]) -> bool {
         tokio::process::Command::new("ffmpeg")
@@ -454,6 +457,7 @@ async fn extract_subtitles(video: &str) {
     if tokio::fs::metadata(&manifest_path).await.is_ok() {
         return;
     }
+    let _job = metrics::media_job();
 
     let streams = probe_subtitles(video).await;
     if streams.is_empty() {
@@ -603,6 +607,7 @@ async fn generate_image_preview(path: &str) {
     if tokio::fs::metadata(&preview_path).await.is_ok() {
         return; // already exists
     }
+    let _job = metrics::media_job();
     let _ = tokio::process::Command::new("ffmpeg")
         .args([
             "-y",

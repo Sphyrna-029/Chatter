@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
-import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw, Activity, Radio, Cpu, Layers, Mic, Monitor, Video, AlertTriangle } from "lucide-react";
 import { useAppActions } from "@/lib/store";
 import {
   apiAdminGetStats,
+  apiAdminGetMetrics,
   apiAdminListUsers,
   apiAdminDeleteUser,
   apiAdminDisableUser,
@@ -14,6 +15,7 @@ import {
   apiAdminUpdateSettings,
   apiAdminRefreshInvite,
   type AdminStats,
+  type AdminMetrics,
   type AdminUser,
   type AdminRoom,
 } from "@/lib/api";
@@ -26,7 +28,7 @@ import { toast } from "sonner";
 import { apiDownloadExport } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 
-type Tab = "overview" | "users" | "rooms" | "settings";
+type Tab = "overview" | "metrics" | "users" | "rooms" | "settings";
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
@@ -163,7 +165,7 @@ export function AdminDashboard() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b px-4 py-1 shrink-0">
-        {(["overview", "users", "rooms", "settings"] as Tab[]).map((t) => (
+        {(["overview", "metrics", "users", "rooms", "settings"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -184,6 +186,8 @@ export function AdminDashboard() {
             <p className="text-sm text-muted-foreground">Loading...</p>
           ) : tab === "overview" && stats ? (
             <OverviewTab stats={stats} />
+          ) : tab === "metrics" ? (
+            <MetricsTab />
           ) : tab === "users" ? (
             <UsersTab
               users={users}
@@ -315,6 +319,329 @@ function OverviewTab({ stats }: { stats: AdminStats }) {
           <span className="text-2xl font-bold">{c.value}</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- */
+/*  Metrics                                                          */
+/* ---------------------------------------------------------------- */
+
+/** Poll cadence. Fast enough to watch a call start, slow enough that the
+ *  window below still covers a couple of minutes. */
+const METRICS_POLL_MS = 3000;
+/** Samples kept for the sparkline — two minutes at the cadence above. */
+const METRICS_HISTORY = 40;
+/** Floor for the sparkline's y-axis, so an idle server reads as flat rather
+ *  than as noise amplified to full height. */
+const SPARKLINE_FLOOR_BPS = 1_000_000;
+
+function formatBitrate(bps: number): string {
+  if (bps >= 1_000_000_000) return `${(bps / 1_000_000_000).toFixed(2)} Gbps`;
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`;
+  if (bps >= 1_000) return `${Math.round(bps / 1_000)} kbps`;
+  return `${Math.round(bps)} bps`;
+}
+
+function formatUptime(secs: number): string {
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+interface MediaRates {
+  voiceOut: number;
+  screenOut: number;
+  webcamOut: number;
+  totalOut: number;
+  totalIn: number;
+}
+
+/**
+ * Egress over the polling window.
+ *
+ * One series, so no legend — the heading names it — and no marker on every
+ * point: the current value is the hero number beside it and the peak is
+ * labelled once. `non-scaling-stroke` keeps the 2px line 2px while the
+ * viewBox stretches to the panel width.
+ */
+function EgressSparkline({ values }: { values: number[] }) {
+  const [hover, setHover] = useState<number | null>(null);
+  const W = 600;
+  const H = 64;
+
+  if (values.length < 2) {
+    return (
+      <div className="h-16 flex items-center text-xs text-muted-foreground">
+        Sampling…
+      </div>
+    );
+  }
+
+  const peak = Math.max(...values);
+  const max = Math.max(peak, SPARKLINE_FLOOR_BPS);
+  const x = (i: number) => (i / (values.length - 1)) * W;
+  const y = (v: number) => H - (v / max) * (H - 4) - 2;
+  const line = values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const area = `${line} L${W},${H} L0,${H} Z`;
+
+  const hoverIndex = hover === null ? null : Math.min(values.length - 1, Math.max(0, Math.round(hover * (values.length - 1))));
+  const secondsAgo = hoverIndex === null ? 0 : Math.round(((values.length - 1 - hoverIndex) * METRICS_POLL_MS) / 1000);
+
+  return (
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="w-full h-16 cursor-crosshair"
+        role="img"
+        aria-label={`Egress over the last ${Math.round((values.length * METRICS_POLL_MS) / 1000)} seconds, currently ${formatBitrate(values[values.length - 1])}, peak ${formatBitrate(peak)}`}
+        onMouseMove={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          setHover((e.clientX - rect.left) / rect.width);
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        <path d={area} fill="var(--color-chart-1)" opacity={0.12} />
+        <path
+          d={line}
+          fill="none"
+          stroke="var(--color-chart-1)"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+        {hoverIndex !== null && (
+          <line
+            x1={x(hoverIndex)}
+            x2={x(hoverIndex)}
+            y1={0}
+            y2={H}
+            stroke="var(--color-muted-foreground)"
+            strokeWidth={1}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+      </svg>
+      <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-0.5">
+        <span>{Math.round((values.length * METRICS_POLL_MS) / 1000)}s ago</span>
+        <span>peak {formatBitrate(peak)}</span>
+      </div>
+      {hoverIndex !== null && (
+        <div className="absolute -top-7 left-0 right-0 flex justify-center pointer-events-none">
+          <span className="rounded bg-popover border px-2 py-0.5 text-xs shadow-sm whitespace-nowrap">
+            {formatBitrate(values[hoverIndex])} · {secondsAgo}s ago
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MetricRow({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 py-1 border-b last:border-b-0">
+      <span className="text-xs text-muted-foreground">
+        {label}
+        {hint && <span className="ml-1 opacity-60">{hint}</span>}
+      </span>
+      <span className="text-sm font-mono">{value}</span>
+    </div>
+  );
+}
+
+function MetricsTab() {
+  const [snap, setSnap] = useState<AdminMetrics | null>(null);
+  const [rates, setRates] = useState<MediaRates | null>(null);
+  const [history, setHistory] = useState<number[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const prevRef = useRef<AdminMetrics | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const tick = async () => {
+      try {
+        const cur = await apiAdminGetMetrics();
+        if (cancelled) return;
+        setError(null);
+        setSnap(cur);
+
+        const prev = prevRef.current;
+        prevRef.current = cur;
+        // A restart resets every counter, so a diff across one would read as a
+        // huge negative rate. Drop the window and start again.
+        if (!prev || cur.uptime_secs < prev.uptime_secs) {
+          setRates(null);
+          setHistory([]);
+          return;
+        }
+        const dt = (cur.timestamp_ms - prev.timestamp_ms) / 1000;
+        if (dt <= 0) return;
+        const rate = (a: number, b: number) => Math.max(0, ((b - a) * 8) / dt);
+        const next: MediaRates = {
+          voiceOut: rate(prev.voice.out_bytes, cur.voice.out_bytes),
+          screenOut: rate(prev.screen.out_bytes, cur.screen.out_bytes),
+          webcamOut: rate(prev.webcam.out_bytes, cur.webcam.out_bytes),
+          totalOut: rate(
+            prev.voice.out_bytes + prev.screen.out_bytes + prev.webcam.out_bytes,
+            cur.voice.out_bytes + cur.screen.out_bytes + cur.webcam.out_bytes,
+          ),
+          totalIn: rate(
+            prev.voice.in_bytes + prev.screen.in_bytes + prev.webcam.in_bytes,
+            cur.voice.in_bytes + cur.screen.in_bytes + cur.webcam.in_bytes,
+          ),
+        };
+        setRates(next);
+        setHistory((h) => [...h, next.totalOut].slice(-METRICS_HISTORY));
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, METRICS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (error) return <p className="text-sm text-destructive">{error}</p>;
+  if (!snap) return <p className="text-sm text-muted-foreground">Loading...</p>;
+
+  const s = snap.sessions;
+  const laggedTotal = snap.voice.lagged_packets + snap.screen.lagged_packets + snap.webcam.lagged_packets;
+
+  const kinds = [
+    { name: "Voice", counters: snap.voice, out: rates?.voiceOut, icon: Mic },
+    { name: "Screen", counters: snap.screen, out: rates?.screenOut, icon: Monitor },
+    { name: "Webcam", counters: snap.webcam, out: rates?.webcamOut, icon: Video },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Media plane — the number that decides how many people fit on this box */}
+      <div className="border rounded-lg p-4">
+        <div className="flex items-center gap-2 text-muted-foreground mb-2">
+          <Activity className="h-4 w-4" />
+          <span className="text-xs">SFU egress</span>
+        </div>
+        <div className="flex items-end gap-3 mb-1">
+          <span className="text-3xl font-bold tabular-nums">
+            {rates ? formatBitrate(rates.totalOut) : "—"}
+          </span>
+          <span className="text-xs text-muted-foreground mb-1.5">
+            forwarded out · {rates ? formatBitrate(rates.totalIn) : "—"} in
+          </span>
+        </div>
+        <EgressSparkline values={history} />
+      </div>
+
+      {/* Per-kind breakdown */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {kinds.map((k) => (
+          <div key={k.name} className="border rounded-lg p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-2">
+              <k.icon className="h-4 w-4" />
+              <span className="text-xs">{k.name}</span>
+            </div>
+            <div className="text-xl font-bold tabular-nums mb-2">
+              {k.out === undefined ? "—" : formatBitrate(k.out)}
+            </div>
+            <MetricRow label="Sent" value={formatBytes(k.counters.out_bytes)} />
+            <MetricRow label="Received" value={formatBytes(k.counters.in_bytes)} />
+            <MetricRow label="Packets out" value={k.counters.out_packets.toLocaleString()} />
+            <MetricRow
+              label="Dropped to lag"
+              value={k.counters.lagged_packets.toLocaleString()}
+            />
+          </div>
+        ))}
+      </div>
+
+      {laggedTotal > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-xs text-muted-foreground">
+            <span className="text-foreground font-medium">
+              {laggedTotal.toLocaleString()} packets dropped to subscriber lag.
+            </span>{" "}
+            A subscriber fell behind the publisher's ring buffer — its link is too slow, the
+            buffer is too small, or the process was starved. Video recovers on the next
+            keyframe; voice does not.
+          </p>
+        </div>
+      )}
+
+      {/* Live sessions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="border rounded-lg p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Radio className="h-4 w-4" />
+            <span className="text-xs">Sessions</span>
+          </div>
+          <MetricRow label="Voice channels occupied" value={s.voice_channels_active} />
+          <MetricRow label="Voice members" value={s.voice_members} />
+          <MetricRow
+            label="Voice streams"
+            value={`${s.voice_publishers} pub / ${s.voice_subscribers} sub`}
+          />
+          <MetricRow
+            label="Screen streams"
+            value={`${s.screen_publishers} pub / ${s.screen_subscribers} sub`}
+          />
+          <MetricRow
+            label="Webcam streams"
+            value={`${s.webcam_publishers} pub / ${s.webcam_subscribers} sub`}
+          />
+        </div>
+
+        <div className="border rounded-lg p-4">
+          <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <Cpu className="h-4 w-4" />
+            <span className="text-xs">Process</span>
+          </div>
+          <MetricRow label="Uptime" value={formatUptime(snap.uptime_secs)} />
+          <MetricRow
+            label="WebSockets"
+            value={`${snap.connections.sockets} / ${snap.connections.users} users`}
+          />
+          <MetricRow
+            label="Resident memory"
+            value={snap.resident_bytes === null ? "n/a" : formatBytes(snap.resident_bytes)}
+          />
+          <MetricRow
+            label="Media jobs"
+            value={`${snap.media_jobs.active} running / ${snap.media_jobs.started} total`}
+            hint="ffmpeg"
+          />
+        </div>
+      </div>
+
+      {/* Ephemeral maps — these only ever grow until something trims them */}
+      <div className="border rounded-lg p-4">
+        <div className="flex items-center gap-2 text-muted-foreground mb-2">
+          <Layers className="h-4 w-4" />
+          <span className="text-xs">In-memory maps</span>
+        </div>
+        <MetricRow label="Rate limit buckets" value={snap.caches.rate_limit_buckets} />
+        <MetricRow label="Presence entries" value={snap.caches.presence_entries} />
+        <MetricRow label="Link preview cache" value={snap.caches.link_previews} />
+        <MetricRow label="Room member cache" value={snap.caches.room_member_cache} />
+        <MetricRow label="Watch parties" value={snap.caches.watch_parties} />
+        <MetricRow label="Pending voice subscribes" value={snap.caches.pending_voice_subscribes} />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Counters are cumulative since startup; rates are measured over the last{" "}
+        {METRICS_POLL_MS / 1000}s. Byte counts are RTP as written to the socket — they exclude
+        IP/UDP and SRTP overhead, so real link usage runs roughly 5–10% higher.
+      </p>
     </div>
   );
 }

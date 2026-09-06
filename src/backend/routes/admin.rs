@@ -1,6 +1,7 @@
 use super::super::{
     app::generate_invite_code,
     helpers::{error_response, hash_password, require_admin},
+    metrics::{resident_bytes, METRICS},
     state::{AppState, UploadRecord, UserRecord},
 };
 use axum::{
@@ -74,6 +75,83 @@ pub(crate) async fn admin_stats(
         "total_file_size": total_size,
         "online_users": online_users
     })))
+}
+
+/// GET /api/admin/metrics
+///
+/// A live picture of the media plane and the ephemeral state around it — the
+/// two things `admin_stats` cannot show, because they are not in the database.
+///
+/// Counters are cumulative; the caller polls and diffs against `timestamp_ms`
+/// to get rates. Nothing here touches Mongo, so it is cheap enough to poll on
+/// a few-second interval while watching a call.
+pub(crate) async fn admin_metrics(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+
+    // Sockets, not people: one user with a phone and a desktop holds two.
+    let (socket_count, connected_users) = {
+        let ws = state.active_websockets.read().await;
+        (
+            ws.values().map(|conns| conns.len()).sum::<usize>(),
+            ws.len(),
+        )
+    };
+
+    let (voice_channels_active, voice_members) = {
+        let channels = state.voice_channels.read().await;
+        let occupied = channels.values().filter(|m| !m.is_empty()).count();
+        (occupied, channels.values().map(|m| m.len()).sum::<usize>())
+    };
+
+    let voice_publishers = state.voice_publishers.read().await.len();
+    let voice_subscribers = state.voice_subscribers.read().await.len();
+    let screen_publishers = state.screen_publishers.read().await.len();
+    let screen_subscribers = state.screen_subscribers.read().await.len();
+    let webcam_publishers = state.webcam_publishers.read().await.len();
+    let webcam_subscribers = state.webcam_subscribers.read().await.len();
+
+    // Maps that grow with use and are only ever trimmed incidentally. Watching
+    // them is how a leak gets noticed before it is an out-of-memory kill.
+    let caches = json!({
+        "rate_limit_buckets": state.rate_limits.read().await.len(),
+        "link_previews": state.link_previews.read().await.len(),
+        "presence_entries": state.user_presence.read().await.len(),
+        "watch_parties": state.watch_party_rooms.read().await.len(),
+        "pending_voice_subscribes": state.pending_voice_subscribes.read().await.len(),
+        "room_member_cache": state.room_members.read().await.len(),
+    });
+
+    let mut snapshot = METRICS.snapshot();
+    if let Some(obj) = snapshot.as_object_mut() {
+        obj.insert(
+            "timestamp_ms".into(),
+            json!(super::super::helpers::now_millis()),
+        );
+        obj.insert(
+            "connections".into(),
+            json!({ "sockets": socket_count, "users": connected_users }),
+        );
+        obj.insert(
+            "sessions".into(),
+            json!({
+                "voice_channels_active": voice_channels_active,
+                "voice_members": voice_members,
+                "voice_publishers": voice_publishers,
+                "voice_subscribers": voice_subscribers,
+                "screen_publishers": screen_publishers,
+                "screen_subscribers": screen_subscribers,
+                "webcam_publishers": webcam_publishers,
+                "webcam_subscribers": webcam_subscribers,
+            }),
+        );
+        obj.insert("caches".into(), caches);
+        obj.insert("resident_bytes".into(), json!(resident_bytes()));
+    }
+
+    Ok(Json(snapshot))
 }
 
 /// GET /api/admin/users

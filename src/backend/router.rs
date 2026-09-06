@@ -4,8 +4,8 @@ use super::{
         activity::{activity_feed, activity_stats},
         admin::{
             admin_delete_room, admin_delete_user, admin_disable_user, admin_enable_user,
-            admin_get_settings, admin_list_rooms, admin_list_users, admin_refresh_invite,
-            admin_reset_password, admin_stats, admin_update_settings,
+            admin_get_settings, admin_list_rooms, admin_list_users, admin_metrics,
+            admin_refresh_invite, admin_reset_password, admin_stats, admin_update_settings,
         },
         audit::{admin_export, list_audit_log},
         auth::{
@@ -427,6 +427,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             post(admin_refresh_invite),
         )
         .route("/api/admin/stats", get(admin_stats))
+        .route("/api/admin/metrics", get(admin_metrics))
         .route("/api/admin/export", get(admin_export))
         .route("/api/admin/users", get(admin_list_users))
         .route(

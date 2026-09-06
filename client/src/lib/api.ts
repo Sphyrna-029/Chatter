@@ -1732,6 +1732,47 @@ export interface AdminStats {
   online_users: number;
 }
 
+export interface AdminStreamCounters {
+  in_packets: number;
+  in_bytes: number;
+  out_packets: number;
+  out_bytes: number;
+  lagged_packets: number;
+}
+
+/** Cumulative counters plus live gauges. Rates are derived client-side by
+ *  diffing two snapshots against `timestamp_ms` — the server deliberately
+ *  keeps no window of its own. */
+export interface AdminMetrics {
+  uptime_secs: number;
+  timestamp_ms: number;
+  voice: AdminStreamCounters;
+  screen: AdminStreamCounters;
+  webcam: AdminStreamCounters;
+  media_jobs: { active: number; started: number };
+  connections: { sockets: number; users: number };
+  sessions: {
+    voice_channels_active: number;
+    voice_members: number;
+    voice_publishers: number;
+    voice_subscribers: number;
+    screen_publishers: number;
+    screen_subscribers: number;
+    webcam_publishers: number;
+    webcam_subscribers: number;
+  };
+  caches: {
+    rate_limit_buckets: number;
+    link_previews: number;
+    presence_entries: number;
+    watch_parties: number;
+    pending_voice_subscribes: number;
+    room_member_cache: number;
+  };
+  /** Null off Linux, where /proc is not there to read. */
+  resident_bytes: number | null;
+}
+
 export interface AdminUser {
   user_id: string;
   display_name: string;
@@ -1802,6 +1843,15 @@ export async function apiAdminGetStats(): Promise<AdminStats> {
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "Failed to get stats");
+  }
+  return res.json();
+}
+
+export async function apiAdminGetMetrics(): Promise<AdminMetrics> {
+  const res = await authenticatedFetch("/api/admin/metrics");
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to get metrics");
   }
   return res.json();
 }

@@ -554,6 +554,10 @@ pub(crate) fn generate_invite_code() -> String {
 }
 
 pub async fn run() {
+    // Before anything else, so uptime measures the process rather than the
+    // moment the first packet happened to be forwarded.
+    crate::backend::metrics::init();
+
     let state = build_state().await;
 
     // Regenerate any legacy all-black video thumbnails in the background.
