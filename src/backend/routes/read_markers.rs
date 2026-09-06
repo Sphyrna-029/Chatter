@@ -159,6 +159,11 @@ pub(crate) async fn get_unreads(
                 "origin_server_ts": { "$gt": since },
                 "sender": { "$ne": &user_id },
                 "content.msgtype": { "$ne": "m.system" },
+                // Thread replies are stored with no channel_id, so without
+                // this every one of them counted toward the channel-less
+                // bucket of whatever room it was in. A thread is unread on its
+                // own terms; see the threads listing.
+                "thread_id": { "$exists": false },
             };
             if channel_id.is_empty() {
                 match_doc.insert("channel_id", doc! { "$exists": false });

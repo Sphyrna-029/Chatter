@@ -420,6 +420,7 @@ pub(crate) async fn send_message(
                 body: req.body.clone(),
                 icon: room.icon_url.clone(),
                 is_dm: room.is_dm,
+                audience: None,
                 suppress_role_mentions: event
                     .get("content")
                     .and_then(|c| c.get("suppress_role_mentions"))
@@ -1283,6 +1284,9 @@ pub(crate) async fn send_thread_message(
     let event_id = generate_id("$");
     let timestamp = now_millis();
 
+    // Kept before `content` takes ownership: the push payload needs it too.
+    let req_body = req.body.clone();
+
     let content = json!({
         "msgtype": req.msgtype.unwrap_or_else(|| "m.text".to_string()),
         "body": req.body
@@ -1389,20 +1393,68 @@ pub(crate) async fn send_thread_message(
             .await;
     }
 
-    // Broadcast to all room members so they can update thread reply counts
+    // Everyone in the thread as of this reply. The broadcast goes to the whole
+    // room so reply counts stay live, but only these people are *in* the
+    // conversation — the client uses this to decide whether to raise anything,
+    // and push below uses it as its audience.
+    let record = state
+        .db
+        .collection::<ThreadRecord>("threads")
+        .find_one(doc! { "_id": &thread_event_id })
+        .await
+        .ok()
+        .flatten();
+    let participants: Vec<String> = record
+        .as_ref()
+        .map(|r| r.participants.clone())
+        .unwrap_or_default();
+    let thread_name = record.map(|r| r.name).unwrap_or_default();
+
     let broadcast_event = json!({
         "type": "m.thread.message",
         "room_id": room_id,
         "sender": user_id,
         "event_id": event_id,
+        "channel_id": root_channel_id,
         "thread_id": thread_event_id,
+        "thread_name": thread_name,
         "content": content,
         "thread_reply_count": reply_count,
+        "thread_participants": participants,
         "origin_server_ts": timestamp,
         "added_participants": added_participants
     });
 
     broadcast_to_room(&state, &room_id, &broadcast_event).await;
+
+    // A reply in a thread reaches the people in that thread, wherever they
+    // are. Before this it reached nobody at all: the client only handled the
+    // event while the room was already on screen, so a reply — even one naming
+    // someone — raised no notification, no unread and no push.
+    let sender_name = display_name_for(&state, &user_id).await;
+    let thread_label = if thread_name.is_empty() {
+        "a thread".to_string()
+    } else {
+        thread_name.clone()
+    };
+    spawn_message_push(
+        state.clone(),
+        MessageNotification {
+            room_id: room_id.clone(),
+            channel_id: root_channel_id.clone(),
+            event_id: event_id.clone(),
+            sender_id: user_id.clone(),
+            sender_name: format!("{sender_name} · {thread_label}"),
+            room_name: room.name.clone(),
+            channel_name: String::new(),
+            body: req_body.clone(),
+            icon: room.icon_url.clone(),
+            is_dm: room.is_dm,
+            audience: Some(participants),
+            // Nobody holds mention_everyone inside a thread reply.
+            suppress_role_mentions: true,
+        },
+    );
 
     Ok(Json(json!({"event_id": event_id})))
 }

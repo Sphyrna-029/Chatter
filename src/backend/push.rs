@@ -262,6 +262,14 @@ pub(crate) struct MessageNotification {
     /// Set when the sender lacks `mention_everyone`: the `@role` still renders,
     /// it just must not wake anyone.
     pub(crate) suppress_role_mentions: bool,
+    /// When set, only these members are considered — everyone else in the room
+    /// is skipped before any policy is applied.
+    ///
+    /// A thread is a side conversation: waking the whole room for a reply in
+    /// one would make threads the noisiest surface in the app rather than the
+    /// quietest. So a thread reply names its participants here, and a channel
+    /// message leaves it `None` and reaches the room.
+    pub(crate) audience: Option<Vec<String>>,
 }
 
 /// Queue push delivery for a message without making the sender wait on it.
@@ -298,6 +306,11 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
         members
             .into_iter()
             .filter(|uid| *uid != n.sender_id)
+            .filter(|uid| {
+                n.audience
+                    .as_ref()
+                    .is_none_or(|audience| audience.contains(uid))
+            })
             .filter(|uid| ws.get(uid).is_none_or(|conns| conns.is_empty()))
             .collect()
     };

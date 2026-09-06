@@ -15,6 +15,74 @@ import { playSound, playSoundUrl, prewarmSounds, type SoundPack } from "@/lib/so
 // it decodes. See lib/sounds.ts.
 prewarmSounds();
 
+/**
+ * Raise a notification for a thread reply, when it is addressed to this user.
+ *
+ * A thread is a side conversation, so the bar is higher than for a channel
+ * message: being in the thread, or being named in it. Everyone else gets the
+ * broadcast for the reply count and nothing more.
+ */
+function notifyThreadReply(
+  msg: {
+    room_id: string;
+    sender: string;
+    channel_id?: string;
+    thread_id: string;
+    thread_name?: string;
+    thread_participants?: string[];
+    content?: { body?: string };
+  },
+  stateRef: MutableRefObject<AppState>,
+  dispatch: Dispatch<Action>,
+) {
+  const me = stateRef.current.userId;
+  if (!me || msg.sender === me) return;
+
+  const body = msg.content?.body || "";
+  const myUsername = displayUserId(me);
+  const isMention = myUsername !== "" && body.includes(`@${myUsername}`);
+  const isParticipant = (msg.thread_participants || []).includes(me);
+  if (!isMention && !isParticipant) return;
+
+  const roomInfo = stateRef.current.roomInfoMap[msg.room_id];
+  const level = resolveNotificationLevel(
+    stateRef.current.notificationSettings,
+    msg.room_id,
+    msg.channel_id || "",
+  );
+  // A reply in a thread you are in is addressed to you the way a DM is, so it
+  // passes "mentions only" — but an explicitly muted scope still means muted.
+  const presence = stateRef.current.userPresence[me]?.status;
+  if (!shouldNotify({ level, isMention, isDm: true, isViewing: false, presence })) return;
+
+  dispatch({ type: "SET_MENTION", payload: { roomId: msg.room_id, hasMention: true } });
+
+  // Already reading this exact thread — the message is on screen.
+  const viewingThisThread =
+    typeof document !== "undefined" &&
+    document.hasFocus() &&
+    stateRef.current.activeThreadEventId === msg.thread_id;
+  if (viewingThisThread) return;
+
+  if (presence !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
+
+  const senderName =
+    stateRef.current.userPresence[msg.sender]?.displayName || displayUserId(msg.sender);
+  const threadLabel = msg.thread_name || "a thread";
+  showDesktopNotification({
+    title: `${senderName} · ${threadLabel}`,
+    body: notificationBody(body),
+    icon: roomInfo?.icon_url || undefined,
+    tag: `${msg.room_id}|thread|${msg.thread_id}`,
+    onClick: () =>
+      window.dispatchEvent(
+        new CustomEvent("notification-navigate", {
+          detail: { roomId: msg.room_id, channelId: msg.channel_id, threadId: msg.thread_id },
+        }),
+      ),
+  });
+}
+
 /** The room's sound pack, for effects that belong to a room. */
 function packFor(stateRef: MutableRefObject<AppState>, roomId: string): SoundPack | undefined {
   return stateRef.current.roomInfoMap[roomId]?.sounds as SoundPack | undefined;
@@ -270,6 +338,12 @@ export function createWsMessageHandler(
         });
       }
     } else if (msg.type === "m.thread.message") {
+      // Deliberately outside the current-room guard below. A reply in a thread
+      // used to reach nobody who was not already looking at the right room:
+      // no notification, no sound, no unread, and if you were in another room
+      // the event was dropped entirely.
+      notifyThreadReply(msg, stateRef, dispatch);
+
       if (msg.room_id === stateRef.current.currentRoomId) {
         // Update thread reply count on the root message
         dispatch({

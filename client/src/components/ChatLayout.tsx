@@ -125,7 +125,7 @@ function MobileHeader({
 }
 
 export function ChatLayout() {
-  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity, selectRoom, selectChannel, closeThread } = useAppContext();
+  const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity, selectRoom, selectChannel, openThread, closeThread } = useAppContext();
   const isMobile = useIsMobile();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
@@ -182,10 +182,13 @@ export function ChatLayout() {
   // The WS handler cannot navigate on its own, so it raises this event.
   useEffect(() => {
     const handler = async (e: Event) => {
-      const { roomId, channelId } = (e as CustomEvent).detail ?? {};
+      const { roomId, channelId, threadId } = (e as CustomEvent).detail ?? {};
       if (!roomId) return;
       if (roomId !== state.currentRoomId) await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);
+      // A thread notification should land in the thread, not merely the
+      // channel it hangs in.
+      if (threadId) await openThread(threadId);
     };
     // The same destination arrives two ways: from the in-page notification as
     // a window event, and from a push notification as a service worker
@@ -200,7 +203,7 @@ export function ChatLayout() {
       window.removeEventListener("notification-navigate", handler);
       navigator.serviceWorker?.removeEventListener("message", fromServiceWorker);
     };
-  }, [selectRoom, selectChannel, state.currentRoomId]);
+  }, [selectRoom, selectChannel, openThread, state.currentRoomId]);
 
   // A push notification clicked with no window open reopens the app with the
   // destination in the URL. Consume it once, then strip it so a refresh does
