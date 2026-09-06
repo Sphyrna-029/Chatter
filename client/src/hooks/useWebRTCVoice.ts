@@ -41,6 +41,12 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const currentRoomRef = useRef(state.currentRoomId);
   const voiceRoomIdRef = useRef(state.voiceRoomId);
   const voiceChannelIdRef = useRef(state.voiceChannelId);
+  // Mute and deafen are read from places that must not re-run when they change
+  // — the join path, and the gain node built for each new speaker.
+  const isMutedRef = useRef(state.isMuted);
+  const isDeafenedRef = useRef(state.isDeafened);
+  useEffect(() => { isMutedRef.current = state.isMuted; }, [state.isMuted]);
+  useEffect(() => { isDeafenedRef.current = state.isDeafened; }, [state.isDeafened]);
   useEffect(() => { inVoiceRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
@@ -169,7 +175,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         const ctx = new AudioContext();
         const source = ctx.createMediaStreamSource(stream);
         const gain = ctx.createGain();
-        gain.gain.value = voiceUserVolumesRef.current[speakerUserId] ?? 1.0;
+        // Deafened means deafened to everyone, including whoever joins next —
+        // and on a rejoin every speaker is a new one.
+        gain.gain.value = isDeafenedRef.current
+          ? 0
+          : (voiceUserVolumesRef.current[speakerUserId] ?? 1.0);
         source.connect(gain);
         gain.connect(ctx.destination);
         voiceGainNodesRef.current.set(speakerUserId, { ctx, gain });
@@ -436,6 +446,14 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }
     }
 
+    // Joining while already in a call is either a channel switch or a rejoin
+    // after the socket dropped. Either way mute and deafen belong to the
+    // person, not to the channel: resetting them would put someone who has
+    // every reason to believe they are muted back on an open mic.
+    const rejoining = inVoiceRef.current;
+    const nextMuted = rejoining ? isMutedRef.current : false;
+    const nextDeafened = rejoining ? isDeafenedRef.current : false;
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -448,11 +466,15 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         video: false,
       });
       localStreamRef.current = stream;
+      // A fresh track starts enabled, so silence it before anything is sent.
+      if (nextMuted || nextDeafened) {
+        stream.getAudioTracks().forEach((t) => { t.enabled = false; });
+      }
 
       const resolvedChannelId = channelId || state.voiceChannelId || undefined;
       const joinedChannel = state.channels.find((c) => c.channel_id === resolvedChannelId);
       voiceBitrateRef.current = clampVoiceBitrate(joinedChannel?.voice_bitrate);
-      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: false, isDeafened: false, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
+      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: nextMuted, isDeafened: nextDeafened, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
       // Persist voice session for auto-rejoin on refresh
@@ -468,6 +490,26 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         const joinMsg: any = { type: "voice_join", room_id: state.currentRoomId };
         if (resolvedChannelId) joinMsg.channel_id = resolvedChannelId;
         wsRef.current.send(JSON.stringify(joinMsg));
+
+        // The server treats a join as a fresh, unmuted arrival, so a preserved
+        // state has to be announced or the rest of the room sees an open mic
+        // on someone who is muted.
+        if (nextMuted) {
+          wsRef.current.send(JSON.stringify({
+            type: "voice_mute",
+            room_id: state.currentRoomId,
+            channel_id: resolvedChannelId || undefined,
+            muted: true,
+          }));
+        }
+        if (nextDeafened) {
+          wsRef.current.send(JSON.stringify({
+            type: "voice_deafen",
+            room_id: state.currentRoomId,
+            channel_id: resolvedChannelId || undefined,
+            deafened: true,
+          }));
+        }
       }
       await createVoicePublisher();
       await loadVoiceMembers();
@@ -650,6 +692,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceGainNodesRef.current.forEach((entry, userId) => {
       entry.gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
     });
+    // Set alongside the dispatch, not by the effect that mirrors it: a
+    // speaker's track can arrive before the next render, and would be built a
+    // gain node at full volume while the user is deafened.
+    isDeafenedRef.current = newDeafened;
     dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
