@@ -289,8 +289,9 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             <span className="text-success" title={`${voiceCount} in voice`}>
               {/* Speaker rather than a microphone: the badge says the room is
                   audible, not that this viewer is transmitting. Two waves, not
-                  three — the outermost arc muddies at 10px. */}
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  the usual three — at badge size the outermost arc closes up
+                  against the middle one. */}
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z" />
                 <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707z" />
                 <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z" />
@@ -299,7 +300,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           )}
           {!isDm && screenShareActive && (
             <span className="text-destructive" title="Someone is sharing their screen">
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h13A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 10.5v-7zM1.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-13z" />
                 <path d="M2 14h12v1H2v-1z" />
               </svg>
