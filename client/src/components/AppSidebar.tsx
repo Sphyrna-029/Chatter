@@ -286,12 +286,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             with them for the same row, so it moved to the row's title. */}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
           {!isDm && voiceCount > 0 && (
-            <span className="flex items-center gap-0.5 text-2xs text-success" title={`${voiceCount} in voice`}>
+            <span className="text-success" title={`${voiceCount} in voice`}>
               <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M5 3a3 3 0 0 1 6 0v5a3 3 0 0 1-6 0V3zm3-2a2 2 0 0 0-2 2v5a2 2 0 0 0 4 0V3a2 2 0 0 0-2-2z" />
                 <path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z" />
               </svg>
-              {voiceCount}
             </span>
           )}
           {!isDm && screenShareActive && (
