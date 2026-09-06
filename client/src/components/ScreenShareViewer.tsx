@@ -9,15 +9,84 @@ import { ClipControls } from "./voice/ClipControls";
 
 
 /** Header bar shown above the resizable panel group — always visible */
+/** How long the overlay stays up after the last sign of life. */
+const CONTROLS_IDLE_MS = 2500;
+
+/**
+ * Fade the overlay out when nothing is happening, back in on any pointer
+ * movement over the video.
+ *
+ * It refuses to hide while the bar is being used: with the pointer on it, with
+ * focus inside it, or with one of its menus open. That last check is why it
+ * looks at the DOM rather than tracking each menu — the FPS and clip menus
+ * render their content in a portal, so neither the pointer nor focus is inside
+ * the header while one is open, and the bar would otherwise fade out from
+ * under a menu the user was reading.
+ */
+function useIdleFade(
+  hostRef: React.RefObject<HTMLElement | null>,
+  headerRef: React.RefObject<HTMLElement | null>,
+) {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const inUse = () => {
+      const header = headerRef.current;
+      if (!header) return false;
+      return (
+        header.matches(":hover") ||
+        header.contains(document.activeElement) ||
+        header.querySelector('[data-state="open"]') !== null
+      );
+    };
+
+    const settle = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (inUse()) {
+          settle();
+          return;
+        }
+        setVisible(false);
+      }, CONTROLS_IDLE_MS);
+    };
+
+    const wake = () => {
+      setVisible(true);
+      settle();
+    };
+
+    wake();
+    host.addEventListener("mousemove", wake);
+    host.addEventListener("mouseenter", wake);
+    return () => {
+      clearTimeout(timer);
+      host.removeEventListener("mousemove", wake);
+      host.removeEventListener("mouseenter", wake);
+    };
+  }, [hostRef, headerRef]);
+
+  return visible;
+}
+
 export function ScreenShareHeader({
   containerRef,
+  hostRef,
   isPiP,
   onTogglePiP,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
+  /** The video area whose pointer activity keeps the bar awake. */
+  hostRef: React.RefObject<HTMLDivElement | null>;
   isPiP?: boolean;
   onTogglePiP?: () => void;
 }) {
+  const headerRef = useRef<HTMLDivElement | null>(null);
+  const controlsVisible = useIdleFade(hostRef, headerRef);
   const { state, dispatch } = useAppContext();
   const { screenFps } = useScreenShareFps();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -57,7 +126,16 @@ export function ScreenShareHeader({
   }
 
   return (
-    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-3 py-1.5 bg-background/70 backdrop-blur-sm border-b border-info/20">
+    <div
+      ref={headerRef}
+      className={cn(
+        "absolute inset-x-0 top-0 z-10 flex items-center justify-between px-3 py-1.5",
+        "bg-background/70 backdrop-blur-sm border-b border-info/20",
+        "transition-opacity duration-200",
+        // Faded out it must not swallow clicks meant for the video.
+        controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none",
+      )}
+    >
       <div className="flex items-center gap-2 min-w-0">
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75" />

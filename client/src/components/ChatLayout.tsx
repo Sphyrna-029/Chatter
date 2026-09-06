@@ -140,6 +140,8 @@ export function ChatLayout() {
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
   const joinVoiceRef = useRef<((channelId?: string) => void) | null>(null);
+  // The video area, whose pointer activity keeps the stream controls awake.
+  const videoPanelRef = useRef<HTMLDivElement | null>(null);
   const leaveVoiceRef = useRef<(() => void) | null>(null);
   const toggleMuteRef = useRef<(() => void) | null>(null);
   const toggleDeafenRef = useRef<(() => void) | null>(null);
@@ -650,9 +652,13 @@ export function ChatLayout() {
                             above it: as a row of its own it took height from
                             the video *and* the chat below, for a strip that is
                             mostly letterboxing anyway. */}
-                        <div className="relative h-full flex flex-col min-h-0">
+                        <div
+                          ref={videoPanelRef}
+                          className="relative h-full flex flex-col min-h-0"
+                        >
                           <ScreenShareHeader
                             containerRef={viewerContainerRef}
+                            hostRef={videoPanelRef}
                             isPiP={isPiP}
                             onTogglePiP={togglePiP}
                           />
