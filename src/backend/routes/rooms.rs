@@ -6,12 +6,13 @@ use super::super::{
     },
     helpers::{
         broadcast_to_room, do_join_room, effective_permissions, error_response, extract_token,
-        generate_id, get_system_channel_id, get_user_from_token, get_user_role, hash_password,
-        is_blocked_between, now_millis, send_to_user, verify_password,
+        generate_id, get_allowed_channel_ids, get_system_channel_id, get_user_from_token,
+        get_user_role, hash_password, is_blocked_between, now_millis, send_to_user,
+        verify_password,
     },
     state::{
         AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
-        UserRecord,
+        UserRecord, VoiceMemberState,
     },
 };
 use super::channels::ensure_default_channels;
@@ -22,6 +23,7 @@ use axum::{
 };
 use mongodb::bson::doc;
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub(crate) async fn create_room(
@@ -847,6 +849,36 @@ pub(crate) async fn delete_room(
     Ok(Json(json!({"deleted": true})))
 }
 
+/// One occupied voice channel: its id, how many are in it, and whether anyone
+/// in it is sharing a screen.
+type ChannelActivity = (String, usize, bool);
+
+/// Group occupied voice channels by the room they belong to.
+///
+/// `voice_channels` is keyed by **channel** id, so a room's activity can only
+/// be reached through the members' own `room_id` — the room list used to read
+/// the map at the room key, which since channels landed only ever hit the
+/// legacy pre-channels entry that nothing writes. Every room reported an empty
+/// call however busy it was, and the sidebar's voice and screen-share badges
+/// never appeared.
+fn voice_activity_by_room(
+    voice_channels: &HashMap<String, HashMap<String, VoiceMemberState>>,
+) -> HashMap<String, Vec<ChannelActivity>> {
+    let mut by_room: HashMap<String, Vec<ChannelActivity>> = HashMap::new();
+    for (channel_id, members) in voice_channels.iter() {
+        // An emptied channel can linger in the map; it is not activity.
+        let Some(room_id) = members.values().next().map(|m| m.room_id.clone()) else {
+            continue;
+        };
+        let sharing = members.values().any(|m| m.screen_sharing);
+        by_room
+            .entry(room_id)
+            .or_default()
+            .push((channel_id.clone(), members.len(), sharing));
+    }
+    by_room
+}
+
 pub(crate) async fn list_all_rooms(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -855,30 +887,64 @@ pub(crate) async fn list_all_rooms(
 
     let token = extract_token(&headers)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
-    let _user_id = get_user_from_token(&state, &token)
+    let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
-    let rm = state.room_members.read().await;
-    let vc = state.voice_channels.read().await;
+
+    let voice_by_room = {
+        let vc = state.voice_channels.read().await;
+        voice_activity_by_room(&vc)
+    };
+
+    // Copied out rather than held: the visibility check below awaits on the
+    // database, and a read guard spanning that blocks every voice join.
+    let (member_counts, joined): (HashMap<String, usize>, HashSet<String>) = {
+        let rm = state.room_members.read().await;
+        let counts = rm.iter().map(|(id, m)| (id.clone(), m.len())).collect();
+        let joined = rm
+            .iter()
+            .filter(|(_, members)| members.iter().any(|m| m == &user_id))
+            .map(|(id, _)| id.clone())
+            .collect();
+        (counts, joined)
+    };
 
     let mut room_list: Vec<Value> = Vec::new();
 
-    if let Ok(mut cursor) = rooms_coll
-        .find(doc! { "is_dm": false, "unlisted": { "$ne": true } })
-        .await
-    {
+    if let Ok(mut cursor) = rooms_coll.find(doc! { "is_dm": false }).await {
         while let Ok(Some(room)) = cursor.try_next().await {
-            let voice_members = vc.get(&room.room_id);
-            let voice_count = voice_members.map(|v| v.len()).unwrap_or(0);
-            let screen_share_active = voice_members
-                .map(|v| v.values().any(|m| m.screen_sharing))
-                .unwrap_or(false);
+            // Unlisted rooms stay out of the directory unless the caller is
+            // already in one: the sidebar reads its live badges from this list,
+            // and the join dialog drops rooms the caller has joined anyway.
+            if room.unlisted && !joined.contains(&room.room_id) {
+                continue;
+            }
+
+            // Voice activity is only reported for channels this caller may see,
+            // so a private channel's call does not light up a room badge for
+            // someone who cannot open it.
+            let (voice_count, screen_share_active) = match voice_by_room.get(&room.room_id) {
+                None => (0usize, false),
+                Some(channels) => {
+                    let allowed = get_allowed_channel_ids(&state, &room.room_id, &user_id).await;
+                    let visible = |cid: &String| match &allowed {
+                        None => true, // owner/moderator: overwrites do not apply
+                        Some(ids) => ids.contains(cid),
+                    };
+                    channels.iter().filter(|(cid, _, _)| visible(cid)).fold(
+                        (0usize, false),
+                        |(count, sharing), (_, members, ch_sharing)| {
+                            (count + members, sharing || *ch_sharing)
+                        },
+                    )
+                }
+            };
             room_list.push(json!({
                 "room_id": room.room_id,
                 "name": room.name,
                 "topic": room.topic,
-                "member_count": rm.get(&room.room_id).map(|m| m.len()).unwrap_or(0),
+                "member_count": member_counts.get(&room.room_id).copied().unwrap_or(0),
                 "voice_count": voice_count,
                 "screen_share_active": screen_share_active,
                 "tags": room.tags,
@@ -1840,4 +1906,71 @@ pub(crate) async fn add_to_dm(
     send_to_user(&state, &req.user_id, &event).await;
 
     Ok(Json(json!({ "added": true })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn member(room_id: &str, screen_sharing: bool) -> VoiceMemberState {
+        VoiceMemberState {
+            muted: false,
+            deafened: false,
+            screen_sharing,
+            force_muted: false,
+            clipping: false,
+            room_id: room_id.to_string(),
+            conn_id: 1,
+        }
+    }
+
+    fn channel(room_id: &str, users: &[(&str, bool)]) -> HashMap<String, VoiceMemberState> {
+        users
+            .iter()
+            .map(|(uid, sharing)| (uid.to_string(), member(room_id, *sharing)))
+            .collect()
+    }
+
+    #[test]
+    fn activity_is_grouped_by_the_members_room_not_the_map_key() {
+        // The regression this guards: the map is keyed by channel, so looking a
+        // room up by its own id finds nothing and every badge stays dark.
+        let mut vc = HashMap::new();
+        vc.insert("chan-1".to_string(), channel("room-a", &[("u1", false)]));
+
+        let by_room = voice_activity_by_room(&vc);
+        assert!(!by_room.contains_key("chan-1"));
+        assert_eq!(by_room["room-a"], vec![("chan-1".to_string(), 1, false)]);
+    }
+
+    #[test]
+    fn a_rooms_channels_are_collected_together() {
+        let mut vc = HashMap::new();
+        vc.insert(
+            "chan-1".to_string(),
+            channel("room-a", &[("u1", false), ("u2", false)]),
+        );
+        vc.insert("chan-2".to_string(), channel("room-a", &[("u3", true)]));
+        vc.insert("chan-3".to_string(), channel("room-b", &[("u4", false)]));
+
+        let by_room = voice_activity_by_room(&vc);
+        assert_eq!(by_room["room-a"].len(), 2);
+        assert_eq!(by_room["room-b"].len(), 1);
+
+        // Summed the way the handler sums them: three people in room-a, one of
+        // whom is sharing.
+        let (count, sharing) = by_room["room-a"].iter().fold(
+            (0usize, false),
+            |(count, sharing), (_, members, ch_sharing)| (count + members, sharing || *ch_sharing),
+        );
+        assert_eq!(count, 3);
+        assert!(sharing);
+    }
+
+    #[test]
+    fn an_emptied_channel_is_not_activity() {
+        let mut vc = HashMap::new();
+        vc.insert("chan-1".to_string(), HashMap::new());
+        assert!(voice_activity_by_room(&vc).is_empty());
+    }
 }

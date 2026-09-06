@@ -295,7 +295,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             </span>
           )}
           {!isDm && screenShareActive && (
-            <span className="text-info" title="Someone is sharing their screen">
+            <span className="text-destructive" title="Someone is sharing their screen">
               <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                 <path d="M0 3.5A1.5 1.5 0 0 1 1.5 2h13A1.5 1.5 0 0 1 16 3.5v7a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 10.5v-7zM1.5 3a.5.5 0 0 0-.5.5v7a.5.5 0 0 0 .5.5h13a.5.5 0 0 0 .5-.5v-7a.5.5 0 0 0-.5-.5h-13z" />
                 <path d="M2 14h12v1H2v-1z" />
