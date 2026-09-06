@@ -77,7 +77,7 @@ export function VoiceDebugPanel({ connStats }: VoiceDebugPanelProps) {
               {hasAudio && (
                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono pl-[118px]">
                   {s.audioBitrate != null && (
-                    <span className="text-purple-400">
+                    <span className="text-info">
                       aud {Math.round(s.audioBitrate * 8 / 1000)}kbps
                     </span>
                   )}

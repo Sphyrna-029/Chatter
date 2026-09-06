@@ -116,8 +116,8 @@ export function VoiceMemberList({
                   className={cn(
                     "text-3xs font-semibold px-1 py-0.5 rounded-md mt-0.5 w-fit transition-colors cursor-pointer",
                     isWatching
-                      ? "text-purple-200 bg-purple-600/40 hover:bg-purple-600/60"
-                      : "text-purple-400 bg-purple-500/10 hover:bg-purple-500/20"
+                      ? "text-info bg-info/40 hover:bg-info/60"
+                      : "text-info bg-info/10 hover:bg-info/20"
                   )}
                 >
                   📺 {isWatching ? "Watching" : "Watch Stream"}
@@ -149,8 +149,8 @@ export function VoiceMemberList({
                       className={cn(
                         "h-5 px-1.5 text-3xs font-semibold w-full",
                         isWatching
-                          ? "bg-purple-600 text-white hover:bg-purple-700 border-purple-600"
-                          : "border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
+                          ? "bg-info text-background hover:bg-info/80 border-info"
+                          : "border-info/50 text-info hover:bg-info/20 hover:text-info"
                       )}
                       title={isWatching ? `Stop watching ${name}'s screen` : `Watch ${name}'s screen`}
                     >

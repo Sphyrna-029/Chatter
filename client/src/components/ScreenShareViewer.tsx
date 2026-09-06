@@ -57,13 +57,13 @@ export function ScreenShareHeader({
   }
 
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 bg-purple-500/10 border-b border-purple-500/20 shrink-0">
+    <div className="flex items-center justify-between px-3 py-1.5 bg-info/10 border-b border-info/20 shrink-0">
       <div className="flex items-center gap-2 min-w-0">
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-destructive" />
         </span>
-        <p className="text-sm font-semibold text-purple-300 truncate">
+        <p className="text-sm font-semibold text-info truncate">
           {state.selectedScreenSharer
             ? state.selectedScreenSharer === state.userId
               ? "Your screen (preview)"
@@ -76,12 +76,12 @@ export function ScreenShareHeader({
             <span className="text-xs text-muted-foreground">No viewers</span>
           );
           if (viewers.length <= 3) return (
-            <span className="text-xs text-purple-400">
+            <span className="text-xs text-info">
               {viewers.map(displayUserId).join(", ")}
             </span>
           );
           return (
-            <span className="text-xs text-purple-400">
+            <span className="text-xs text-info">
               {viewers.length} viewers
             </span>
           );
@@ -102,8 +102,8 @@ export function ScreenShareHeader({
                 className={cn(
                   "px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer",
                   sharerId === state.selectedScreenSharer
-                    ? "bg-purple-500 text-white"
-                    : "bg-purple-500/20 text-purple-300 hover:bg-purple-500/30"
+                    ? "bg-info text-background"
+                    : "bg-info/20 text-info hover:bg-info/30"
                 )}
               >
                 {sharerId === state.userId ? "You" : displayUserId(sharerId)}
@@ -552,8 +552,8 @@ export function ScreenShareViewer() {
                 className={cn(
                   "relative shrink-0 w-28 rounded-md border-2 overflow-hidden bg-black aspect-video cursor-pointer transition-all",
                   isSelected
-                    ? "border-purple-500 ring-1 ring-purple-500/50"
-                    : "border-border/50 hover:border-purple-500/50 opacity-70 hover:opacity-100"
+                    ? "border-info ring-1 ring-info/50"
+                    : "border-border/50 hover:border-info/50 opacity-70 hover:opacity-100"
                 )}
                 onClick={() => dispatch({ type: "SET_SCREEN_VIEWER", payload: { sharer: sharerId } })}
               >
@@ -563,10 +563,10 @@ export function ScreenShareViewer() {
                   className="w-full h-full object-contain"
                 />
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 py-0.5 flex items-center gap-1">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-purple-300 shrink-0">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-info shrink-0">
                     <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
                   </svg>
-                  <p className="text-3xs text-purple-300 font-semibold truncate">
+                  <p className="text-3xs text-info font-semibold truncate">
                     {sharerId === state.userId ? "You" : displayUserId(sharerId)}
                   </p>
                 </div>

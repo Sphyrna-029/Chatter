@@ -665,7 +665,7 @@ export function ActivityPage() {
                             </span>
                           )}
                           {sharers.length > 0 && (
-                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-purple-500/20 text-purple-400 shrink-0">
+                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-info/20 text-info shrink-0">
                               <Monitor className="h-3 w-3" />
                               {sharers.length === 1
                                 ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`

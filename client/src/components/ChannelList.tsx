@@ -591,10 +591,10 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                             e.stopPropagation();
                             dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
                           }}
-                          className="shrink-0 p-0.5 rounded hover:bg-purple-500/20 transition-colors"
+                          className="shrink-0 p-0.5 rounded hover:bg-info/20 transition-colors"
                           title={`Watch ${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))}'s screen`}
                         >
-                          <Monitor className="h-3 w-3 text-purple-400" />
+                          <Monitor className="h-3 w-3 text-info" />
                         </button>
                       )}
                       {m.clipping && (
@@ -1019,7 +1019,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   onClick={onToggleScreenShare}
                   className={`flex-1 flex items-center justify-center gap-1.5 rounded-l-md px-2 py-1.5 text-xs font-medium transition-colors ${
                     isScreenSharing
-                      ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                      ? "bg-info/20 text-info hover:bg-info/30"
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                   }`}
                   title={isScreenSharing ? "Stop sharing" : "Share screen"}
@@ -1030,7 +1030,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   <button
                     className={`flex items-center justify-center rounded-r-md border-l border-background/40 px-1 py-1.5 text-[10px] font-medium leading-none transition-colors ${
                       isScreenSharing
-                        ? "bg-purple-500/20 text-purple-400 hover:bg-purple-500/30"
+                        ? "bg-info/20 text-info hover:bg-info/30"
                         : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                     }`}
                     title="Screen share quality"

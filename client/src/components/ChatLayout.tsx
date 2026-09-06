@@ -543,13 +543,13 @@ export function ChatLayout() {
 
             {/* PiP active banner — shown when watching a screen share from another room */}
             {showPipBanner && (
-              <div className="flex items-center justify-between px-3 py-1.5 bg-purple-500/10 border-b border-purple-500/20 shrink-0">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-info/10 border-b border-info/20 shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500" />
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-info opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-info" />
                   </span>
-                  <p className="text-xs text-purple-300 truncate">
+                  <p className="text-xs text-info truncate">
                     {isPiP
                       ? <>Watching <span className="font-semibold">{sharerName}</span> in PiP</>
                       : <>Screen share from <span className="font-semibold">{sharerName}</span> is active</>
@@ -561,7 +561,7 @@ export function ChatLayout() {
                   {pipWanted && !isPiP && (
                     <button
                       onClick={manualEnterPiP}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 hover:text-purple-200 transition-colors cursor-pointer"
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-info/20 text-info hover:bg-info/30 hover:text-info transition-colors cursor-pointer"
                     >
                       <svg
                         xmlns="http://www.w3.org/2000/svg"
@@ -582,7 +582,7 @@ export function ChatLayout() {
                   )}
                   <button
                     onClick={returnToStream}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 hover:text-purple-200 transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-info/20 text-info hover:bg-info/30 hover:text-info transition-colors cursor-pointer"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
