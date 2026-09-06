@@ -2,53 +2,22 @@ import type { Dispatch, MutableRefObject } from "react";
 import type { Action, AppState } from "./types";
 import { apiSync, apiGetPresence } from "../api";
 import { displayUserId } from "@/lib/utils";
+import { toast } from "sonner";
 import {
   notificationBody,
   resolveNotificationLevel,
   shouldNotify,
   showDesktopNotification,
 } from "@/lib/notifications";
+import { playSound, playSoundUrl, prewarmSounds, type SoundPack } from "@/lib/sounds";
 
-// Pre-decode and cache the reversed leave sound so playback is instant
-let cachedLeaveBuffer: AudioBuffer | null = null;
-let cacheLoading = false;
+// Warm the derived leave sound now, so the first leave is not silent while
+// it decodes. See lib/sounds.ts.
+prewarmSounds();
 
-function ensureLeaveBufferCached() {
-  if (cachedLeaveBuffer || cacheLoading) return;
-  cacheLoading = true;
-  (async () => {
-    try {
-      const ctx = new AudioContext();
-      const response = await fetch("/external/vc-join.wav");
-      const arrayBuffer = await response.arrayBuffer();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-        audioBuffer.getChannelData(c).reverse();
-      }
-      cachedLeaveBuffer = audioBuffer;
-      await ctx.close();
-    } catch {
-      cacheLoading = false;
-    }
-  })();
-}
-
-// Start caching immediately on module load
-ensureLeaveBufferCached();
-
-function playLeaveSound() {
-  try {
-    if (!cachedLeaveBuffer) {
-      ensureLeaveBufferCached();
-      return;
-    }
-    const ctx = new AudioContext();
-    const source = ctx.createBufferSource();
-    source.buffer = cachedLeaveBuffer;
-    source.connect(ctx.destination);
-    source.start();
-    source.onended = () => ctx.close();
-  } catch {}
+/** The room's sound pack, for effects that belong to a room. */
+function packFor(stateRef: MutableRefObject<AppState>, roomId: string): SoundPack | undefined {
+  return stateRef.current.roomInfoMap[roomId]?.sounds as SoundPack | undefined;
 }
 
 /** The server sets this when the sender lacks the mention_everyone permission:
@@ -192,7 +161,7 @@ export function createWsMessageHandler(
             }
             dispatch({ type: "SET_MENTION", payload: { roomId: msg.room_id, hasMention: true } });
             const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
-            if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
+            if (ownStatus !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
           }
         }
       } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
@@ -212,7 +181,7 @@ export function createWsMessageHandler(
           dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
         }
         if (isDm || hasMention) {
-          if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
+          if (ownStatus !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
           dispatch({
             type: "SET_MENTION",
             payload: { roomId: msg.room_id, hasMention: true },
@@ -411,7 +380,12 @@ export function createWsMessageHandler(
             ? msg.channel_id === stateRef.current.voiceChannelId
             : msg.room_id === stateRef.current.voiceRoomId);
         if (inSameChannel || msg.user_id === stateRef.current.userId) {
-          new Audio("/external/vc-join.wav").play().catch(() => {});
+          // Someone's own sting stands in for the generic join sound — one
+          // arrival should not make two noises. The server sends none when the
+          // room has entrance sounds switched off.
+          const sting = msg.entrance_sound_url as string | undefined;
+          if (sting) playSoundUrl(sting);
+          else playSound("voice-join", packFor(stateRef, msg.room_id));
         }
       }
     } else if (msg.type === "voice_user_left") {
@@ -434,7 +408,7 @@ export function createWsMessageHandler(
             ? msg.channel_id === stateRef.current.voiceChannelId
             : msg.room_id === stateRef.current.voiceRoomId);
         if (inSameChannelLeave || msg.user_id === stateRef.current.userId) {
-          playLeaveSound();
+          playSound("voice-leave", packFor(stateRef, msg.room_id));
         }
       }
     } else if (msg.type === "voice_user_clipping") {
@@ -527,10 +501,14 @@ export function createWsMessageHandler(
       if (isVoiceRoom) {
         dispatch({ type: "WEBCAM_SHARE_STOPPED", payload: msg.user_id });
       }
+    } else if (msg.type === "sound_rejected") {
+      // A chosen sound failed the server's length or format check. Without
+      // this the file would simply never play and nothing would say why.
+      toast.error(String(msg.error || "That sound could not be used"));
     } else if (msg.type === "m.reply_notification") {
       if (msg.room_id !== stateRef.current.currentRoomId) {
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
-        if (ownStatus !== "dnd") new Audio("/external/vc-join.wav").play().catch(() => {});
+        if (ownStatus !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
         dispatch({
           type: "SET_MENTION",
           payload: { roomId: msg.room_id, hasMention: true },

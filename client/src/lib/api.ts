@@ -337,7 +337,7 @@ export async function apiGetAccountStatus() {
     const body = await res.json().catch(() => null);
     throw new Error(body?.error || "Failed to get account status");
   }
-  return res.json() as Promise<{ totp_verified: boolean }>;
+  return res.json() as Promise<{ totp_verified: boolean; entrance_sound_url?: string }>;
 }
 
 export async function apiLogout() {
@@ -803,6 +803,11 @@ export interface RoomInfo {
   banner_url?: string;
   dm_streak_count?: number;
   dm_streak_last_ts?: number;
+  /** Room sound pack: event name -> `/external/...` URL. A missing entry means
+   *  the client's built-in sound for that event. */
+  sounds?: Record<string, string>;
+  /** Whether members' entrance stings play in this room's voice channels. */
+  entrance_sounds_enabled?: boolean;
 }
 
 // ─── Channels ───────────────────────────────────────────────────────────────
@@ -1287,7 +1292,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; banner_url?: string }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; banner_url?: string; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean }
 ) {
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,

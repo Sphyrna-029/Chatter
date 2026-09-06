@@ -31,6 +31,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Webhooks
 - Push Notifications and Installable App (PWA, requires HTTPS)
 - Synced Drafts and Video Resume Across Devices
+- Per-Room Sound Packs and Entrance Sounds
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard
 

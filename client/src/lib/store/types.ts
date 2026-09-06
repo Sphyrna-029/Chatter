@@ -354,10 +354,10 @@ export interface AppContextValue {
   openDM: (targetUserIds: string | string[]) => Promise<void>;
   addToGroupDM: (roomId: string, userId: string) => Promise<void>;
   updateTopic: (roomId: string, topic: string) => Promise<void>;
-  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean }) => Promise<void>;
+  updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
-  updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string }) => void;
+  updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; entranceSoundUrl?: string }) => void;
   kickMember: (roomId: string, userId: string) => Promise<void>;
   banMember: (roomId: string, userId: string) => Promise<void>;
   unbanMember: (roomId: string, userId: string) => Promise<void>;

@@ -25,6 +25,14 @@ import {
 import { cn, displayUserId } from "@/lib/utils";
 import { ensureFontFace } from "@/lib/fontFace";
 import {
+  MAX_SOUND_SECS,
+  loadSoundSettings,
+  playSound,
+  playSoundUrl,
+  saveSoundSettings,
+  type SoundSettings,
+} from "@/lib/sounds";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -192,6 +200,11 @@ export function UserProfileDialog({
   const bannerInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [pendingFontFile, setPendingFontFile] = useState<File | null>(null);
+  const stingInputRef = useRef<HTMLInputElement>(null);
+  // The caller's own sting is not in presence — only its owner needs to see
+  // it, so it is read from the account endpoint rather than broadcast.
+  const [entranceSoundUrl, setEntranceSoundUrl] = useState("");
+  const [soundSettings, setSoundSettings] = useState<SoundSettings>(() => loadSoundSettings());
   const nameFontUrl = presence?.nameFontUrl || "";
   if (presence?.nameFontUrl) {
     ensureFontFace(userId, presence.nameFontUrl);
@@ -334,6 +347,15 @@ export function UserProfileDialog({
   useEffect(() => {
     setFilePage(1);
   }, [fileSort]);
+
+  // The entrance sound lives on the profile tab, so it is fetched whenever the
+  // dialog is opened on yourself rather than with the account-tab bundle.
+  useEffect(() => {
+    if (!isSelf) return;
+    apiGetAccountStatus()
+      .then((data) => setEntranceSoundUrl(data.entrance_sound_url || ""))
+      .catch(() => {});
+  }, [isSelf]);
 
   useEffect(() => {
     if (activeTab === "account" && isSelf) {
@@ -740,6 +762,86 @@ export function UserProfileDialog({
               </p>
             )}
           </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Entrance Sound
+            </label>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-foreground truncate flex-1">
+                {entranceSoundUrl
+                  ? decodeURIComponent(entranceSoundUrl.split("/").pop() || "Custom Sound")
+                  : "None"}
+              </span>
+              {entranceSoundUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => playSoundUrl(entranceSoundUrl)}
+                >
+                  Play
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => stingInputRef.current?.click()}
+                disabled={uploading}
+              >
+                Upload
+              </Button>
+              {entranceSoundUrl && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 text-destructive"
+                  onClick={() => {
+                    setEntranceSoundUrl("");
+                    updateProfile({ entranceSoundUrl: "" });
+                  }}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            <p className="text-3xs text-muted-foreground">
+              Played to a voice channel when you join it. Up to {MAX_SOUND_SECS} seconds;
+              rooms can turn these off.
+            </p>
+            <input
+              ref={stingInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.ogg,.m4a,.opus"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                e.target.value = "";
+                if (!file.type.startsWith("audio/")) {
+                  toast.error("Choose an audio file");
+                  return;
+                }
+                // The server measures the real duration and is the authority;
+                // this only saves an obviously-too-big upload from happening
+                // at all. A few seconds of audio is never megabytes.
+                if (file.size > 2 * 1024 * 1024) {
+                  toast.error("Entrance sound must be under 2 MB");
+                  return;
+                }
+                setUploading(true);
+                try {
+                  const uploaded = await apiUploadFile(file);
+                  setEntranceSoundUrl(uploaded.url);
+                  updateProfile({ entranceSoundUrl: uploaded.url });
+                } catch {
+                  toast.error("Failed to upload entrance sound");
+                } finally {
+                  setUploading(false);
+                }
+              }}
+            />
+          </div>
           <Button
             className="w-full"
             onClick={handleSave}
@@ -750,6 +852,54 @@ export function UserProfileDialog({
 
           {/* Below the Save button on purpose: these apply the moment they are
               changed, and are kept on this device rather than on the server. */}
+          <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Sound effects
+                </label>
+                <p className="text-3xs text-muted-foreground">
+                  Mentions, voice joins, and entrance sounds. Rooms can replace
+                  these with their own.
+                </p>
+              </div>
+              <Switch
+                checked={soundSettings.enabled}
+                onCheckedChange={(v) => {
+                  const next = { ...soundSettings, enabled: v };
+                  setSoundSettings(next);
+                  saveSoundSettings(next);
+                }}
+              />
+            </div>
+            {soundSettings.enabled && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-muted-foreground">Volume</label>
+                  <span className="text-3xs text-muted-foreground">
+                    {Math.round(soundSettings.volume * 100)}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(soundSettings.volume * 100)}
+                  aria-label="Sound effect volume"
+                  className="w-full accent-primary"
+                  onChange={(e) => {
+                    const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
+                    setSoundSettings(next);
+                    saveSoundSettings(next);
+                  }}
+                  // Play on release rather than on every step, so dragging the
+                  // slider does not fire a burst of overlapping sounds.
+                  onMouseUp={() => playSound("mention")}
+                  onTouchEnd={() => playSound("mention")}
+                />
+              </div>
+            )}
+          </div>
           {clipBufferSupported() && (
             <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
               <div className="flex items-center justify-between gap-3">

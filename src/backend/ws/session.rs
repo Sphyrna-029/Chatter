@@ -23,7 +23,9 @@ use crate::backend::{
         broadcast_to_room, channel_permissions, generate_id, get_user_from_token, get_user_role,
         now_millis, now_secs, send_to_conn, send_to_user,
     },
-    state::{AppState, PresenceRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord},
+    state::{
+        AppState, PresenceRecord, RoomRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord,
+    },
 };
 use axum::{
     extract::ws::{Message, WebSocket},
@@ -599,6 +601,33 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .await;
             }
 
+            // The joiner's entrance sting travels with the join so listeners
+            // do not have to look it up. A room that has switched them off
+            // sends none at all, rather than relying on each client to check.
+            let entrance_sound_url = {
+                let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+                let enabled = rooms_coll
+                    .find_one(doc! { "_id": room_id })
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|r| r.entrance_sounds_enabled)
+                    .unwrap_or(true);
+                if enabled {
+                    state
+                        .db
+                        .collection::<UserRecord>("users")
+                        .find_one(doc! { "_id": user_id })
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|u| u.entrance_sound_url)
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
+
             let event = json!({
                 "type": "voice_user_joined",
                 "room_id": room_id,
@@ -606,7 +635,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "user_id": user_id,
                 "voice_members": voice_members,
                 "force_muted": force_muted,
-                "occupied_since": occupied_since_ms
+                "occupied_since": occupied_since_ms,
+                "entrance_sound_url": entrance_sound_url
             });
             broadcast_to_room(&state, room_id, &event).await;
 
@@ -1493,6 +1523,28 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             }
             if let Some(nfu) = msg.get("name_font_url").and_then(|v| v.as_str()) {
                 update_doc.insert("name_font_url", nfu);
+            }
+            if let Some(sting) = msg.get("entrance_sound_url").and_then(|v| v.as_str()) {
+                // Played to everyone in a voice channel without their asking,
+                // so its length is checked here rather than taken on trust.
+                match crate::backend::sounds::validate_sound_url(&state, sting).await {
+                    Ok(()) => {
+                        update_doc.insert("entrance_sound_url", sting.trim());
+                    }
+                    Err(err) => {
+                        send_to_conn(
+                            &state,
+                            user_id,
+                            conn_id,
+                            &json!({
+                                "type": "sound_rejected",
+                                "scope": "entrance",
+                                "error": err.message(),
+                            }),
+                        )
+                        .await;
+                    }
+                }
             }
             if !update_doc.is_empty() {
                 let users_coll = state.db.collection::<UserRecord>("users");

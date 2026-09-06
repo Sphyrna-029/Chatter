@@ -268,6 +268,15 @@ pub(crate) async fn sync(
                 "content": {"banner_url": room_data.banner_url},
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.sounds",
+                "state_key": "",
+                "content": {
+                    "sounds": room_data.sounds,
+                    "entrance_sounds_enabled": room_data.entrance_sounds_enabled,
+                },
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             state_events.push(json!({

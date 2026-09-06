@@ -5,6 +5,7 @@ pub(crate) mod helpers;
 pub(crate) mod push;
 pub(crate) mod router;
 pub(crate) mod routes;
+pub(crate) mod sounds;
 pub(crate) mod state;
 pub(crate) mod webpush;
 pub(crate) mod webrtc;

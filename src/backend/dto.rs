@@ -138,6 +138,10 @@ pub(crate) struct UpdateRoomSettingsRequest {
     pub(crate) remove_password: Option<bool>,
     pub(crate) read_only: Option<bool>,
     pub(crate) banner_url: Option<String>,
+    /// Event name -> sound URL. An empty URL clears that event back to the
+    /// client's built-in sound.
+    pub(crate) sounds: Option<std::collections::HashMap<String, String>>,
+    pub(crate) entrance_sounds_enabled: Option<bool>,
 }
 
 #[derive(Deserialize)]

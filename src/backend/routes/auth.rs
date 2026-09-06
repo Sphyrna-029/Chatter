@@ -369,6 +369,7 @@ pub(crate) async fn totp_verify(
             recovery_codes: hashed_codes,
             custom_status: String::new(),
             manual_status: None,
+            entrance_sound_url: String::new(),
             is_admin: pending_reg.is_admin,
             disabled: false,
             name_font_url: String::new(),
@@ -1074,7 +1075,11 @@ pub(crate) async fn account_status(
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "User not found"))?;
 
     Ok(Json(json!({
-        "totp_verified": user.totp_verified
+        "totp_verified": user.totp_verified,
+        // The caller's own entrance sting. It is not in presence, because only
+        // its owner needs to see it — everyone else is sent the URL with the
+        // voice join that plays it.
+        "entrance_sound_url": user.entrance_sound_url
     })))
 }
 

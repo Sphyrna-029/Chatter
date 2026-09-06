@@ -19,6 +19,17 @@ import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, 
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 import { toast } from "sonner";
+import { MAX_SOUND_SECS, playSound, type SoundEvent, type SoundPack } from "@/lib/sounds";
+
+/** The pack's events, in the order they are offered. Keep in sync with
+ *  SoundEvent in lib/sounds.ts and PACK_EVENTS in backend/sounds.rs. */
+const SOUND_EVENT_LABELS: { event: SoundEvent; label: string }[] = [
+  { event: "mention", label: "Mention" },
+  { event: "voice-join", label: "Voice join" },
+  { event: "voice-leave", label: "Voice leave" },
+  { event: "mute", label: "Mute" },
+  { event: "unmute", label: "Unmute" },
+];
 import { useConfirm } from "@/components/ConfirmDialog";
 
 interface CreateRoomDialogProps {
@@ -457,6 +468,10 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [settingsUnlisted, setSettingsUnlisted] = useState(false);
   const [settingsReadOnly, setSettingsReadOnly] = useState(false);
   const [settingsPassword, setSettingsPassword] = useState("");
+  // The room's sound pack, edited as a whole and saved with the rest.
+  const [roomSounds, setRoomSounds] = useState<Record<string, string>>({});
+  const [entranceSoundsEnabled, setEntranceSoundsEnabled] = useState(true);
+  const [uploadingSound, setUploadingSound] = useState<SoundEvent | null>(null);
   const [showSettingsPassword, setShowSettingsPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -524,6 +539,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setBotDescription("");
       setNewBotToken(null);
       setCopiedBotToken(false);
+      setRoomSounds({ ...(info?.sounds || {}) });
+      setEntranceSoundsEnabled(info?.entrance_sounds_enabled !== false);
+      setUploadingSound(null);
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
         apiListWebhooks(roomId).then((data) => setWebhooks(data.webhooks)).catch(() => {});
@@ -548,7 +566,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
@@ -560,6 +578,11 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       if (settingsUnlisted !== (info?.unlisted || false)) settings.unlisted = settingsUnlisted;
       if (settingsReadOnly !== (info?.read_only || false)) settings.read_only = settingsReadOnly;
       if (settingsPassword) settings.password = settingsPassword;
+      const infoSounds = info?.sounds || {};
+      if (JSON.stringify(roomSounds) !== JSON.stringify(infoSounds)) settings.sounds = roomSounds;
+      if (entranceSoundsEnabled !== (info?.entrance_sounds_enabled !== false)) {
+        settings.entrance_sounds_enabled = entranceSoundsEnabled;
+      }
       if (Object.keys(settings).length > 0) {
         await updateRoomSettings(roomId, settings);
       }
@@ -744,6 +767,101 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   <p className="text-xs text-muted-foreground">Only owners and moderators can send messages</p>
                 </div>
                 <Switch checked={settingsReadOnly} onCheckedChange={setSettingsReadOnly} />
+              </div>
+            )}
+            {isOwner && (
+              <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
+                <div>
+                  <Label>Sound Pack</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Replace what this room sounds like. Anything left as Default
+                    uses the built-in sound. Up to {MAX_SOUND_SECS} seconds each.
+                  </p>
+                </div>
+                {SOUND_EVENT_LABELS.map(({ event, label }) => (
+                  <div key={event} className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground w-24 shrink-0">{label}</span>
+                    <span className="text-sm truncate flex-1">
+                      {roomSounds[event]
+                        ? decodeURIComponent(roomSounds[event].split("/").pop() || "Custom")
+                        : "Default"}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      onClick={() => playSound(event, roomSounds as SoundPack)}
+                    >
+                      Play
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0"
+                      disabled={uploadingSound !== null}
+                      onClick={() => {
+                        const input = document.createElement("input");
+                        input.type = "file";
+                        input.accept = "audio/*";
+                        input.onchange = async () => {
+                          const file = input.files?.[0];
+                          if (!file) return;
+                          if (!file.type.startsWith("audio/")) {
+                            toast.error("Choose an audio file");
+                            return;
+                          }
+                          if (file.size > 2 * 1024 * 1024) {
+                            toast.error("Sound must be under 2 MB");
+                            return;
+                          }
+                          setUploadingSound(event);
+                          try {
+                            const uploaded = await apiUploadFile(file);
+                            // Held locally until Save, like every other room
+                            // setting here — the server checks the length then.
+                            setRoomSounds((prev) => ({ ...prev, [event]: uploaded.url }));
+                          } catch {
+                            toast.error("Failed to upload sound");
+                          } finally {
+                            setUploadingSound(null);
+                          }
+                        };
+                        input.click();
+                      }}
+                    >
+                      {uploadingSound === event ? "…" : "Upload"}
+                    </Button>
+                    {roomSounds[event] && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 text-destructive"
+                        onClick={() =>
+                          setRoomSounds((prev) => {
+                            const next = { ...prev };
+                            delete next[event];
+                            return next;
+                          })
+                        }
+                      >
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-3">
+                  <div className="min-w-0">
+                    <Label>Entrance sounds</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Let members play their own short sound when they join a
+                      voice channel here.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={entranceSoundsEnabled}
+                    onCheckedChange={setEntranceSoundsEnabled}
+                  />
+                </div>
               </div>
             )}
             {isOwner && (

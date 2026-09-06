@@ -94,6 +94,8 @@ pub(crate) async fn create_room(
                     read_only: false,
                     banner_url: String::new(),
                     dm_name_override: false,
+                    sounds: std::collections::HashMap::new(),
+                    entrance_sounds_enabled: true,
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -210,6 +212,8 @@ pub(crate) async fn create_room(
                     read_only: false,
                     banner_url: String::new(),
                     dm_name_override: false,
+                    sounds: std::collections::HashMap::new(),
+                    entrance_sounds_enabled: true,
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -392,6 +396,8 @@ pub(crate) async fn create_room(
         read_only: false,
         banner_url: String::new(),
         dm_name_override: false,
+        sounds: std::collections::HashMap::new(),
+        entrance_sounds_enabled: true,
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -942,7 +948,9 @@ pub(crate) async fn update_room_settings(
             || req.password.is_some()
             || req.remove_password.is_some()
             || req.read_only.is_some()
-            || req.banner_url.is_some();
+            || req.banner_url.is_some()
+            || req.sounds.is_some()
+            || req.entrance_sounds_enabled.is_some();
         if has_non_name {
             return Err(error_response(
                 StatusCode::FORBIDDEN,
@@ -966,6 +974,8 @@ pub(crate) async fn update_room_settings(
             && req.remove_password.is_none()
             && req.read_only.is_none()
             && req.banner_url.is_none()
+            && req.sounds.is_none()
+            && req.entrance_sounds_enabled.is_none()
             && (req.custom_emojis.is_some() || req.emoji_aliases.is_some());
 
         let allowed = if emoji_only {
@@ -1076,6 +1086,39 @@ pub(crate) async fn update_room_settings(
     if let Some(read_only) = req.read_only {
         set_doc.insert("read_only", read_only);
         content.insert("read_only".to_string(), json!(read_only));
+    }
+    if let Some(ref sounds) = req.sounds {
+        // Only the events the client actually plays are storable, and each
+        // chosen file is checked here rather than trusted — a sound plays
+        // without anyone asking for it, so its length is not the client's
+        // call to make.
+        let mut cleaned: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (event, url) in sounds {
+            if !crate::backend::sounds::PACK_EVENTS.contains(&event.as_str()) {
+                return Err(error_response(
+                    StatusCode::BAD_REQUEST,
+                    &format!("Unknown sound event: {event}"),
+                ));
+            }
+            if let Err(err) = crate::backend::sounds::validate_sound_url(&state, url).await {
+                return Err(error_response(StatusCode::BAD_REQUEST, &err.message()));
+            }
+            // An empty URL clears the override back to the built-in sound
+            // rather than storing a blank one.
+            if !url.trim().is_empty() {
+                cleaned.insert(event.clone(), url.trim().to_string());
+            }
+        }
+        set_doc.insert(
+            "sounds",
+            mongodb::bson::to_bson(&cleaned).unwrap_or(mongodb::bson::Bson::Null),
+        );
+        content.insert("sounds".to_string(), json!(cleaned));
+    }
+    if let Some(enabled) = req.entrance_sounds_enabled {
+        set_doc.insert("entrance_sounds_enabled", enabled);
+        content.insert("entrance_sounds_enabled".to_string(), json!(enabled));
     }
     if let Some(ref banner_url) = req.banner_url {
         set_doc.insert("banner_url", banner_url.as_str());

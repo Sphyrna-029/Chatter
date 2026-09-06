@@ -125,6 +125,10 @@ pub(crate) struct UserRecord {
     pub(crate) custom_status: String,
     #[serde(default)]
     pub(crate) manual_status: Option<String>,
+    /// A short sound played to a voice channel when this user arrives.
+    /// Empty means none; length is capped when it is chosen (see sounds.rs).
+    #[serde(default)]
+    pub(crate) entrance_sound_url: String,
     #[serde(default)]
     pub(crate) is_admin: bool,
     #[serde(default)]
@@ -173,6 +177,16 @@ pub(crate) struct RoomRecord {
     /// When true, use the stored name as-is for DMs instead of auto-generating from members.
     #[serde(default)]
     pub(crate) dm_name_override: bool,
+    /// The room's sound pack: event name -> `/external/...` URL. An event with
+    /// no entry falls back to the client's built-in sound, so a partial pack
+    /// is normal rather than broken. Keys are limited to `sounds::PACK_EVENTS`.
+    #[serde(default)]
+    pub(crate) sounds: HashMap<String, String>,
+    /// Whether members' entrance stings play in this room's voice channels.
+    /// Defaults to on; a room that finds them tiresome turns them off for
+    /// everyone rather than asking each member to.
+    #[serde(default = "default_true")]
+    pub(crate) entrance_sounds_enabled: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

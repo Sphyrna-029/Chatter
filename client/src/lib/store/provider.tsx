@@ -443,6 +443,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const streakEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.dm_streak"
         );
+        const soundsEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.sounds"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -462,6 +465,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           banner_url: bannerEvent?.content?.banner_url || "",
           dm_streak_count: streakEvent?.content?.streak_count || 0,
           dm_streak_last_ts: streakEvent?.content?.last_message_ts || 0,
+          sounds: soundsEvent?.content?.sounds || {},
+          // Rooms that predate the field, and any room whose state event is
+          // missing, keep entrance sounds on — the field's default.
+          entrance_sounds_enabled:
+            soundsEvent?.content?.entrance_sounds_enabled !== false,
         };
       } else {
         roomInfoMap[roomId] = {
@@ -1196,7 +1204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateRoomSettings = useCallback(
-    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean }) => {
+    async (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean }) => {
       await apiUpdateRoomSettings(roomId, settings);
     },
     []
@@ -1321,7 +1329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "REMOVE_BLOCKED_USER", payload: userId });
   }, []);
 
-  const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string }) => {
+  const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; entranceSoundUrl?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       const payload: any = { type: "set_profile" };
@@ -1331,6 +1339,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (profile.customStatus !== undefined) payload.custom_status = profile.customStatus;
       if (profile.displayName !== undefined) payload.display_name = profile.displayName;
       if (profile.nameFontUrl !== undefined) payload.name_font_url = profile.nameFontUrl;
+      if (profile.entranceSoundUrl !== undefined) payload.entrance_sound_url = profile.entranceSoundUrl;
       ws.send(JSON.stringify(payload));
     }
   }, []);

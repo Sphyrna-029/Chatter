@@ -1,6 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
+import { playSound, type SoundPack } from "@/lib/sounds";
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 import { toast } from "sonner";
 
@@ -553,14 +554,23 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   }, [teardownLocalVoice, state.currentRoomId, state.voiceChannelId, loadVoiceMembers]);
 
   // ─── Mute ─────────────────────────────────────────────────────────────────
+  // The pack of the room this call belongs to, so the effects match the server
+  // being talked on rather than whichever room is on screen.
+  //
+  // Held in a ref because the PTT handlers below are bound once: adding it to
+  // their dependencies would rebind the keyboard listeners every time any room
+  // updated, and reading it through a stale closure would play the previous
+  // room's sounds after switching calls.
+  const roomSoundsRef = useRef<SoundPack | undefined>(undefined);
+  roomSoundsRef.current = state.roomInfoMap[state.voiceRoomId ?? state.currentRoomId ?? ""]
+    ?.sounds as SoundPack | undefined;
+
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
     const newMuted = !state.isMuted;
     localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
     dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: newMuted } });
-    const muteSound = new Audio(newMuted ? "/external/mute.wav" : "/external/unmute.wav");
-    muteSound.volume = 0.2;
-    muteSound.play().catch(() => {});
+    playSound(newMuted ? "mute" : "unmute", roomSoundsRef.current);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: newMuted }));
     }
@@ -593,9 +603,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (e.key === "`" && !e.repeat) {
         localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = true; });
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: false } });
-        const unmuteSound = new Audio("/external/unmute.wav");
-        unmuteSound.volume = 0.2;
-        unmuteSound.play().catch(() => {});
+        playSound("unmute", roomSoundsRef.current);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
         }
@@ -605,9 +613,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (e.key === "`") {
         localStreamRef.current?.getAudioTracks().forEach((t) => { t.enabled = false; });
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: true } });
-        const muteSound = new Audio("/external/mute.wav");
-        muteSound.volume = 0.2;
-        muteSound.play().catch(() => {});
+        playSound("mute", roomSoundsRef.current);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
           wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
         }
