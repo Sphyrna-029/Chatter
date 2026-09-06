@@ -6,7 +6,8 @@
 
 use super::super::{
     helpers::{
-        error_response, extract_token, get_allowed_channel_ids, get_user_from_token, now_millis,
+        error_response, extract_token, get_allowed_channel_ids, get_user_from_token, mention_token,
+        now_millis,
     },
     state::{AppState, ChannelRecord},
 };
@@ -31,16 +32,6 @@ pub(crate) struct MarkReadRequest {
 
 fn marker_id(user_id: &str, channel_id: &str) -> String {
     format!("{user_id}|{channel_id}")
-}
-
-/// The `@name` a message body would contain to mention this user.
-fn mention_token(user_id: &str) -> String {
-    let local = user_id
-        .split(':')
-        .next()
-        .unwrap_or(user_id)
-        .trim_start_matches('@');
-    format!("@{local}")
 }
 
 /// Record that `user_id` has read `channel_id` up to a point in time.
@@ -229,12 +220,6 @@ fn regex_escape(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn mention_token_uses_the_localpart() {
-        assert_eq!(mention_token("@buck:localhost"), "@buck");
-        assert_eq!(mention_token("buck"), "@buck");
-    }
 
     #[test]
     fn regex_escape_neutralizes_metacharacters() {

@@ -4,7 +4,8 @@ use super::super::{
         broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
         get_user_from_token, now_millis,
     },
-    state::{AppState, RoomRecord, WebhookRecord},
+    push::{spawn_message_push, MessageNotification},
+    state::{AppState, ChannelRecord, RoomRecord, WebhookRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -406,6 +407,50 @@ pub(crate) async fn execute_webhook(
     }
 
     broadcast_to_room(&state, &webhook.room_id, &event).await;
+
+    // A webhook message is an `m.room.message` like any other, so it must reach
+    // members with no tab open the same way one typed by a person does.
+    let room_name = state
+        .db
+        .collection::<RoomRecord>("rooms")
+        .find_one(doc! { "_id": &webhook.room_id })
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.name)
+        .unwrap_or_default();
+    let channel_name = if webhook.channel_id.is_empty() {
+        String::new()
+    } else {
+        state
+            .db
+            .collection::<ChannelRecord>("channels")
+            .find_one(doc! { "_id": &webhook.channel_id })
+            .await
+            .ok()
+            .flatten()
+            .map(|ch| ch.name)
+            .unwrap_or_default()
+    };
+    spawn_message_push(
+        state.clone(),
+        MessageNotification {
+            room_id: webhook.room_id.clone(),
+            channel_id: webhook.channel_id.clone(),
+            event_id: event_id.clone(),
+            sender_id: sender,
+            sender_name: webhook.name.clone(),
+            room_name,
+            channel_name,
+            body: text,
+            icon: webhook.avatar_url.clone(),
+            // A webhook posts into a room, never into a DM.
+            is_dm: false,
+            // Nothing here holds mention_everyone, so a role mention in a
+            // webhook body must not ping.
+            suppress_role_mentions: true,
+        },
+    );
 
     Ok(Json(json!({ "event_id": event_id })))
 }

@@ -44,6 +44,13 @@ pub async fn build_state() -> Arc<AppState> {
 
     let webrtc_api = build_webrtc_api();
 
+    // Minted on first boot and reused forever after: every browser
+    // subscription is bound to the public key it enrolled with.
+    let vapid = super::push::load_or_create_vapid_keys(&db).await;
+    if vapid.is_none() {
+        eprintln!("Web Push is disabled: no usable VAPID key");
+    }
+
     Arc::new(AppState {
         db,
         jwt_secret,
@@ -74,6 +81,8 @@ pub async fn build_state() -> Arc<AppState> {
         spotify_client_secret,
         spotify_tokens: RwLock::new(HashMap::new()),
         steam_login_codes: RwLock::new(HashMap::new()),
+        vapid,
+        http_client: reqwest::Client::new(),
     })
 }
 
@@ -185,6 +194,13 @@ async fn create_indexes(db: &mongodb::Database) {
     let _ = db
         .collection::<mongodb::bson::Document>("invites")
         .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
+        .await;
+
+    // push_subscriptions: index on user_id — every push resolves a room's
+    // members to their devices through this
+    let _ = db
+        .collection::<mongodb::bson::Document>("push_subscriptions")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
         .await;
 
     // friend_requests: unique compound {from_user, to_user}

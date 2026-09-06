@@ -39,6 +39,7 @@ use super::{
         notification_settings::{get_notification_settings, set_notification_level},
         pins::{list_pins, pin_message, unpin_message},
         presence::{get_room_presence, get_voice_channel_status},
+        push::{push_public_key, push_subscribe, push_unsubscribe},
         reactions::{add_reaction, get_reactions},
         read_markers::{get_unreads, mark_read},
         roles::{
@@ -57,7 +58,9 @@ use super::{
         spotify::{
             spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink,
         },
-        static_content::{build_version, serve_client, serve_invite_page, versions},
+        static_content::{
+            build_version, serve_client, serve_dist_file, serve_invite_page, versions,
+        },
         steam::{
             steam_callback, steam_exchange, steam_link_url, steam_login, steam_set_hide_game,
             steam_status, steam_unlink,
@@ -82,6 +85,9 @@ use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
 };
+
+const SVG: &str = "image/svg+xml";
+const PNG: &str = "image/png";
 
 pub(crate) fn build_router() -> Router<Arc<AppState>> {
     // CORS layer for uploaded media — required for Chromecast (Default Media
@@ -108,6 +114,34 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // Static / client
         .route("/", get(serve_client))
         .nest_service("/assets", ServeDir::new("client/dist/assets"))
+        // PWA surface. The service worker must answer from the root for its
+        // scope to cover the app, so these cannot live under /assets.
+        .route(
+            "/sw.js",
+            get(|| serve_dist_file("sw.js", "application/javascript")),
+        )
+        .route(
+            "/manifest.webmanifest",
+            get(|| serve_dist_file("manifest.webmanifest", "application/manifest+json")),
+        )
+        .route("/icon.svg", get(|| serve_dist_file("icon.svg", SVG)))
+        .route("/vite.svg", get(|| serve_dist_file("vite.svg", SVG)))
+        .route(
+            "/icon-192.png",
+            get(|| serve_dist_file("icon-192.png", PNG)),
+        )
+        .route(
+            "/icon-512.png",
+            get(|| serve_dist_file("icon-512.png", PNG)),
+        )
+        .route(
+            "/icon-maskable-512.png",
+            get(|| serve_dist_file("icon-maskable-512.png", PNG)),
+        )
+        .route(
+            "/icon-badge.png",
+            get(|| serve_dist_file("icon-badge.png", PNG)),
+        )
         .nest("/external", external_router)
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
@@ -296,6 +330,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             put(set_notification_level),
         )
         .route("/api/notification_settings", get(get_notification_settings))
+        // Web Push enrollment
+        .route("/api/push/public-key", get(push_public_key))
+        .route("/api/push/subscribe", post(push_subscribe))
+        .route("/api/push/unsubscribe", post(push_unsubscribe))
         // Read markers / unread counts
         .route("/api/rooms/{room_id}/read", post(mark_read))
         .route("/api/unreads", get(get_unreads))
@@ -399,4 +437,14 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/invite/{code}", get(serve_invite_page))
         // WebSocket
         .route("/ws", get(ws_upgrade))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn router_builds() {
+        // Route patterns are validated when the router is constructed, not at
+        // compile time: a malformed one panics here rather than at boot.
+        let _ = super::build_router();
+    }
 }

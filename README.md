@@ -29,6 +29,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Chat Search
 - Message Pins
 - Webhooks
+- Push Notifications and Installable App (PWA, requires HTTPS)
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard
 

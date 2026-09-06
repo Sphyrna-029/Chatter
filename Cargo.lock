@@ -499,6 +499,7 @@ checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 name = "chatter"
 version = "0.1.0"
 dependencies = [
+ "aes-gcm",
  "argon2",
  "axum",
  "base64 0.22.1",
@@ -506,11 +507,13 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "hex",
+ "hkdf",
  "hmac",
  "jsonwebtoken",
  "mime_guess",
  "mlua",
  "mongodb",
+ "p256",
  "percent-encoding",
  "rand 0.8.5",
  "regex",

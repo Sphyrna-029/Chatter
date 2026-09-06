@@ -2102,6 +2102,36 @@ export async function apiGetNotificationSettings() {
   return res.json() as Promise<{ settings: NotificationSettingEntry[] }>;
 }
 
+// ─── Web Push ────────────────────────────────────────────────────────────────
+
+/** The server's VAPID public key. `enabled` is false when it has none. */
+export async function apiGetPushPublicKey() {
+  const res = await authenticatedFetch("/api/push/public-key");
+  if (!res.ok) throw new Error("Failed to load push key");
+  return res.json() as Promise<{ enabled: boolean; public_key: string }>;
+}
+
+export async function apiPushSubscribe(subscription: {
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+}) {
+  const res = await authenticatedFetch("/api/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(subscription),
+  });
+  if (!res.ok) throw new Error("Failed to enable push notifications");
+  return res.json() as Promise<{ subscribed: boolean }>;
+}
+
+export async function apiPushUnsubscribe(endpoint: string) {
+  const res = await authenticatedFetch("/api/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
+  if (!res.ok) throw new Error("Failed to disable push notifications");
+  return res.json() as Promise<{ subscribed: boolean }>;
+}
+
 /** Pass level "default" to clear an override and inherit the next scope up. */
 export async function apiSetNotificationLevel(
   roomId: string,

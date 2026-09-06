@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
 import { displayUserId } from "@/lib/utils";
+import { syncPushSubscription } from "@/lib/push";
 
 // ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
 function pipEnabled(): boolean {
@@ -173,9 +174,47 @@ export function ChatLayout() {
       if (roomId !== state.currentRoomId) await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);
     };
+    // The same destination arrives two ways: from the in-page notification as
+    // a window event, and from a push notification as a service worker
+    // message. Both land here so there is one navigation path.
+    const fromServiceWorker = (e: MessageEvent) => {
+      if (e.data?.type !== "notification-navigate") return;
+      void handler(new CustomEvent("notification-navigate", { detail: e.data }));
+    };
     window.addEventListener("notification-navigate", handler);
-    return () => window.removeEventListener("notification-navigate", handler);
+    navigator.serviceWorker?.addEventListener("message", fromServiceWorker);
+    return () => {
+      window.removeEventListener("notification-navigate", handler);
+      navigator.serviceWorker?.removeEventListener("message", fromServiceWorker);
+    };
   }, [selectRoom, selectChannel, state.currentRoomId]);
+
+  // A push notification clicked with no window open reopens the app with the
+  // destination in the URL. Consume it once, then strip it so a refresh does
+  // not bounce the user back here.
+  const deepLinkHandledRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    if (Object.keys(state.roomInfoMap).length === 0) return;
+    deepLinkHandledRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const roomId = params.get("room");
+    const channelId = params.get("channel");
+    if (!roomId) return;
+
+    window.history.replaceState({}, "", window.location.pathname);
+    void (async () => {
+      await selectRoom(roomId);
+      if (channelId) await selectChannel(channelId);
+    })();
+  }, [state.roomInfoMap, selectRoom, selectChannel]);
+
+  // Repair this browser's push subscription if it was enrolled and the
+  // endpoint has since rotated or been dropped.
+  useEffect(() => {
+    void syncPushSubscription();
+  }, []);
 
   // Auto-rejoin voice channel on page refresh (within 30 seconds)
   const autoRejoinAttemptedRef = useRef(false);

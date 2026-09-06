@@ -1,8 +1,8 @@
 use super::super::state::{AppState, InviteRecord, RoomRecord};
 use axum::{
     extract::{Path, State},
-    http::HeaderMap,
-    response::{Html, Json},
+    http::{header, HeaderMap, StatusCode},
+    response::{Html, IntoResponse, Json, Response},
 };
 use mongodb::bson::doc;
 use serde_json::{json, Value};
@@ -92,6 +92,29 @@ pub(crate) async fn serve_invite_page(
     };
 
     Html(final_html)
+}
+
+/// Files the browser fetches from the site root by name rather than through
+/// the hashed `/assets` bundle: the manifest, the app icons, and the service
+/// worker. The worker in particular has to be served from the root or its
+/// scope cannot cover the whole app.
+///
+/// Each is registered under its own literal route rather than a pattern, so
+/// the name never comes from the caller and cannot walk out of `client/dist`.
+pub(crate) async fn serve_dist_file(name: &str, content_type: &'static str) -> Response {
+    match tokio::fs::read(format!("client/dist/{name}")).await {
+        Ok(bytes) => (
+            [
+                (header::CONTENT_TYPE, content_type),
+                // These are fetched by a stable name, so a long-lived cached
+                // copy would outlive the deploy that changed it.
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
+    }
 }
 
 pub(crate) async fn versions() -> Json<Value> {

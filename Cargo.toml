@@ -33,6 +33,15 @@ hmac = "0.12"
 hex = "0.4"
 dotenvy = "0.15"
 mlua = { version = "0.10", features = ["lua54", "send", "serialize", "vendored"] }
+# Web Push (RFC 8188/8291/8292) is implemented in backend/webpush.rs rather
+# than taken from the `web-push` crate: that crate reaches OpenSSL through
+# `ece`, which this build deliberately does not have — reqwest above is rustls
+# with default features off — and its `aes` requires a rustc newer than the
+# pinned toolchain. All three of these are already in the tree as transitive
+# dependencies, so implementing the three RFCs adds nothing to the build.
+p256 = { version = "0.13", features = ["ecdh"] }
+hkdf = "0.12"
+aes-gcm = "0.10"
 
 [dev-dependencies]
 tokio-tungstenite = "0.24"

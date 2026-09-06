@@ -9,7 +9,8 @@ use super::super::{
         get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
         get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, send_to_user,
     },
-    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord},
+    push::{spawn_message_push, MessageNotification},
+    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Path, Query, State},
@@ -28,6 +29,29 @@ use std::sync::Arc;
 fn body_has_attachment(body: &str) -> bool {
     body.split_whitespace()
         .any(|token| token.starts_with("/external/") || token.contains("/external/"))
+}
+
+/// The name a notification should call this sender, falling back to the user id
+/// when no display name has been set.
+async fn display_name_for(state: &AppState, user_id: &str) -> String {
+    let name = state
+        .db
+        .collection::<UserRecord>("users")
+        .find_one(doc! { "_id": user_id })
+        .await
+        .ok()
+        .flatten()
+        .map(|u| u.display_name)
+        .unwrap_or_default();
+    if !name.is_empty() {
+        return name;
+    }
+    user_id
+        .split(':')
+        .next()
+        .unwrap_or(user_id)
+        .trim_start_matches('@')
+        .to_string()
 }
 
 pub(crate) async fn send_message(
@@ -315,6 +339,54 @@ pub(crate) async fn send_message(
     }
 
     broadcast_to_room(&state, &room_id, &event).await;
+
+    // Anyone connected has just been handed the event and raises their own
+    // notification from it; push covers only the members that reached nobody.
+    // Read back off the event: `content` was moved into it above.
+    let is_system = event
+        .get("content")
+        .and_then(|c| c.get("msgtype"))
+        .and_then(|v| v.as_str())
+        == Some("m.system");
+    if !is_system {
+        let channel_name = if channel_id.is_empty() {
+            String::new()
+        } else {
+            state
+                .db
+                .collection::<ChannelRecord>("channels")
+                .find_one(doc! { "_id": &channel_id })
+                .await
+                .ok()
+                .flatten()
+                .map(|ch| ch.name)
+                .unwrap_or_default()
+        };
+        let sender_name = match bot_name {
+            Some(ref name) => name.clone(),
+            None => display_name_for(&state, &sender_id).await,
+        };
+        spawn_message_push(
+            state.clone(),
+            MessageNotification {
+                room_id: room_id.clone(),
+                channel_id: channel_id.clone(),
+                event_id: event_id.clone(),
+                sender_id: sender_id.clone(),
+                sender_name,
+                room_name: room.name.clone(),
+                channel_name,
+                body: req.body.clone(),
+                icon: room.icon_url.clone(),
+                is_dm: room.is_dm,
+                suppress_role_mentions: event
+                    .get("content")
+                    .and_then(|c| c.get("suppress_role_mentions"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            },
+        );
+    }
 
     // Send reply notification (not for bots)
     if !is_bot {

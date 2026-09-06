@@ -112,6 +112,19 @@ pub(crate) fn format_user_id(username: &str) -> String {
     format!("@{}:localhost", username)
 }
 
+/// The `@name` a message body would contain to mention this user.
+///
+/// Shared by the unread mention counts and by push delivery, so both agree on
+/// what being mentioned looks like.
+pub(crate) fn mention_token(user_id: &str) -> String {
+    let local = user_id
+        .split(':')
+        .next()
+        .unwrap_or(user_id)
+        .trim_start_matches('@');
+    format!("@{local}")
+}
+
 pub(crate) fn validate_username(username: &str) -> Result<(), &'static str> {
     if username.len() < MIN_USERNAME_LENGTH || username.len() > MAX_USERNAME_LENGTH {
         return Err("Username must be 3-42 characters long");
@@ -1011,4 +1024,15 @@ pub(crate) async fn get_reactions_for_events(
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mention_token_uses_the_localpart() {
+        assert_eq!(mention_token("@buck:localhost"), "@buck");
+        assert_eq!(mention_token("buck"), "@buck");
+    }
 }

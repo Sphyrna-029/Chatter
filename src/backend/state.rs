@@ -78,6 +78,12 @@ pub struct AppState {
     pub(crate) spotify_tokens: RwLock<HashMap<String, (String, f64)>>,
     // One-time login codes for Steam OAuth — nonce -> payload, expires in 60s
     pub(crate) steam_login_codes: RwLock<HashMap<String, SteamLoginCode>>,
+    // Web Push application-server keypair. None when push is misconfigured, in
+    // which case delivery is skipped rather than attempted and failed.
+    pub(crate) vapid: Option<super::push::VapidKeys>,
+    // Shared outbound HTTP client. Push delivery reuses one connection pool
+    // across every message rather than building a client per notification.
+    pub(crate) http_client: reqwest::Client,
 }
 
 #[derive(Clone)]
