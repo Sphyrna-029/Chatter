@@ -563,9 +563,9 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                     {m.force_muted && (
                       <ShieldOff className="h-3 w-3 shrink-0 text-destructive" aria-label="Muted by a moderator" />
                     )}
-                    <Avatar className="h-4 w-4 shrink-0">
+                    <Avatar className="h-5 w-5 shrink-0">
                       <AuthAvatarImage src={state.userPresence[m.userId]?.avatarUrl} />
-                      <AvatarFallback className="text-3xs bg-secondary">
+                      <AvatarFallback className="text-2xs bg-secondary">
                         {(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))[0]?.toUpperCase() || "?"}
                       </AvatarFallback>
                     </Avatar>

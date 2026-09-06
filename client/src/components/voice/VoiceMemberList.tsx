@@ -95,9 +95,9 @@ export function VoiceMemberList({
                     </TooltipProvider>
                   );
                 })()}
-                <Avatar className="h-5 w-5 shrink-0">
+                <Avatar className="h-6 w-6 shrink-0">
                   <AuthAvatarImage src={userPresence[memberId]?.avatarUrl} />
-                  <AvatarFallback className="text-3xs bg-secondary">
+                  <AvatarFallback className="text-2xs bg-secondary">
                     {name[0]?.toUpperCase() || "?"}
                   </AvatarFallback>
                 </Avatar>
