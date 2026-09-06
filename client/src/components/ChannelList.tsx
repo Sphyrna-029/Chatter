@@ -42,6 +42,63 @@ import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { clickable } from "@/lib/a11y";
 import { toast } from "sonner";
 
+/** How wide the channel column may get when sizing itself to its contents,
+ *  and how narrow it may be dragged. */
+const MIN_PANEL_WIDTH = 180;
+const MAX_PANEL_WIDTH = 400;
+const MIN_DRAG_WIDTH = 140;
+/** Used until the first measurement, and if a canvas context is unavailable. */
+const DEFAULT_PANEL_WIDTH = 208;
+
+/** Space each row needs beside its text, in pixels.
+ *
+ *  Room: 12px padding either side plus roughly 60px of action buttons.
+ *  Channel: 4px margin and 8px padding either side, a 16px icon, a 12px drag
+ *  grip, their gaps, and room for an unread badge and the notification bell.
+ *  Category: padding, a 12px chevron and its menu button. */
+const ROOM_ROW_CHROME = 84;
+const CHANNEL_ROW_CHROME = 124;
+const CATEGORY_ROW_CHROME = 72;
+
+/**
+ * How wide the channel column has to be to show its longest row unclipped,
+ * clamped to the limits above.
+ *
+ * Measured rather than guessed, because the answer depends on the font: the
+ * app is set in JetBrains Mono, appreciably wider than the system sans this
+ * used to assume, so every measurement came out short.
+ */
+function measurePanelWidth(
+  roomName: string,
+  channelNames: string[],
+  categoryNames: string[],
+): number {
+  const ctx = document.createElement("canvas").getContext("2d");
+  if (!ctx) return DEFAULT_PANEL_WIDTH;
+
+  const family =
+    getComputedStyle(document.body).fontFamily || "ui-monospace, monospace";
+  const measure = (text: string, weight: number, size: number) => {
+    ctx.font = `${weight} ${size}px ${family}`;
+    return ctx.measureText(text).width;
+  };
+
+  // Each row reserves what sits beside its text.
+  let widest = measure(roomName, 600, 14) + ROOM_ROW_CHROME;
+  for (const name of channelNames) {
+    widest = Math.max(widest, measure(name, 400, 14) + CHANNEL_ROW_CHROME);
+  }
+  for (const name of categoryNames) {
+    // Uppercased at render time, which is wider than what was typed.
+    widest = Math.max(
+      widest,
+      measure(name.toUpperCase(), 600, 12.1) + CATEGORY_ROW_CHROME,
+    );
+  }
+
+  return Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, Math.ceil(widest)));
+}
+
 /** Waits offered for slow mode. The server clamps at six hours. */
 const SLOWMODE_OPTIONS: { secs: number; label: string }[] = [
   { secs: 0, label: "Off" },
@@ -756,36 +813,36 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   };
 
   // ─── Resize handle ─────────────────────────────────────────────────────
-  const [width, setWidth] = useState(() => {
-    // Auto-size to fit room name: measure text width + padding for icons/buttons
-    const name = roomInfo?.name || "Room";
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif"; // text-sm font-semibold
-      const textW = ctx.measureText(name).width;
-      // Add padding: 12px left + 12px right + ~60px for action buttons
-      return Math.min(400, Math.max(180, Math.ceil(textW + 84)));
-    }
-    return 208;
-  });
+  //
+  // The column sizes itself to whatever it has to show. It used to measure the
+  // room name alone, so any channel with a longer name than the room simply
+  // truncated — which is most of them, since a room is usually one word.
+  const [width, setWidth] = useState(DEFAULT_PANEL_WIDTH);
   const resizing = useRef(false);
   const manuallyResized = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
 
-  // Re-auto-size when switching rooms (unless user manually resized)
+  // Re-measure when the room, its channels or its categories change — unless
+  // the user has dragged the handle, at which point their width wins.
+  const contentKey = [
+    roomInfo?.name ?? "",
+    ...channels.map((c) => c.name),
+    ...categories.map((c) => c.name),
+  ].join("\u0000");
   useEffect(() => {
     if (manuallyResized.current) return;
-    const name = roomInfo?.name || "Room";
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.font = "600 14px ui-sans-serif, system-ui, sans-serif";
-      const textW = ctx.measureText(name).width;
-      setWidth(Math.min(400, Math.max(180, Math.ceil(textW + 84))));
-    }
-  }, [roomInfo?.name]);
+    setWidth(
+      measurePanelWidth(
+        roomInfo?.name || "Room",
+        channels.map((c) => c.name),
+        categories.map((c) => c.name),
+      ),
+    );
+    // contentKey is the dependency that matters: the arrays it is built from
+    // are new objects on every render and would re-run this each time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentKey]);
 
   const onResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -795,7 +852,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
 
     const onMove = (ev: MouseEvent) => {
       if (!resizing.current) return;
-      const newW = Math.min(400, Math.max(140, startW.current + (ev.clientX - startX.current)));
+      const newW = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_DRAG_WIDTH, startW.current + (ev.clientX - startX.current)));
       setWidth(newW);
     };
     const onUp = () => {
