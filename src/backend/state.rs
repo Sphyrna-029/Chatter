@@ -68,6 +68,10 @@ pub struct AppState {
     pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
+    // Token buckets for rate limiting and slowmode, keyed by "<bucket>:<who>".
+    // Ephemeral on purpose: a restart forgiving everyone's limit is a better
+    // trade than persisting a write per action.
+    pub(crate) rate_limits: RwLock<HashMap<String, super::ratelimit::Bucket>>,
     pub(crate) pending_registrations: RwLock<HashMap<String, PendingRegistration>>,
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
     pub(crate) klipy_api_key: String,
@@ -448,6 +452,10 @@ pub(crate) struct ChannelRecord {
     pub(crate) category_id: String,
     #[serde(default)]
     pub(crate) read_only: bool,
+    /// Seconds a member must wait between messages here. 0 is off. Bypassed by
+    /// anyone who can manage messages, matching how read_only behaves.
+    #[serde(default)]
+    pub(crate) slowmode_secs: u32,
     /// Per-channel permission overwrites, applied over the room-level set and
     /// after any inherited from the channel's category.
     #[serde(default)]

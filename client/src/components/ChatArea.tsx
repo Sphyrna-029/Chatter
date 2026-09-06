@@ -496,28 +496,44 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
         return value;
       });
 
-    if (toUpload.length > 0 && body) {
-      // Files + text: upload all files first, then send as one combined message
-      // so text and images aren't split into separate spoiler/reply messages.
-      const uploadedUrls: string[] = [];
-      for (const file of toUpload) {
-        const url = await uploadFile(file);
-        if (url) uploadedUrls.push(url);
+    // The composer was cleared optimistically above, so a refused send has to
+    // put the text back. Slow mode and rate limits make refusal an ordinary
+    // outcome rather than a rare one, and silently eating what someone wrote
+    // is the worst possible answer to it.
+    const restoreComposer = () => {
+      setComposerText(inputRef.current, body);
+      setInput(body);
+      setDisplayLength(computeDisplayLength());
+      inputRef.current?.focus();
+    };
+
+    try {
+      if (toUpload.length > 0 && body) {
+        // Files + text: upload all files first, then send as one combined message
+        // so text and images aren't split into separate spoiler/reply messages.
+        const uploadedUrls: string[] = [];
+        for (const file of toUpload) {
+          const url = await uploadFile(file);
+          if (url) uploadedUrls.push(url);
+        }
+        const parts = [resolveShortcodes(body), ...uploadedUrls].filter(Boolean);
+        if (parts.length > 0) {
+          await sendMessage(parts.join("\n"), replyEventId, spoiler);
+        }
+      } else {
+        // Files only: send each as its own message
+        for (const file of toUpload) {
+          const url = await uploadFile(file);
+          if (url) await sendMessage(url, undefined, spoiler);
+        }
+        // Text only: send as one message
+        if (body) {
+          await sendMessage(resolveShortcodes(body), replyEventId, spoiler);
+        }
       }
-      const parts = [resolveShortcodes(body), ...uploadedUrls].filter(Boolean);
-      if (parts.length > 0) {
-        await sendMessage(parts.join("\n"), replyEventId, spoiler);
-      }
-    } else {
-      // Files only: send each as its own message
-      for (const file of toUpload) {
-        const url = await uploadFile(file);
-        if (url) await sendMessage(url, undefined, spoiler);
-      }
-      // Text only: send as one message
-      if (body) {
-        await sendMessage(resolveShortcodes(body), replyEventId, spoiler);
-      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send message");
+      if (body) restoreComposer();
     }
   };
 

@@ -32,6 +32,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Push Notifications and Installable App (PWA, requires HTTPS)
 - Synced Drafts and Video Resume Across Devices
 - Per-Room Sound Packs and Entrance Sounds
+- Rate Limiting and Per-Channel Slow Mode
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard
 

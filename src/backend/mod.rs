@@ -3,6 +3,7 @@ pub(crate) mod constants;
 pub(crate) mod dto;
 pub(crate) mod helpers;
 pub(crate) mod push;
+pub(crate) mod ratelimit;
 pub(crate) mod router;
 pub(crate) mod routes;
 pub(crate) mod sounds;

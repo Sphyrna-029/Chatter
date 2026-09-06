@@ -40,6 +40,19 @@ import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { clickable } from "@/lib/a11y";
 import { toast } from "sonner";
+
+/** Waits offered for slow mode. The server clamps at six hours. */
+const SLOWMODE_OPTIONS: { secs: number; label: string }[] = [
+  { secs: 0, label: "Off" },
+  { secs: 5, label: "5 seconds" },
+  { secs: 10, label: "10 seconds" },
+  { secs: 30, label: "30 seconds" },
+  { secs: 60, label: "1 minute" },
+  { secs: 300, label: "5 minutes" },
+  { secs: 900, label: "15 minutes" },
+  { secs: 3600, label: "1 hour" },
+  { secs: 21600, label: "6 hours" },
+];
 import { useConfirm } from "@/components/ConfirmDialog";
 
 interface ChannelListProps {
@@ -99,6 +112,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const [editOpen, setEditOpen] = useState(false);
   const [editChannelId, setEditChannelId] = useState<string | null>(null);
   const [editReadOnly, setEditReadOnly] = useState(false);
+  const [editSlowmodeSecs, setEditSlowmodeSecs] = useState(0);
   const [editOverwrites, setEditOverwrites] = useState<PermissionOverwrite[]>([]);
   const [editInheritCategory, setEditInheritCategory] = useState(true);
   const [editCategoryIdOfChannel, setEditCategoryIdOfChannel] = useState("");
@@ -234,13 +248,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         name: name.trim() || undefined,
         topic: topic.trim(),
         read_only: editReadOnly,
+        slowmode_secs: editSlowmodeSecs,
         overwrites: editOverwrites,
         inherit_category_permissions: editInheritCategory,
         showcase_write_roles: editChannelType === "showcase" ? editShowcaseWriteRoles : undefined,
         system_channel: editSystemChannel,
         voice_bitrate: isVoiceChannel ? editVoiceBitrateKbps * 1000 : undefined,
       });
-      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, overwrites: editOverwrites, inherit_category_permissions: editInheritCategory, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
+      dispatch({ type: "UPDATE_CHANNEL", payload: { channel_id: editChannelId, name: name.trim(), topic: topic.trim(), read_only: editReadOnly, slowmode_secs: editSlowmodeSecs, overwrites: editOverwrites, inherit_category_permissions: editInheritCategory, showcase_write_roles: editShowcaseWriteRoles, system_channel: editSystemChannel, ...(isVoiceChannel ? { voice_bitrate: editVoiceBitrateKbps * 1000 } : {}) } });
       setEditOpen(false);
       setEditChannelId(null);
       setName("");
@@ -265,6 +280,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
     setName(ch.name);
     setTopic(ch.topic || "");
     setEditReadOnly(ch.read_only ?? false);
+    setEditSlowmodeSecs(ch.slowmode_secs ?? 0);
     setEditOverwrites(ch.overwrites ?? []);
     setEditInheritCategory(ch.inherit_category_permissions ?? true);
     setEditCategoryIdOfChannel(ch.category_id ?? "");
@@ -1149,6 +1165,26 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               />
               <span className="text-sm">Read-only (only owners/moderators can post)</span>
             </label>
+            {editChannelType === "text" && (
+              <div className="space-y-1.5">
+                <label className="text-sm">Slow mode</label>
+                <select
+                  value={editSlowmodeSecs}
+                  onChange={(e) => setEditSlowmodeSecs(Number(e.target.value))}
+                  className="w-full rounded-md border border-input bg-transparent px-2 py-1.5 text-sm"
+                >
+                  {SLOWMODE_OPTIONS.map(({ secs, label }) => (
+                    <option key={secs} value={secs}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+                <p className="ui-hint">
+                  How long a member waits between messages. Anyone who can manage
+                  messages is unaffected.
+                </p>
+              </div>
+            )}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"

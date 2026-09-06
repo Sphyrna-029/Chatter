@@ -2,8 +2,9 @@ use super::super::{
     dto::FriendActionRequest,
     helpers::{
         error_response, extract_token, generate_id, get_user_from_token, now_millis, now_secs,
-        send_to_user,
+        rate_limited, send_to_user,
     },
+    ratelimit,
     state::{AppState, BlockRecord, FriendRequestRecord, FriendshipRecord, UserRecord},
 };
 use super::presence::build_presence_entry;
@@ -231,6 +232,19 @@ pub(crate) async fn send_friend_request(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
     let target_id = &body.user_id;
+
+    if let Err(retry_after) = ratelimit::check(
+        &state,
+        &format!("friend:{user_id}"),
+        ratelimit::FRIEND_REQUEST,
+    )
+    .await
+    {
+        return Err(rate_limited(
+            retry_after,
+            "You are sending friend requests too quickly",
+        ));
+    }
 
     if user_id == *target_id {
         return Err(error_response(

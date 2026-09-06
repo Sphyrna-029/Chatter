@@ -471,8 +471,25 @@ export async function apiSendMessage(roomId: string, body: string, inReplyTo?: s
       body: JSON.stringify(payload),
     }
   );
-  if (!res.ok) throw new Error("Failed to send message");
+  if (!res.ok) {
+    // A rate limit or slow mode says how long to wait; pass that through so
+    // the composer can explain the refusal rather than just failing.
+    const body = await res.json().catch(() => null);
+    const wait = body?.retry_after_secs;
+    if (res.status === 429 && typeof wait === "number") {
+      throw new Error(`${body.error || "Slow down"} — try again in ${formatWait(wait)}`);
+    }
+    throw new Error(body?.error || "Failed to send message");
+  }
   return res.json();
+}
+
+/** A wait in the units a person would say it in. */
+function formatWait(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.ceil(secs / 60);
+  if (mins < 60) return `${mins} min`;
+  return `${Math.ceil(mins / 60)}h`;
 }
 
 export async function apiDeleteMessage(roomId: string, eventId: string) {
@@ -850,6 +867,9 @@ export interface Channel {
   position: number;
   category_id?: string;
   read_only?: boolean;
+  /** Seconds a member must wait between messages here; 0 is off. Bypassed by
+   *  anyone who can manage messages. */
+  slowmode_secs?: number;
   /** Per-channel permission overwrites, applied over the room-level set and
    *  after any inherited from the channel's category. */
   overwrites?: PermissionOverwrite[];
@@ -1007,7 +1027,7 @@ export async function apiCreateChannel(roomId: string, data: { name: string; cha
   return res.json() as Promise<{ channel_id: string }>;
 }
 
-export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; overwrites?: PermissionOverwrite[]; inherit_category_permissions?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number }) {
+export async function apiUpdateChannel(roomId: string, channelId: string, data: { name?: string; topic?: string; position?: number; category_id?: string; read_only?: boolean; overwrites?: PermissionOverwrite[]; inherit_category_permissions?: boolean; view_roles?: string[]; write_roles?: string[]; showcase_write_roles?: string[]; showcase_posters?: string[]; system_channel?: boolean; voice_bitrate?: number; slowmode_secs?: number }) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/channels/${encodeURIComponent(channelId)}`, {
     method: "PUT",
     body: JSON.stringify(data),

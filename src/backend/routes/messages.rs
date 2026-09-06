@@ -4,12 +4,14 @@ use super::super::{
         ThreadListQuery,
     },
     helpers::{
-        broadcast_to_room, channel_permissions, effective_permissions, error_response,
-        extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
+        broadcast_to_room, can_manage_messages, channel_permissions, effective_permissions,
+        error_response, extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
         get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
-        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, send_to_user,
+        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, rate_limited,
+        send_to_user,
     },
     push::{spawn_message_push, MessageNotification},
+    ratelimit,
     state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, UserRecord},
 };
 use axum::{
@@ -245,6 +247,42 @@ pub(crate) async fn send_message(
                         ));
                     }
                 }
+            }
+        }
+    }
+
+    // Bots are rate limited on their own identity, so one misbehaving bot
+    // cannot spend a person's budget or vice versa.
+    if let Err(retry_after) = ratelimit::check(
+        &state,
+        &format!("send:{sender_id}"),
+        ratelimit::SEND_MESSAGE,
+    )
+    .await
+    {
+        return Err(rate_limited(
+            retry_after,
+            "You are sending messages too quickly",
+        ));
+    }
+
+    // Slowmode, where the channel sets one. Bypassed by anyone who can manage
+    // messages — the same people read_only lets through.
+    if !channel_id.is_empty() && !is_bot {
+        let slowmode = state
+            .db
+            .collection::<ChannelRecord>("channels")
+            .find_one(doc! { "_id": &channel_id })
+            .await
+            .ok()
+            .flatten()
+            .map(|ch| ch.slowmode_secs)
+            .unwrap_or(0);
+        if slowmode > 0 && !can_manage_messages(&state, &room_id, &sender_id).await {
+            if let Err(retry_after) =
+                ratelimit::check_slowmode(&state, &channel_id, &sender_id, slowmode).await
+            {
+                return Err(rate_limited(retry_after, "This channel is in slow mode"));
             }
         }
     }

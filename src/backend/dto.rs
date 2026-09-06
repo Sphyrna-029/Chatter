@@ -302,6 +302,7 @@ pub(crate) struct UpdateChannelRequest {
     pub(crate) position: Option<i32>,
     pub(crate) category_id: Option<String>,
     pub(crate) read_only: Option<bool>,
+    pub(crate) slowmode_secs: Option<u32>,
     pub(crate) view_roles: Option<Vec<String>>,
     pub(crate) write_roles: Option<Vec<String>>,
     pub(crate) overwrites: Option<Vec<super::state::PermissionOverwrite>>,

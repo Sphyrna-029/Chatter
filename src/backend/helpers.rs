@@ -181,6 +181,20 @@ pub(crate) async fn get_bot_from_token(
         .flatten()
 }
 
+/// A 429 that says how long to wait. A limit which only says "no" is
+/// indistinguishable from a bug, so the wait is always included.
+pub(crate) fn rate_limited(retry_after: f64, detail: &str) -> (StatusCode, Json<Value>) {
+    let secs = super::ratelimit::retry_after_secs(retry_after);
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(serde_json::json!({
+            "error": detail,
+            "errcode": "M_LIMIT_EXCEEDED",
+            "retry_after_secs": secs,
+        })),
+    )
+}
+
 pub(crate) fn error_response(status: StatusCode, detail: &str) -> (StatusCode, Json<Value>) {
     (
         status,

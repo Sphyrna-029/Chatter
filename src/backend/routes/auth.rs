@@ -7,8 +7,10 @@ use super::super::{
     helpers::{
         auth_cookie_headers, clear_cookie_headers, create_access_token, create_refresh_token,
         decode_token, error_response, extract_refresh_cookie, extract_token, format_user_id,
-        generate_id, get_user_from_token, hash_password, validate_username, verify_password,
+        generate_id, get_user_from_token, hash_password, rate_limited, validate_username,
+        verify_password,
     },
+    ratelimit,
     state::{AppState, PendingRegistration, RefreshTokenRecord, UserRecord},
 };
 use axum::{
@@ -171,8 +173,31 @@ pub(crate) async fn ice_servers(
 
 pub(crate) async fn register(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    // Two buckets, because neither alone is enough. The per-address one keeps
+    // one client from making accounts in a loop; the instance-wide one holds
+    // even when the address cannot be trusted (see REGISTER_GLOBAL).
+    if let Err(retry_after) =
+        ratelimit::check(&state, "register:global", ratelimit::REGISTER_GLOBAL).await
+    {
+        return Err(rate_limited(
+            retry_after,
+            "This server is receiving too many registrations right now",
+        ));
+    }
+    let ip = extract_ip(&headers, Some(peer));
+    if let Err(retry_after) =
+        ratelimit::check(&state, &format!("register:{ip}"), ratelimit::REGISTER).await
+    {
+        return Err(rate_limited(
+            retry_after,
+            "Too many accounts created from this address",
+        ));
+    }
+
     // Check invite-only mode
     {
         let settings = state.server_settings.read().await;

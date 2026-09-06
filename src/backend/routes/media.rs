@@ -1,7 +1,8 @@
 use super::super::{
     constants::CHUNK_SIZE,
     dto::{GifSearchQuery, LinkPreviewQuery},
-    helpers::{error_response, extract_token, get_user_from_token},
+    helpers::{error_response, extract_token, get_user_from_token, rate_limited},
+    ratelimit,
     state::{AppState, CachedPreview, UploadRecord},
 };
 use axum::{
@@ -704,6 +705,14 @@ pub(crate) async fn upload_file(
 
     if let Err(e) = check_storage_quota(&state, &user_id, data.len() as u64).await {
         return e;
+    }
+
+    // Guarded before any disk work: an upload costs a write, ffprobe, a
+    // thumbnail and sometimes a transcode.
+    if let Err(retry_after) =
+        ratelimit::check(&state, &format!("upload:{user_id}"), ratelimit::UPLOAD).await
+    {
+        return rate_limited(retry_after, "You are uploading too quickly");
     }
 
     // Generate random folder name

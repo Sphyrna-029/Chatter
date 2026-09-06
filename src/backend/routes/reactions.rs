@@ -2,8 +2,9 @@ use super::super::{
     dto::ReactionRequest,
     helpers::{
         broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
-        get_user_from_token,
+        get_user_from_token, rate_limited,
     },
+    ratelimit,
     state::{AppState, ReactionRecord, RoomRecord},
 };
 use axum::{
@@ -26,6 +27,12 @@ pub(crate) async fn add_reaction(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    if let Err(retry_after) =
+        ratelimit::check(&state, &format!("react:{user_id}"), ratelimit::REACTION).await
+    {
+        return Err(rate_limited(retry_after, "You are reacting too quickly"));
+    }
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     if rooms_coll

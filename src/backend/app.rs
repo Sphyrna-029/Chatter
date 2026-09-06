@@ -73,6 +73,7 @@ pub async fn build_state() -> Arc<AppState> {
         voice_subscribers: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
         totp_attempts: RwLock::new(HashMap::new()),
+        rate_limits: RwLock::new(HashMap::new()),
         pending_registrations: RwLock::new(HashMap::new()),
         watch_party_rooms: RwLock::new(HashMap::new()),
         klipy_api_key,

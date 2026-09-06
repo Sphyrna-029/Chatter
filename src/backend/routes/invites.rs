@@ -1,6 +1,9 @@
 use super::super::{
     dto::CreateInviteRequest,
-    helpers::{do_join_room, error_response, extract_token, get_user_from_token, now_millis},
+    helpers::{
+        do_join_room, error_response, extract_token, get_user_from_token, now_millis, rate_limited,
+    },
+    ratelimit,
     state::{AppState, InviteRecord, RoomRecord},
 };
 use axum::{
@@ -32,6 +35,19 @@ pub(crate) async fn create_invite(
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    if let Err(retry_after) = ratelimit::check(
+        &state,
+        &format!("invite:{user_id}"),
+        ratelimit::CREATE_INVITE,
+    )
+    .await
+    {
+        return Err(rate_limited(
+            retry_after,
+            "You are creating invites too quickly",
+        ));
+    }
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let room = rooms_coll

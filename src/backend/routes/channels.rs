@@ -76,6 +76,7 @@ pub(crate) async fn list_channels(
             "position": ch.position,
             "category_id": ch.category_id,
             "read_only": ch.read_only,
+            "slowmode_secs": ch.slowmode_secs,
             "overwrites": serde_json::to_value(&ch.overwrites).unwrap_or_default(),
             "inherit_category_permissions": ch.inherit_category_permissions,
             "view_roles": ch.view_roles,
@@ -263,6 +264,7 @@ pub(crate) async fn create_channel(
         position: max_pos,
         category_id: req.category_id.unwrap_or_default(),
         read_only: false,
+        slowmode_secs: 0,
         overwrites: vec![],
         overwrites_migrated: true,
         inherit_category_permissions: true,
@@ -292,6 +294,7 @@ pub(crate) async fn create_channel(
             "position": channel.position,
             "category_id": channel.category_id,
             "read_only": channel.read_only,
+            "slowmode_secs": channel.slowmode_secs,
             "overwrites": serde_json::to_value(&channel.overwrites).unwrap_or_default(),
             "view_roles": channel.view_roles,
             "write_roles": channel.write_roles,
@@ -368,6 +371,14 @@ pub(crate) async fn update_channel(
     if let Some(read_only) = req.read_only {
         set_doc.insert("read_only", read_only);
         content.insert("read_only".to_string(), json!(read_only));
+    }
+    if let Some(slowmode_secs) = req.slowmode_secs {
+        // Six hours is Discord's ceiling and a sensible one: past that, the
+        // channel is really an announcement channel and read_only says so
+        // more honestly.
+        let clamped = slowmode_secs.min(21_600);
+        set_doc.insert("slowmode_secs", clamped as i64);
+        content.insert("slowmode_secs".to_string(), json!(clamped));
     }
     if let Some(ref overwrites) = req.overwrites {
         validate_overwrites(overwrites)?;
@@ -576,6 +587,7 @@ pub(crate) async fn ensure_default_channels(
             position: 0,
             category_id: String::new(),
             read_only: false,
+            slowmode_secs: 0,
             overwrites: vec![],
             overwrites_migrated: true,
             inherit_category_permissions: true,
@@ -603,6 +615,7 @@ pub(crate) async fn ensure_default_channels(
             position: 1,
             category_id: String::new(),
             read_only: false,
+            slowmode_secs: 0,
             overwrites: vec![],
             overwrites_migrated: true,
             inherit_category_permissions: true,
