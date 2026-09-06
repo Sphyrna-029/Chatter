@@ -704,6 +704,71 @@ pub(crate) fn legacy_role_overwrites(
 /// Returns None if the user is an owner or moderator (can see all channels).
 /// Returns Some(ids) for regular members — only channels with empty view_roles
 /// or where the user holds a matching custom role.
+/// Whether a channel is open to the room at large.
+///
+/// The "everyone" layer only — no member, no roles, no owner/moderator bypass.
+/// That is deliberate and differs from `get_allowed_channel_ids`, which answers
+/// "may *this caller* see it". A moderator can open a private channel, but a
+/// call happening in one is still not something to advertise on a room's badge:
+/// public has to mean the same thing to everybody, or the badge says something
+/// different depending on who is looking at it.
+///
+/// Legacy `view_roles` are covered too, because `merged_overwrites` folds them
+/// in through `channel_overwrites` — a channel restricted the old way denies
+/// `view_channel` to everyone, so it is not public either.
+pub(crate) fn channel_is_public(
+    category_overwrites: &[PermissionOverwrite],
+    channel: &ChannelRecord,
+) -> bool {
+    let empty: Vec<PermissionOverwrite> = Vec::new();
+    let inherited = if channel.inherit_category_permissions {
+        category_overwrites
+    } else {
+        &empty
+    };
+    // Filtered rather than passed an empty user id: a "user" overwrite that
+    // happened to carry an empty target would otherwise apply to nobody's
+    // permissions and still change the answer.
+    let everyone: Vec<PermissionOverwrite> = merged_overwrites(inherited, channel)
+        .into_iter()
+        .filter(|o| o.target_type == "everyone")
+        .collect();
+    apply_overwrites(RolePermissions::default(), &everyone, &[], "").view_channel
+}
+
+/// The channels in a room that `channel_is_public` accepts.
+pub(crate) async fn public_channel_ids(
+    state: &AppState,
+    room_id: &str,
+) -> std::collections::HashSet<String> {
+    use super::state::ChannelCategoryRecord;
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+    use std::collections::{HashMap, HashSet};
+
+    let mut categories: HashMap<String, Vec<PermissionOverwrite>> = HashMap::new();
+    let cat_coll = state
+        .db
+        .collection::<ChannelCategoryRecord>("channel_categories");
+    if let Ok(mut cursor) = cat_coll.find(doc! { "room_id": room_id }).await {
+        while let Ok(Some(cat)) = cursor.try_next().await {
+            categories.insert(cat.category_id.clone(), cat.overwrites);
+        }
+    }
+
+    let mut public = HashSet::new();
+    let channels_coll = state.db.collection::<ChannelRecord>("channels");
+    if let Ok(mut cursor) = channels_coll.find(doc! { "room_id": room_id }).await {
+        while let Ok(Some(ch)) = cursor.try_next().await {
+            let inherited = categories.get(&ch.category_id).cloned().unwrap_or_default();
+            if channel_is_public(&inherited, &ch) {
+                public.insert(ch.channel_id.clone());
+            }
+        }
+    }
+    public
+}
+
 pub(crate) async fn get_allowed_channel_ids(
     state: &AppState,
     room_id: &str,
@@ -1082,6 +1147,109 @@ pub(crate) async fn get_reactions_for_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn overwrite(
+        target_type: &str,
+        target_id: &str,
+        allow: &[&str],
+        deny: &[&str],
+    ) -> PermissionOverwrite {
+        PermissionOverwrite {
+            target_type: target_type.to_string(),
+            target_id: target_id.to_string(),
+            allow: allow.iter().map(|s| s.to_string()).collect(),
+            deny: deny.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    fn voice_channel(overwrites: Vec<PermissionOverwrite>) -> ChannelRecord {
+        ChannelRecord {
+            channel_id: "chan-1".to_string(),
+            room_id: "room-a".to_string(),
+            name: "General".to_string(),
+            channel_type: "voice".to_string(),
+            topic: String::new(),
+            position: 0,
+            category_id: "cat-1".to_string(),
+            read_only: false,
+            slowmode_secs: 0,
+            overwrites,
+            inherit_category_permissions: true,
+            view_roles: Vec::new(),
+            write_roles: Vec::new(),
+            overwrites_migrated: true,
+            showcase_write_roles: Vec::new(),
+            showcase_posters: Vec::new(),
+            system_channel: false,
+            bot_id: String::new(),
+            voice_bitrate: 64_000,
+            created_by: "@a:h".to_string(),
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn a_channel_with_no_overwrites_is_public() {
+        assert!(channel_is_public(&[], &voice_channel(Vec::new())));
+    }
+
+    #[test]
+    fn denying_everyone_makes_a_channel_private() {
+        let ch = voice_channel(vec![overwrite("everyone", "", &[], &["view_channel"])]);
+        assert!(!channel_is_public(&[], &ch));
+    }
+
+    #[test]
+    fn a_role_that_can_see_a_private_channel_does_not_make_it_public() {
+        // The usual shape of a private channel: shut to everyone, opened for
+        // one role. Whoever holds that role can see the call; the room at
+        // large cannot, so the room's badge must stay dark.
+        let ch = voice_channel(vec![
+            overwrite("everyone", "", &[], &["view_channel"]),
+            overwrite("role", "role-mods", &["view_channel"], &[]),
+        ]);
+        assert!(!channel_is_public(&[], &ch));
+    }
+
+    #[test]
+    fn a_member_granted_access_does_not_make_it_public() {
+        let ch = voice_channel(vec![
+            overwrite("everyone", "", &[], &["view_channel"]),
+            overwrite("user", "@a:h", &["view_channel"], &[]),
+        ]);
+        assert!(!channel_is_public(&[], &ch));
+    }
+
+    #[test]
+    fn a_private_category_carries_down_to_a_channel_that_inherits() {
+        let category = vec![overwrite("everyone", "", &[], &["view_channel"])];
+        assert!(!channel_is_public(&category, &voice_channel(Vec::new())));
+    }
+
+    #[test]
+    fn a_channel_that_opts_out_of_its_category_is_judged_alone() {
+        let category = vec![overwrite("everyone", "", &[], &["view_channel"])];
+        let mut ch = voice_channel(Vec::new());
+        ch.inherit_category_permissions = false;
+        assert!(channel_is_public(&category, &ch));
+    }
+
+    #[test]
+    fn a_channel_can_reopen_what_its_category_shut() {
+        let category = vec![overwrite("everyone", "", &[], &["view_channel"])];
+        let ch = voice_channel(vec![overwrite("everyone", "", &["view_channel"], &[])]);
+        assert!(channel_is_public(&category, &ch));
+    }
+
+    #[test]
+    fn a_legacy_view_roles_channel_is_private() {
+        // Restricted before overwrites existed and never migrated: the roles
+        // are folded into an everyone-deny, so this reads as private too.
+        let mut ch = voice_channel(Vec::new());
+        ch.overwrites_migrated = false;
+        ch.view_roles = vec!["role-mods".to_string()];
+        assert!(!channel_is_public(&[], &ch));
+    }
 
     /// The filter `is_blocked_between` builds, without needing a database.
     fn block_filter(a: &str, b: &str) -> mongodb::bson::Document {

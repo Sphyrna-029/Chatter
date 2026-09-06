@@ -6,9 +6,8 @@ use super::super::{
     },
     helpers::{
         broadcast_to_room, do_join_room, effective_permissions, error_response, extract_token,
-        generate_id, get_allowed_channel_ids, get_system_channel_id, get_user_from_token,
-        get_user_role, hash_password, is_blocked_between, now_millis, send_to_user,
-        verify_password,
+        generate_id, get_system_channel_id, get_user_from_token, get_user_role, hash_password,
+        is_blocked_between, now_millis, public_channel_ids, send_to_user, verify_password,
     },
     state::{
         AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
@@ -921,23 +920,23 @@ pub(crate) async fn list_all_rooms(
                 continue;
             }
 
-            // Voice activity is only reported for channels this caller may see,
-            // so a private channel's call does not light up a room badge for
-            // someone who cannot open it.
+            // Only public channels are reported. Not "channels this caller may
+            // see": a moderator can open a private channel, but a call in one
+            // still must not light a room's badge, or the badge would mean
+            // something different depending on who is looking at it.
             let (voice_count, screen_share_active) = match voice_by_room.get(&room.room_id) {
                 None => (0usize, false),
                 Some(channels) => {
-                    let allowed = get_allowed_channel_ids(&state, &room.room_id, &user_id).await;
-                    let visible = |cid: &String| match &allowed {
-                        None => true, // owner/moderator: overwrites do not apply
-                        Some(ids) => ids.contains(cid),
-                    };
-                    channels.iter().filter(|(cid, _, _)| visible(cid)).fold(
-                        (0usize, false),
-                        |(count, sharing), (_, members, ch_sharing)| {
-                            (count + members, sharing || *ch_sharing)
-                        },
-                    )
+                    let public = public_channel_ids(&state, &room.room_id).await;
+                    channels
+                        .iter()
+                        .filter(|(cid, _, _)| public.contains(cid))
+                        .fold(
+                            (0usize, false),
+                            |(count, sharing), (_, members, ch_sharing)| {
+                                (count + members, sharing || *ch_sharing)
+                            },
+                        )
                 }
             };
             room_list.push(json!({
