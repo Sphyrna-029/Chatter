@@ -641,19 +641,21 @@ export function ChatLayout() {
                   <ForumArea />
                 ) : showViewer ? (
                   <div ref={viewerContainerRef} className="flex-1 flex flex-col min-h-0">
-                    {/* Header lives outside the resizable panels — always visible */}
-                    <ScreenShareHeader
-                      containerRef={viewerContainerRef}
-                      isPiP={isPiP}
-                      onTogglePiP={togglePiP}
-                    />
-
                     <ResizablePanelGroup
                       orientation="vertical"
                       className="flex-1"
                     >
                       <ResizablePanel defaultSize={50} minSize={15}>
-                        <div className="h-full flex flex-col min-h-0">
+                        {/* The header overlays the video rather than sitting
+                            above it: as a row of its own it took height from
+                            the video *and* the chat below, for a strip that is
+                            mostly letterboxing anyway. */}
+                        <div className="relative h-full flex flex-col min-h-0">
+                          <ScreenShareHeader
+                            containerRef={viewerContainerRef}
+                            isPiP={isPiP}
+                            onTogglePiP={togglePiP}
+                          />
                           <ScreenShareViewer />
                         </div>
                       </ResizablePanel>

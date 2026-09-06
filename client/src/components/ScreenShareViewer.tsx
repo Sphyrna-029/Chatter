@@ -57,7 +57,7 @@ export function ScreenShareHeader({
   }
 
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 bg-info/10 border-b border-info/20 shrink-0">
+    <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between px-3 py-1.5 bg-background/70 backdrop-blur-sm border-b border-info/20">
       <div className="flex items-center gap-2 min-w-0">
         <span className="relative flex h-2 w-2 shrink-0">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive opacity-75" />
