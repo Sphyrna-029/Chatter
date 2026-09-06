@@ -232,6 +232,40 @@ export function ChatLayout() {
     void syncPushSubscription();
   }, []);
 
+  // Re-establish a call after the socket comes back.
+  //
+  // The server tears down voice state when a connection drops, so a client
+  // that still believes it is in a channel is not in one any more. It used to
+  // find that out only by nobody being able to hear it: the rejoin below is
+  // one-shot per mount and consumes its sessionStorage key on read, so it only
+  // ever covered a page refresh — and a dropped socket does not reload the
+  // page. Anyone whose connection blipped mid-call was silently ejected.
+  const wasConnectedRef = useRef(false);
+  const hasEverConnectedRef = useRef(false);
+
+  useEffect(() => {
+    const reconnected = state.wsConnected && !wasConnectedRef.current;
+    // Only a *re*-connection. The first one is a page load, which the rejoin
+    // below already covers from sessionStorage.
+    const isFirstConnect = !hasEverConnectedRef.current;
+    if (state.wsConnected) hasEverConnectedRef.current = true;
+    wasConnectedRef.current = state.wsConnected;
+    if (!reconnected || isFirstConnect) return;
+
+    // What the client still thinks it is in. If it never joined, or left
+    // deliberately while the socket was down, there is nothing to restore.
+    if (!state.inVoiceChannel || !state.voiceRoomId) return;
+
+    // Let the socket's own hello be processed before rejoining on it.
+    const channelId = state.voiceChannelId;
+    const timer = setTimeout(() => {
+      joinVoiceRef.current?.(channelId ?? undefined);
+    }, 500);
+    return () => clearTimeout(timer);
+    // The voice fields are read, not watched: a change to one of them re-runs
+    // this, but `reconnected` is false unless the socket actually came back.
+  }, [state.wsConnected, state.inVoiceChannel, state.voiceRoomId, state.voiceChannelId]);
+
   // Auto-rejoin voice channel on page refresh (within 30 seconds)
   const autoRejoinAttemptedRef = useRef(false);
   useEffect(() => {
