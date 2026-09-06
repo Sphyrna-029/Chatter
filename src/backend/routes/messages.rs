@@ -8,8 +8,8 @@ use super::super::{
         broadcast_to_room, can_manage_messages, channel_permissions, effective_permissions,
         error_response, extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
         get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
-        get_user_from_token, get_user_role, is_moderator_or_owner, now_millis, rate_limited,
-        regex_escape, send_to_user,
+        get_user_from_token, get_user_role, is_blocked_between, is_moderator_or_owner, now_millis,
+        rate_limited, regex_escape, send_to_user,
     },
     push::{spawn_message_push, MessageNotification},
     ratelimit,
@@ -250,6 +250,25 @@ pub(crate) async fn send_message(
                         ));
                     }
                 }
+            }
+        }
+    }
+
+    // A DM that already existed when the block happened is still a way to
+    // reach someone, so the send is checked too — not just the opening of it.
+    if room.is_dm && !is_bot {
+        let others: Vec<String> = {
+            let rm = state.room_members.read().await;
+            rm.get(&room_id)
+                .map(|m| m.iter().filter(|id| **id != sender_id).cloned().collect())
+                .unwrap_or_default()
+        };
+        for other in &others {
+            if is_blocked_between(&state, &sender_id, other).await {
+                return Err(error_response(
+                    StatusCode::FORBIDDEN,
+                    "You cannot send messages in this conversation",
+                ));
             }
         }
     }

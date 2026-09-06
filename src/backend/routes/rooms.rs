@@ -7,7 +7,7 @@ use super::super::{
     helpers::{
         broadcast_to_room, do_join_room, effective_permissions, error_response, extract_token,
         generate_id, get_system_channel_id, get_user_from_token, get_user_role, hash_password,
-        now_millis, send_to_user, verify_password,
+        is_blocked_between, now_millis, send_to_user, verify_password,
     },
     state::{
         AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
@@ -64,6 +64,11 @@ pub(crate) async fn create_room(
                 let users_coll = state.db.collection::<UserRecord>("users");
                 let mut valid_invites: Vec<String> = Vec::new();
                 for invited in invite_list {
+                    // A block keeps someone out of a group DM with the person
+                    // who blocked them, the same as a one-to-one.
+                    if is_blocked_between(&state, &user_id, invited).await {
+                        continue;
+                    }
                     if users_coll
                         .find_one(doc! { "_id": invited })
                         .await
@@ -157,6 +162,16 @@ pub(crate) async fn create_room(
                     return Err(error_response(
                         StatusCode::BAD_REQUEST,
                         "Cannot DM yourself",
+                    ));
+                }
+
+                // Blocking has to stop the conversation starting, not just the
+                // friend request. Until now it did neither: nothing outside
+                // friends.rs ever read the blocks collection.
+                if is_blocked_between(&state, &user_id, other_user).await {
+                    return Err(error_response(
+                        StatusCode::FORBIDDEN,
+                        "You cannot start a conversation with this user",
                     ));
                 }
 
@@ -1758,6 +1773,22 @@ pub(crate) async fn add_to_dm(
         .is_none()
     {
         return Err(error_response(StatusCode::NOT_FOUND, "User not found"));
+    }
+
+    // Nor may someone be added to a DM alongside anyone they have blocked, or
+    // who has blocked them — being added by a third party would otherwise be a
+    // way around it.
+    let existing_members: Vec<String> = {
+        let rm = state.room_members.read().await;
+        rm.get(&room_id).cloned().unwrap_or_default()
+    };
+    for member in &existing_members {
+        if is_blocked_between(&state, member, &req.user_id).await {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "That user cannot be added to this conversation",
+            ));
+        }
     }
 
     // Add user (do_join_room handles already-member and broadcasts m.room.member)

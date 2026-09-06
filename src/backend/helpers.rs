@@ -112,6 +112,28 @@ pub(crate) fn format_user_id(username: &str) -> String {
     format!("@{}:localhost", username)
 }
 
+/// Whether either of two users has blocked the other.
+///
+/// Blocking is checked in both directions on purpose: the point of it is that
+/// the two of them stop reaching each other, and a rule that only stopped the
+/// blocked party would let the blocker keep opening conversations with someone
+/// who has no way to answer.
+pub(crate) async fn is_blocked_between(state: &AppState, a: &str, b: &str) -> bool {
+    use super::state::BlockRecord;
+    use mongodb::bson::doc;
+    state
+        .db
+        .collection::<BlockRecord>("blocks")
+        .find_one(doc! { "$or": [
+            { "blocker": a, "blocked": b },
+            { "blocker": b, "blocked": a },
+        ]})
+        .await
+        .ok()
+        .flatten()
+        .is_some()
+}
+
 /// Escape regex metacharacters so a value is matched literally.
 ///
 /// Anything user-supplied that reaches a `$regex` has to come through here.
@@ -1060,6 +1082,44 @@ pub(crate) async fn get_reactions_for_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The filter `is_blocked_between` builds, without needing a database.
+    fn block_filter(a: &str, b: &str) -> mongodb::bson::Document {
+        mongodb::bson::doc! { "$or": [
+            { "blocker": a, "blocked": b },
+            { "blocker": b, "blocked": a },
+        ]}
+    }
+
+    #[test]
+    fn a_block_is_checked_in_both_directions() {
+        // Blocking exists so the two of them stop reaching each other. A rule
+        // that only stopped the blocked party would let the blocker keep
+        // opening conversations with someone who cannot answer.
+        let forward = block_filter("@a:h", "@b:h");
+        let reverse = block_filter("@b:h", "@a:h");
+        let clauses = forward.get_array("$or").unwrap();
+        assert_eq!(clauses.len(), 2);
+        // The same pair produces the same two clauses whichever way round the
+        // arguments come in, just swapped.
+        let as_pairs = |d: &mongodb::bson::Document| {
+            let mut pairs: Vec<(String, String)> = d
+                .get_array("$or")
+                .unwrap()
+                .iter()
+                .map(|c| {
+                    let c = c.as_document().unwrap();
+                    (
+                        c.get_str("blocker").unwrap().to_string(),
+                        c.get_str("blocked").unwrap().to_string(),
+                    )
+                })
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        assert_eq!(as_pairs(&forward), as_pairs(&reverse));
+    }
 
     #[test]
     fn regex_escape_neutralizes_metacharacters() {
