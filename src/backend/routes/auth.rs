@@ -881,6 +881,10 @@ pub(crate) async fn delete_account(
     state.user_presence.write().await.remove(&user_id);
 
     // Delete user record
+    // Deleting an account has to take its files too, or "delete my account"
+    // leaves every screenshot the person ever posted still served.
+    super::media::purge_user_uploads(&state, &user_id).await;
+
     let _ = users.delete_one(doc! { "_id": &user_id }).await;
 
     Ok(Json(json!({ "deleted": true })))

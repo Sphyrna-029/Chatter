@@ -865,6 +865,14 @@ pub(crate) async fn redact_message(
         }
     }
 
+    // Read before the update below replaces it with "[deleted]" — that is the
+    // only record of which files this message referred to.
+    let body_before_redaction = msg
+        .get_document("content")
+        .ok()
+        .and_then(|c| c.get_str("body").ok())
+        .map(String::from);
+
     // Update message in MongoDB
     let _ = msg_coll
         .update_one(
@@ -882,6 +890,18 @@ pub(crate) async fn redact_message(
 
     // A deleted message must not linger in the pin list.
     super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
+
+    // Nor should its attachments stay on disk and served. Only files the
+    // sender uploaded, and only when nothing else still refers to them —
+    // deleting a message must not break someone else's copy of the same link.
+    let attachments = body_before_redaction
+        .as_deref()
+        .map(super::media::attachment_urls)
+        .unwrap_or_default();
+    if !attachments.is_empty() {
+        super::media::purge_attachments(&state, &attachments, Some(msg_sender), Some(&event_id))
+            .await;
+    }
 
     let redaction_event_id = generate_id("$");
     let redaction_event = json!({

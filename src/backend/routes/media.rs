@@ -1745,6 +1745,116 @@ pub(crate) struct DeleteUploadBody {
     url: String,
 }
 
+/// The `/external/...` files a message body refers to.
+///
+/// Attachments are posted as bare URLs in the body, which is also how
+/// `body_has_attachment` in messages.rs judges them.
+pub(crate) fn attachment_urls(body: &str) -> Vec<String> {
+    body.split_whitespace()
+        // Punctuation from the prose a link was pasted into, on both sides.
+        // Erring toward finding fewer URLs is the safe direction here: the
+        // worst case is a file outliving its message, where over-matching
+        // would delete one that another message still needs.
+        .map(|token| {
+            token
+                .trim_start_matches(['(', '[', '<', '"', '\''])
+                .trim_end_matches(['.', ',', ')', ']', '>', '"', '\'', '!', '?'])
+        })
+        .filter(|token| token.starts_with("/external/"))
+        .filter(|token| token.len() > "/external/".len())
+        .map(String::from)
+        .collect()
+}
+
+/// Remove an uploaded file and its record, together with the sidecars derived
+/// from it — a thumbnail, a preview, extracted subtitles.
+async fn remove_upload_record(state: &Arc<AppState>, record: &UploadRecord) {
+    let _ = tokio::fs::remove_file(&record.disk_path).await;
+    // Generated alongside the original; see generate_thumbnail,
+    // generate_image_preview and extract_subtitles.
+    for suffix in [".thumb.jpg", ".preview.webp", "@subs.json", ".faststarted"] {
+        let _ = tokio::fs::remove_file(format!("{}{suffix}", record.disk_path)).await;
+    }
+    if let Some(parent) = std::path::Path::new(&record.disk_path).parent() {
+        // Uploads live one-per-random-folder, so this only succeeds once the
+        // folder is genuinely empty.
+        let _ = tokio::fs::remove_dir(parent).await;
+    }
+    let _ = state
+        .db
+        .collection::<UploadRecord>("uploads")
+        .delete_one(doc! { "url": &record.url })
+        .await;
+}
+
+/// Delete the files a message referred to, unless something else still refers
+/// to them.
+///
+/// The reference check is what keeps this safe: the same URL can be pasted
+/// into a second message, and deleting the first must not break the second.
+/// It costs a scan, which is acceptable only because deleting is rare — do not
+/// reach for this on a hot path.
+///
+/// `owner` restricts deletion to files that user uploaded; `None` skips the
+/// check, for when the owner is already known to be going away.
+/// `excluding_event` is the message being deleted, which must not count as a
+/// reference to itself.
+pub(crate) async fn purge_attachments(
+    state: &Arc<AppState>,
+    urls: &[String],
+    owner: Option<&str>,
+    excluding_event: Option<&str>,
+) {
+    use super::super::helpers::regex_escape;
+
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let messages = state.db.collection::<mongodb::bson::Document>("messages");
+
+    for url in urls {
+        let mut query = doc! { "url": url };
+        if let Some(owner) = owner {
+            query.insert("user_id", owner);
+        }
+        let Ok(Some(record)) = uploads.find_one(query).await else {
+            continue;
+        };
+
+        let mut still_used = doc! {
+            "content.body": { "$regex": regex_escape(url) },
+            "redacted": { "$ne": true },
+        };
+        if let Some(event_id) = excluding_event {
+            still_used.insert("event_id", doc! { "$ne": event_id });
+        }
+        if messages.find_one(still_used).await.ok().flatten().is_some() {
+            continue;
+        }
+
+        remove_upload_record(state, &record).await;
+    }
+}
+
+/// Delete everything a user ever uploaded.
+///
+/// Used when the account itself is going away, where there is no question of
+/// another message still needing the file — the person it belonged to has
+/// asked to be gone.
+pub(crate) async fn purge_user_uploads(state: &Arc<AppState>, user_id: &str) {
+    use futures_util::TryStreamExt;
+
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let Ok(mut cursor) = uploads.find(doc! { "user_id": user_id }).await else {
+        return;
+    };
+    let mut records: Vec<UploadRecord> = Vec::new();
+    while let Ok(Some(record)) = cursor.try_next().await {
+        records.push(record);
+    }
+    for record in &records {
+        remove_upload_record(state, record).await;
+    }
+}
+
 pub(crate) async fn delete_upload(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -2454,6 +2564,39 @@ mod tests {
         for p in [&mp4, &marker] {
             let _ = tokio::fs::remove_file(p).await;
         }
+    }
+
+    #[test]
+    fn attachment_urls_finds_posted_files() {
+        // Attachments are posted as bare URLs in the body, sometimes alongside
+        // text and sometimes several at once.
+        assert_eq!(
+            attachment_urls("look at this /external/uploads/u1/cat.png"),
+            vec!["/external/uploads/u1/cat.png"],
+        );
+        assert_eq!(
+            attachment_urls("/external/a/one.png\n/external/b/two.mp4"),
+            vec!["/external/a/one.png", "/external/b/two.mp4"],
+        );
+        assert!(attachment_urls("no attachments here").is_empty());
+        // A remote link is not ours to delete.
+        assert!(attachment_urls("https://elsewhere/cat.png").is_empty());
+        // Nor is the bare prefix.
+        assert!(attachment_urls("/external/").is_empty());
+    }
+
+    #[test]
+    fn attachment_urls_strips_trailing_prose() {
+        // A link pasted mid-sentence keeps the punctuation that followed it,
+        // which would otherwise never match the stored upload.
+        assert_eq!(
+            attachment_urls("see /external/uploads/u1/cat.png."),
+            vec!["/external/uploads/u1/cat.png"],
+        );
+        assert_eq!(
+            attachment_urls("(/external/uploads/u1/cat.png)"),
+            vec!["/external/uploads/u1/cat.png"],
+        );
     }
 
     #[test]

@@ -753,7 +753,34 @@ pub(crate) async fn delete_room(
     let members_coll = state.db.collection::<RoomMemberRecord>("room_members");
     let _ = members_coll.delete_many(doc! { "room_id": &room_id }).await;
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+
+    // Collect what the room's messages referred to before deleting them: once
+    // they are gone there is nothing left saying which files were theirs.
+    use futures_util::TryStreamExt;
+    let mut attachments: Vec<String> = Vec::new();
+    if let Ok(mut cursor) = msg_coll
+        .find(doc! { "room_id": &room_id, "content.body": { "$regex": "/external/" } })
+        .await
+    {
+        while let Ok(Some(message)) = cursor.try_next().await {
+            if let Ok(body) = message
+                .get_document("content")
+                .and_then(|c| c.get_str("body"))
+            {
+                attachments.extend(super::media::attachment_urls(body));
+            }
+        }
+    }
+
     let _ = msg_coll.delete_many(doc! { "room_id": &room_id }).await;
+
+    // After the messages are gone, so anything still referenced elsewhere is
+    // correctly left alone.
+    if !attachments.is_empty() {
+        attachments.sort();
+        attachments.dedup();
+        super::media::purge_attachments(&state, &attachments, None, None).await;
+    }
     let react_coll = state
         .db
         .collection::<super::super::state::ReactionRecord>("reactions");

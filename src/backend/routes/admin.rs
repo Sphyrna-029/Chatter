@@ -243,6 +243,8 @@ pub(crate) async fn admin_delete_user(
     // Remove presence
     state.user_presence.write().await.remove(&target_id);
 
+    // Same as a self-deletion: the account going away takes its uploads.
+    super::media::purge_user_uploads(&state, &target_id).await;
     Ok(Json(json!({ "deleted": true })))
 }
 
