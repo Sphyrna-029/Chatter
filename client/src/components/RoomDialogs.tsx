@@ -19,7 +19,28 @@ import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, 
 import { displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 import { toast } from "sonner";
+import { apiGetAuditLog, type AuditEntry } from "@/lib/api";
 import { MAX_SOUND_SECS, playSound, type SoundEvent, type SoundPack } from "@/lib/sounds";
+
+/** Readable phrasing for each audit action. An unknown action falls back to
+ *  its raw string, so a newly added server action still renders. */
+const AUDIT_LABELS: Record<string, string> = {
+  "member.kicked": "kicked",
+  "member.banned": "banned",
+  "member.unbanned": "unbanned",
+  "member.role_changed": "changed the role of",
+  "member.roles_assigned": "assigned roles to",
+  "role.created": "created role",
+  "role.updated": "updated role",
+  "role.deleted": "deleted role",
+  "channel.created": "created channel",
+  "channel.updated": "updated channel",
+  "channel.deleted": "deleted channel",
+  "message.deleted": "deleted a message",
+  "room.settings_updated": "updated room settings",
+  "invite.created": "created an invite",
+  "invite.deleted": "deleted an invite",
+};
 
 /** The pack's events, in the order they are offered. Keep in sync with
  *  SoundEvent in lib/sounds.ts and PACK_EVENTS in backend/sounds.rs. */
@@ -472,6 +493,10 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   const [roomSounds, setRoomSounds] = useState<Record<string, string>>({});
   const [entranceSoundsEnabled, setEntranceSoundsEnabled] = useState(true);
   const [uploadingSound, setUploadingSound] = useState<SoundEvent | null>(null);
+  const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditHasMore, setAuditHasMore] = useState(false);
+  const [auditOffset, setAuditOffset] = useState(0);
   const [showSettingsPassword, setShowSettingsPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -542,6 +567,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setRoomSounds({ ...(info?.sounds || {}) });
       setEntranceSoundsEnabled(info?.entrance_sounds_enabled !== false);
       setUploadingSound(null);
+      setAuditEntries([]);
+      setAuditOffset(0);
+      setAuditHasMore(false);
       if (isOwner) {
         apiListInvites(roomId).then((data) => setInvites(data.invites)).catch(() => {});
         apiListWebhooks(roomId).then((data) => setWebhooks(data.webhooks)).catch(() => {});
@@ -556,6 +584,22 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       }
     }
   }, [open, roomId]);
+
+  /** Fetch a page of the moderation log, appending when paging. */
+  const loadAudit = async (offset = 0) => {
+    if (!roomId) return;
+    setAuditLoading(true);
+    try {
+      const data = await apiGetAuditLog(roomId, { offset, limit: 50 });
+      setAuditEntries((prev) => (offset === 0 ? data.items : [...prev, ...data.items]));
+      setAuditHasMore(data.has_more);
+      setAuditOffset(data.next_offset);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to load the audit log");
+    } finally {
+      setAuditLoading(false);
+    }
+  };
 
   const handleSave = async () => {
     if (isOwner && !name) return;
@@ -680,6 +724,19 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             {isOwner && <TabsTrigger value="bots" className="flex-1">Bots</TabsTrigger>}
             {isOwner && <TabsTrigger value="webhooks" className="flex-1">Webhooks</TabsTrigger>}
             {canManageBans && <TabsTrigger value="moderation" className="flex-1">Moderation</TabsTrigger>}
+            {canManageBans && (
+              <TabsTrigger
+                value="audit"
+                className="flex-1"
+                onClick={() => {
+                  // Fetched on first open rather than with the dialog: most
+                  // visits to room settings are not about the log.
+                  if (auditEntries.length === 0) void loadAudit(0);
+                }}
+              >
+                Audit
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-4">
@@ -1526,6 +1583,63 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   <p className="text-xs text-muted-foreground py-2">No webhooks yet. Create one to allow external services to post messages.</p>
                 )}
               </div>
+            </TabsContent>
+          )}
+
+          {canManageBans && (
+            <TabsContent value="audit" className="space-y-3 mt-4">
+              <p className="text-xs text-muted-foreground">
+                Who did what in this room. Append-only — entries cannot be
+                edited or removed.
+              </p>
+              {auditEntries.length === 0 && !auditLoading && (
+                <p className="text-xs text-muted-foreground py-2">Nothing recorded yet</p>
+              )}
+              <div className="space-y-1.5 max-h-[320px] overflow-y-auto">
+                {auditEntries.map((entry) => (
+                  <div
+                    key={entry.entry_id}
+                    className="rounded-md border border-border/40 bg-muted/20 px-2.5 py-2 text-xs"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="font-medium truncate">
+                        {displayUserId(entry.actor_id)}{" "}
+                        <span className="text-muted-foreground font-normal">
+                          {AUDIT_LABELS[entry.action] ?? entry.action}
+                        </span>{" "}
+                        {entry.target_id && (
+                          <span className="truncate">
+                            {entry.action.startsWith("member.")
+                              ? displayUserId(entry.target_id)
+                              : entry.target_id}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-muted-foreground shrink-0">
+                        {new Date(entry.created_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </div>
+                    {entry.detail && (
+                      <p className="text-muted-foreground mt-0.5">{entry.detail}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {auditHasMore && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={auditLoading}
+                  onClick={() => void loadAudit(auditOffset)}
+                >
+                  {auditLoading ? "Loading…" : "Load more"}
+                </Button>
+              )}
             </TabsContent>
           )}
 

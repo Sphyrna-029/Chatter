@@ -1,4 +1,5 @@
 pub mod app;
+pub(crate) mod audit;
 pub(crate) mod constants;
 pub(crate) mod dto;
 pub(crate) mod helpers;

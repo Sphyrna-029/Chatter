@@ -1,4 +1,5 @@
 use super::super::{
+    audit,
     dto::CreateInviteRequest,
     helpers::{
         do_join_room, error_response, extract_token, get_user_from_token, now_millis, rate_limited,
@@ -78,7 +79,7 @@ pub(crate) async fn create_invite(
     let record = InviteRecord {
         code: code.clone(),
         room_id: room_id.clone(),
-        creator: user_id,
+        creator: user_id.clone(),
         click_count: 0,
         created_at: now_millis(),
         expires_at,
@@ -86,6 +87,16 @@ pub(crate) async fn create_invite(
 
     let inv_coll = state.db.collection::<InviteRecord>("invites");
     let _ = inv_coll.insert_one(record).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::InviteCreated,
+        &code,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({ "code": code, "expires_at": expires_at })))
 }
@@ -166,6 +177,16 @@ pub(crate) async fn delete_invite(
     }
 
     let _ = inv_coll.delete_one(doc! { "_id": &code }).await;
+
+    audit::record(
+        &state,
+        &room.room_id,
+        &user_id,
+        audit::AuditAction::InviteDeleted,
+        &code,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({ "success": true })))
 }

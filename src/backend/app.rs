@@ -224,6 +224,16 @@ async fn create_indexes(db: &mongodb::Database) {
         )
         .await;
 
+    // audit_log: newest-first listing per room
+    let _ = db
+        .collection::<mongodb::bson::Document>("audit_log")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "created_at": -1 })
+                .build(),
+        )
+        .await;
+
     // push_subscriptions: index on user_id — every push resolves a room's
     // members to their devices through this
     let _ = db

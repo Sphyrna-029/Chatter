@@ -1,4 +1,5 @@
 use super::super::{
+    audit,
     dto::{
         AddToDmRequest, CreateRoomRequest, JoinRoomRequest, SetNameColorRequest, SetRoleRequest,
         UpdateRoomSettingsRequest, UpdateTopicRequest,
@@ -1139,6 +1140,23 @@ pub(crate) async fn update_room_settings(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
+    let mut changed: Vec<&str> = event["content"]
+        .as_object()
+        .map(|o| o.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    changed.sort_unstable();
+    if !changed.is_empty() {
+        audit::record(
+            &state,
+            &room_id,
+            &user_id,
+            audit::AuditAction::RoomSettingsUpdated,
+            &room_id,
+            &format!("changed: {}", changed.join(", ")),
+        )
+        .await;
+    }
+
     Ok(Json(json!({"event_id": generate_id("$")})))
 }
 
@@ -1262,6 +1280,16 @@ pub(crate) async fn kick_member(
         "origin_server_ts": now_millis()
     });
     broadcast_to_room(&state, &room_id, &member_event).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::MemberKicked,
+        &target_user_id,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({"kicked": true})))
 }
@@ -1402,6 +1430,16 @@ pub(crate) async fn ban_member(
     });
     broadcast_to_room(&state, &room_id, &member_event).await;
 
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::MemberBanned,
+        &target_user_id,
+        "",
+    )
+    .await;
+
     Ok(Json(json!({"banned": true})))
 }
 
@@ -1436,6 +1474,16 @@ pub(crate) async fn unban_member(
             list.retain(|u| u != &target_user_id);
         }
     }
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::MemberUnbanned,
+        &target_user_id,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({"unbanned": true})))
 }
@@ -1542,6 +1590,16 @@ pub(crate) async fn set_member_role(
         "sender": user_id,
     });
     broadcast_to_room(&state, &room_id, &role_event).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::MemberRoleChanged,
+        &target_user_id,
+        &format!("role set to {}", req.role),
+    )
+    .await;
 
     Ok(Json(json!({"role": req.role})))
 }

@@ -1,4 +1,5 @@
 use super::super::{
+    audit,
     dto::{
         EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest,
         ThreadListQuery,
@@ -824,6 +825,22 @@ pub(crate) async fn redact_message(
     });
 
     broadcast_to_room(&state, &room_id, &redaction_event).await;
+
+    // Only a moderator deleting someone else's message is a moderation
+    // action. Someone deleting their own is not, and logging it would turn the
+    // audit log into a record of ordinary use.
+    if !is_own {
+        audit::record(
+            &state,
+            &room_id,
+            &user_id,
+            audit::AuditAction::MessageDeleted,
+            &event_id,
+            &format!("message by {msg_sender}"),
+        )
+        .await;
+    }
+
     Ok(Json(json!({"event_id": redaction_event_id})))
 }
 

@@ -7,6 +7,7 @@ use super::{
             admin_get_settings, admin_list_rooms, admin_list_users, admin_refresh_invite,
             admin_reset_password, admin_stats, admin_update_settings,
         },
+        audit::{admin_export, list_audit_log},
         auth::{
             account_status, change_password, check_username, delete_account, force_reset_password,
             get_recovery_codes, ice_servers, list_sessions, login, logout, recovery_login, refresh,
@@ -272,6 +273,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             get(list_all_member_roles),
         )
         .route("/api/rooms/{room_id}/permissions", get(get_my_permissions))
+        .route("/api/rooms/{room_id}/audit", get(list_audit_log))
         .route("/api/rooms/{room_id}/categories", post(create_category))
         .route(
             "/api/rooms/{room_id}/categories/{category_id}",
@@ -425,6 +427,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             post(admin_refresh_invite),
         )
         .route("/api/admin/stats", get(admin_stats))
+        .route("/api/admin/export", get(admin_export))
         .route("/api/admin/users", get(admin_list_users))
         .route(
             "/api/admin/users/{user_id}/disable",

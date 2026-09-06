@@ -1,4 +1,5 @@
 use super::super::{
+    audit,
     dto::{
         AssignMemberRolesRequest, CreateCustomRoleRequest, PermissionsQuery,
         UpdateCustomRoleRequest,
@@ -160,6 +161,16 @@ pub(crate) async fn create_role(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::RoleCreated,
+        &role_id,
+        &record.name,
+    )
+    .await;
+
     Ok(Json(json!({ "role_id": role_id })))
 }
 
@@ -268,6 +279,21 @@ pub(crate) async fn update_role(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
+    let mut changed: Vec<&str> = event["content"]
+        .as_object()
+        .map(|o| o.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    changed.sort_unstable();
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::RoleUpdated,
+        &role_id,
+        &format!("changed: {}", changed.join(", ")),
+    )
+    .await;
+
     Ok(Json(json!({ "updated": true })))
 }
 
@@ -338,6 +364,16 @@ pub(crate) async fn delete_role(
         "role_id": role_id,
     });
     broadcast_to_room(&state, &room_id, &event).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::RoleDeleted,
+        &role_id,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({ "deleted": true })))
 }
@@ -492,6 +528,16 @@ pub(crate) async fn assign_member_roles(
         "role_ids": req.role_ids,
     });
     broadcast_to_room(&state, &room_id, &event).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::MemberRolesAssigned,
+        &target_user_id,
+        &format!("{} role(s)", req.role_ids.len()),
+    )
+    .await;
 
     Ok(Json(json!({ "updated": true })))
 }

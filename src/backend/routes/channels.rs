@@ -1,4 +1,5 @@
 use super::super::{
+    audit,
     constants::{VOICE_BITRATE_DEFAULT, VOICE_BITRATE_MAX, VOICE_BITRATE_MIN},
     dto::{
         CreateCategoryRequest, CreateChannelRequest, UpdateCategoryRequest, UpdateChannelRequest,
@@ -309,6 +310,16 @@ pub(crate) async fn create_channel(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::ChannelCreated,
+        &channel_id,
+        &format!("#{} ({})", channel.name, channel.channel_type),
+    )
+    .await;
+
     Ok(Json(json!({ "channel_id": channel_id })))
 }
 
@@ -475,6 +486,23 @@ pub(crate) async fn update_channel(
     });
     broadcast_to_room(&state, &room_id, &event).await;
 
+    // The field names, not their values: the log says what was touched
+    // without becoming a second copy of the settings.
+    let mut changed: Vec<&str> = event["content"]
+        .as_object()
+        .map(|o| o.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    changed.sort_unstable();
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::ChannelUpdated,
+        &channel_id,
+        &format!("changed: {}", changed.join(", ")),
+    )
+    .await;
+
     Ok(Json(json!({ "updated": true })))
 }
 
@@ -549,6 +577,16 @@ pub(crate) async fn delete_channel(
         "channel_id": channel_id,
     });
     broadcast_to_room(&state, &room_id, &event).await;
+
+    audit::record(
+        &state,
+        &room_id,
+        &user_id,
+        audit::AuditAction::ChannelDeleted,
+        &channel_id,
+        "",
+    )
+    .await;
 
     Ok(Json(json!({ "deleted": true })))
 }

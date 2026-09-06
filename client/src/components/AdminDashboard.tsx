@@ -23,6 +23,7 @@ import { AuthAvatarImage } from "@/components/AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
+import { apiDownloadExport } from "@/lib/api";
 import { useConfirm } from "@/components/ConfirmDialog";
 
 type Tab = "overview" | "users" | "rooms" | "settings";
@@ -477,6 +478,9 @@ function SettingsTab({
   onToggleRequireAuthForUploads: (val: boolean) => void;
   onToggleRoomCreationDisabled: (val: boolean) => void;
 }) {
+  // Local: the export is a one-off action, not server settings state.
+  const [exporting, setExporting] = useState(false);
+
   const [localLimit, setLocalLimit] = useState(storageLimitMb);
   const limitChanged = localLimit !== storageLimitMb;
   const [localUploadLimit, setLocalUploadLimit] = useState(uploadLimitMb);
@@ -701,6 +705,39 @@ function SettingsTab({
             ? "Only logged-in users can view uploaded images and files."
             : "Uploaded files are publicly accessible to anyone with the link."}
         </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold">Backup</h3>
+          <p className="text-xs text-muted-foreground">
+            Download every room, message, member and setting as newline-delimited
+            JSON.
+          </p>
+        </div>
+        <p className="ui-meta">
+          Contains password hashes, TOTP secrets and recovery codes — a backup
+          that cannot restore logins is not a backup. Store it accordingly.
+          Uploaded media is not included; copy the server's{" "}
+          <code className="text-2xs">external/</code> directory alongside it.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border border-input px-3 py-1.5 text-sm hover:bg-muted transition-colors disabled:opacity-50"
+          disabled={exporting}
+          onClick={async () => {
+            setExporting(true);
+            try {
+              await apiDownloadExport();
+            } catch {
+              toast.error("Export failed");
+            } finally {
+              setExporting(false);
+            }
+          }}
+        >
+          {exporting ? "Preparing…" : "Download backup"}
+        </button>
       </div>
     </div>
   );

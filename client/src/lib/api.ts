@@ -2148,6 +2148,61 @@ export async function apiGetNotificationSettings() {
   return res.json() as Promise<{ settings: NotificationSettingEntry[] }>;
 }
 
+// ─── Audit log and backup ────────────────────────────────────────────────────
+
+export interface AuditEntry {
+  entry_id: string;
+  actor_id: string;
+  /** Namespaced, e.g. "member.kicked", "channel.updated". */
+  action: string;
+  target_id: string;
+  detail: string;
+  created_at: number;
+}
+
+/** The room's moderation log, newest first. Owners and moderators only. */
+export async function apiGetAuditLog(
+  roomId: string,
+  opts: { limit?: number; offset?: number; action?: string } = {},
+) {
+  const params = new URLSearchParams();
+  if (opts.limit) params.set("limit", String(opts.limit));
+  if (opts.offset) params.set("offset", String(opts.offset));
+  if (opts.action) params.set("action", opts.action);
+  const query = params.toString();
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/audit${query ? `?${query}` : ""}`,
+  );
+  if (!res.ok) throw new Error("Failed to load the audit log");
+  return res.json() as Promise<{
+    items: AuditEntry[];
+    has_more: boolean;
+    next_offset: number;
+  }>;
+}
+
+/**
+ * Download a full server backup as NDJSON. Admin only.
+ *
+ * Fetched rather than linked because it needs the auth header; the blob is
+ * held in memory, so a very large instance is better off calling the endpoint
+ * with curl.
+ */
+export async function apiDownloadExport() {
+  const res = await authenticatedFetch("/api/admin/export");
+  if (!res.ok) throw new Error("Failed to export");
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = `chatter-export-${stamp}.ndjson`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ─── Cross-device continuity ─────────────────────────────────────────────────
 
 export interface DraftEntry {
