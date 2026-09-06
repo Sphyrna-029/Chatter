@@ -208,8 +208,8 @@ export function CreateRoomDialog({ open, onOpenChange }: CreateRoomDialogProps) 
               </div>
             )}
           </div>
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5 min-w-0">
               <Label>Unlisted</Label>
               <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
             </div>
@@ -809,8 +809,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               )}
             </div>
             {isOwner && (
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5 min-w-0">
                   <Label>Unlisted</Label>
                   <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
                 </div>
@@ -818,8 +818,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
               </div>
             )}
             {(isOwner || isModerator) && (
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5 min-w-0">
                   <Label>Read Only</Label>
                   <p className="text-xs text-muted-foreground">Only owners and moderators can send messages</p>
                 </div>

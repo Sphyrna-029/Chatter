@@ -164,13 +164,13 @@ export function AdminDashboard() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b px-4 py-1 shrink-0">
+      <div className="flex gap-1 border-b px-4 py-1 shrink-0 overflow-x-auto">
         {(["overview", "metrics", "users", "rooms", "settings"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={cn(
-              "px-3 py-1.5 text-sm rounded-md transition-colors capitalize",
+              "px-3 py-1.5 text-sm rounded-md transition-colors capitalize shrink-0",
               tab === t ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted"
             )}
           >
@@ -830,8 +830,8 @@ function SettingsTab({
   return (
     <div className="space-y-4">
       <div className="border rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold">Invite-Only Mode</h3>
             <p className="text-xs text-muted-foreground">
               When enabled, new users must enter a valid invite code to register.
@@ -939,8 +939,8 @@ function SettingsTab({
       </div>
 
       <div className="border rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold">Disable Room Creation</h3>
             <p className="text-xs text-muted-foreground">
               Prevent all non-admin users from creating new rooms. Server owners can still create rooms.
@@ -1002,8 +1002,8 @@ function SettingsTab({
       </div>
 
       <div className="border rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold">Require Auth for Uploads</h3>
             <p className="text-xs text-muted-foreground">
               When enabled, uploaded files can only be accessed by authenticated users.

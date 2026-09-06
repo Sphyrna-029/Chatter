@@ -1556,7 +1556,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               </span>
             </div>
           )}
-          <div className="relative flex gap-2">
+          <div className="relative flex items-end gap-2">
             {/* Mention autocomplete */}
             {mentionOpen && mentionMatches.length > 0 && (
               <div className="absolute bottom-full left-0 mb-1 w-56 rounded-md border bg-popover p-1 shadow-lg z-50">
@@ -1660,10 +1660,10 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               <EyeOff className="h-4 w-4" />
             </Button>
 
-            <div className="relative flex-1">
+            <div className="relative flex-1 min-w-0">
               {/* Placeholder — shown when the div is empty */}
               {!input && (
-                <span className="absolute top-2 left-3 text-sm text-muted-foreground pointer-events-none select-none z-10">
+                <span className="absolute top-2 left-3 right-16 truncate text-sm text-muted-foreground pointer-events-none select-none z-10">
                   Type your message...
                 </span>
               )}
@@ -1677,7 +1677,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
                 suppressContentEditableWarning
-                className={`w-full rounded-lg border border-input bg-transparent px-3 py-2 pr-10 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
+                className={`w-full rounded-lg border border-input bg-transparent px-3 py-2 pr-16 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
                 style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: isMobile ? "24px" : "20px" }}
               />
 
@@ -1754,7 +1754,7 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
               onClick={handleSend}
               size={isMobile ? "lg" : "default"}
               disabled={displayLength > MAX_MESSAGE_LENGTH}
-              className={isMobile ? "px-5 text-base" : ""}
+              className={`shrink-0 ${isMobile ? "px-4 text-base" : ""}`}
             >
               Send
             </Button>

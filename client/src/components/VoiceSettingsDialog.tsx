@@ -271,8 +271,8 @@ export function VoiceSettingsDialog({
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <Label>Echo Cancellation</Label>
                 <p className="text-xs text-muted-foreground">
                   Reduces echo from speakers
@@ -300,8 +300,8 @@ export function VoiceSettingsDialog({
               </select>
             </div>
 
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <Label>Auto Gain Control</Label>
                 <p className="text-xs text-muted-foreground">
                   OS normalizes mic level automatically
@@ -383,8 +383,8 @@ export function VoiceSettingsDialog({
 
           {/* ── Advanced Tab ── */}
           <TabsContent value="advanced" className="space-y-5 mt-4">
-            <div className="flex items-center justify-between">
-              <div>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
                 <Label>Push to Talk</Label>
                 <p className="text-xs text-muted-foreground">
                   Hold backtick (`) to speak
