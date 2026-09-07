@@ -14,7 +14,8 @@ import {
   setRefreshToken,
   clearTokens,
   getAccessToken,
-  apiRefreshToken,
+  refreshSession,
+  hadSession,
   setIsAdmin,
   getIsAdmin,
   setTotpVerified,
@@ -251,22 +252,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     let attempt = 0;
 
     const restoreSession = () => {
-      void apiRefreshToken().then((outcome) => {
+      void refreshSession().then((outcome) => {
         if (cancelled) return;
         if (outcome === "refreshed") {
           const newToken = getAccessToken();
           if (newToken) loginWithToken(newToken);
+          dispatch({ type: "SET_SESSION_RESTORE", payload: "restored" });
           return;
         }
         // The server judged the cookie and there is no session behind it, so
         // the login screen is the right answer.
-        if (outcome === "rejected") return;
+        if (outcome === "rejected") {
+          dispatch({ type: "SET_SESSION_RESTORE", payload: "absent" });
+          return;
+        }
         // Nothing answered. Loading while the server is down or restarting is
         // not evidence of being logged out, and showing a login screen to
         // someone who still has a session is why refreshing the page "logs
         // them in" — it was only ever asking again at a better moment.
         attempt += 1;
-        if (attempt > SESSION_RESTORE_MAX_ATTEMPTS) return;
+        // Someone who has signed in on this browser is waiting behind the
+        // reconnecting screen, so keep asking however long it takes; the delay
+        // settles at SESSION_RESTORE_MAX_MS. A browser that has never held a
+        // session has a login form to get on with, so that one gives up.
+        if (!hadSession() && attempt > SESSION_RESTORE_MAX_ATTEMPTS) {
+          dispatch({ type: "SET_SESSION_RESTORE", payload: "absent" });
+          return;
+        }
+        dispatch({ type: "SET_SESSION_RESTORE", payload: "unreachable" });
         timer = setTimeout(
           restoreSession,
           Math.min(SESSION_RESTORE_BASE_MS * 2 ** (attempt - 1), SESSION_RESTORE_MAX_MS),
@@ -370,7 +383,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
       if (payload.exp * 1000 <= Date.now()) {
-        const outcome = await apiRefreshToken();
+        const outcome = await refreshSession();
         if (outcome === "rejected") {
           dispatch({ type: "LOGOUT" });
           return;

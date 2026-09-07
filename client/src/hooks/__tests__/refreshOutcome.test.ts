@@ -4,7 +4,14 @@
  * Needs a DOM for localStorage, which the refresh writes admin flags into.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { apiRefreshToken, getAccessToken, setAccessToken } from "@/lib/api";
+import {
+  apiRefreshToken,
+  clearTokens,
+  getAccessToken,
+  hadSession,
+  refreshSession,
+  setAccessToken,
+} from "@/lib/api";
 
 /** A refresh endpoint that answers however the test says. */
 function answering(reply: () => Promise<Response> | Response) {
@@ -62,5 +69,71 @@ describe("apiRefreshToken", () => {
     answering(() => new Response("<html>gateway</html>", { status: 200 }));
     await expect(apiRefreshToken()).resolves.toBe("unreachable");
     expect(getAccessToken()).toBeNull();
+  });
+});
+
+describe("refreshSession", () => {
+  it("shares one attempt between concurrent callers", async () => {
+    // The cookie is single-use: the server deletes the row as it rotates it. A
+    // second live request would be told the token was revoked — a 401 that
+    // reads exactly like a real logout, which is how a reconnect used to throw
+    // people out at random.
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      await new Promise((r) => setTimeout(r, 5));
+      return jsonResponse(200, { access_token: "rotated" });
+    }) as unknown as typeof fetch;
+
+    const [a, b, c] = await Promise.all([
+      refreshSession(),
+      refreshSession(),
+      refreshSession(),
+    ]);
+
+    expect(calls).toBe(1);
+    expect([a, b, c]).toEqual(["refreshed", "refreshed", "refreshed"]);
+  });
+
+  it("starts a fresh attempt once the last one has settled", async () => {
+    let calls = 0;
+    globalThis.fetch = vi.fn(async () => {
+      calls += 1;
+      return jsonResponse(200, { access_token: "rotated" });
+    }) as unknown as typeof fetch;
+
+    await refreshSession();
+    await refreshSession();
+    expect(calls).toBe(2);
+  });
+});
+
+describe("hadSession", () => {
+  it("is remembered once a session exists, so a load can wait for the server", () => {
+    expect(hadSession()).toBe(false);
+    setAccessToken("a-token");
+    expect(hadSession()).toBe(true);
+  });
+
+  it("is forgotten when the server refuses the cookie", async () => {
+    setAccessToken("a-token");
+    answering(() => jsonResponse(401, { error: "Refresh token revoked or not found" }));
+    await expect(apiRefreshToken()).resolves.toBe("rejected");
+    expect(hadSession()).toBe(false);
+  });
+
+  it("survives a server that never answered", async () => {
+    setAccessToken("a-token");
+    answering(() => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(apiRefreshToken()).resolves.toBe("unreachable");
+    expect(hadSession()).toBe(true);
+  });
+
+  it("is forgotten on an explicit sign-out", () => {
+    setAccessToken("a-token");
+    clearTokens();
+    expect(hadSession()).toBe(false);
   });
 });

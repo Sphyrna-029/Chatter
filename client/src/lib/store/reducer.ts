@@ -9,8 +9,13 @@ export function reducer(state: AppState, action: Action): AppState {
         accessToken: action.payload.accessToken,
         userId: action.payload.userId,
       };
+    case "SET_SESSION_RESTORE":
+      return { ...state, sessionRestore: action.payload };
     case "LOGOUT":
-      return { ...initialState };
+      // Deliberately not "pending": this is a settled answer, and leaving it
+      // pending would put the reconnecting screen in front of someone who has
+      // just been told their session is over.
+      return { ...initialState, sessionRestore: "absent" as const };
     case "SET_ROOMS":
       return {
         ...state,

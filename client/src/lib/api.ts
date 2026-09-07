@@ -6,9 +6,34 @@
 let _accessToken: string | null = null;
 let _refreshPromise: Promise<RefreshOutcome> | null = null;
 
+/** Whether this browser has ever held a session, so a load that cannot reach
+ *  the server knows to wait behind a reconnecting screen rather than present a
+ *  login form to someone who is signed in. Not a credential — it authorises
+ *  nothing, and the server still decides. */
+const HAD_SESSION_KEY = "had_session";
+
+export function hadSession(): boolean {
+  try {
+    return localStorage.getItem(HAD_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberHadSession(had: boolean) {
+  try {
+    if (had) localStorage.setItem(HAD_SESSION_KEY, "1");
+    else localStorage.removeItem(HAD_SESSION_KEY);
+  } catch {
+    // Private browsing: the session still works, it just will not be waited for.
+  }
+}
+
 /** Store the access token in memory only. */
 export function setAccessToken(token: string | null) {
   _accessToken = token;
+  // Every route into a session comes through here — login, register, refresh.
+  if (token) rememberHadSession(true);
 }
 
 /** No-op kept for call-site compatibility; the server manages the refresh-token
@@ -29,6 +54,7 @@ export function restoreTokens() {
 
 export function clearTokens() {
   _accessToken = null;
+  rememberHadSession(false);
   // Non-sensitive UI state that's fine to keep in localStorage:
   localStorage.removeItem("is_admin");
   localStorage.removeItem("totp_verified");
@@ -96,7 +122,9 @@ export async function apiRefreshToken(): Promise<RefreshOutcome> {
     // Only the server judging the cookie ends a session. A 5xx is the server
     // failing to answer for itself, and a proxy in front of one that is
     // restarting says 502/503/504 — none of which is a verdict on the session.
-    return res.status >= 500 ? "unreachable" : "rejected";
+    if (res.status >= 500) return "unreachable";
+    rememberHadSession(false);
+    return "rejected";
   }
 
   try {
@@ -109,6 +137,27 @@ export async function apiRefreshToken(): Promise<RefreshOutcome> {
     // A 200 that is not the payload we expect: the session is not disproven.
     return "unreachable";
   }
+}
+
+/**
+ * Refresh, sharing one attempt across every caller.
+ *
+ * The refresh cookie is single-use: the server deletes the row as it rotates
+ * it. Two refreshes in flight at once therefore means the loser is told the
+ * token was "revoked or not found" — a 401, indistinguishable from a real
+ * logout — and the user is thrown out mid-session. That race is exactly what a
+ * reconnect provokes, with the socket and several pending requests all noticing
+ * an expired token at the same moment, which is why it struck at random.
+ *
+ * Nothing may call apiRefreshToken directly. This is the only way in.
+ */
+export function refreshSession(): Promise<RefreshOutcome> {
+  if (!_refreshPromise) {
+    _refreshPromise = apiRefreshToken().finally(() => {
+      _refreshPromise = null;
+    });
+  }
+  return _refreshPromise;
 }
 
 async function authenticatedFetch(
@@ -124,12 +173,7 @@ async function authenticatedFetch(
     // Only attempt refresh when we have an access token (i.e., we were logged in)
     // to avoid an extra round-trip for genuinely unauthenticated requests.
     // Deduplicate concurrent refresh attempts
-    if (!_refreshPromise) {
-      _refreshPromise = apiRefreshToken().finally(() => {
-        _refreshPromise = null;
-      });
-    }
-    const refreshed = await _refreshPromise;
+    const refreshed = await refreshSession();
     if (refreshed === "refreshed") {
       // Retry with new token
       return fetch(url, {
@@ -1194,12 +1238,7 @@ function uploadSingleFile(
           reject(new Error("Invalid response from server"));
         }
       } else if (xhr.status === 401 && _accessToken) {
-        if (!_refreshPromise) {
-          _refreshPromise = apiRefreshToken().finally(() => {
-            _refreshPromise = null;
-          });
-        }
-        _refreshPromise.then((refreshed) => {
+        refreshSession().then((refreshed) => {
           if (refreshed !== "refreshed") {
             reject(new Error("Upload failed - authentication expired"));
             return;
@@ -1260,10 +1299,7 @@ function uploadChunkXhrOnce(
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
       } else if (xhr.status === 401 && _accessToken) {
-        if (!_refreshPromise) {
-          _refreshPromise = apiRefreshToken().finally(() => { _refreshPromise = null; });
-        }
-        _refreshPromise.then((refreshed) => {
+        refreshSession().then((refreshed) => {
           if (refreshed !== "refreshed") { reject(new Error("Auth expired")); return; }
           const retry = new XMLHttpRequest();
           retry.open("POST", "/api/upload/chunk");

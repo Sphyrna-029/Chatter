@@ -108,6 +108,12 @@ export interface AppState {
   typingUsers: string[];
   // Connection
   wsConnected: boolean;
+  /** How far the page-load attempt to restore a session has got.
+   *
+   *  "pending" is not "logged out": until the server answers, an authenticated
+   *  user must not be shown a login form. Only "absent" — the server judging
+   *  the cookie and refusing it — means there is no session. */
+  sessionRestore: "pending" | "restored" | "absent" | "unreachable";
   // Admin
   isAdmin: boolean;
   adminDashboardOpen: boolean;
@@ -168,6 +174,7 @@ export const resumePointsMap = new Map<
 export type Action =
   | { type: "LOGIN"; payload: { accessToken: string; userId: string } }
   | { type: "LOGOUT" }
+  | { type: "SET_SESSION_RESTORE"; payload: AppState["sessionRestore"] }
   | { type: "SET_ROOMS"; payload: { roomIds: string[]; roomInfoMap: Record<string, RoomInfo> } }
   | { type: "SELECT_ROOM"; payload: string | null }
   | { type: "SET_MESSAGES"; payload: { messages: MatrixMessage[]; hasMore: boolean } }
@@ -330,6 +337,7 @@ export const initialState: AppState = {
   threadMessages: [],
   typingUsers: [],
   wsConnected: false,
+  sessionRestore: "pending",
   isAdmin: false,
   adminDashboardOpen: false,
   requireAuthForUploads: false,
