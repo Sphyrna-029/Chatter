@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,7 +11,13 @@ import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { useThemeSettings, THEMES, type ThemeColors } from "@/hooks/useThemeSettings";
+import {
+  useThemeSettings,
+  resolveThemeColors,
+  type ThemeColors,
+  type ThemeMode,
+} from "@/hooks/useThemeSettings";
+import { isDarkColor } from "@/lib/color";
 import { Input } from "@/components/ui/input";
 
 interface VoiceSettingsDialogProps {
@@ -24,7 +30,16 @@ export function VoiceSettingsDialog({
   onOpenChange,
 }: VoiceSettingsDialogProps) {
   const { settings, updateSettings } = useVoiceSettings();
-  const { themeId, setTheme, customThemes, addCustomTheme, updateCustomTheme, deleteCustomTheme, exportTheme, importTheme } = useThemeSettings();
+  const {
+    themeId,
+    setTheme,
+    themes,
+    addCustomTheme,
+    updateCustomTheme,
+    deleteCustomTheme,
+    exportTheme,
+    importTheme,
+  } = useThemeSettings();
   const [creatingTheme, setCreatingTheme] = useState(false);
   const [editingThemeId, setEditingThemeId] = useState<string | null>(null);
   const [themeName, setThemeName] = useState("My Theme");
@@ -34,10 +49,22 @@ export function VoiceSettingsDialog({
     accent: "#e94560",
     primary: "#eaeaea",
   });
+  /** null follows the background colour; a value is an explicit choice. */
+  const [themeMode, setThemeMode] = useState<ThemeMode | null>(null);
   const [copiedThemeId, setCopiedThemeId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importJson, setImportJson] = useState("");
   const [importError, setImportError] = useState("");
+
+  const effectiveMode: ThemeMode =
+    themeMode ?? (isDarkColor(themeColors.background) ? "dark" : "light");
+
+  // Built-in swatches come out of the stylesheet, so what the picker shows is
+  // what the theme actually renders. Cached per theme after the first read.
+  const themeSwatches = useMemo(
+    () => themes.map((theme) => ({ theme, colors: resolveThemeColors(theme) })),
+    [themes],
+  );
   const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
   const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
   const [micLevel, setMicLevel] = useState(0);
@@ -402,8 +429,8 @@ export function VoiceSettingsDialog({
           {/* ── Theme Tab ── */}
           <TabsContent value="theme" className="mt-4 space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              {[...THEMES, ...customThemes].map((theme) => {
-                const isCustom = theme.id.startsWith("custom-");
+              {themeSwatches.map(({ theme, colors }) => {
+                const isCustom = theme.colors !== null;
                 return (
                   <div key={theme.id} className="relative group">
                     <button
@@ -413,16 +440,16 @@ export function VoiceSettingsDialog({
                           ? "border-primary"
                           : "border-muted-foreground/20 hover:border-muted-foreground/40"
                       }`}
-                      style={{ backgroundColor: theme.colors.background }}
+                      style={{ backgroundColor: colors.background }}
                     >
                       <span
                         className="block text-sm font-medium mb-2"
-                        style={{ color: theme.colors.primary }}
+                        style={{ color: colors.primary }}
                       >
                         {theme.name}
                       </span>
                       <div className="flex gap-1.5">
-                        {Object.values(theme.colors).map((color, i) => (
+                        {Object.values(colors).map((color, i) => (
                           <div
                             key={i}
                             className="h-4 w-4 rounded-full border border-white/10"
@@ -438,7 +465,8 @@ export function VoiceSettingsDialog({
                           onClick={() => {
                             setEditingThemeId(theme.id);
                             setThemeName(theme.name);
-                            setThemeColors(theme.colors);
+                            setThemeColors(colors);
+                            setThemeMode(theme.mode);
                             setCreatingTheme(true);
                           }}
                         >
@@ -516,6 +544,32 @@ export function VoiceSettingsDialog({
                     </label>
                   ))}
                 </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <Label className="text-xs">Base palette</Label>
+                    <p className="ui-hint">
+                      Decides the colours a theme does not name for itself —
+                      error, success, warning. Follows the background until you
+                      pick.
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 rounded-md border border-muted-foreground/20 p-0.5">
+                    {(["light", "dark"] as const).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => setThemeMode(m)}
+                        className={`rounded px-2 py-1 text-2xs capitalize transition-colors ${
+                          effectiveMode === m
+                            ? "bg-primary text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 {/* Live preview */}
                 <div
                   className="rounded-lg p-3"
@@ -543,9 +597,18 @@ export function VoiceSettingsDialog({
                   disabled={!themeName.trim()}
                   onClick={() => {
                     if (editingThemeId) {
-                      updateCustomTheme(editingThemeId, themeName.trim(), themeColors);
+                      updateCustomTheme(
+                        editingThemeId,
+                        themeName.trim(),
+                        themeColors,
+                        effectiveMode,
+                      );
                     } else {
-                      const t = addCustomTheme(themeName.trim(), themeColors);
+                      const t = addCustomTheme(
+                        themeName.trim(),
+                        themeColors,
+                        effectiveMode,
+                      );
                       setTheme(t.id);
                     }
                     setCreatingTheme(false);
@@ -570,6 +633,7 @@ export function VoiceSettingsDialog({
                       accent: "#e94560",
                       primary: "#eaeaea",
                     });
+                    setThemeMode(null);
                     setCreatingTheme(true);
                   }}
                 >
@@ -587,24 +651,22 @@ export function VoiceSettingsDialog({
                 >
                   Import Theme
                 </Button>
-                {themeId !== "light" && themeId !== "dark" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={async () => {
-                      const json = exportTheme(themeId);
-                      if (!json) return;
-                      try {
-                        await navigator.clipboard.writeText(json);
-                        setCopiedThemeId(themeId);
-                        setTimeout(() => setCopiedThemeId(null), 2000);
-                      } catch {}
-                    }}
-                  >
-                    {copiedThemeId === themeId ? "Copied!" : "Export Current"}
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                  onClick={async () => {
+                    const json = exportTheme(themeId);
+                    if (!json) return;
+                    try {
+                      await navigator.clipboard.writeText(json);
+                      setCopiedThemeId(themeId);
+                      setTimeout(() => setCopiedThemeId(null), 2000);
+                    } catch {}
+                  }}
+                >
+                  {copiedThemeId === themeId ? "Copied!" : "Export Current"}
+                </Button>
               </div>
             )}
 

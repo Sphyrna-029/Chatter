@@ -6,7 +6,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { ChatLayout } from "@/components/ChatLayout";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
-import { useThemeSettings } from "@/hooks/useThemeSettings";
+import { ThemeProvider } from "@/hooks/useThemeSettings";
 
 // Only ever reached by following an invite link, which is a fresh navigation
 // anyway — no reason for every other load to carry it.
@@ -66,16 +66,16 @@ function AppContent() {
 }
 
 function App() {
-  useThemeSettings();
-
   return (
-    <AppProvider>
-      <TooltipProvider>
-        <ConfirmProvider>
-          <AppContent />
-        </ConfirmProvider>
-      </TooltipProvider>
-    </AppProvider>
+    <ThemeProvider>
+      <AppProvider>
+        <TooltipProvider>
+          <ConfirmProvider>
+            <AppContent />
+          </ConfirmProvider>
+        </TooltipProvider>
+      </AppProvider>
+    </ThemeProvider>
   );
 }
 

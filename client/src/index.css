@@ -109,7 +109,13 @@ html {
   }
 }
 
-:root {
+/* `[data-theme="light"]` and `[data-theme="dark"]` below are aliases, never set
+   on <html> — the two base themes are the bare `:root` and `.dark` blocks. They
+   exist so the theme picker can resolve any theme's colours by matching a rule
+   on a detached probe element, rather than keeping a second hand-copied set of
+   hex values in TypeScript that drifts from these. */
+:root,
+[data-theme="light"] {
   --radius: 0.875rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -150,7 +156,8 @@ html {
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-.dark {
+.dark,
+[data-theme="dark"] {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
