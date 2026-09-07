@@ -99,6 +99,36 @@ function clampVolume(volume: number): number {
 /** The URL an event resolves to for a given room, or null for the derived
  *  reversed-join leave sound. */
 /**
+ * An arrival sound waiting for the connection it announces.
+ *
+ * Your own sting is triggered by the server registering the join, which happens
+ * before any audio is negotiated — so it played into a call you could not yet
+ * hear or be heard in, and finished before anyone arrived. Held here instead,
+ * and released when the voice publisher actually connects.
+ *
+ * Module state beside the store, like `screenStreamsMap`: nothing renders from
+ * it, and a re-render must not replay a sound.
+ */
+let pendingArrival: { url: string; gain: number } | null = null;
+
+/** Hold an arrival sound until the connection it announces is up. */
+export function deferArrivalSound(sound: { url: string; gain: number } | null) {
+  pendingArrival = sound;
+}
+
+/** Play whatever was held, once. A second call after it is nothing. */
+export function playDeferredArrivalSound() {
+  const sound = pendingArrival;
+  pendingArrival = null;
+  if (sound) playSoundUrl(sound.url, sound.gain);
+}
+
+/** Forget it — the call being announced is not happening. */
+export function dropDeferredArrivalSound() {
+  pendingArrival = null;
+}
+
+/**
  * What an arrival in a voice channel sounds like: the member's own entrance
  * sting where they have one, otherwise the room's join sound.
  *

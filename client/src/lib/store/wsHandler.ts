@@ -9,7 +9,14 @@ import {
   shouldNotify,
   showDesktopNotification,
 } from "@/lib/notifications";
-import { arrivalSound, playSound, playSoundUrl, prewarmSounds, type SoundPack } from "@/lib/sounds";
+import {
+  arrivalSound,
+  deferArrivalSound,
+  playSound,
+  playSoundUrl,
+  prewarmSounds,
+  type SoundPack,
+} from "@/lib/sounds";
 
 // Warm the derived leave sound now, so the first leave is not silent while
 // it decodes. See lib/sounds.ts.
@@ -483,7 +490,15 @@ export function createWsMessageHandler(
             msg.entrance_sound_url as string | undefined,
             packFor(stateRef, msg.room_id),
           );
-          if (arrival) playSoundUrl(arrival.url, arrival.gain);
+          if (msg.user_id === stateRef.current.userId) {
+            // Your own arrival is announced when the server registers the join,
+            // which is before any audio is negotiated. Held until the voice
+            // publisher connects, so the sound marks arriving in a call you can
+            // hear rather than the intention to.
+            deferArrivalSound(arrival);
+          } else if (arrival) {
+            playSoundUrl(arrival.url, arrival.gain);
+          }
         }
       }
     } else if (msg.type === "voice_user_left") {

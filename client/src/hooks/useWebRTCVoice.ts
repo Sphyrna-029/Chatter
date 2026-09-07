@@ -1,7 +1,12 @@
 import { useCallback, useRef, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { useVoiceSettings } from "@/hooks/useVoiceSettings";
-import { playSound, type SoundPack } from "@/lib/sounds";
+import {
+  dropDeferredArrivalSound,
+  playDeferredArrivalSound,
+  playSound,
+  type SoundPack,
+} from "@/lib/sounds";
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 import { toast } from "sonner";
 
@@ -86,6 +91,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (pc !== voicePublisherPcRef.current) return;
       if (pc.connectionState === "connected") {
         voicePublishRetryCountRef.current = 0;
+        // Audio is flowing now, so the arrival this call was announcing has
+        // actually happened. Held since the join was acknowledged; a retry
+        // simply releases it later, and leaving first drops it entirely.
+        playDeferredArrivalSound();
       } else if (pc.connectionState === "failed") {
         const attempt = voicePublishRetryCountRef.current + 1;
         console.warn(`[voice] Publisher connection failed (attempt ${attempt}/${VOICE_PUBLISH_MAX_RETRIES})`);
@@ -585,6 +594,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   }, [dispatch, cleanupScreenRef]);
 
   const leaveVoice = useCallback(async () => {
+    // Leaving before the connection came up: the arrival it was waiting on is
+    // not going to happen, so the sound must not surface on some later call.
+    dropDeferredArrivalSound();
     await teardownLocalVoice();
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {

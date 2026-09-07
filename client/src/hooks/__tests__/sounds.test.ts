@@ -6,6 +6,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   arrivalSound,
+  deferArrivalSound,
+  dropDeferredArrivalSound,
+  playDeferredArrivalSound,
   DEFAULT_SOUND_SETTINGS,
   loadSoundSettings,
   resolveSound,
@@ -124,5 +127,64 @@ describe("arrivalSound", () => {
     const result = arrivalSound(sting, pack);
     expect(result).not.toBeNull();
     expect(Object.keys(result!).sort()).toEqual(["gain", "url"]);
+  });
+});
+
+/** jsdom has no audio pipeline, so playback is observed by the urls it would
+ *  have constructed. */
+function recordingPlayback(body: (played: string[]) => void) {
+  const played: string[] = [];
+  const OriginalAudio = globalThis.Audio;
+  class FakeAudio {
+    volume = 1;
+    src: string;
+    constructor(src: string) {
+      this.src = src;
+      played.push(src);
+    }
+    play() {
+      return Promise.resolve();
+    }
+  }
+  globalThis.Audio = FakeAudio as unknown as typeof Audio;
+  try {
+    body(played);
+  } finally {
+    globalThis.Audio = OriginalAudio;
+  }
+}
+
+describe("deferred arrival sound", () => {
+  const sound = { url: "/external/uploads/u1/my-sting.wav", gain: 1 };
+
+  beforeEach(() => {
+    dropDeferredArrivalSound();
+  });
+
+  it("plays nothing until it is released", () => {
+    recordingPlayback((played) => {
+      deferArrivalSound(sound);
+      expect(played).toEqual([]);
+      playDeferredArrivalSound();
+      expect(played).toEqual([sound.url]);
+    });
+  });
+
+  it("plays once, however many times it is released", () => {
+    recordingPlayback((played) => {
+      deferArrivalSound(sound);
+      playDeferredArrivalSound();
+      playDeferredArrivalSound();
+      expect(played).toEqual([sound.url]);
+    });
+  });
+
+  it("forgets a sound whose call never connected", () => {
+    recordingPlayback((played) => {
+      deferArrivalSound(sound);
+      dropDeferredArrivalSound();
+      playDeferredArrivalSound();
+      expect(played).toEqual([]);
+    });
   });
 });
