@@ -147,7 +147,16 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_ROOM_MEMBERS":
       return { ...state, roomMembers: action.payload };
     case "SET_PRESENCE":
-      return { ...state, userPresence: action.payload };
+      // Merged, not replaced. Every caller fetches presence for one room, so
+      // replacing threw away everyone outside it: opening a DM left the rest of
+      // the list with no presence at all, and their avatars and display names
+      // fell back to initials until something happened to refetch them. A
+      // presence entry going stale is corrected by the next `presence_update`;
+      // a discarded one is not corrected by anything.
+      return {
+        ...state,
+        userPresence: { ...state.userPresence, ...action.payload },
+      };
     case "SET_VOICE_STATE":
       return { ...state, ...action.payload };
     case "SET_VOICE_MEMBERS":
