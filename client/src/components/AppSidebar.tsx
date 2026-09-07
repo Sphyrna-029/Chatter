@@ -130,7 +130,12 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     // Streak display calculations
     // A one-to-one DM shows the other person's face. A group has no single
     // face to show, so it keeps the conversation glyph.
-    const dmUserIds = isDm ? (info?.dm_user_ids ?? []) : [];
+    // Self is filtered out server-side, and again here: a DM that listed both
+    // members would have two ids, no single peer, and would silently fall back
+    // to the glyph — a failure that looks exactly like the field being absent.
+    const dmUserIds = isDm
+      ? (info?.dm_user_ids ?? []).filter((id) => id !== state.userId)
+      : [];
     const dmPeerId = dmUserIds.length === 1 ? dmUserIds[0] : null;
     // Presence first — it follows an avatar change live — then the copy that
     // came down with the room, which is there before the DM is ever opened.

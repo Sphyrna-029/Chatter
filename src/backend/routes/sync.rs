@@ -284,12 +284,12 @@ pub(crate) async fn sync(
             // and members are only loaded for the room currently open — a list
             // of every conversation needs the ids up front. Taken from the
             // membership cache, so this costs no query.
-            let others: Vec<String> = {
-                let rm = state.room_members.read().await;
-                rm.get(room_id)
-                    .map(|members| members.iter().filter(|m| *m != &user_id).cloned().collect())
-                    .unwrap_or_default()
-            };
+            // `members` is the list this loop is already iterating. Taking a
+            // second read on `room_members` here risked a deadlock rather than
+            // a stale answer: tokio's RwLock is write-preferring, so a join
+            // arriving mid-sync would queue a writer behind the guard held for
+            // the whole loop, and this read would then wait on that writer.
+            let others: Vec<String> = members.iter().filter(|m| **m != user_id).cloned().collect();
             // Their avatar travels with the id. Presence — the client's usual
             // source for a face — is only loaded for the room being viewed, so
             // a list of every conversation would otherwise show initials until
