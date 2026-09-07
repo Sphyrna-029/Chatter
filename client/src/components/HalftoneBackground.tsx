@@ -239,7 +239,7 @@ export function HalftoneBackground() {
       const exclusion = getExclusionZone();
 
       // Measure text width to avoid placing off-screen
-      ctx!.font = `${FONT_SIZE}px "JetBrains Mono", monospace`;
+      ctx!.font = `${FONT_SIZE}px "JetBrains Mono Variable", "JetBrains Mono", monospace`;
       const textWidth = ctx!.measureText(text).width;
 
       const margin = 40;
@@ -310,7 +310,7 @@ export function HalftoneBackground() {
         ctx!.drawImage(noiseCanvas, 0, 0, w, h);
       }
 
-      ctx!.font = `${FONT_SIZE}px "JetBrains Mono", monospace`;
+      ctx!.font = `${FONT_SIZE}px "JetBrains Mono Variable", "JetBrains Mono", monospace`;
       ctx!.textBaseline = "alphabetic";
 
       // Voltage dip — rare global flicker

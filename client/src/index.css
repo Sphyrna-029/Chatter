@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "highlight.js/styles/github-dark.min.css";
+/* Self-hosted, so first paint does not wait on fonts.googleapis.com and a
+   self-hosted server does not announce every launch to Google. Both files
+   are split by unicode-range, so a Latin reader fetches only the Latin
+   subset; Vite hashes them into /assets, where they are cached for a year. */
+@import "@fontsource-variable/jetbrains-mono";
+@import "@fontsource-variable/jetbrains-mono/wght-italic.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -9,14 +15,6 @@
    there is no hover state at all. Gate the hiding on a hover-capable pointer
    so the same markup shows the control outright on phones and tablets. */
 @custom-variant can-hover (@media (hover: hover) and (pointer: fine));
-
-@font-face {
-  font-family: "JetBrains Mono";
-  font-style: normal;
-  font-weight: 100 800;
-  font-display: swap;
-  src: url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap");
-}
 
 @theme inline {
   /* Two defined steps below text-xs, for the dense surfaces. Rendered sizes
@@ -29,10 +27,12 @@
        text-3xs 11px    badges and counters only — never a sentence */
   --text-2xs: 0.6875rem; /* 12.1px at the root size below */
   --text-3xs: 0.625rem;  /* 11px at the root size below */
-  --font-sans: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, "Liberation Mono", "Courier New", monospace;
-  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
-    Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-sans: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace,
+    SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -474,7 +474,7 @@ em, i {
   }
   body {
     @apply bg-background text-foreground;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
   }
 }
 
