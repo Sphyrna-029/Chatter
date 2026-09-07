@@ -363,6 +363,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // the viewport to the newest message loses the reader's place every time.
   useEffect(() => {
     if (!isNearBottomRef.current) return;
+    // SELECT_CHANNEL empties the list and the new channel's page arrives a
+    // request later, so opening a channel renders once with nothing in it.
+    // There is nothing to scroll to on that render, and letting it through
+    // spent the flag below before the messages it was meant for existed.
+    if (state.messages.length === 0) return;
     // A channel's first render starts at the top, so gliding down through it
     // would be a visible swoop. Only later arrivals animate.
     if (justSwitchedChannelRef.current) {
