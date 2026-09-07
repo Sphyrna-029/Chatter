@@ -98,6 +98,28 @@ function clampVolume(volume: number): number {
 
 /** The URL an event resolves to for a given room, or null for the derived
  *  reversed-join leave sound. */
+/**
+ * What an arrival in a voice channel sounds like: the member's own entrance
+ * sting where they have one, otherwise the room's join sound.
+ *
+ * A room's pack replaces the *generic* join sound — the one that plays for
+ * someone with nothing of their own. It is not a way for a room to decide what
+ * one of its members sounds like, so a pack never displaces a sting, and never
+ * plays alongside one: an arrival makes a single noise.
+ *
+ * A room that wants no stings at all switches them off, and the server then
+ * sends none — this is never handed one to weigh against a pack.
+ */
+export function arrivalSound(
+  entranceSting: string | undefined | null,
+  pack?: SoundPack,
+): { url: string; gain: number } | null {
+  const sting = entranceSting?.trim();
+  if (sting) return { url: sting, gain: 1 };
+  const url = resolveSound("voice-join", pack);
+  return url === null ? null : { url, gain: EVENT_GAIN["voice-join"] };
+}
+
 export function resolveSound(event: SoundEvent, pack?: SoundPack): string | null {
   const override = pack?.[event]?.trim();
   if (override) return override;

@@ -9,7 +9,7 @@ import {
   shouldNotify,
   showDesktopNotification,
 } from "@/lib/notifications";
-import { playSound, playSoundUrl, prewarmSounds, type SoundPack } from "@/lib/sounds";
+import { arrivalSound, playSound, playSoundUrl, prewarmSounds, type SoundPack } from "@/lib/sounds";
 
 // Warm the derived leave sound now, so the first leave is not silent while
 // it decodes. See lib/sounds.ts.
@@ -476,11 +476,14 @@ export function createWsMessageHandler(
             : msg.room_id === stateRef.current.voiceRoomId);
         if (inSameChannel || msg.user_id === stateRef.current.userId) {
           // Someone's own sting stands in for the generic join sound — one
-          // arrival should not make two noises. The server sends none when the
-          // room has entrance sounds switched off.
-          const sting = msg.entrance_sound_url as string | undefined;
-          if (sting) playSoundUrl(sting);
-          else playSound("voice-join", packFor(stateRef, msg.room_id));
+          // arrival should not make two noises, and a room's pack replaces the
+          // generic sound rather than anybody's own. The server sends no sting
+          // when the room has entrance sounds switched off.
+          const arrival = arrivalSound(
+            msg.entrance_sound_url as string | undefined,
+            packFor(stateRef, msg.room_id),
+          );
+          if (arrival) playSoundUrl(arrival.url, arrival.gain);
         }
       }
     } else if (msg.type === "voice_user_left") {

@@ -5,6 +5,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import {
+  arrivalSound,
   DEFAULT_SOUND_SETTINGS,
   loadSoundSettings,
   resolveSound,
@@ -88,5 +89,40 @@ describe("sound settings", () => {
     const settings = loadSoundSettings();
     expect(settings.enabled).toBe(false);
     expect(settings.volume).toBe(DEFAULT_SOUND_SETTINGS.volume);
+  });
+});
+
+describe("arrivalSound", () => {
+  const pack: SoundPack = { "voice-join": "/external/uploads/room/fanfare.wav" };
+  const sting = "/external/uploads/u1/my-sting.wav";
+
+  it("plays a member's own sting over the room's pack", () => {
+    // The point of the rule: a room replacing the generic join sound must not
+    // decide what one of its members sounds like when they arrive.
+    expect(arrivalSound(sting, pack)).toEqual({ url: sting, gain: 1 });
+  });
+
+  it("plays the room's pack for someone with no sting of their own", () => {
+    expect(arrivalSound(undefined, pack)?.url).toBe(
+      "/external/uploads/room/fanfare.wav",
+    );
+    expect(arrivalSound("", pack)?.url).toBe("/external/uploads/room/fanfare.wav");
+    expect(arrivalSound("   ", pack)?.url).toBe("/external/uploads/room/fanfare.wav");
+  });
+
+  it("falls back to the built-in join sound with neither", () => {
+    expect(arrivalSound(undefined)?.url).toBe("/external/vc-join.wav");
+  });
+
+  it("plays a sting even where the room has no pack", () => {
+    expect(arrivalSound(sting)).toEqual({ url: sting, gain: 1 });
+  });
+
+  it("answers with one sound, never a sting and a pack together", () => {
+    // An arrival makes a single noise; the shape of the answer is what
+    // guarantees it, since there is nowhere to put a second url.
+    const result = arrivalSound(sting, pack);
+    expect(result).not.toBeNull();
+    expect(Object.keys(result!).sort()).toEqual(["gain", "url"]);
   });
 });
