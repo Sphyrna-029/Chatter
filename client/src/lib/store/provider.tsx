@@ -570,7 +570,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
           banner_url: bannerEvent?.content?.banner_url || "",
           dm_streak_count: streakEvent?.content?.streak_count || 0,
           dm_streak_last_ts: streakEvent?.content?.last_message_ts || 0,
-          dm_user_ids: directEvent?.content?.dm_user_ids || [],
+          // Prefer the explicit list, fall back to the room's membership. The
+          // member events have always been in this payload, so a DM resolves
+          // its peer whatever the server is running — the explicit field only
+          // saves the client from filtering.
+          dm_user_ids:
+            directEvent?.content?.dm_user_ids?.length
+              ? directEvent.content.dm_user_ids
+              : (roomData.state.events as { type?: string; state_key?: string }[])
+                  .filter((e) => e.type === "m.room.member" && !!e.state_key)
+                  .map((e) => e.state_key as string),
           dm_avatars: directEvent?.content?.dm_avatars || {},
           dm_voice_count: directEvent?.content?.dm_voice_count || 0,
           sounds: soundsEvent?.content?.sounds || {},
