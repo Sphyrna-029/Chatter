@@ -709,15 +709,22 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
+      {/* Seven tabs of settings do not fit the default sm:max-w-lg, and with
+          no height cap the footer's Save button was pushed past the bottom
+          edge. Bound both, and make the panel the only scrolling part. */}
+      <DialogContent className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Room Settings</DialogTitle>
           <DialogDescription>
             Edit the room name, icon, and tags.
           </DialogDescription>
         </DialogHeader>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="py-2">
-          <TabsList className="w-full overflow-x-auto">
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="flex min-h-0 min-w-0 flex-1 flex-col py-2"
+        >
+          <TabsList className="w-full shrink-0 overflow-x-auto">
             <TabsTrigger value="general" className="flex-1 shrink-0">General</TabsTrigger>
             <TabsTrigger value="emojis" className="flex-1 shrink-0">Emojis</TabsTrigger>
             {isOwner && <TabsTrigger value="invites" className="flex-1 shrink-0">Invites</TabsTrigger>}
@@ -739,7 +746,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             )}
           </TabsList>
 
-          <TabsContent value="general" className="space-y-4 mt-4">
+          <TabsContent value="general" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
             <div className="flex items-start gap-4">
               <button
                 type="button"
@@ -838,7 +845,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 {SOUND_EVENT_LABELS.map(({ event, label }) => (
                   <div key={event} className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground w-24 shrink-0">{label}</span>
-                    <span className="text-sm truncate flex-1">
+                    <span className="min-w-0 flex-1 truncate text-sm">
                       {roomSounds[event]
                         ? decodeURIComponent(roomSounds[event].split("/").pop() || "Custom")
                         : "Default"}
@@ -984,7 +991,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             )}
           </TabsContent>
 
-          <TabsContent value="emojis" className="space-y-4 mt-4">
+          <TabsContent value="emojis" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
             <div className="space-y-2">
               <Label htmlFor="settings-room-emojis">Room Emojis</Label>
               <div className="flex gap-2">
@@ -1116,7 +1123,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           </TabsContent>
 
           {isOwner && (
-            <TabsContent value="invites" className="space-y-4 mt-4">
+            <TabsContent value="invites" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-1.5">
@@ -1205,7 +1212,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           )}
 
           {isOwner && (
-            <TabsContent value="bots" className="space-y-4 mt-4">
+            <TabsContent value="bots" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="space-y-2">
                 <Label className="flex items-center gap-1.5">
                   <BotIcon className="w-3.5 h-3.5" />
@@ -1408,7 +1415,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           )}
 
           {isOwner && (
-            <TabsContent value="webhooks" className="space-y-4 mt-4">
+            <TabsContent value="webhooks" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="space-y-2">
                 <Label className="flex items-center gap-1.5">
                   <WebhookIcon className="w-3.5 h-3.5" />
@@ -1587,7 +1594,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           )}
 
           {canManageBans && (
-            <TabsContent value="audit" className="space-y-3 mt-4">
+            <TabsContent value="audit" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
               <p className="text-xs text-muted-foreground">
                 Who did what in this room. Append-only — entries cannot be
                 edited or removed.
@@ -1644,7 +1651,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           )}
 
           {canManageBans && (
-            <TabsContent value="moderation" className="space-y-4 mt-4">
+            <TabsContent value="moderation" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
               <div className="space-y-2">
                 <Label className="flex items-center gap-1.5">
                   <ShieldBan className="w-3.5 h-3.5" />
@@ -1736,7 +1743,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             </TabsContent>
           )}
         </Tabs>
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
