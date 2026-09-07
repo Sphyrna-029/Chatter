@@ -1,7 +1,10 @@
 use axum::extract::ws::Message;
 use mongodb::Database;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     task::JoinHandle,
@@ -49,6 +52,14 @@ pub struct AppState {
     // Ephemeral in-memory state (not persisted)
     // Maps user_id -> { conn_id -> sender } so multiple devices can be connected simultaneously.
     pub(crate) active_websockets: RwLock<HashMap<String, HashMap<u64, WsSender>>>,
+    /// Which of a user's connections authenticated from a phone.
+    ///
+    /// Kept per connection rather than as one flag on the presence record: a
+    /// phone and a desktop can be connected at once, and the phone leaving has
+    /// to revise the answer while the desktop keeps the session — and the
+    /// record — alive. A single flag could only ever record whichever device
+    /// connected last, and nothing revised it until every device had gone.
+    pub(crate) mobile_connections: RwLock<HashMap<String, HashSet<u64>>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Server-muted users per room. Held outside VoiceMemberState so a moderator's
     // mute survives the user leaving and rejoining the channel.

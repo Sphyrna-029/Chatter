@@ -1,5 +1,5 @@
 use super::{
-    helpers::{broadcast_to_room, now_secs},
+    helpers::{broadcast_to_room, now_secs, presence_status},
     router,
     routes::media,
     state::{AppState, ServerSettings, UserRecord},
@@ -62,6 +62,7 @@ pub async fn build_state() -> Arc<AppState> {
         room_roles: RwLock::new(room_roles),
         banned_users: RwLock::new(banned_users),
         active_websockets: RwLock::new(HashMap::new()),
+        mobile_connections: RwLock::new(HashMap::new()),
         voice_channels: RwLock::new(HashMap::new()),
         voice_force_muted: RwLock::new(HashMap::new()),
         voice_channel_occupied_since: RwLock::new(HashMap::new()),
@@ -703,15 +704,7 @@ async fn steam_presence_poller(state: Arc<AppState>) {
                 let up = state.user_presence.read().await;
                 up.get(user_id)
                     .map(|p| {
-                        let st = if !p.connected {
-                            "offline".to_string()
-                        } else if let Some(ref ms) = p.manual_status {
-                            ms.clone()
-                        } else if now_secs() - p.last_active < 300.0 {
-                            "active".to_string()
-                        } else {
-                            "idle".to_string()
-                        };
+                        let st = presence_status(p, now_secs()).to_string();
                         (
                             st,
                             p.custom_status.clone(),
@@ -933,15 +926,7 @@ async fn spotify_presence_poller(state: Arc<AppState>) {
                 let up = state.user_presence.read().await;
                 up.get(user_id)
                     .map(|p| {
-                        let st = if !p.connected {
-                            "offline".to_string()
-                        } else if let Some(ref ms) = p.manual_status {
-                            ms.clone()
-                        } else if now_secs() - p.last_active < 300.0 {
-                            "active".to_string()
-                        } else {
-                            "idle".to_string()
-                        };
+                        let st = presence_status(p, now_secs()).to_string();
                         (
                             st,
                             p.custom_status.clone(),

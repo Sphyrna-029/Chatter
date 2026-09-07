@@ -1,5 +1,5 @@
 use super::super::{
-    helpers::{error_response, extract_token, get_user_from_token, now_secs},
+    helpers::{error_response, extract_token, get_user_from_token, now_secs, presence_status},
     state::{AppState, PresenceRecord, RoomRecord, UserRecord},
 };
 use axum::{
@@ -133,16 +133,7 @@ pub(crate) async fn build_presence_entry(
 
     match up.get(user_id) {
         Some(presence) => {
-            let time_since_active = current_time - presence.last_active;
-            let status = if !presence.connected {
-                "offline"
-            } else if let Some(ref ms) = presence.manual_status {
-                ms.as_str()
-            } else if time_since_active < 300.0 {
-                "active"
-            } else {
-                "idle"
-            };
+            let status = presence_status(presence, current_time);
 
             json!({
                 "status": status,

@@ -396,6 +396,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [state.accessToken]); // connectWebSocket is stable ([] deps), no need to include
 
+  // Say goodbye when the page is really going away.
+  //
+  // Closing a tab or app without a close frame leaves the server waiting out
+  // its 45s read timeout before anyone sees the session end — most of why a
+  // phone kept showing as online after it was closed. `persisted` separates a
+  // discard from a back/forward-cache suspend: an app merely switched away
+  // keeps its session, and reconnects on its own if the socket dies meanwhile.
+  useEffect(() => {
+    const onPageHide = (e: PageTransitionEvent) => {
+      if (e.persisted) return;
+      const ws = wsRef.current;
+      if (!ws) return;
+      ws.onclose = null; // nothing to reconnect to; the page is leaving
+      ws.close(1000, "page closed");
+      wsRef.current = null;
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
+
   // Send periodic heartbeats to keep presence active
   useEffect(() => {
     if (!state.accessToken) return;

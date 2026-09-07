@@ -1,8 +1,8 @@
 use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
     state::{
-        AppState, ChannelRecord, PermissionOverwrite, ReactionRecord, RolePermissions,
-        RoomMemberRecord,
+        AppState, ChannelRecord, PermissionOverwrite, PresenceRecord, ReactionRecord,
+        RolePermissions, RoomMemberRecord,
     },
 };
 use axum::{
@@ -14,6 +14,7 @@ use base64::Engine;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::time::SystemTime;
 
 // ─── JWT ─────────────────────────────────────────────────────────────────────
@@ -716,6 +717,34 @@ pub(crate) fn legacy_role_overwrites(
 /// Legacy `view_roles` are covered too, because `merged_overwrites` folds them
 /// in through `channel_overwrites` — a channel restricted the old way denies
 /// `view_channel` to everyone, so it is not public either.
+/// Whether a user's badge should read "on mobile": they are connected, and
+/// every connection they hold is a phone.
+///
+/// "Every", not "any". The badge tells other people where they can be reached;
+/// someone sitting at a desktop with their phone also logged in is at a
+/// keyboard, and a phone icon on them is a lie. It also means closing the
+/// phone revises the badge immediately instead of waiting for the desktop to
+/// go too.
+pub(crate) fn is_mobile_only(live_conn_ids: &[u64], mobile_conn_ids: &HashSet<u64>) -> bool {
+    !live_conn_ids.is_empty() && live_conn_ids.iter().all(|id| mobile_conn_ids.contains(id))
+}
+
+/// The status string a presence record resolves to, as every caller reports it.
+pub(crate) fn presence_status(presence: &PresenceRecord, now: f64) -> &str {
+    if !presence.connected {
+        "offline"
+    } else if let Some(ref manual) = presence.manual_status {
+        manual.as_str()
+    } else if now - presence.last_active < IDLE_AFTER_SECS {
+        "active"
+    } else {
+        "idle"
+    }
+}
+
+/// How long without activity before a connected user reads as idle.
+pub(crate) const IDLE_AFTER_SECS: f64 = 300.0;
+
 pub(crate) fn channel_is_public(
     category_overwrites: &[PermissionOverwrite],
     channel: &ChannelRecord,
@@ -1186,6 +1215,89 @@ mod tests {
             created_by: "@a:h".to_string(),
             created_at: 0,
         }
+    }
+
+    fn presence(connected: bool, last_active_ago: f64, manual: Option<&str>) -> PresenceRecord {
+        PresenceRecord {
+            last_active: 1_000.0 - last_active_ago,
+            last_typing: 0.0,
+            connected,
+            custom_status: String::new(),
+            manual_status: manual.map(|m| m.to_string()),
+            is_mobile: false,
+            steam_game: None,
+            steam_appid: None,
+            game_session_start: None,
+            spotify_track: None,
+            spotify_artist: None,
+            spotify_album_art: None,
+        }
+    }
+
+    #[test]
+    fn a_lone_phone_reads_as_mobile() {
+        let mobile: HashSet<u64> = [1].into_iter().collect();
+        assert!(is_mobile_only(&[1], &mobile));
+    }
+
+    #[test]
+    fn a_desktop_alongside_a_phone_is_not_mobile() {
+        // The badge says where someone can be reached. With a desktop session
+        // open they are at a keyboard, whatever else is logged in.
+        let mobile: HashSet<u64> = [1].into_iter().collect();
+        assert!(!is_mobile_only(&[1, 2], &mobile));
+    }
+
+    #[test]
+    fn closing_the_desktop_leaves_them_on_mobile() {
+        let mobile: HashSet<u64> = [1].into_iter().collect();
+        assert!(!is_mobile_only(&[1, 2], &mobile));
+        // ...and the phone is all that is left.
+        assert!(is_mobile_only(&[1], &mobile));
+    }
+
+    #[test]
+    fn closing_the_phone_clears_it_while_the_desktop_stays() {
+        // The regression: this used to keep saying mobile until every device
+        // had disconnected, because only the last one out revised the flag.
+        let mobile: HashSet<u64> = [1].into_iter().collect();
+        assert!(!is_mobile_only(&[2], &mobile));
+    }
+
+    #[test]
+    fn no_connections_is_never_mobile() {
+        let mobile: HashSet<u64> = [1, 2].into_iter().collect();
+        assert!(!is_mobile_only(&[], &mobile));
+    }
+
+    #[test]
+    fn status_is_offline_whenever_disconnected() {
+        // Even with a manual status set, and even if they were active a second
+        // ago: no connection is no presence.
+        assert_eq!(
+            presence_status(&presence(false, 1.0, Some("dnd")), 1_000.0),
+            "offline"
+        );
+    }
+
+    #[test]
+    fn a_manual_status_outranks_activity() {
+        assert_eq!(
+            presence_status(&presence(true, 1.0, Some("dnd")), 1_000.0),
+            "dnd"
+        );
+    }
+
+    #[test]
+    fn activity_decides_when_nothing_is_set_manually() {
+        assert_eq!(
+            presence_status(&presence(true, 1.0, None), 1_000.0),
+            "active"
+        );
+        assert_eq!(
+            presence_status(&presence(true, IDLE_AFTER_SECS + 1.0, None), 1_000.0),
+            "idle"
+        );
     }
 
     #[test]

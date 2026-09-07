@@ -21,7 +21,7 @@ use super::{
 use crate::backend::{
     helpers::{
         broadcast_to_room, channel_permissions, generate_id, get_user_from_token, get_user_role,
-        now_millis, now_secs, send_to_conn, send_to_user,
+        is_mobile_only, now_millis, now_secs, presence_status, send_to_conn, send_to_user,
     },
     state::{
         AppState, PresenceRecord, RoomRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord,
@@ -161,6 +161,19 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     }
 
     if !is_bot_connection {
+        // Record which connection this is before deriving the badge: a desktop
+        // session alongside a phone means they are at a keyboard.
+        if is_mobile {
+            state
+                .mobile_connections
+                .write()
+                .await
+                .entry(user_id.clone())
+                .or_default()
+                .insert(conn_id);
+        }
+        let mobile_now = current_is_mobile(&state, &user_id).await;
+
         // Update presence – preserve custom_status and manual_status on reconnect
         // On first connect (no existing PresenceRecord), load persisted values from MongoDB
         {
@@ -169,7 +182,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 p.last_active = now_secs();
                 p.last_typing = 0.0;
                 p.connected = true;
-                p.is_mobile = is_mobile;
+                p.is_mobile = mobile_now;
             } else {
                 // Load persisted custom_status and manual_status from user record
                 let (saved_custom_status, saved_manual_status) = {
@@ -187,7 +200,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                         connected: true,
                         custom_status: saved_custom_status,
                         manual_status: saved_manual_status,
-                        is_mobile,
+                        is_mobile: mobile_now,
                         steam_game: None,
                         steam_appid: None,
                         game_session_start: None,
@@ -2195,6 +2208,19 @@ async fn get_user_profile(
     }
 }
 
+/// The mobile badge for a user, from the connections they hold right now.
+async fn current_is_mobile(state: &AppState, user_id: &str) -> bool {
+    let live: Vec<u64> = {
+        let ws = state.active_websockets.read().await;
+        ws.get(user_id)
+            .map(|c| c.keys().copied().collect())
+            .unwrap_or_default()
+    };
+    let mobile = state.mobile_connections.read().await;
+    let empty = HashSet::new();
+    is_mobile_only(&live, mobile.get(user_id).unwrap_or(&empty))
+}
+
 pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id: u64) {
     // Teardown voice WebRTC
     teardown_voice_subscriptions_for_listener(state, user_id).await;
@@ -2337,6 +2363,56 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
     };
 
     // Only mark offline and broadcast when the last connection closes.
+    // Whether or not the session survives, this connection is gone.
+    {
+        let mut mobile = state.mobile_connections.write().await;
+        if let Some(conns) = mobile.get_mut(user_id) {
+            conns.remove(&conn_id);
+            if conns.is_empty() {
+                mobile.remove(user_id);
+            }
+        }
+    }
+
+    // A phone closing while a desktop stays connected leaves the session up, so
+    // nothing below runs — but the badge is now wrong and has to be corrected
+    // on its own. This is why the icon used to linger: the only code that
+    // revised it ran when the *last* connection went.
+    if still_connected && !user_id.starts_with("bot:") {
+        let mobile_now = current_is_mobile(state, user_id).await;
+        let changed = {
+            let mut up = state.user_presence.write().await;
+            match up.get_mut(user_id) {
+                Some(p) if p.is_mobile != mobile_now => {
+                    p.is_mobile = mobile_now;
+                    Some(presence_status(p, now_secs()).to_string())
+                }
+                _ => None,
+            }
+        };
+        if let Some(status) = changed {
+            let user_rooms: Vec<String> = {
+                let rm = state.room_members.read().await;
+                rm.iter()
+                    .filter(|(_, members)| members.contains(&user_id.to_string()))
+                    .map(|(rid, _)| rid.clone())
+                    .collect()
+            };
+            // Only the two fields that changed: the client merges a presence
+            // update field by field, so naming nothing else leaves the rest of
+            // their presence alone.
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": status,
+                "is_mobile": mobile_now,
+            });
+            for rid in user_rooms {
+                broadcast_to_room(state, &rid, &event).await;
+            }
+        }
+    }
+
     if !still_connected {
         if user_id.starts_with("bot:") {
             // Remove bot from room_members cache
@@ -2350,6 +2426,12 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
                 if let Some(p) = up.get_mut(user_id) {
                     p.connected = false;
                     p.last_active = now_secs();
+                    // The broadcast below has always said `is_mobile: false`;
+                    // the record itself kept saying true, so every later reader
+                    // — the presence endpoint, and the Steam and Spotify
+                    // pollers, which re-broadcast this field — put the phone
+                    // icon back.
+                    p.is_mobile = false;
                 }
             }
 
