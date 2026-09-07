@@ -115,7 +115,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const isWhiteboardRoom = info?.room_type === "whiteboard";
     const isWatchPartyRoom = info?.room_type === "watchparty";
     const memberCount = summary?.member_count ?? 0;
-    const voiceCount = summary?.voice_count ?? 0;
+    const voiceCount = isDm ? (info?.dm_voice_count ?? 0) : (summary?.voice_count ?? 0);
     const screenShareActive = summary?.screen_share_active ?? false;
 
     let roomName: string;
@@ -314,7 +314,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             screen share. The member count is static trivia that was competing
             with them for the same row, so it moved to the row's title. */}
         <span className="ml-auto flex shrink-0 items-center gap-1.5">
-          {!isDm && voiceCount > 0 && (
+          {voiceCount > 0 && (
             <span className="text-success" title={`${voiceCount} in voice`}>
               {/* Speaker rather than a microphone: the badge says the room is
                   audible, not that this viewer is transmitting. Two waves, not

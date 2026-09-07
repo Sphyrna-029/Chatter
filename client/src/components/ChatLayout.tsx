@@ -458,6 +458,20 @@ export function ChatLayout() {
 
   // On a phone the channel column would eat most of the viewport, so it moves
   // into a drawer and the chat gets the full width.
+  // A DM's call is room-scoped: passing the room id as the channel id is the
+  // path the server keeps for rooms without channels, and it stops a call in
+  // some other room's channel from being resolved as the DM's own.
+  const dmCall = {
+    join: () => {
+      if (state.currentRoomId) joinVoiceRef.current?.(state.currentRoomId);
+    },
+    leave: () => leaveVoiceRef.current?.(),
+    toggleMute: () => toggleMuteRef.current?.(),
+    toggleDeafen: () => toggleDeafenRef.current?.(),
+    startScreenShare: () => startScreenShareRef.current?.(),
+    stopScreenShare: () => stopScreenShareRef.current?.(),
+  };
+
   const showChannelColumn = hasChannels;
 
   const renderChannelList = (asDrawer: boolean) => (
@@ -671,7 +685,7 @@ export function ChatLayout() {
                           {state.activeThreadEventId ? (
                             <ThreadPanel />
                           ) : (
-                            <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                            <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} dmCall={dmCall} />
                           )}
                         </div>
                       </ResizablePanel>
@@ -680,7 +694,7 @@ export function ChatLayout() {
                 ) : state.activeThreadEventId ? (
                   <ThreadPanel />
                 ) : (
-                  <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                  <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} dmCall={dmCall} />
                 )}
                 {!isMobile && (
                   <MembersPanel

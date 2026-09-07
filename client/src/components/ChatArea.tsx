@@ -8,8 +8,9 @@ import { MessageItem } from "./MessageItem";
 import { MessagePanel, type PanelMode } from "./MessagePanel";
 import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
+import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
-import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile } from "lucide-react";
+import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -70,13 +71,27 @@ const mediaUrlRegex = /(https?:\/\/[^\s]+)/g;
 const mediaImageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
 const mediaVideoExtensions = /\.(mp4|webm|ogg|mov|mkv)(\?.*)?$/i;
 
-interface ChatAreaProps {
-  onJoinVoice?: () => void;
+/** Handlers for a DM's call, owned by ChatLayout where the voice hooks live. */
+export interface DMCallHandlers {
+  join: () => void;
+  leave: () => void;
+  toggleMute: () => void;
+  toggleDeafen: () => void;
+  startScreenShare: () => void;
+  stopScreenShare: () => void;
 }
 
-export function ChatArea({ onJoinVoice }: ChatAreaProps) {
+interface ChatAreaProps {
+  onJoinVoice?: () => void;
+  dmCall?: DMCallHandlers;
+}
+
+export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead, saveDraft } = useAppContext();
   const isMobile = useIsMobile();
+  // A DM's call is keyed by the room, so being in it is a room comparison.
+  const inThisDmCall =
+    state.inVoiceChannel && !!state.currentRoomId && state.voiceRoomId === state.currentRoomId;
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
@@ -1265,6 +1280,21 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           })()}
         </div>
         <div className="flex items-center gap-1">
+          {roomInfo?.is_direct && state.currentRoomId && dmCall && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="shrink-0"
+              onClick={inThisDmCall ? dmCall.leave : dmCall.join}
+              title={inThisDmCall ? "Leave call" : "Start a call"}
+            >
+              {inThisDmCall ? (
+                <PhoneOff className="h-4 w-4 text-destructive" />
+              ) : (
+                <Phone className="h-4 w-4" />
+              )}
+            </Button>
+          )}
           {roomInfo?.is_direct && state.currentRoomId && (
             <Button
               variant="ghost"
@@ -1313,6 +1343,18 @@ export function ChatArea({ onJoinVoice }: ChatAreaProps) {
           </Button>
         </div>
       </div>
+      {roomInfo?.is_direct && state.currentRoomId && dmCall && (
+        <DMCallBar
+          roomId={state.currentRoomId}
+          onJoin={dmCall.join}
+          onLeave={dmCall.leave}
+          onToggleMute={dmCall.toggleMute}
+          onToggleDeafen={dmCall.toggleDeafen}
+          onStartScreenShare={dmCall.startScreenShare}
+          onStopScreenShare={dmCall.stopScreenShare}
+        />
+      )}
+
       {state.currentRoomId && (
         <AddToDMDialog
           open={addToDMOpen}

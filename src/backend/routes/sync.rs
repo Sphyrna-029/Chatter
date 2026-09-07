@@ -305,6 +305,13 @@ pub(crate) async fn sync(
                     }
                 }
             }
+            // A DM's call is keyed by the room id, so its occupancy is one
+            // lookup. Seeded here because live join and leave events only tell
+            // a client about calls that start while it is running.
+            let dm_voice_count = {
+                let vc = state.voice_channels.read().await;
+                vc.get(room_id).map(|m| m.len()).unwrap_or(0)
+            };
             state_events.push(json!({
                 "type": "m.room.direct",
                 "state_key": "",
@@ -312,6 +319,7 @@ pub(crate) async fn sync(
                     "is_direct": true,
                     "dm_user_ids": others,
                     "dm_avatars": Value::Object(dm_avatars),
+                    "dm_voice_count": dm_voice_count,
                 },
                 "sender": room_data.creator
             }));

@@ -378,6 +378,19 @@ export function reducer(state: AppState, action: Action): AppState {
             ? { ...state.threadRootMessage, thread_name: action.payload.name }
             : state.threadRootMessage,
       };
+    case "SET_DM_VOICE_COUNT": {
+      // Only for rooms already known; a call in a room this client has never
+      // heard of is not something to invent an entry for.
+      const info = state.roomInfoMap[action.payload.roomId];
+      if (!info || info.dm_voice_count === action.payload.count) return state;
+      return {
+        ...state,
+        roomInfoMap: {
+          ...state.roomInfoMap,
+          [action.payload.roomId]: { ...info, dm_voice_count: action.payload.count },
+        },
+      };
+    }
     case "UPDATE_ROOM_TOPIC":
       return {
         ...state,

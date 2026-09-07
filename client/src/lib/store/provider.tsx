@@ -572,6 +572,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dm_streak_last_ts: streakEvent?.content?.last_message_ts || 0,
           dm_user_ids: directEvent?.content?.dm_user_ids || [],
           dm_avatars: directEvent?.content?.dm_avatars || {},
+          dm_voice_count: directEvent?.content?.dm_voice_count || 0,
           sounds: soundsEvent?.content?.sounds || {},
           // Rooms that predate the field, and any room whose state event is
           // missing, keep entrance sounds on — the field's default.

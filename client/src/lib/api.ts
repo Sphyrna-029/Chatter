@@ -870,6 +870,9 @@ export interface RoomInfo {
   /** Their avatars, carried with the room so the DM list can show a face
    *  before that conversation has ever been opened. */
   dm_avatars?: Record<string, string>;
+  /** How many are in this DM's call. Seeded on load, then kept current by
+   *  voice join and leave events, which reach every member of the room. */
+  dm_voice_count?: number;
   /** Room sound pack: event name -> `/external/...` URL. A missing entry means
    *  the client's built-in sound for that event. */
   sounds?: Record<string, string>;

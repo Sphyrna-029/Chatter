@@ -434,6 +434,12 @@ export function createWsMessageHandler(
         });
       }
     } else if (msg.type === "voice_user_joined") {
+      // Before the room filter: a DM's call has to reach its row in the list
+      // even when that conversation is not the one on screen. This is the only
+      // notice the other person gets that a call has started.
+      if (msg.room_id && Array.isArray(msg.voice_members)) {
+        dispatch({ type: "SET_DM_VOICE_COUNT", payload: { roomId: msg.room_id, count: msg.voice_members.length } });
+      }
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
@@ -478,6 +484,9 @@ export function createWsMessageHandler(
         }
       }
     } else if (msg.type === "voice_user_left") {
+      if (msg.room_id && Array.isArray(msg.voice_members)) {
+        dispatch({ type: "SET_DM_VOICE_COUNT", payload: { roomId: msg.room_id, count: msg.voice_members.length } });
+      }
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });

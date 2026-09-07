@@ -207,6 +207,8 @@ export type Action =
   | { type: "DELETE_THREAD"; payload: string }
   | { type: "UPDATE_MEMBER_EVENT"; payload: null }
   | { type: "UPDATE_ROOM_TOPIC"; payload: { roomId: string; topic: string } }
+  /** How many are in a DM's call, kept current for DMs that are not open. */
+  | { type: "SET_DM_VOICE_COUNT"; payload: { roomId: string; count: number } }
   | { type: "UPDATE_ROOM_SETTINGS"; payload: { roomId: string; name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; has_password?: boolean; read_only?: boolean; banner_url?: string } }
   | { type: "SET_TYPING_USER"; payload: string }
   | { type: "CLEAR_TYPING_USER"; payload: string }
