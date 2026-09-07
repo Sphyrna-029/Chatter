@@ -717,17 +717,17 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           </DialogDescription>
         </DialogHeader>
         <Tabs value={activeTab} onValueChange={setActiveTab} className="py-2">
-          <TabsList className="w-full">
-            <TabsTrigger value="general" className="flex-1">General</TabsTrigger>
-            <TabsTrigger value="emojis" className="flex-1">Emojis</TabsTrigger>
-            {isOwner && <TabsTrigger value="invites" className="flex-1">Invites</TabsTrigger>}
-            {isOwner && <TabsTrigger value="bots" className="flex-1">Bots</TabsTrigger>}
-            {isOwner && <TabsTrigger value="webhooks" className="flex-1">Webhooks</TabsTrigger>}
-            {canManageBans && <TabsTrigger value="moderation" className="flex-1">Moderation</TabsTrigger>}
+          <TabsList className="w-full overflow-x-auto">
+            <TabsTrigger value="general" className="flex-1 shrink-0">General</TabsTrigger>
+            <TabsTrigger value="emojis" className="flex-1 shrink-0">Emojis</TabsTrigger>
+            {isOwner && <TabsTrigger value="invites" className="flex-1 shrink-0">Invites</TabsTrigger>}
+            {isOwner && <TabsTrigger value="bots" className="flex-1 shrink-0">Bots</TabsTrigger>}
+            {isOwner && <TabsTrigger value="webhooks" className="flex-1 shrink-0">Webhooks</TabsTrigger>}
+            {canManageBans && <TabsTrigger value="moderation" className="flex-1 shrink-0">Moderation</TabsTrigger>}
             {canManageBans && (
               <TabsTrigger
                 value="audit"
-                className="flex-1"
+                className="flex-1 shrink-0"
                 onClick={() => {
                   // Fetched on first open rather than with the dialog: most
                   // visits to room settings are not about the log.

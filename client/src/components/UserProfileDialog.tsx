@@ -352,9 +352,21 @@ export function UserProfileDialog({
   // dialog is opened on yourself rather than with the account-tab bundle.
   useEffect(() => {
     if (!isSelf) return;
-    apiGetAccountStatus()
-      .then((data) => setEntranceSoundUrl(data.entrance_sound_url || ""))
-      .catch(() => {});
+    const load = () =>
+      apiGetAccountStatus()
+        .then((data) => setEntranceSoundUrl(data.entrance_sound_url || ""))
+        .catch(() => {});
+    load();
+    // The sound is set optimistically, and the server's verdict arrives later
+    // over the socket. Re-reading on a refusal puts the picker back to what is
+    // actually stored, rather than leaving it showing a sound that was never
+    // accepted.
+    const onRejected = (e: Event) => {
+      const scope = (e as CustomEvent<{ scope?: string }>).detail?.scope;
+      if (scope === "entrance") load();
+    };
+    window.addEventListener("sound-rejected", onRejected);
+    return () => window.removeEventListener("sound-rejected", onRejected);
   }, [isSelf]);
 
   useEffect(() => {
@@ -766,6 +778,10 @@ export function UserProfileDialog({
             <label className="text-xs font-medium text-muted-foreground">
               Entrance Sound
             </label>
+            <p className="text-3xs text-muted-foreground">
+              Up to 5 seconds. Plays to everyone in a voice channel when you join,
+              unless the room has entrance sounds turned off.
+            </p>
             <div className="flex items-center gap-2">
               <span className="text-sm text-foreground truncate flex-1">
                 {entranceSoundUrl
@@ -827,6 +843,28 @@ export function UserProfileDialog({
                 // at all. A few seconds of audio is never megabytes.
                 if (file.size > 2 * 1024 * 1024) {
                   toast.error("Entrance sound must be under 2 MB");
+                  return;
+                }
+                // The server measures it again and refuses anything over the
+                // limit; catching it here means the refusal does not arrive
+                // after an upload, as a toast, about a sound the picker is
+                // already showing as set.
+                const tooLong = await new Promise<number | null>((resolve) => {
+                  const objectUrl = URL.createObjectURL(file);
+                  const probe = new Audio();
+                  const done = (secs: number | null) => {
+                    URL.revokeObjectURL(objectUrl);
+                    resolve(secs);
+                  };
+                  probe.onloadedmetadata = () =>
+                    done(Number.isFinite(probe.duration) ? probe.duration : null);
+                  probe.onerror = () => done(null);
+                  probe.src = objectUrl;
+                });
+                if (tooLong !== null && tooLong > 5) {
+                  toast.error(
+                    `That sound is ${tooLong.toFixed(1)}s; the limit is 5s`,
+                  );
                   return;
                 }
                 setUploading(true);

@@ -603,6 +603,13 @@ export function createWsMessageHandler(
       // A chosen sound failed the server's length or format check. Without
       // this the file would simply never play and nothing would say why.
       toast.error(String(msg.error || "That sound could not be used"));
+      // The picker set it optimistically and the server did not store it, so
+      // say so: otherwise the profile keeps showing a sound that will never
+      // play, and previewing it works, because the file did upload — only the
+      // choice was refused.
+      window.dispatchEvent(
+        new CustomEvent("sound-rejected", { detail: { scope: String(msg.scope || "") } }),
+      );
     } else if (msg.type === "m.reply_notification") {
       if (msg.room_id !== stateRef.current.currentRoomId) {
         const ownStatus = stateRef.current.userPresence[stateRef.current.userId ?? ""]?.status;
