@@ -988,7 +988,12 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
       )}
 
       <ScrollArea className={`flex-1 min-h-0 ${panelCollapsed ? "hidden" : ""}`}>
-        <div className="py-1">
+        {/* The scrollbar is an overlay painted on top of the viewport, not a
+            column beside it, so anything flush to the right edge ends up
+            underneath it — the stream and camera buttons on a voice member,
+            which sit at the end of their row. Reserve its width (w-2.5) on the
+            content instead. */}
+        <div className="py-1 pr-2.5">
           {/* Uncategorized channels — drop zone for removing from category */}
           <div
             onDragOver={(e) => handleDragOver(e, "")}
