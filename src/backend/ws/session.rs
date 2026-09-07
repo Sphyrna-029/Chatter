@@ -1539,8 +1539,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 // Played to everyone in a voice channel without their asking,
                 // so its length is checked here rather than taken on trust.
                 match crate::backend::sounds::validate_sound_url(&state, sting).await {
-                    Ok(()) => {
-                        update_doc.insert("entrance_sound_url", sting.trim());
+                    // Stored as the path the validator hands back, not as the
+                    // absolute URL the upload answered with, so it keeps
+                    // working if the instance changes address.
+                    Ok(normalized) => {
+                        update_doc.insert("entrance_sound_url", normalized);
                     }
                     Err(err) => {
                         send_to_conn(

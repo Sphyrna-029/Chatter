@@ -1209,13 +1209,14 @@ pub(crate) async fn update_room_settings(
                     &format!("Unknown sound event: {event}"),
                 ));
             }
-            if let Err(err) = crate::backend::sounds::validate_sound_url(&state, url).await {
-                return Err(error_response(StatusCode::BAD_REQUEST, &err.message()));
-            }
+            let normalized = match crate::backend::sounds::validate_sound_url(&state, url).await {
+                Ok(normalized) => normalized,
+                Err(err) => return Err(error_response(StatusCode::BAD_REQUEST, &err.message())),
+            };
             // An empty URL clears the override back to the built-in sound
             // rather than storing a blank one.
-            if !url.trim().is_empty() {
-                cleaned.insert(event.clone(), url.trim().to_string());
+            if !normalized.is_empty() {
+                cleaned.insert(event.clone(), normalized);
             }
         }
         set_doc.insert(
