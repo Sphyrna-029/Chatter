@@ -518,15 +518,27 @@ em, i {
   #root {
     height: 100dvh;
     overflow: hidden;
+
+    /* `viewport-fit=cover` in index.html is what makes these non-zero; without
+       it iOS letterboxes the app and every inset reads 0. Insetting the shell
+       once covers every bottom bar — composer, thread reply, forum — instead
+       of each one remembering to clear the home indicator on its own.
+
+       env() reports the device inset regardless of nesting, so anything inside
+       must NOT add its own or the padding doubles. */
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Landscape is where the camera housing eats into the sides. */
+  @media (orientation: landscape) {
+    #root {
+      padding-left: env(safe-area-inset-left);
+      padding-right: env(safe-area-inset-right);
+    }
   }
 
   body {
     -webkit-text-size-adjust: 100%;
-  }
-
-  /* Ensure bottom input clears the safe area on notched devices */
-  .border-t.p-3 {
-    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 
   /* Tighter chat messages on mobile */
