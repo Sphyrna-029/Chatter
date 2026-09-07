@@ -33,7 +33,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { UserProfileDialog } from "./UserProfileDialog";
-import hljs from "highlight.js";
+import { CodeBlock } from "./CodeBlock";
 
 // ─── Custom name font registration ──────────────────────────────────────────
 import { ensureFontFace } from "@/lib/fontFace";
@@ -165,40 +165,6 @@ function parseMessageSegments(body: string): MessageSegment[] {
   }
 
   return segments;
-}
-
-function CodeBlock({ code, language }: { code: string; language?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const highlighted = useMemo(() => {
-    if (language && hljs.getLanguage(language)) {
-      return hljs.highlight(code, { language }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  }, [code, language]);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="relative group/code my-1">
-      <button
-        onClick={handleCopy}
-        className="absolute right-2 top-2 can-hover:opacity-0 can-hover:group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
-      >
-        {copied ? "Copied!" : "Copy"}
-      </button>
-      <pre className="rounded-md bg-[#0d1117] p-3 overflow-x-auto text-sm">
-        <code
-          className="hljs"
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
-      </pre>
-    </div>
-  );
 }
 
 const youtubeRegex = /(?:youtube\.com\/(?:watch\?.*v=|shorts\/)|youtu\.be\/)([\w-]{11})/;

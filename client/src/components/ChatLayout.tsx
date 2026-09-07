@@ -1,16 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
 import { WifiOff, ChevronRight, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { AdminDashboard } from "./AdminDashboard";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
-import { ForumArea } from "./ForumArea";
-import { ShowcaseArea } from "./ShowcaseArea";
-import { WatchPartyArea } from "./WatchPartyArea";
-import { WhiteboardArea } from "./WhiteboardArea";
-import { ActivityPage } from "./ActivityPage";
 import { MembersPanel } from "./MembersPanel";
 import { ThreadPanel } from "./ThreadPanel";
 import { ChannelList } from "./ChannelList";
@@ -31,6 +25,26 @@ import {
   ResizableHandle,
 } from "@/components/ui/resizable";
 import { Toaster } from "@/components/ui/sonner";
+
+// Full-screen views the user reaches deliberately, and never more than one
+// at a time. Splitting them out keeps the whiteboard, the watch party and
+// the admin dashboard off the critical path of simply opening a channel.
+const AdminDashboard = lazy(() =>
+  import("./AdminDashboard").then((m) => ({ default: m.AdminDashboard })),
+);
+const ForumArea = lazy(() => import("./ForumArea").then((m) => ({ default: m.ForumArea })));
+const ShowcaseArea = lazy(() =>
+  import("./ShowcaseArea").then((m) => ({ default: m.ShowcaseArea })),
+);
+const WatchPartyArea = lazy(() =>
+  import("./WatchPartyArea").then((m) => ({ default: m.WatchPartyArea })),
+);
+const WhiteboardArea = lazy(() =>
+  import("./WhiteboardArea").then((m) => ({ default: m.WhiteboardArea })),
+);
+const ActivityPage = lazy(() =>
+  import("./ActivityPage").then((m) => ({ default: m.ActivityPage })),
+);
 import { displayUserId } from "@/lib/utils";
 import { syncPushSubscription } from "@/lib/push";
 
@@ -640,6 +654,10 @@ export function ChatLayout() {
                   speakingUsersRef={speakingUsersRef}
                 />
               </div>
+              {/* One boundary for the whole slot: the branches below are
+                  mutually exclusive, so only ever one lazy view suspends,
+                  and the eager ones never reach the fallback. */}
+              <Suspense fallback={<div className="flex-1" />}>
               {state.adminDashboardOpen ? (
                 <AdminDashboard />
               ) : !state.currentRoomId ? (
@@ -706,6 +724,7 @@ export function ChatLayout() {
                 )}
               </>
               )}
+              </Suspense>
             </div>
             {/* Voice bar: shown when in voice while viewing a different room, and
                 always on mobile — the channel column's voice controls live in a

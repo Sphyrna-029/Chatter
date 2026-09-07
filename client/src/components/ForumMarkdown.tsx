@@ -1,42 +1,7 @@
-import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { AuthImage } from "@/components/AuthImage";
 import remarkGfm from "remark-gfm";
-import hljs from "highlight.js";
-
-function CodeBlock({ code, language }: { code: string; language?: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const highlighted = useMemo(() => {
-    if (language && hljs.getLanguage(language)) {
-      return hljs.highlight(code, { language }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  }, [code, language]);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <div className="relative group/code my-1">
-      <button
-        onClick={handleCopy}
-        className="absolute right-2 top-2 can-hover:opacity-0 can-hover:group-hover/code:opacity-100 transition-opacity text-xs px-2 py-1 rounded bg-secondary hover:bg-accent text-muted-foreground cursor-pointer"
-      >
-        {copied ? "Copied!" : "Copy"}
-      </button>
-      <pre className="rounded-md bg-[#0d1117] p-3 overflow-x-auto text-sm">
-        <code
-          className="hljs"
-          dangerouslySetInnerHTML={{ __html: highlighted }}
-        />
-      </pre>
-    </div>
-  );
-}
+import { CodeBlock } from "./CodeBlock";
 
 interface ForumMarkdownProps {
   content: string;
