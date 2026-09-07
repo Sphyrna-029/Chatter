@@ -14,7 +14,7 @@ rand = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 futures-util = "0.3"
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 reqwest = { version = "0.12", features = ["rustls-tls", "json", "multipart", "gzip", "brotli", "deflate"], default-features = false }
 percent-encoding = "2"
 url = "2"

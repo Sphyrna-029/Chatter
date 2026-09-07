@@ -77,7 +77,7 @@ use super::{
 };
 use axum::{
     extract::DefaultBodyLimit,
-    http::Method,
+    http::{header, HeaderValue, Method},
     middleware,
     routing::{delete, get, post, put},
     Router,
@@ -86,6 +86,7 @@ use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
     services::ServeDir,
+    set_header::SetResponseHeaderLayer,
 };
 
 const SVG: &str = "image/svg+xml";
@@ -105,6 +106,21 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             axum::http::header::ACCEPT_RANGES,
         ]);
 
+    // Vite gives every file here a content hash, so a given URL's bytes can
+    // never change — a new build is a new name. Without this they carry no
+    // Cache-Control at all and the browser revalidates the whole bundle on
+    // every cold start, which an installed PWA pays on each launch.
+    //
+    // The header is layered onto a router of its own rather than onto the
+    // main one: Router::layer applies to every route registered before it,
+    // so hanging this off the top level would mark the API immutable too.
+    let assets_router = Router::new()
+        .fallback_service(ServeDir::new("client/dist/assets"))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=31536000, immutable"),
+        ));
+
     // ServeDir serves static files with streaming, Range requests, etc.
     // upload_guard middleware handles auth, dangerous extensions, and MKV conversion.
     let external_router = Router::new()
@@ -115,7 +131,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
     Router::new()
         // Static / client
         .route("/", get(serve_client))
-        .nest_service("/assets", ServeDir::new("client/dist/assets"))
+        .nest_service("/assets", assets_router)
         // PWA surface. The service worker must answer from the root for its
         // scope to cover the app, so these cannot live under /assets.
         .route(
