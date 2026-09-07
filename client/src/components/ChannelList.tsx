@@ -187,11 +187,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   const [topic, setTopic] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("");
 
-  // Connection quality polling — initialize from the ref so remounts don't flash stale status
+  // Signal bars and ping — sampled values, so polling is the right shape for
+  // them. Whether the call is up is not: that comes off the peer connection
+  // through the store. Initialized from the ref so a remount does not flash
+  // stale numbers.
   const [connData, setConnData] = useState<ConnQualityData>(() =>
-    connQualityRef?.current ?? { quality: 0, pingMs: null, status: "closed" }
+    connQualityRef?.current ?? { quality: 0, pingMs: null }
   );
-  // Sync immediately on mount (before paint) so we never render stale status
+  // Sync immediately on mount, before paint, for the same reason.
   useLayoutEffect(() => {
     if (connQualityRef) setConnData(connQualityRef.current);
   }, [connQualityRef]);

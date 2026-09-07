@@ -17,8 +17,7 @@ import { VoiceMemberList } from "./voice/VoiceMemberList";
 import { CameraSelectModal } from "./CameraSelectModal";
 
 export type ConnectionQuality = 0 | 1 | 2 | 3 | 4;
-export type VoiceConnectionStatus = "new" | "connecting" | "connected" | "disconnected" | "failed" | "closed";
-export interface ConnQualityData { quality: ConnectionQuality; pingMs: number | null; status: VoiceConnectionStatus; }
+export interface ConnQualityData { quality: ConnectionQuality; pingMs: number | null; }
 
 interface VoiceControlsProps {
   joinVoiceRef?: React.MutableRefObject<((channelId?: string) => void) | null>;
@@ -142,9 +141,6 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, releaseVoiceRef, to
     connQualityRef.current = {
       quality: state.inVoiceChannel ? computeQuality(connStats) : 0,
       pingMs: state.inVoiceChannel ? pingMs : null,
-      status: (state.inVoiceChannel
-        ? pub?.connectionState ?? voice.voicePublisherPcRef.current?.connectionState ?? "new"
-        : "closed") as VoiceConnectionStatus,
     };
   }
 

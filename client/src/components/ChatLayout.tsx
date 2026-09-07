@@ -163,7 +163,7 @@ export function ChatLayout() {
   const toggleMuteRef = useRef<(() => void) | null>(null);
   const toggleDeafenRef = useRef<(() => void) | null>(null);
   const startScreenShareRef = useRef<(() => void) | null>(null);
-  const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null, status: "closed" });
+  const connQualityRef = useRef<ConnQualityData>({ quality: 0, pingMs: null });
   const stopScreenShareRef = useRef<(() => void) | null>(null);
   const startWebcamRef = useRef<(() => void) | null>(null);
   const stopWebcamRef = useRef<(() => void) | null>(null);
