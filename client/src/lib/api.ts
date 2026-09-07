@@ -4,7 +4,7 @@
 // The refresh token is stored exclusively in an HttpOnly cookie managed by the
 // server, so JS cannot read or exfiltrate it even under XSS.
 let _accessToken: string | null = null;
-let _refreshPromise: Promise<boolean> | null = null;
+let _refreshPromise: Promise<RefreshOutcome> | null = null;
 
 /** Store the access token in memory only. */
 export function setAccessToken(token: string | null) {
@@ -65,23 +65,49 @@ function authHeaders(): Record<string, string> {
 
 // ─── Token refresh ──────────────────────────────────────────────────────────
 
-export async function apiRefreshToken(): Promise<boolean> {
+/**
+ * Why a refresh did not produce a token.
+ *
+ * The difference matters: "rejected" is the server saying this session is over,
+ * and is grounds for showing the login screen. "unreachable" says nothing about
+ * the session at all — the server is down, restarting, or behind a proxy that
+ * is answering for it — and treating it as a logout throws away a session that
+ * is still perfectly good. A page refresh then logs the user straight back in,
+ * which is the tell that they were never logged out in the first place.
+ */
+export type RefreshOutcome = "refreshed" | "rejected" | "unreachable";
+
+export async function apiRefreshToken(): Promise<RefreshOutcome> {
+  let res: Response;
   try {
     // Send an empty body; the browser attaches the HttpOnly refresh_token cookie
     // automatically.  The server rotates the cookie and returns a new access token.
-    const res = await fetch("/_matrix/client/r0/refresh", {
+    res = await fetch("/_matrix/client/r0/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
-    if (!res.ok) return false;
+  } catch {
+    // Nothing answered — DNS, connection refused, offline, aborted.
+    return "unreachable";
+  }
+
+  if (!res.ok) {
+    // Only the server judging the cookie ends a session. A 5xx is the server
+    // failing to answer for itself, and a proxy in front of one that is
+    // restarting says 502/503/504 — none of which is a verdict on the session.
+    return res.status >= 500 ? "unreachable" : "rejected";
+  }
+
+  try {
     const data = await res.json();
     setAccessToken(data.access_token);
     if (data.is_admin !== undefined) setIsAdmin(data.is_admin);
     if (data.totp_verified !== undefined) setTotpVerified(data.totp_verified);
-    return true;
+    return "refreshed";
   } catch {
-    return false;
+    // A 200 that is not the payload we expect: the session is not disproven.
+    return "unreachable";
   }
 }
 
@@ -104,7 +130,7 @@ async function authenticatedFetch(
       });
     }
     const refreshed = await _refreshPromise;
-    if (refreshed) {
+    if (refreshed === "refreshed") {
       // Retry with new token
       return fetch(url, {
         ...init,
@@ -1174,7 +1200,7 @@ function uploadSingleFile(
           });
         }
         _refreshPromise.then((refreshed) => {
-          if (!refreshed) {
+          if (refreshed !== "refreshed") {
             reject(new Error("Upload failed - authentication expired"));
             return;
           }
@@ -1238,7 +1264,7 @@ function uploadChunkXhrOnce(
           _refreshPromise = apiRefreshToken().finally(() => { _refreshPromise = null; });
         }
         _refreshPromise.then((refreshed) => {
-          if (!refreshed) { reject(new Error("Auth expired")); return; }
+          if (refreshed !== "refreshed") { reject(new Error("Auth expired")); return; }
           const retry = new XMLHttpRequest();
           retry.open("POST", "/api/upload/chunk");
           retry.timeout = CHUNK_UPLOAD_TIMEOUT_MS;

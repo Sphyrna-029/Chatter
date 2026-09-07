@@ -107,6 +107,18 @@ import { createWsMessageHandler } from "./wsHandler";
 
 
 
+/** How long to wait before opening the socket again after it closed. */
+const WS_RECONNECT_MS = 3000;
+
+/** Retry schedule for restoring a session at page load when nothing answers.
+ *
+ * Backed off rather than hammered, and bounded: a server that has not come
+ * back within a couple of minutes is not one to keep silently polling, and the
+ * login screen already sitting there stays the way back in. */
+const SESSION_RESTORE_BASE_MS = 1000;
+const SESSION_RESTORE_MAX_MS = 30_000;
+const SESSION_RESTORE_MAX_ATTEMPTS = 8;
+
 export function AppProvider({ children }: { children: ReactNode }) {
   useVersionCheck();
   const [state, dispatch] = useReducer(reducer, initialState);
@@ -234,13 +246,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     // Always try a cookie-based refresh on page load.
     // If the user has a valid session, the server will issue a fresh access token.
-    apiRefreshToken().then((refreshed) => {
-      if (refreshed) {
-        const newToken = getAccessToken();
-        if (newToken) loginWithToken(newToken);
-      }
-      // If refresh fails, the user is logged out — no further action needed.
-    });
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
+
+    const restoreSession = () => {
+      void apiRefreshToken().then((outcome) => {
+        if (cancelled) return;
+        if (outcome === "refreshed") {
+          const newToken = getAccessToken();
+          if (newToken) loginWithToken(newToken);
+          return;
+        }
+        // The server judged the cookie and there is no session behind it, so
+        // the login screen is the right answer.
+        if (outcome === "rejected") return;
+        // Nothing answered. Loading while the server is down or restarting is
+        // not evidence of being logged out, and showing a login screen to
+        // someone who still has a session is why refreshing the page "logs
+        // them in" — it was only ever asking again at a better moment.
+        attempt += 1;
+        if (attempt > SESSION_RESTORE_MAX_ATTEMPTS) return;
+        timer = setTimeout(
+          restoreSession,
+          Math.min(SESSION_RESTORE_BASE_MS * 2 ** (attempt - 1), SESSION_RESTORE_MAX_MS),
+        );
+      });
+    };
+    restoreSession();
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // Keep a ref to loadRooms so WS handler can call it without stale closure
@@ -332,9 +370,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const payload = JSON.parse(atob(token.split(".")[1]));
       if (payload.exp * 1000 <= Date.now()) {
-        const ok = await apiRefreshToken();
-        if (!ok) {
+        const outcome = await apiRefreshToken();
+        if (outcome === "rejected") {
           dispatch({ type: "LOGOUT" });
+          return;
+        }
+        if (outcome === "unreachable") {
+          // The server is down, restarting, or behind a proxy answering for
+          // it. That is exactly when this runs — the socket dropped for the
+          // same reason — so it must not be read as the session ending. Keep
+          // trying on the same cadence as the socket's own retry; returning
+          // without one would strand the client until it was reloaded.
+          setTimeout(connectWebSocket, WS_RECONNECT_MS);
           return;
         }
         token = getAccessToken();
@@ -372,7 +419,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ws.onclose = () => {
       wsRef.current = null;
       dispatch({ type: "SET_WS_CONNECTED", payload: false });
-      setTimeout(connectWebSocket, 3000);
+      setTimeout(connectWebSocket, WS_RECONNECT_MS);
     };
   }, []); // getAccessToken / apiRefreshToken are module-level, no deps needed
 

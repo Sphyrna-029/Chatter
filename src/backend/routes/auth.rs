@@ -933,11 +933,23 @@ pub(crate) async fn refresh(
 
     // Check if refresh token exists in MongoDB (not revoked)
     let refresh_tokens = state.db.collection::<RefreshTokenRecord>("refresh_tokens");
-    let found = refresh_tokens
+    // A failed query and an absent token are not the same answer. Collapsing
+    // both to None reported "your session is over" whenever the database was
+    // merely unreachable — during a restart, say — and every client holding a
+    // perfectly good session was shown the login screen for it.
+    let found = match refresh_tokens
         .find_one_and_delete(doc! { "token": &token_str })
         .await
-        .ok()
-        .flatten();
+    {
+        Ok(found) => found,
+        Err(e) => {
+            eprintln!("[auth] refresh lookup failed: {e}");
+            return Err(error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Storage unavailable, try again",
+            ));
+        }
+    };
 
     if found.is_none() {
         return Err(error_response(
