@@ -865,6 +865,11 @@ export interface RoomInfo {
   banner_url?: string;
   dm_streak_count?: number;
   dm_streak_last_ts?: number;
+  /** The other people in a DM. One id for a one-to-one, more for a group. */
+  dm_user_ids?: string[];
+  /** Their avatars, carried with the room so the DM list can show a face
+   *  before that conversation has ever been opened. */
+  dm_avatars?: Record<string, string>;
   /** Room sound pack: event name -> `/external/...` URL. A missing entry means
    *  the client's built-in sound for that event. */
   sounds?: Record<string, string>;

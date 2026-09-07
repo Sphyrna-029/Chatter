@@ -279,10 +279,40 @@ pub(crate) async fn sync(
             }),
         ];
         if room_data.is_dm {
+            // Who the DM is *with*, so the client can show their face without
+            // asking. The room's name carries a display name and nothing else,
+            // and members are only loaded for the room currently open — a list
+            // of every conversation needs the ids up front. Taken from the
+            // membership cache, so this costs no query.
+            let others: Vec<String> = {
+                let rm = state.room_members.read().await;
+                rm.get(room_id)
+                    .map(|members| members.iter().filter(|m| *m != &user_id).cloned().collect())
+                    .unwrap_or_default()
+            };
+            // Their avatar travels with the id. Presence — the client's usual
+            // source for a face — is only loaded for the room being viewed, so
+            // a list of every conversation would otherwise show initials until
+            // each one had been opened once.
+            let mut dm_avatars = serde_json::Map::new();
+            if !others.is_empty() {
+                let users_coll = state.db.collection::<UserRecord>("users");
+                if let Ok(mut cursor) = users_coll.find(doc! { "_id": { "$in": &others } }).await {
+                    while let Ok(Some(u)) = cursor.try_next().await {
+                        if !u.avatar_url.is_empty() {
+                            dm_avatars.insert(u.user_id.clone(), json!(u.avatar_url));
+                        }
+                    }
+                }
+            }
             state_events.push(json!({
                 "type": "m.room.direct",
                 "state_key": "",
-                "content": {"is_direct": true},
+                "content": {
+                    "is_direct": true,
+                    "dm_user_ids": others,
+                    "dm_avatars": Value::Object(dm_avatars),
+                },
                 "sender": room_data.creator
             }));
 

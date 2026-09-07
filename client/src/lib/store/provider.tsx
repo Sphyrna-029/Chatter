@@ -570,6 +570,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           banner_url: bannerEvent?.content?.banner_url || "",
           dm_streak_count: streakEvent?.content?.streak_count || 0,
           dm_streak_last_ts: streakEvent?.content?.last_message_ts || 0,
+          dm_user_ids: directEvent?.content?.dm_user_ids || [],
+          dm_avatars: directEvent?.content?.dm_avatars || {},
           sounds: soundsEvent?.content?.sounds || {},
           // Rooms that predate the field, and any room whose state event is
           // missing, keep entrance sounds on — the field's default.

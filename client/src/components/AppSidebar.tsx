@@ -128,6 +128,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const roomInitial = roomName.substring(0, 1).toUpperCase();
 
     // Streak display calculations
+    // A one-to-one DM shows the other person's face. A group has no single
+    // face to show, so it keeps the conversation glyph.
+    const dmUserIds = isDm ? (info?.dm_user_ids ?? []) : [];
+    const dmPeerId = dmUserIds.length === 1 ? dmUserIds[0] : null;
+    // Presence first — it follows an avatar change live — then the copy that
+    // came down with the room, which is there before the DM is ever opened.
+    const dmPeerAvatar = dmPeerId
+      ? (state.userPresence[dmPeerId]?.avatarUrl || info?.dm_avatars?.[dmPeerId] || "")
+      : "";
+
     const streakCount = isDm ? (info?.dm_streak_count ?? 0) : 0;
     const lastTs = isDm ? (info?.dm_streak_last_ts ?? 0) : 0;
     const now = Date.now();
@@ -233,6 +243,23 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             alt=""
             className="h-7 w-7 shrink-0 rounded-md object-cover"
           />
+        ) : dmPeerAvatar && !showStreak ? (
+          // Radix's Avatar so a deleted or unreachable file falls back to the
+          // initial instead of a broken image, the way every other avatar in
+          // the app behaves.
+          <Avatar className="h-7 w-7 shrink-0">
+            <AuthAvatarImage src={dmPeerAvatar} />
+            <AvatarFallback
+              className={cn(
+                "rounded-full text-xs font-bold",
+                isActive
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                  : "bg-sidebar-accent text-sidebar-foreground",
+              )}
+            >
+              {roomInitial}
+            </AvatarFallback>
+          </Avatar>
         ) : (
           <span
             className={cn(
@@ -248,6 +275,8 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   <span className="text-xs leading-none">{isStreakExpiring ? "⏳" : "🔥"}</span>
                   <span className="text-3xs font-bold leading-none">{streakCount}</span>
                 </span>
+              ) : dmPeerId ? (
+                roomInitial
               ) : (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
                   <path d="M2.678 11.894a1 1 0 0 1 .287.801 10.97 10.97 0 0 1-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 0 1 .71-.074A8.06 8.06 0 0 0 8 14c3.996 0 7-2.807 7-6s-3.004-6-7-6-7 2.808-7 6c0 1.468.617 2.83 1.678 3.894z" />
