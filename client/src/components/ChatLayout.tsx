@@ -47,6 +47,8 @@ const ActivityPage = lazy(() =>
 );
 import { displayUserId } from "@/lib/utils";
 import { syncPushSubscription } from "@/lib/push";
+import { decideVoiceRejoin } from "@/lib/voiceRejoin";
+import { toast } from "sonner";
 
 // ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
 function pipEnabled(): boolean {
@@ -157,6 +159,7 @@ export function ChatLayout() {
   // The video area, whose pointer activity keeps the stream controls awake.
   const videoPanelRef = useRef<HTMLDivElement | null>(null);
   const leaveVoiceRef = useRef<(() => void) | null>(null);
+  const releaseVoiceRef = useRef<(() => void) | null>(null);
   const toggleMuteRef = useRef<(() => void) | null>(null);
   const toggleDeafenRef = useRef<(() => void) | null>(null);
   const startScreenShareRef = useRef<(() => void) | null>(null);
@@ -258,6 +261,11 @@ export function ChatLayout() {
   // page. Anyone whose connection blipped mid-call was silently ejected.
   const wasConnectedRef = useRef(false);
   const hasEverConnectedRef = useRef(false);
+  /** When the socket went down, so a reconnect can tell a blip from an absence.
+   *  Stamped only on the connected -> disconnected edge: the retry loop opens a
+   *  fresh socket every 3s and each failure would otherwise reset the clock,
+   *  making every outage look like it had just started. */
+  const disconnectedAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     const reconnected = state.wsConnected && !wasConnectedRef.current;
@@ -265,12 +273,29 @@ export function ChatLayout() {
     // below already covers from sessionStorage.
     const isFirstConnect = !hasEverConnectedRef.current;
     if (state.wsConnected) hasEverConnectedRef.current = true;
+    else if (wasConnectedRef.current) disconnectedAtRef.current = Date.now();
     wasConnectedRef.current = state.wsConnected;
     if (!reconnected || isFirstConnect) return;
 
-    // What the client still thinks it is in. If it never joined, or left
-    // deliberately while the socket was down, there is nothing to restore.
-    if (!state.inVoiceChannel || !state.voiceRoomId) return;
+    const downFor =
+      disconnectedAtRef.current === null ? 0 : Date.now() - disconnectedAtRef.current;
+    disconnectedAtRef.current = null;
+
+    const decision = decideVoiceRejoin({
+      inVoiceChannel: state.inVoiceChannel,
+      voiceRoomId: state.voiceRoomId,
+      downForMs: downFor,
+    });
+    if (decision === "nothing-to-restore") return;
+
+    // The server dropped this session when the socket died, so there is nothing
+    // to announce a leave for — release the local half and let them decide
+    // whether to walk back in.
+    if (decision === "release") {
+      releaseVoiceRef.current?.();
+      toast.info("You were disconnected for too long — rejoin the call to come back.");
+      return;
+    }
 
     // Let the socket's own hello be processed before rejoining on it.
     const channelId = state.voiceChannelId;
@@ -643,6 +668,7 @@ export function ChatLayout() {
                 <VoiceControls
                   joinVoiceRef={joinVoiceRef}
                   leaveVoiceRef={leaveVoiceRef}
+                  releaseVoiceRef={releaseVoiceRef}
                   toggleMuteRef={toggleMuteRef}
                   toggleDeafenRef={toggleDeafenRef}
                   startScreenShareRef={startScreenShareRef}

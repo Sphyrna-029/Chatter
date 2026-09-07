@@ -730,6 +730,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceAudioElementsRef,
     joinVoice,
     leaveVoice,
+    /** Drop the local half of a call without announcing a leave — for when the
+     *  session is already gone on the server's side. */
+    releaseVoice: teardownLocalVoice,
     toggleMute,
     toggleDeafen,
     toggleInputMode,

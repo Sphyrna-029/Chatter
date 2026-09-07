@@ -23,6 +23,7 @@ export interface ConnQualityData { quality: ConnectionQuality; pingMs: number | 
 interface VoiceControlsProps {
   joinVoiceRef?: React.MutableRefObject<((channelId?: string) => void) | null>;
   leaveVoiceRef?: React.MutableRefObject<(() => void) | null>;
+  releaseVoiceRef?: React.MutableRefObject<(() => void) | null>;
   toggleMuteRef?: React.MutableRefObject<(() => void) | null>;
   toggleDeafenRef?: React.MutableRefObject<(() => void) | null>;
   startScreenShareRef?: React.MutableRefObject<(() => void) | null>;
@@ -50,7 +51,7 @@ function computeQuality(connStats: Record<string, import("@/lib/webrtc").PeerSta
   return 1;
 }
 
-export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, startWebcamRef, stopWebcamRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
+export function VoiceControls({ joinVoiceRef, leaveVoiceRef, releaseVoiceRef, toggleMuteRef, toggleDeafenRef, startScreenShareRef, stopScreenShareRef, startWebcamRef, stopWebcamRef, connQualityRef, setUserVolumeRef, speakingUsersRef }: VoiceControlsProps) {
   const { state } = useAppContext();
   const [debugOpen, setDebugOpen] = useState(false);
   const [cameraModalOpen, setCameraModalOpen] = useState(false);
@@ -73,6 +74,11 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, toggleMuteRef, togg
     if (leaveVoiceRef) leaveVoiceRef.current = voice.leaveVoice;
     return () => { if (leaveVoiceRef) leaveVoiceRef.current = null; };
   }, [leaveVoiceRef, voice.leaveVoice]);
+
+  useEffect(() => {
+    if (releaseVoiceRef) releaseVoiceRef.current = voice.releaseVoice;
+    return () => { if (releaseVoiceRef) releaseVoiceRef.current = null; };
+  }, [releaseVoiceRef, voice.releaseVoice]);
 
   useEffect(() => {
     if (toggleMuteRef) toggleMuteRef.current = voice.toggleMute;
