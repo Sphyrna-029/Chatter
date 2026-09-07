@@ -1014,9 +1014,13 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         <div className="border-t px-2 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center gap-1 px-1">
             {(() => {
-              // Derive effective status — treat "closed" as connected when we know we're in voice
-              // (can happen briefly on ChannelList remount before the first poll)
-              const s = connData.status === "closed" && state.inVoiceChannel ? "connected" : connData.status;
+              // Straight from the peer connection, which reports a change as it
+              // happens. connData is polled every 500ms off stats gathered every
+              // 2s, so reading status from it left "Connecting..." on screen for
+              // seconds after the call was up — and after the entrance sound had
+              // already played. connData still supplies the quality numbers,
+              // which are genuinely a sampled thing.
+              const s = state.voicePublisherState;
               const isOk = s === "connected";
               const isBad = s === "failed" || s === "disconnected";
               return (

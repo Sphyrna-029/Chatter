@@ -89,6 +89,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
     pc.onconnectionstatechange = () => {
       if (pc !== voicePublisherPcRef.current) return;
+      // Reported the moment it changes, so the UI and the entrance sound agree
+      // on when the call came up rather than the label trailing it by a poll.
+      dispatch({ type: "SET_VOICE_STATE", payload: { voicePublisherState: pc.connectionState } });
       if (pc.connectionState === "connected") {
         voicePublishRetryCountRef.current = 0;
         // Audio is flowing now, so the arrival this call was announcing has
@@ -113,6 +116,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         }
       }
     };
+
+    // A retry closes the failed connection and builds this one; without a
+    // report here the label would go on showing whatever the dead one last said.
+    dispatch({ type: "SET_VOICE_STATE", payload: { voicePublisherState: pc.connectionState } });
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -483,7 +490,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       const resolvedChannelId = channelId || state.voiceChannelId || undefined;
       const joinedChannel = state.channels.find((c) => c.channel_id === resolvedChannelId);
       voiceBitrateRef.current = clampVoiceBitrate(joinedChannel?.voice_bitrate);
-      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: nextMuted, isDeafened: nextDeafened, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null } });
+      dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: true, isMuted: nextMuted, isDeafened: nextDeafened, voiceRoomId: state.currentRoomId, voiceChannelId: resolvedChannelId ?? null, voicePublisherState: "new" } });
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
       // Persist voice session for auto-rejoin on refresh
@@ -581,22 +588,24 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceRetryTimersRef.current.clear();
     voicePublishRetryCountRef.current = 0;
     pendingVoiceSubsRef.current.clear();
+    // Every exit runs through here, so an entrance sting still waiting on a
+    // connection is dropped whichever way the call ended — left deliberately,
+    // taken by another device, or released after too long off the socket.
+    // A sting must never surface on some later call it was not announcing.
+    dropDeferredArrivalSound();
 
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((t) => t.stop());
       localStreamRef.current = null;
     }
 
-    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null, voiceChannelName: null } });
+    dispatch({ type: "SET_VOICE_STATE", payload: { inVoiceChannel: false, isMuted: false, isDeafened: false, isScreenSharing: false, voiceRoomId: null, voiceChannelId: null, voiceChannelName: null, voicePublisherState: "closed" } });
     // Cleared so a refresh on this device does not auto-rejoin and take the
     // session straight back off whichever device is holding it.
     try { sessionStorage.removeItem("voiceSession"); } catch {}
   }, [dispatch, cleanupScreenRef]);
 
   const leaveVoice = useCallback(async () => {
-    // Leaving before the connection came up: the arrival it was waiting on is
-    // not going to happen, so the sound must not surface on some later call.
-    dropDeferredArrivalSound();
     await teardownLocalVoice();
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
