@@ -62,12 +62,26 @@ pub(crate) struct ThemeColorsPayload {
     pub(crate) primary: String,
 }
 
+/// Optional overrides for colours a theme otherwise derives. Absent fields
+/// mean "derive it", which is why every one is an Option rather than a value
+/// with a default: storing a default here would freeze it against later
+/// changes to the derivation.
+#[derive(Deserialize, Default)]
+pub(crate) struct ThemeAdvancedPayload {
+    pub(crate) sidebar: Option<String>,
+    pub(crate) mention: Option<String>,
+    #[serde(rename = "borderStrength")]
+    pub(crate) border_strength: Option<f64>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct CustomThemePayload {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) mode: String,
     pub(crate) colors: ThemeColorsPayload,
+    #[serde(default)]
+    pub(crate) advanced: Option<ThemeAdvancedPayload>,
 }
 
 #[derive(Deserialize)]
@@ -189,7 +203,7 @@ pub(crate) async fn set_appearance(
                 "Theme colours must be #rrggbb",
             ));
         }
-        themes.push(doc! {
+        let mut entry = doc! {
             "id": &theme.id,
             "name": theme.name.trim(),
             "mode": &theme.mode,
@@ -199,7 +213,38 @@ pub(crate) async fn set_appearance(
                 "accent": c.accent.to_ascii_lowercase(),
                 "primary": c.primary.to_ascii_lowercase(),
             },
-        });
+        };
+
+        if let Some(adv) = &theme.advanced {
+            let mut advanced = Document::new();
+            for (key, value) in [("sidebar", &adv.sidebar), ("mention", &adv.mention)] {
+                if let Some(hex) = value {
+                    if !valid_hex(hex) {
+                        return Err(error_response(
+                            StatusCode::BAD_REQUEST,
+                            "Theme colours must be #rrggbb",
+                        ));
+                    }
+                    advanced.insert(key, hex.to_ascii_lowercase());
+                }
+            }
+            if let Some(strength) = adv.border_strength {
+                if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+                    return Err(error_response(
+                        StatusCode::BAD_REQUEST,
+                        "Invalid border strength",
+                    ));
+                }
+                advanced.insert("borderStrength", strength);
+            }
+            // An empty override set is stored as no override set, so "derive
+            // everything" has one representation here too.
+            if !advanced.is_empty() {
+                entry.insert("advanced", advanced);
+            }
+        }
+
+        themes.push(entry);
     }
 
     let d = &req.display;

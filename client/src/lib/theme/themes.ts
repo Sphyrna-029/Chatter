@@ -25,6 +25,27 @@ export interface ThemeColors {
   primary: string;
 }
 
+/**
+ * Overrides for colours a theme otherwise derives from the four above.
+ *
+ * Every field is optional and absent means "derive it", so a theme built
+ * before these existed keeps deriving and a later change to a derivation still
+ * reaches it. They are here because the derivations are guesses that are
+ * usually right and occasionally not: a sidebar that wants to be darker than
+ * its mix, borders that want to be barely there or clearly drawn, and a
+ * mention highlight that was not themeable at all before.
+ */
+export interface ThemeAdvanced {
+  /** Replaces the background/card mix behind the room and channel lists. */
+  sidebar?: string;
+  /** The tint behind a message that mentions you. */
+  mention?: string;
+  /** Alpha on the accent for borders and inputs, 0 to 1. */
+  borderStrength?: number;
+}
+
+export const DEFAULT_BORDER_STRENGTH = 0.3;
+
 export interface ThemeDefinition {
   id: string;
   name: string;
@@ -37,6 +58,8 @@ export interface ThemeDefinition {
    *  the single place they are written down. `resolveThemeColors` reads them
    *  back from there rather than keeping a second, drifting copy here. */
   colors: ThemeColors | null;
+  /** Custom themes only, and optional even there. */
+  advanced?: ThemeAdvanced;
 }
 
 export const DEFAULT_THEME_ID = "dark";
@@ -154,7 +177,10 @@ export function checkContrast(colors: ThemeColors): ContrastCheck[] {
   });
 }
 
-export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
+export function deriveThemeVars(
+  colors: ThemeColors,
+  advanced: ThemeAdvanced = {},
+): Record<string, string> {
   const { background, card, accent, primary } = colors;
   const [ar, ag, ab] = hexToRgb(accent);
   const secondary = mixColors(background, card, 0.5);
@@ -167,6 +193,12 @@ export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
     MIN_TEXT_CONTRAST,
     0.55,
   );
+  const borderAlpha = advanced.borderStrength ?? DEFAULT_BORDER_STRENGTH;
+  const onAccent = (alpha: number) => `rgba(${ar}, ${ag}, ${ab}, ${alpha})`;
+  const sidebar = advanced.sidebar ?? mixColors(background, card, 0.3);
+  // Amber at a tenth, the value this was hardcoded to in the message row
+  // before a theme could say otherwise.
+  const mention = advanced.mention ?? "#fbbf24";
 
   // Deliberately absent: destructive, success, warning and info. Those are not
   // derivable from four colours — red has to stay red — and pinning them here
@@ -188,21 +220,22 @@ export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
     "--muted-foreground": mutedFg,
     "--accent": accent,
     "--accent-foreground": primary,
-    "--border": `rgba(${ar}, ${ag}, ${ab}, 0.3)`,
-    "--input": `rgba(${ar}, ${ag}, ${ab}, 0.35)`,
+    "--border": onAccent(borderAlpha),
+    "--input": onAccent(Math.min(1, borderAlpha + 0.05)),
+    "--mention": mention,
     "--ring": accent,
     "--chart-1": accent,
     "--chart-2": mixColors(accent, primary, 0.3),
     "--chart-3": primary,
     "--chart-4": mixColors(accent, primary, 0.6),
     "--chart-5": mixColors(accent, background, 0.3),
-    "--sidebar": mixColors(background, card, 0.3),
+    "--sidebar": sidebar,
     "--sidebar-foreground": primary,
     "--sidebar-primary": accent,
     "--sidebar-primary-foreground": primary,
     "--sidebar-accent": secondary,
     "--sidebar-accent-foreground": primary,
-    "--sidebar-border": `rgba(${ar}, ${ag}, ${ab}, 0.3)`,
+    "--sidebar-border": onAccent(borderAlpha),
     "--sidebar-ring": accent,
   };
 }
@@ -223,7 +256,7 @@ export function isSafeThemeId(id: unknown): id is string {
  *  last one in the head loses the tie whenever HMR re-injects index.css. */
 export function customThemeCss(theme: ThemeDefinition): string {
   if (!theme.colors || !isSafeThemeId(theme.id)) return "";
-  const body = Object.entries(deriveThemeVars(theme.colors))
+  const body = Object.entries(deriveThemeVars(theme.colors, theme.advanced))
     .map(([k, v]) => `${k}: ${v};`)
     .join("\n  ");
   return `html[data-theme="${theme.id}"] {\n  ${body}\n}`;
@@ -272,6 +305,26 @@ export function newThemeId(): string {
 /** Themes stored before modes existed have no `mode`, and were all rendered
  *  dark whatever their colours. Reading one back infers the mode its colours
  *  actually call for. */
+/** Read the optional overrides, dropping anything that is not a usable value.
+ *  Returns undefined rather than an empty object so "derive everything" has
+ *  one representation. */
+export function normalizeAdvanced(raw: unknown): ThemeAdvanced | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const a = raw as Record<string, unknown>;
+  const out: ThemeAdvanced = {};
+  if (isHexColor(a.sidebar)) out.sidebar = a.sidebar.toLowerCase();
+  if (isHexColor(a.mention)) out.mention = a.mention.toLowerCase();
+  if (
+    typeof a.borderStrength === "number" &&
+    Number.isFinite(a.borderStrength) &&
+    a.borderStrength >= 0 &&
+    a.borderStrength <= 1
+  ) {
+    out.borderStrength = a.borderStrength;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function normalizeStoredTheme(raw: unknown): ThemeDefinition | null {
   if (!raw || typeof raw !== "object") return null;
   const t = raw as Record<string, unknown>;
@@ -294,6 +347,7 @@ function normalizeStoredTheme(raw: unknown): ThemeDefinition | null {
           ? "dark"
           : "light",
     colors: resolved,
+    advanced: normalizeAdvanced(t.advanced),
   };
 }
 
@@ -358,6 +412,7 @@ export function parseImportedTheme(json: string): ThemeDefinition {
           ? "dark"
           : "light",
     colors,
+    advanced: normalizeAdvanced(data.advanced),
   };
 }
 
@@ -405,12 +460,14 @@ export interface ThemeSettings {
     name: string,
     colors: ThemeColors,
     mode?: ThemeMode,
+    advanced?: ThemeAdvanced,
   ) => ThemeDefinition;
   updateCustomTheme: (
     id: string,
     name: string,
     colors: ThemeColors,
     mode?: ThemeMode,
+    advanced?: ThemeAdvanced,
   ) => void;
   deleteCustomTheme: (id: string) => void;
   exportTheme: (id: string) => string | null;

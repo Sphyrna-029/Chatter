@@ -58,6 +58,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  --color-mention: var(--mention);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -126,6 +127,19 @@ html {
     margin-top: -0.125rem;
   }
 
+  /* A message that mentions you. The tint is the theme's --mention at a
+     tenth, lifting to a sixth on hover — the same two steps the row used when
+     these were amber-400/10 and amber-400/15 written into the markup. */
+  .msg-mentioned {
+    background-color: color-mix(in oklab, var(--mention) 10%, transparent);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .msg-mentioned:hover {
+      background-color: color-mix(in oklab, var(--mention) 16%, transparent);
+    }
+  }
+
   /* Timestamps, counts, and the byline under a row. */
   .ui-meta {
     font-size: var(--text-xs);
@@ -163,6 +177,9 @@ html {
   --success: oklch(0.58 0.16 150);
   --warning: oklch(0.68 0.15 75);
   --info: oklch(0.55 0.18 250);
+  /* The tint behind a message that mentions you. Amber, which is what the
+     message row hardcoded before a theme could say otherwise. */
+  --mention: oklch(0.83 0.16 82);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -201,6 +218,7 @@ html {
   --success: oklch(0.75 0.17 152);
   --warning: oklch(0.82 0.15 85);
   --info: oklch(0.72 0.15 250);
+  --mention: oklch(0.83 0.16 82);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

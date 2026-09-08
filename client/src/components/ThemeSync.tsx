@@ -3,6 +3,7 @@ import { useAppState } from "@/lib/store";
 import {
   useThemeSettings,
   isSafeThemeId,
+  normalizeAdvanced,
   normalizeDisplay,
   DEFAULT_DISPLAY,
   type ThemeDefinition,
@@ -37,6 +38,7 @@ function toThemeDefinition(
       accent: c.accent,
       primary: c.primary,
     },
+    advanced: normalizeAdvanced(raw.advanced),
   };
 }
 
@@ -70,6 +72,10 @@ export function ThemeSync() {
       name: t.name,
       mode: t.mode,
       colors: t.colors,
+      // Omitted rather than sent as null, so the shape matches what comes back
+      // and the change detection below does not see a difference that is not
+      // one.
+      ...(t.advanced ? { advanced: t.advanced } : {}),
     })),
     display: {
       font_scale: display.fontScale,

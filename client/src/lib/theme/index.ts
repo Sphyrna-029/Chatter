@@ -4,15 +4,18 @@ export {
   checkContrast,
   deriveThemeVars,
   isSafeThemeId,
+  normalizeAdvanced,
   parseImportedTheme,
   resolveThemeColors,
   DEFAULT_THEME_ID,
   SYSTEM_THEME_ID,
+  DEFAULT_BORDER_STRENGTH,
   MIN_TEXT_CONTRAST,
   THEMES,
 } from "./themes";
 export type {
   ContrastCheck,
+  ThemeAdvanced,
   ThemeColors,
   ThemeDefinition,
   ThemeMode,

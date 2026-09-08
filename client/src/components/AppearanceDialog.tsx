@@ -14,15 +14,17 @@ import {
   useThemeSettings,
   resolveThemeColors,
   checkContrast,
+  DEFAULT_BORDER_STRENGTH,
   DEFAULT_DISPLAY,
   FONT_SCALE_RANGE,
   MIN_TEXT_CONTRAST,
   RADIUS_RANGE,
   SYSTEM_THEME_ID,
+  type ThemeAdvanced,
   type ThemeColors,
   type ThemeMode,
 } from "@/lib/theme";
-import { isDarkColor } from "@/lib/color";
+import { isDarkColor, mixColors } from "@/lib/color";
 
 const NEW_THEME_COLORS: ThemeColors = {
   background: "#1a1a2e",
@@ -59,6 +61,10 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
   const [themeColors, setThemeColors] = useState<ThemeColors>(NEW_THEME_COLORS);
   /** null follows the background colour; a value is an explicit choice. */
   const [themeMode, setThemeMode] = useState<ThemeMode | null>(null);
+  /** Each field absent means "derive it"; the editor shows the derived value
+   *  and only stores an override once one is turned on. */
+  const [advanced, setAdvanced] = useState<ThemeAdvanced>({});
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [copiedThemeId, setCopiedThemeId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importJson, setImportJson] = useState("");
@@ -99,8 +105,27 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
     setThemeName("My Theme");
     setThemeColors(NEW_THEME_COLORS);
     setThemeMode(null);
+    setAdvanced({});
+    setAdvancedOpen(false);
     setCreatingTheme(true);
   };
+
+  const savedAdvanced = () =>
+    Object.keys(advanced).length > 0 ? advanced : undefined;
+
+  /** What the theme would use for an override that is switched off. */
+  const derived = {
+    sidebar: mixColors(themeColors.background, themeColors.card, 0.3),
+    mention: "#fbbf24",
+  };
+
+  const toggleOverride = (key: "sidebar" | "mention") =>
+    setAdvanced((prev) => {
+      const next = { ...prev };
+      if (next[key] === undefined) next[key] = derived[key];
+      else delete next[key];
+      return next;
+    });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -191,6 +216,8 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                           setThemeName(theme.name);
                           setThemeColors(colors);
                           setThemeMode(theme.mode);
+                          setAdvanced(theme.advanced ?? {});
+                          setAdvancedOpen(theme.advanced !== undefined);
                           setCreatingTheme(true);
                         }}
                       >
@@ -289,6 +316,90 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                 </div>
               </div>
 
+              <div className="rounded-md border border-muted-foreground/20">
+                <button
+                  className="flex w-full items-center justify-between gap-2 p-2.5 text-left"
+                  onClick={() => setAdvancedOpen((v) => !v)}
+                >
+                  <Label className="text-xs cursor-pointer">
+                    Derived colours
+                  </Label>
+                  <span className="ui-hint">
+                    {Object.keys(advanced).length > 0
+                      ? `${Object.keys(advanced).length} overridden`
+                      : "All derived"}
+                  </span>
+                </button>
+                {advancedOpen && (
+                  <div className="space-y-3 border-t border-muted-foreground/20 p-2.5">
+                    {(
+                      [
+                        ["sidebar", "Sidebar"],
+                        ["mention", "Mention highlight"],
+                      ] as const
+                    ).map(([key, label]) => {
+                      const overridden = advanced[key] !== undefined;
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <span className="text-xs text-muted-foreground">
+                            {label}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="color"
+                              disabled={!overridden}
+                              value={advanced[key] ?? derived[key]}
+                              onChange={(e) =>
+                                setAdvanced((prev) => ({
+                                  ...prev,
+                                  [key]: e.target.value,
+                                }))
+                              }
+                              className="h-6 w-6 rounded border-0 bg-transparent cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
+                            />
+                            <button
+                              onClick={() => toggleOverride(key)}
+                              className="rounded border border-muted-foreground/20 px-1.5 py-0.5 text-3xs text-muted-foreground hover:text-foreground"
+                            >
+                              {overridden ? "Derive" : "Override"}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          Border strength
+                        </span>
+                        <span className="text-2xs text-muted-foreground tabular-nums">
+                          {Math.round(
+                            (advanced.borderStrength ??
+                              DEFAULT_BORDER_STRENGTH) * 100,
+                          )}
+                          %
+                        </span>
+                      </div>
+                      <Slider
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={[
+                          advanced.borderStrength ?? DEFAULT_BORDER_STRENGTH,
+                        ]}
+                        onValueChange={([borderStrength]) =>
+                          setAdvanced((prev) => ({ ...prev, borderStrength }))
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-1.5 rounded-md border border-muted-foreground/20 p-2.5">
                 <div className="flex items-baseline justify-between gap-2">
                   <Label className="text-xs">Contrast</Label>
@@ -355,12 +466,14 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                       themeName.trim(),
                       themeColors,
                       effectiveMode,
+                      savedAdvanced(),
                     );
                   } else {
                     const t = addCustomTheme(
                       themeName.trim(),
                       themeColors,
                       effectiveMode,
+                      savedAdvanced(),
                     );
                     setTheme(t.id);
                   }

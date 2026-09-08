@@ -1505,6 +1505,7 @@ async fn appearance_contract_round_trip_and_validation() {
                 "accent": "#c2410c",
                 "primary": "#1c1917",
             },
+            "advanced": { "sidebar": "#EEE8E0", "borderStrength": 0.55 },
         }],
         "display": {
             "font_scale": 1.15,
@@ -1542,6 +1543,65 @@ async fn appearance_contract_round_trip_and_validation() {
         stored["custom_themes"][0]["colors"]["background"],
         "#fdfaf6"
     );
+    assert_eq!(stored["custom_themes"][0]["advanced"]["sidebar"], "#eee8e0");
+    assert_eq!(
+        stored["custom_themes"][0]["advanced"]["borderStrength"],
+        0.55
+    );
+    // An override that was not set stays unset rather than being stored at its
+    // derived value, so a later change to the derivation still reaches it.
+    assert!(stored["custom_themes"][0]["advanced"]["mention"].is_null());
+
+    // Overrides are colours too, and are checked the same way.
+    let bad_override = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&json!({
+            "theme_id": "dark",
+            "custom_themes": [{
+                "id": "custom-xyz",
+                "name": "Bad",
+                "mode": "dark",
+                "colors": {
+                    "background": "#111111", "card": "#222222",
+                    "accent": "#333333", "primary": "#eeeeee",
+                },
+                "advanced": { "mention": "red" },
+            }],
+            "display": {
+                "font_scale": 1.0, "radius": 0.875,
+                "density": "comfortable", "motion": "system",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_override.status(), StatusCode::BAD_REQUEST);
+
+    let bad_strength = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&json!({
+            "theme_id": "dark",
+            "custom_themes": [{
+                "id": "custom-xyz",
+                "name": "Bad",
+                "mode": "dark",
+                "colors": {
+                    "background": "#111111", "card": "#222222",
+                    "accent": "#333333", "primary": "#eeeeee",
+                },
+                "advanced": { "borderStrength": 5.0 },
+            }],
+            "display": {
+                "font_scale": 1.0, "radius": 0.875,
+                "density": "comfortable", "motion": "system",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_strength.status(), StatusCode::BAD_REQUEST);
 
     // A theme id is interpolated into a CSS attribute selector by the client,
     // so anything that could end that string is refused here too.

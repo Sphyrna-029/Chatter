@@ -34,6 +34,7 @@ import {
   THEMES,
   type ThemeColors,
   type ThemeDefinition,
+  type ThemeAdvanced,
   type ThemeMode,
   type ThemeSettings,
 } from "./themes";
@@ -160,12 +161,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addCustomTheme = useCallback(
-    (name: string, colors: ThemeColors, mode?: ThemeMode): ThemeDefinition => {
+    (
+      name: string,
+      colors: ThemeColors,
+      mode?: ThemeMode,
+      advanced?: ThemeAdvanced,
+    ): ThemeDefinition => {
       const theme: ThemeDefinition = {
         id: newThemeId(),
         name,
         mode: mode ?? (isDarkColor(colors.background) ? "dark" : "light"),
         colors,
+        advanced,
       };
       setCustomThemes((prev) => persistCustomThemes([...prev, theme]));
       return theme;
@@ -174,7 +181,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   );
 
   const updateCustomTheme = useCallback(
-    (id: string, name: string, colors: ThemeColors, mode?: ThemeMode) => {
+    (
+      id: string,
+      name: string,
+      colors: ThemeColors,
+      mode?: ThemeMode,
+      advanced?: ThemeAdvanced,
+    ) => {
       setCustomThemes((prev) =>
         persistCustomThemes(
           prev.map((t) =>
@@ -183,6 +196,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
                   ...t,
                   name,
                   colors,
+                  advanced,
                   mode:
                     mode ?? (isDarkColor(colors.background) ? "dark" : "light"),
                 }
@@ -215,7 +229,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       const theme = themes.find((t) => t.id === id);
       if (!theme) return null;
       const colors = resolveThemeColors(theme);
-      return JSON.stringify({ name: theme.name, mode: theme.mode, ...colors }, null, 2);
+      return JSON.stringify(
+        {
+          name: theme.name,
+          mode: theme.mode,
+          ...colors,
+          // Omitted entirely when a theme derives everything, so the common
+          // export stays the four colours it always was.
+          ...(theme.advanced ? { advanced: theme.advanced } : {}),
+        },
+        null,
+        2,
+      );
     },
     [themes],
   );

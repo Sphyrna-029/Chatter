@@ -1334,7 +1334,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md transition-colors", isMentioned ? "bg-amber-400/10 hover:bg-amber-400/15" : "hover:bg-accent/50", grouped ? "msg-row-grouped" : isMobile ? "msg-row-mobile" : "msg-row-full")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md transition-colors", isMentioned ? "msg-mentioned" : "hover:bg-accent/50", grouped ? "msg-row-grouped" : isMobile ? "msg-row-mobile" : "msg-row-full")} data-event-id={message.event_id}>
       <div className={cn("flex items-start", isMobile ? "gap-2" : "gap-3")}>
         {grouped ? (
           <span className={cn("flex-shrink-0", isMobile ? "w-7" : "w-10")} />

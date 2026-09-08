@@ -12,6 +12,7 @@ import {
   parseImportedTheme,
   checkContrast,
   isSafeThemeId,
+  normalizeAdvanced,
   MIN_TEXT_CONTRAST,
   THEMES,
   type ThemeColors,
@@ -342,5 +343,82 @@ describe("isSafeThemeId", () => {
     expect(isSafeThemeId("")).toBe(false);
     expect(isSafeThemeId(null)).toBe(false);
     expect(isSafeThemeId("x".repeat(65))).toBe(false);
+  });
+});
+
+describe("advanced overrides", () => {
+  it("derives everything when none are set", () => {
+    const plain = deriveThemeVars(PALE);
+    const empty = deriveThemeVars(PALE, {});
+    expect(empty).toEqual(plain);
+  });
+
+  it("replaces only what it names", () => {
+    const vars = deriveThemeVars(PALE, { sidebar: "#101010" });
+    expect(vars["--sidebar"]).toBe("#101010");
+    // The rest still derive, including the other sidebar variables.
+    expect(vars["--sidebar-primary"]).toBe(PALE.accent);
+    expect(vars["--background"]).toBe(PALE.background);
+  });
+
+  it("carries border strength into borders and inputs together", () => {
+    const vars = deriveThemeVars(PALE, { borderStrength: 0.6 });
+    expect(vars["--border"]).toContain("0.6");
+    expect(vars["--sidebar-border"]).toContain("0.6");
+    // Inputs sit one step above the border, and cannot exceed opaque.
+    expect(vars["--input"]).toContain("0.65");
+    expect(deriveThemeVars(PALE, { borderStrength: 1 })["--input"]).toContain(
+      ", 1)",
+    );
+  });
+
+  it("makes the mention tint themeable", () => {
+    expect(deriveThemeVars(PALE)["--mention"]).toBe("#fbbf24");
+    expect(deriveThemeVars(PALE, { mention: "#00ff88" })["--mention"]).toBe(
+      "#00ff88",
+    );
+  });
+});
+
+describe("normalizeAdvanced", () => {
+  it("drops values that are not usable", () => {
+    expect(
+      normalizeAdvanced({ sidebar: "rgb(1,2,3)", borderStrength: 4 }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined rather than an empty set", () => {
+    // "Derive everything" has one representation, so a theme that overrides
+    // nothing compares equal however it was built.
+    expect(normalizeAdvanced({})).toBeUndefined();
+    expect(normalizeAdvanced(null)).toBeUndefined();
+  });
+
+  it("keeps the usable fields beside the unusable ones", () => {
+    expect(
+      normalizeAdvanced({ sidebar: "#ABCDEF", mention: "nope" }),
+    ).toEqual({ sidebar: "#abcdef" });
+  });
+
+  it("accepts the ends of the border range", () => {
+    expect(normalizeAdvanced({ borderStrength: 0 })).toEqual({
+      borderStrength: 0,
+    });
+    expect(normalizeAdvanced({ borderStrength: 1 })).toEqual({
+      borderStrength: 1,
+    });
+  });
+});
+
+describe("importing a theme with overrides", () => {
+  it("round-trips them and ignores junk in the same field", () => {
+    const theme = parseImportedTheme(
+      JSON.stringify({
+        name: "Parchment",
+        ...PALE,
+        advanced: { sidebar: "#eeeeee", borderStrength: 0.5, mention: 12 },
+      }),
+    );
+    expect(theme.advanced).toEqual({ sidebar: "#eeeeee", borderStrength: 0.5 });
   });
 });

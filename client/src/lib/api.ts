@@ -2378,6 +2378,11 @@ export interface AppearancePayload {
           accent: string;
           primary: string;
         };
+        advanced?: {
+          sidebar?: string;
+          mention?: string;
+          borderStrength?: number;
+        };
       }[]
     | null;
   display: {
