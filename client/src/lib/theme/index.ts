@@ -1,14 +1,17 @@
 export { ThemeProvider } from "./provider";
 export { useThemeSettings } from "./context";
 export {
+  checkContrast,
   deriveThemeVars,
   parseImportedTheme,
   resolveThemeColors,
   DEFAULT_THEME_ID,
   SYSTEM_THEME_ID,
+  MIN_TEXT_CONTRAST,
   THEMES,
 } from "./themes";
 export type {
+  ContrastCheck,
   ThemeColors,
   ThemeDefinition,
   ThemeMode,

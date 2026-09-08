@@ -337,7 +337,9 @@ html {
   --secondary: oklch(0.35 0.012 265);
   --secondary-foreground: oklch(0.88 0.005 265);
   --muted: oklch(0.35 0.012 265);
-  --muted-foreground: oklch(0.65 0.01 265);
+  /* 0.65 read at 3.91:1 against this background — below AA for the timestamps
+     and secondary rows it is used for. 0.70 clears it at 4.73:1. */
+  --muted-foreground: oklch(0.7 0.01 265);
   --accent: oklch(0.55 0.2 270);
   --accent-foreground: oklch(0.97 0.005 265);
   --destructive: oklch(0.63 0.2 25);

@@ -6,10 +6,12 @@
  * component and the constants around it cannot hot-reload either.
  */
 import {
+  contrastRatio,
   hexToRgb,
   isDarkColor,
   isHexColor,
   mixColors,
+  mixToContrast,
   normalizeToHex,
 } from "@/lib/color";
 import type { DisplaySettings } from "./display";
@@ -118,11 +120,53 @@ export function resolveThemeColors(theme: ThemeDefinition): ThemeColors {
   return colors;
 }
 
+/** WCAG AA for body text. Secondary text is still text. */
+export const MIN_TEXT_CONTRAST = 4.5;
+
+/** A text/ground pair the editor checks, in the order they are shown. */
+export const CONTRAST_PAIRS = [
+  { label: "Text on background", text: "primary", ground: "background" },
+  { label: "Text on cards", text: "primary", ground: "card" },
+  { label: "Text on accent", text: "primary", ground: "accent" },
+] as const satisfies readonly {
+  label: string;
+  text: keyof ThemeColors;
+  ground: keyof ThemeColors;
+}[];
+
+export interface ContrastCheck {
+  label: string;
+  ratio: number;
+  passes: boolean;
+}
+
+/**
+ * How the four chosen colours read against each other.
+ *
+ * Advisory: a theme that fails is still saved. Someone deliberately building a
+ * low-contrast theme for themselves is entitled to, and the warning is there
+ * for the far more common case of not having noticed.
+ */
+export function checkContrast(colors: ThemeColors): ContrastCheck[] {
+  return CONTRAST_PAIRS.map(({ label, text, ground }) => {
+    const ratio = contrastRatio(colors[text], colors[ground]);
+    return { label, ratio, passes: ratio >= MIN_TEXT_CONTRAST };
+  });
+}
+
 export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
   const { background, card, accent, primary } = colors;
   const [ar, ag, ab] = hexToRgb(accent);
   const secondary = mixColors(background, card, 0.5);
-  const mutedFg = mixColors(background, primary, 0.55);
+  // 55% of the way to the foreground is the look this wants; the floor is what
+  // stops that being unreadable against a background it was not chosen for.
+  const mutedFg = mixToContrast(
+    background,
+    primary,
+    background,
+    MIN_TEXT_CONTRAST,
+    0.55,
+  );
 
   // Deliberately absent: destructive, success, warning and info. Those are not
   // derivable from four colours — red has to stay red — and pinning them here

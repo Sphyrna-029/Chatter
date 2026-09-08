@@ -13,8 +13,10 @@ import { Input } from "@/components/ui/input";
 import {
   useThemeSettings,
   resolveThemeColors,
+  checkContrast,
   DEFAULT_DISPLAY,
   FONT_SCALE_RANGE,
+  MIN_TEXT_CONTRAST,
   RADIUS_RANGE,
   SYSTEM_THEME_ID,
   type ThemeColors,
@@ -64,6 +66,9 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
 
   const effectiveMode: ThemeMode =
     themeMode ?? (isDarkColor(themeColors.background) ? "dark" : "light");
+
+  const contrast = useMemo(() => checkContrast(themeColors), [themeColors]);
+  const failing = contrast.filter((c) => !c.passes);
 
   // Built-in swatches come out of the stylesheet, so what the picker shows is
   // what the theme actually renders. Cached per theme after the first read.
@@ -282,6 +287,40 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="space-y-1.5 rounded-md border border-muted-foreground/20 p-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <Label className="text-xs">Contrast</Label>
+                  <span className="ui-hint">
+                    {MIN_TEXT_CONTRAST}:1 needed
+                  </span>
+                </div>
+                {contrast.map((check) => (
+                  <div
+                    key={check.label}
+                    className="flex items-center justify-between gap-2 text-2xs"
+                  >
+                    <span className="text-muted-foreground">{check.label}</span>
+                    <span
+                      className={
+                        check.passes
+                          ? "text-success tabular-nums"
+                          : "text-warning font-medium tabular-nums"
+                      }
+                    >
+                      {check.ratio.toFixed(1)}:1
+                    </span>
+                  </div>
+                ))}
+                {failing.length > 0 && (
+                  <p className="ui-hint">
+                    {failing.length === 1
+                      ? `${failing[0].label.toLowerCase()} will be hard to read.`
+                      : "Some text will be hard to read."}{" "}
+                    Saving anyway is fine — this is a warning, not a limit.
+                  </p>
+                )}
               </div>
 
               {/* Live preview */}

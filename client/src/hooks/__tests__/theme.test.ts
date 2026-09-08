@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest";
 import {
   deriveThemeVars,
   parseImportedTheme,
+  checkContrast,
+  MIN_TEXT_CONTRAST,
   THEMES,
   type ThemeColors,
 } from "@/lib/theme";
@@ -21,7 +23,13 @@ import {
   DEFAULT_DISPLAY,
   FONT_SCALE_RANGE,
 } from "@/lib/theme";
-import { isDarkColor, mixColors, normalizeToHex } from "@/lib/color";
+import {
+  contrastRatio,
+  isDarkColor,
+  mixColors,
+  mixToContrast,
+  normalizeToHex,
+} from "@/lib/color";
 
 const PALE: ThemeColors = {
   background: "#fdfaf6",
@@ -207,5 +215,111 @@ describe("prefersReducedMotion", () => {
     expect(scrollBehavior()).toBe("smooth");
 
     document.documentElement.removeAttribute("data-motion");
+  });
+});
+
+describe("contrastRatio", () => {
+  it("returns the known endpoints", () => {
+    expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 5);
+    expect(contrastRatio("#ffffff", "#ffffff")).toBeCloseTo(1, 5);
+  });
+
+  it("does not depend on the order of the arguments", () => {
+    expect(contrastRatio("#123456", "#abcdef")).toBeCloseTo(
+      contrastRatio("#abcdef", "#123456"),
+      10,
+    );
+  });
+});
+
+describe("mixToContrast", () => {
+  it("keeps the starting mix when it already reads", () => {
+    // 55% from white toward black clears 4.5:1 on its own, so the floor must
+    // not darken it further and change the look for no reason.
+    const plain = mixColors("#ffffff", "#000000", 0.55);
+    expect(mixToContrast("#ffffff", "#000000", "#ffffff", 4.5, 0.55)).toBe(
+      plain,
+    );
+  });
+
+  it("pushes further when the starting mix does not read", () => {
+    // Mid grey on mid grey: 55% of the way to a near-grey foreground is
+    // invisible, so it has to keep going.
+    const bg = "#767676";
+    const fg = "#8a8a8a";
+    const plain = mixColors(bg, fg, 0.55);
+    const floored = mixToContrast(bg, fg, bg, 4.5, 0.55);
+    expect(floored).not.toBe(plain);
+  });
+
+  it("gives up at the far end rather than looping", () => {
+    // No mix of two near-identical colours can clear 4.5:1 against one of them.
+    expect(mixToContrast("#777777", "#787878", "#777777", 4.5, 0.55)).toBe(
+      "#787878",
+    );
+  });
+});
+
+describe("checkContrast", () => {
+  it("flags the pair that fails and not the ones that pass", () => {
+    const checks = checkContrast({
+      background: "#ffffff",
+      card: "#ffffff",
+      accent: "#1a1a1a",
+      primary: "#111111",
+    });
+    const byLabel = Object.fromEntries(checks.map((c) => [c.label, c]));
+    expect(byLabel["Text on background"].passes).toBe(true);
+    expect(byLabel["Text on cards"].passes).toBe(true);
+    // Near-black text on a near-black accent.
+    expect(byLabel["Text on accent"].passes).toBe(false);
+  });
+
+  it("agrees with the threshold it is checked against", () => {
+    for (const check of checkContrast(PALE)) {
+      expect(check.passes).toBe(check.ratio >= MIN_TEXT_CONTRAST);
+    }
+  });
+});
+
+describe("derived muted foreground", () => {
+  // Backgrounds paired with a foreground a real theme would use with them.
+  const pairs: [string, string][] = [
+    ["#ffffff", "#111111"],
+    ["#000000", "#eeeeee"],
+    ["#313338", "#f2f3f5"],
+    ["#fdfaf6", "#1c1917"],
+  ];
+
+  it("clears the text threshold against the background it sits on", () => {
+    // The old fixed 55% mix produced whatever it produced, which on some
+    // backgrounds was secondary text nobody could read.
+    for (const [background, primary] of pairs) {
+      const vars = deriveThemeVars({
+        background,
+        card: background,
+        accent: "#888888",
+        primary,
+      });
+      expect(
+        contrastRatio(vars["--muted-foreground"], background),
+      ).toBeGreaterThanOrEqual(MIN_TEXT_CONTRAST);
+    }
+  });
+
+  it("stays at the plain mix where that already reads", () => {
+    // The floor is a floor, not a restyle: a pair that was already fine keeps
+    // the muted tone it had. (The white/near-black pair is not one of those —
+    // 55% of the way down from white lands at 3.9:1, which is the bug.)
+    const [background, primary] = pairs[1];
+    const vars = deriveThemeVars({
+      background,
+      card: background,
+      accent: "#888888",
+      primary,
+    });
+    expect(vars["--muted-foreground"]).toBe(
+      mixColors(background, primary, 0.55),
+    );
   });
 });

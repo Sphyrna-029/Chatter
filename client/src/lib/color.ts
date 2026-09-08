@@ -99,6 +99,46 @@ export function relativeLuminance(hex: string): number {
 }
 
 /**
+ * WCAG 2.1 contrast ratio between two colours, 1 (identical) to 21
+ * (black on white). 4.5 is the AA threshold for body text, 3 for large text
+ * and for the boundary of a control.
+ */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * Mix `from` toward `to` until the result clears `minRatio` against
+ * `against`, starting at `startT` and never going back below it.
+ *
+ * This is the floor under a derived colour. A fixed mix ratio produces
+ * readable secondary text against some backgrounds and unreadable text against
+ * others, which is not something a person picking four colours should have to
+ * work out for themselves.
+ */
+export function mixToContrast(
+  from: string,
+  to: string,
+  against: string,
+  minRatio: number,
+  startT = 0,
+  step = 0.05,
+): string {
+  let candidate = mixColors(from, to, startT);
+  for (let t = startT; t <= 1; t += step) {
+    candidate = mixColors(from, to, t);
+    if (contrastRatio(candidate, against) >= minRatio) return candidate;
+  }
+  // Nothing on the line qualifies — the two endpoints are too close to
+  // `against` for any mix of them to be readable. The far end is the best
+  // available, and the editor warns about the pair separately.
+  return to;
+}
+
+/**
  * Which base palette a theme belongs to, judged from its background.
  *
  * The threshold sits well below the midpoint because the base blocks it picks
