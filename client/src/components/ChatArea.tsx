@@ -397,14 +397,26 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       // than at the moment a load starts keeps the anchor honest as content
       // above the viewport keeps resolving its height.
       scrollAnchorRef.current = nearBottom ? null : captureAnchor();
-      // Two guards, both there to stop a channel asking for older history
-      // while it is still landing on its newest message. `nearBottom` is the
-      // real one: a reader pinned to the bottom is not reading history, even
-      // though a list that has not filled the viewport yet also sits at
-      // scrollTop 0. The load that used to fire here suppressed the
-      // bottom-pin below for a whole network round trip, which is what
-      // "it doesn't open at the newest message" looked like.
-      if (!nearBottom && scrollTop < 100 && scrollHeight > clientHeight) {
+      // Fetch the next page while the reader is still two viewports away from
+      // the top of what is loaded, rather than once they have reached it.
+      //
+      // The lead is the point. Attachments render without a reserved height,
+      // so a freshly loaded page grows as its images arrive, and where that
+      // growth happens decides whether it is correctable. Above the viewport
+      // it moves the anchor and is compensated exactly. On screen it moves
+      // whatever sits below it and cannot be — holding the top of the viewport
+      // still is precisely what pushes the reader's content down. Loading
+      // early keeps the growth off-screen: by the time the reader arrives the
+      // page has settled. Measured in Chromium against a reader wheeling
+      // upwards into a loading page — at 2 viewports of lead the content they
+      // were reading did not move; at 1.5 it drifted 300px, at 1 it drifted
+      // 600px, and at the old 100px threshold it drifted 600px.
+      //
+      // `nearBottom` is the other guard, and it is what keeps a channel from
+      // asking for history while it is still landing on its newest message:
+      // a reader pinned to the bottom is not reading history, even though a
+      // list that has not filled the viewport yet also sits at scrollTop 0.
+      if (!nearBottom && scrollTop < clientHeight * 2 && scrollHeight > clientHeight) {
         loadOlderMessages();
       }
       // Clear unread divider when user scrolls to bottom
