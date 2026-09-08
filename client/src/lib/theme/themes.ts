@@ -1,12 +1,10 @@
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  useCallback,
-  useMemo,
-  type ReactNode,
-} from "react";
+/**
+ * Everything about a theme that is not React: the built-in list, how a theme's
+ * colours are resolved, and how one is read in or written out.
+ *
+ * Split from the provider the way `lib/store` is — a file that exports both a
+ * component and the constants around it cannot hot-reload either.
+ */
 import {
   hexToRgb,
   isDarkColor,
@@ -40,6 +38,11 @@ export interface ThemeDefinition {
 
 export const DEFAULT_THEME_ID = "dark";
 
+/** Not a theme — a standing instruction to follow the OS. It resolves to the
+ *  `light` or `dark` built-in and re-resolves when the OS flips, so it is kept
+ *  out of `THEMES` and handled where the active theme is chosen. */
+export const SYSTEM_THEME_ID = "system";
+
 export const THEMES: ThemeDefinition[] = [
   { id: "light", name: "Light", mode: "light", colors: null },
   { id: "dark", name: "Default Dark", mode: "dark", colors: null },
@@ -51,8 +54,10 @@ export const THEMES: ThemeDefinition[] = [
   { id: "neon", name: "Neon", mode: "dark", colors: null },
 ];
 
-const STORAGE_KEY = "chatter_theme";
+export const STORAGE_KEY = "chatter_theme";
 const CUSTOM_THEMES_KEY = "chatter_custom_themes";
+/** What `index.html` replays before React loads. See `writePaintCache`. */
+const PAINT_KEY = "chatter_theme_paint";
 
 /** Used where the document cannot be read — under test, or before first
  *  paint. These are the Default Dark values. */
@@ -157,8 +162,20 @@ export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
   };
 }
 
-function applyCustomThemeStyle(theme: ThemeDefinition) {
-  if (!theme.colors) return;
+/** The rule a custom theme is applied through, as text.
+ *
+ *  `html[...]` rather than a bare attribute selector: the base blocks are class
+ *  and attribute rules of equal weight, and relying on this sheet being the
+ *  last one in the head loses the tie whenever HMR re-injects index.css. */
+export function customThemeCss(theme: ThemeDefinition): string {
+  if (!theme.colors) return "";
+  const body = Object.entries(deriveThemeVars(theme.colors))
+    .map(([k, v]) => `${k}: ${v};`)
+    .join("\n  ");
+  return `html[data-theme="${theme.id}"] {\n  ${body}\n}`;
+}
+
+export function setCustomThemeStyle(css: string) {
   let el = document.getElementById(
     "custom-theme-style",
   ) as HTMLStyleElement | null;
@@ -167,20 +184,34 @@ function applyCustomThemeStyle(theme: ThemeDefinition) {
     el.id = "custom-theme-style";
     document.head.appendChild(el);
   }
-  const cssText = Object.entries(deriveThemeVars(theme.colors))
-    .map(([k, v]) => `${k}: ${v};`)
-    .join("\n  ");
-  // `html[...]` rather than a bare attribute selector: the base blocks are
-  // class and attribute rules of equal weight, and relying on this sheet being
-  // the last one in the head loses the tie whenever HMR re-injects index.css.
-  el.textContent = `html[data-theme="${theme.id}"] {\n  ${cssText}\n}`;
+  el.textContent = css;
 }
 
-function removeCustomThemeStyle() {
+export function removeCustomThemeStyle() {
   document.getElementById("custom-theme-style")?.remove();
 }
 
-function newThemeId(): string {
+/**
+ * Leave behind everything the pre-paint script in `index.html` needs to put the
+ * theme on screen before React has loaded.
+ *
+ * It is a cache rather than a second implementation: the script replays this
+ * verbatim and derives nothing, so the rules for what a theme looks like stay
+ * in one place. A miss — a first visit, a theme changed in another tab — costs
+ * one frame of the wrong palette, not a wrong theme.
+ */
+export function writePaintCache(theme: ThemeDefinition, css: string, bg: string) {
+  try {
+    localStorage.setItem(
+      PAINT_KEY,
+      JSON.stringify({ id: theme.id, mode: theme.mode, css, bg }),
+    );
+  } catch {
+    // Storage full or blocked; the app still themes itself a frame later.
+  }
+}
+
+export function newThemeId(): string {
   return `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -212,7 +243,19 @@ function normalizeStoredTheme(raw: unknown): ThemeDefinition | null {
   };
 }
 
-function loadCustomThemes(): ThemeDefinition[] {
+/** Write the custom theme list back, returning it so callers can use this
+ *  inside a state updater. A full or blocked store costs the user the theme on
+ *  the next load, which is not worth failing the edit they just made. */
+export function persistCustomThemes(next: ThemeDefinition[]): ThemeDefinition[] {
+  try {
+    localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(next));
+  } catch {
+    // Applied now, forgotten on reload.
+  }
+  return next;
+}
+
+export function loadCustomThemes(): ThemeDefinition[] {
   try {
     const raw = localStorage.getItem(CUSTOM_THEMES_KEY);
     if (!raw) return [];
@@ -264,10 +307,32 @@ export function parseImportedTheme(json: string): ThemeDefinition {
   };
 }
 
+/** `useSyncExternalStore` subscriber for the OS colour-scheme preference. */
+export function subscribePrefersDark(onChange: () => void): () => void {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  const query = window.matchMedia("(prefers-color-scheme: dark)");
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+export function getPrefersDark(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
+
 export interface ThemeSettings {
+  /** What the user picked — a theme id, or `SYSTEM_THEME_ID`. */
   themeId: string;
-  /** The theme actually in force, already resolved past a stale or deleted id. */
+  /** The theme actually in force, resolved past `system` and past a stale or
+   *  deleted id. */
   activeTheme: ThemeDefinition;
+  /** The built-in `system` currently resolves to, whatever is selected. */
+  systemTheme: ThemeDefinition;
   themes: ThemeDefinition[];
   customThemes: ThemeDefinition[];
   setTheme: (id: string) => void;
@@ -285,183 +350,4 @@ export interface ThemeSettings {
   deleteCustomTheme: (id: string) => void;
   exportTheme: (id: string) => string | null;
   importTheme: (json: string) => ThemeDefinition;
-}
-
-const ThemeContext = createContext<ThemeSettings | null>(null);
-
-/**
- * Owns the selected theme for the whole app.
- *
- * This was a plain hook, and both `App` and the settings dialog called it. Each
- * call built its own state and its own apply-to-`<html>` effect, so the two
- * disagreed the moment either changed the theme; it only held together because
- * `App`'s effect never re-ran. One owner, one effect.
- */
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [themeId, setThemeId] = useState<string>(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME_ID;
-    } catch {
-      return DEFAULT_THEME_ID;
-    }
-  });
-
-  const [customThemes, setCustomThemes] =
-    useState<ThemeDefinition[]>(loadCustomThemes);
-
-  const themes = useMemo(
-    () => [...THEMES, ...customThemes],
-    [customThemes],
-  );
-
-  const activeTheme = useMemo(
-    () =>
-      themes.find((t) => t.id === themeId) ??
-      THEMES.find((t) => t.id === DEFAULT_THEME_ID)!,
-    [themes, themeId],
-  );
-
-  useEffect(() => {
-    const html = document.documentElement;
-    html.classList.toggle("dark", activeTheme.mode === "dark");
-    if (activeTheme.colors) {
-      html.setAttribute("data-theme", activeTheme.id);
-      applyCustomThemeStyle(activeTheme);
-    } else {
-      removeCustomThemeStyle();
-      // The two base themes are the bare `:root` and `.dark` blocks; the rest
-      // are attribute blocks layered over them.
-      if (activeTheme.id === "light" || activeTheme.id === "dark") {
-        html.removeAttribute("data-theme");
-      } else {
-        html.setAttribute("data-theme", activeTheme.id);
-      }
-    }
-  }, [activeTheme]);
-
-  const persistCustom = useCallback((next: ThemeDefinition[]) => {
-    try {
-      localStorage.setItem(CUSTOM_THEMES_KEY, JSON.stringify(next));
-    } catch {
-      // A full or blocked store costs the user the theme on next load, which
-      // is not worth failing the edit they just made in front of them.
-    }
-    return next;
-  }, []);
-
-  const setTheme = useCallback((id: string) => {
-    setThemeId(id);
-    try {
-      localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      // Same as above: applied now, forgotten on reload.
-    }
-  }, []);
-
-  const addCustomTheme = useCallback(
-    (name: string, colors: ThemeColors, mode?: ThemeMode): ThemeDefinition => {
-      const theme: ThemeDefinition = {
-        id: newThemeId(),
-        name,
-        mode: mode ?? (isDarkColor(colors.background) ? "dark" : "light"),
-        colors,
-      };
-      setCustomThemes((prev) => persistCustom([...prev, theme]));
-      return theme;
-    },
-    [persistCustom],
-  );
-
-  const updateCustomTheme = useCallback(
-    (id: string, name: string, colors: ThemeColors, mode?: ThemeMode) => {
-      setCustomThemes((prev) =>
-        persistCustom(
-          prev.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  name,
-                  colors,
-                  mode:
-                    mode ?? (isDarkColor(colors.background) ? "dark" : "light"),
-                }
-              : t,
-          ),
-        ),
-      );
-    },
-    [persistCustom],
-  );
-
-  const deleteCustomTheme = useCallback(
-    (id: string) => {
-      setCustomThemes((prev) => persistCustom(prev.filter((t) => t.id !== id)));
-      setThemeId((prev) => {
-        if (prev !== id) return prev;
-        try {
-          localStorage.setItem(STORAGE_KEY, DEFAULT_THEME_ID);
-        } catch {
-          // Applied now, forgotten on reload.
-        }
-        return DEFAULT_THEME_ID;
-      });
-    },
-    [persistCustom],
-  );
-
-  const exportTheme = useCallback(
-    (id: string): string | null => {
-      const theme = themes.find((t) => t.id === id);
-      if (!theme) return null;
-      const colors = resolveThemeColors(theme);
-      return JSON.stringify({ name: theme.name, mode: theme.mode, ...colors }, null, 2);
-    },
-    [themes],
-  );
-
-  const importTheme = useCallback(
-    (json: string): ThemeDefinition => {
-      const theme = parseImportedTheme(json);
-      setCustomThemes((prev) => persistCustom([...prev, theme]));
-      return theme;
-    },
-    [persistCustom],
-  );
-
-  const value = useMemo<ThemeSettings>(
-    () => ({
-      themeId,
-      activeTheme,
-      themes,
-      customThemes,
-      setTheme,
-      addCustomTheme,
-      updateCustomTheme,
-      deleteCustomTheme,
-      exportTheme,
-      importTheme,
-    }),
-    [
-      themeId,
-      activeTheme,
-      themes,
-      customThemes,
-      setTheme,
-      addCustomTheme,
-      updateCustomTheme,
-      deleteCustomTheme,
-      exportTheme,
-      importTheme,
-    ],
-  );
-
-  return (
-    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
-  );
-}
-
-export function useThemeSettings(): ThemeSettings {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) throw new Error("useThemeSettings must be within ThemeProvider");
-  return ctx;
 }

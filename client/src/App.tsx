@@ -6,7 +6,7 @@ import { LoginScreen } from "@/components/LoginScreen";
 import { ChatLayout } from "@/components/ChatLayout";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
-import { ThemeProvider } from "@/hooks/useThemeSettings";
+import { ThemeProvider } from "@/lib/theme";
 
 // Only ever reached by following an invite link, which is a fresh navigation
 // anyway — no reason for every other load to carry it.

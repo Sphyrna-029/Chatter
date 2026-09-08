@@ -12,7 +12,7 @@ import {
   parseImportedTheme,
   THEMES,
   type ThemeColors,
-} from "@/hooks/useThemeSettings";
+} from "@/lib/theme";
 import { isDarkColor, mixColors, normalizeToHex } from "@/lib/color";
 
 const PALE: ThemeColors = {

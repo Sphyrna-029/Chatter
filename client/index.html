@@ -10,6 +10,52 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>Chatter</title>
+    <script>
+      /* Put the theme on <html> before the first paint. Without this the page
+         paints the stylesheet's default — a white flash on the way into a dark
+         app — because the theme is otherwise applied from a React effect.
+
+         This derives nothing. Everything below was worked out by the app and
+         left in localStorage (see writePaintCache in useThemeSettings); a miss
+         costs one frame of the wrong palette, never the wrong theme. */
+      (function () {
+        try {
+          var sel = localStorage.getItem("chatter_theme") || "dark";
+          if (sel === "system") {
+            sel = matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
+          }
+          var mode = sel === "light" ? "light" : "dark";
+          var css = "";
+          var bg = "";
+          var paint = JSON.parse(
+            localStorage.getItem("chatter_theme_paint") || "null"
+          );
+          if (paint && paint.id === sel) {
+            mode = paint.mode;
+            css = paint.css || "";
+            bg = paint.bg || "";
+          }
+          var html = document.documentElement;
+          if (mode === "dark") html.classList.add("dark");
+          if (sel !== "light" && sel !== "dark")
+            html.setAttribute("data-theme", sel);
+          if (css) {
+            var style = document.createElement("style");
+            style.id = "custom-theme-style";
+            style.textContent = css;
+            document.head.appendChild(style);
+          }
+          if (bg) {
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute("content", bg);
+          }
+        } catch (e) {
+          /* Any failure just means the theme lands a frame later. */
+        }
+      })();
+    </script>
     <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1" async></script>
   </head>
   <body>
