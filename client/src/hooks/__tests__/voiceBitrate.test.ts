@@ -56,6 +56,21 @@ describe("mungeVoiceAudioSdp", () => {
     expect(mungeVoiceAudioSdp(SDP_WITH_FMTP, 100)).toContain(`maxaveragebitrate=${VOICE_BITRATE_MIN_BPS}`);
   });
 
+  it("enables DTX so silent publishers stop sending", () => {
+    expect(mungeVoiceAudioSdp(SDP_WITH_FMTP, 64_000)).toContain("usedtx=1");
+  });
+
+  it("does not duplicate usedtx when the answer already carries it", () => {
+    const sdp = SDP_WITH_FMTP.replace(
+      "a=fmtp:111 minptime=10;useinbandfec=1",
+      "a=fmtp:111 minptime=10;usedtx=0;useinbandfec=1",
+    );
+    const out = mungeVoiceAudioSdp(sdp, 64_000);
+    expect(out).toContain("usedtx=1");
+    expect(out).not.toContain("usedtx=0");
+    expect(out.match(/usedtx=/g)).toHaveLength(1);
+  });
+
   it("leaves SDP without an opus track untouched", () => {
     const sdp = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n";
     expect(mungeVoiceAudioSdp(sdp, 64_000)).toBe(sdp);

@@ -65,7 +65,7 @@ export function canSignal(wsRef: React.MutableRefObject<WebSocket | null>) {
 // src/backend/constants.rs.
 export const VOICE_BITRATE_MIN_BPS = 8_000;
 export const VOICE_BITRATE_MAX_BPS = 256_000;
-export const VOICE_BITRATE_DEFAULT_BPS = 64_000;
+export const VOICE_BITRATE_DEFAULT_BPS = 32_000;
 
 export function clampVoiceBitrate(bps: number | null | undefined): number {
   if (bps == null || !Number.isFinite(bps)) return VOICE_BITRATE_DEFAULT_BPS;
@@ -85,8 +85,12 @@ export function mungeVoiceAudioSdp(sdp: string, bitrateBps: number): string {
   const params = (existing?.[0].slice(`a=fmtp:${pt} `.length) ?? "minptime=10;useinbandfec=1")
     .split(";")
     .map((p) => p.trim())
-    .filter((p) => p.length > 0 && !/^maxaveragebitrate=/i.test(p));
+    .filter((p) => p.length > 0 && !/^maxaveragebitrate=/i.test(p) && !/^usedtx=/i.test(p));
   params.push(`maxaveragebitrate=${bitrate}`);
+  // Discontinuous transmission. Without it a silent or muted publisher still
+  // sends full-rate encoded silence, which the SFU then fans out to everyone —
+  // so a mostly-listening call costs the same as one where everybody talks.
+  params.push("usedtx=1");
   const line = `a=fmtp:${pt} ${params.join(";")}`;
   if (existing) return sdp.replace(existingFmtp, line);
   // No existing fmtp line — insert one after the rtpmap line

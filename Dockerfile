@@ -26,7 +26,7 @@ COPY --from=builder /app/target/release/chatter .
 COPY --from=frontend /app/client/dist ./client/dist/
 COPY external/ ./external/
 
-EXPOSE 8000
+EXPOSE 8000/tcp 8000/udp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/_matrix/client/versions || exit 1

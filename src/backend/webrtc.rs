@@ -13,6 +13,10 @@ use webrtc::{
         interceptor_registry::register_default_interceptors, media_engine::MediaEngine,
         setting_engine::SettingEngine, APIBuilder, API,
     },
+    ice::{
+        udp_mux::{UDPMuxDefault, UDPMuxParams},
+        udp_network::UDPNetwork,
+    },
     ice_transport::{
         ice_candidate::RTCIceCandidateInit, ice_candidate_type::RTCIceCandidateType,
         ice_credential_type::RTCIceCredentialType, ice_server::RTCIceServer,
@@ -20,6 +24,12 @@ use webrtc::{
     interceptor::registry::Registry,
     peer_connection::{configuration::RTCConfiguration, RTCPeerConnection},
 };
+
+/// Port every peer connection is multiplexed onto unless `WEBRTC_UDP_PORT`
+/// says otherwise. Matches the HTTP listener's port number — UDP and TCP are
+/// separate spaces, so nothing collides — which means the single mapping
+/// deployments already publish covers media too.
+const DEFAULT_WEBRTC_UDP_PORT: u16 = 8000;
 
 pub(crate) fn parse_ice_candidate(value: &Value) -> Option<RTCIceCandidateInit> {
     let candidate = value.get("candidate")?.as_str()?.to_string();
@@ -53,7 +63,7 @@ pub(crate) fn ice_candidate_to_json(candidate: &RTCIceCandidateInit) -> Value {
     })
 }
 
-pub(crate) fn build_webrtc_api() -> Arc<API> {
+pub(crate) async fn build_webrtc_api() -> Arc<API> {
     let mut media_engine = MediaEngine::default();
     media_engine
         .register_default_codecs()
@@ -64,6 +74,30 @@ pub(crate) fn build_webrtc_api() -> Arc<API> {
         .expect("register_default_interceptors failed");
 
     let mut setting_engine = SettingEngine::default();
+
+    // Carry every peer connection over one UDP socket. The default is an
+    // ephemeral port per connection, which a large call exhausts long before
+    // bandwidth becomes the limit — and it leaves nothing specific to open on
+    // a firewall. Binding failure is not fatal: falling back to ephemeral
+    // ports keeps small calls working on a host where the port is taken.
+    let udp_port: u16 = std::env::var("WEBRTC_UDP_PORT")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(DEFAULT_WEBRTC_UDP_PORT);
+    match tokio::net::UdpSocket::bind(("0.0.0.0", udp_port)).await {
+        Ok(socket) => {
+            println!("WebRTC: multiplexing peer connections over UDP port {udp_port}");
+            setting_engine.set_udp_network(UDPNetwork::Muxed(UDPMuxDefault::new(
+                UDPMuxParams::new(socket),
+            )));
+        }
+        Err(e) => {
+            eprintln!(
+                "WebRTC: could not bind UDP port {udp_port} ({e}); \
+                 falling back to an ephemeral port per connection"
+            );
+        }
+    }
 
     // If WEBRTC_IP is set (e.g. the server's public IP), advertise it as a
     // server-reflexive candidate so remote peers can connect through NAT while

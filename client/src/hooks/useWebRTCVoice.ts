@@ -25,7 +25,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voicePublisherPcRef = useRef<RTCPeerConnection | null>(null);
   const voiceSubscriberPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
   const voiceAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  const voiceGainNodesRef = useRef<Map<string, { ctx: AudioContext; gain: GainNode }>>(new Map());
+  // One AudioContext for the whole call, with a gain node per speaker hanging
+  // off it. A context per speaker capped call size far below anything else
+  // here — browsers limit how many a single document may hold.
+  const voiceAudioCtxRef = useRef<AudioContext | null>(null);
+  const voiceGainNodesRef = useRef<Map<string, GainNode>>(new Map());
   const voiceUserVolumesRef = useRef<Record<string, number>>({});
   const pendingVoiceSubsRef = useRef<Set<string>>(new Set());
   const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
@@ -69,6 +73,26 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       applyVoiceSenderBitrate(voicePublisherPcRef.current, bitrate);
     }
   }, [state.channels, state.voiceChannelId]);
+
+  // Built on first use and reused for every speaker. A context that was closed
+  // by an earlier call is replaced rather than revived — closing is final.
+  const getVoiceAudioCtx = () => {
+    if (!voiceAudioCtxRef.current || voiceAudioCtxRef.current.state === "closed") {
+      voiceAudioCtxRef.current = new AudioContext();
+    }
+    return voiceAudioCtxRef.current;
+  };
+
+  // Drop every speaker's gain node and the context they share. Used by the
+  // teardown paths; a single speaker leaving only disconnects their own node.
+  const closeVoiceAudioGraph = () => {
+    voiceGainNodesRef.current.forEach((gain) => { try { gain.disconnect(); } catch {} });
+    voiceGainNodesRef.current.clear();
+    if (voiceAudioCtxRef.current) {
+      voiceAudioCtxRef.current.close().catch(() => {});
+      voiceAudioCtxRef.current = null;
+    }
+  };
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
   const createVoicePublisher = useCallback(async () => {
@@ -188,7 +212,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
       // Route through a GainNode so per-user volume can exceed 100%
       if (!voiceGainNodesRef.current.has(speakerUserId)) {
-        const ctx = new AudioContext();
+        const ctx = getVoiceAudioCtx();
         const source = ctx.createMediaStreamSource(stream);
         const gain = ctx.createGain();
         // Deafened means deafened to everyone, including whoever joins next —
@@ -198,7 +222,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
           : (voiceUserVolumesRef.current[speakerUserId] ?? 1.0);
         source.connect(gain);
         gain.connect(ctx.destination);
-        voiceGainNodesRef.current.set(speakerUserId, { ctx, gain });
+        voiceGainNodesRef.current.set(speakerUserId, gain);
         // Mute the HTML element since GainNode handles playback
         audioEl.volume = 0;
       }
@@ -354,8 +378,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
           voiceRetryCountsRef.current.delete(leftId);
           const audioEl = voiceAudioElementsRef.current.get(leftId);
           if (audioEl) { audioEl.pause(); audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
-          const gainEntry = voiceGainNodesRef.current.get(leftId);
-          if (gainEntry) { gainEntry.ctx.close().catch(() => {}); voiceGainNodesRef.current.delete(leftId); }
+          const gain = voiceGainNodesRef.current.get(leftId);
+          if (gain) { try { gain.disconnect(); } catch {} voiceGainNodesRef.current.delete(leftId); }
         }
       } else if (msg.type === "voice_webrtc_publisher_ready") {
         if (state.inVoiceChannel && msg.user_id !== state.userId) {
@@ -448,8 +472,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voiceSubscriberPcsRef.current.clear();
       voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
       voiceAudioElementsRef.current.clear();
-      voiceGainNodesRef.current.forEach((entry) => entry.ctx.close().catch(() => {}));
-      voiceGainNodesRef.current.clear();
+      closeVoiceAudioGraph();
       voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
       voiceRetryTimersRef.current.clear();
       voiceRetryCountsRef.current.clear();
@@ -582,8 +605,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     voiceSubscriberPcsRef.current.clear();
     voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
     voiceAudioElementsRef.current.clear();
-    voiceGainNodesRef.current.forEach((entry) => entry.ctx.close().catch(() => {}));
-    voiceGainNodesRef.current.clear();
+    closeVoiceAudioGraph();
     voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
     voiceRetryTimersRef.current.clear();
     voicePublishRetryCountRef.current = 0;
@@ -690,9 +712,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Volume control ───────────────────────────────────────────────────────
   const setUserVolume = useCallback((userId: string, vol: number) => {
     voiceUserVolumesRef.current[userId] = vol;
-    const gainEntry = voiceGainNodesRef.current.get(userId);
-    if (gainEntry) {
-      gainEntry.gain.gain.value = vol;
+    const gain = voiceGainNodesRef.current.get(userId);
+    if (gain) {
+      gain.gain.value = vol;
     } else {
       // Fallback if GainNode not yet created (clamped to 1.0 by browser)
       const audioEl = voiceAudioElementsRef.current.get(userId);
@@ -710,8 +732,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         t.enabled = newDeafened ? false : !state.isMuted;
       });
     }
-    voiceGainNodesRef.current.forEach((entry, userId) => {
-      entry.gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
+    voiceGainNodesRef.current.forEach((gain, userId) => {
+      gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
     });
     // Set alongside the dispatch, not by the effect that mirrors it: a
     // speaker's track can arrive before the next render, and would be built a

@@ -45,7 +45,7 @@ pub async fn build_state() -> Arc<AppState> {
     let banned_users = load_banned_users_cache(&db).await;
     let server_settings = load_server_settings(&db).await;
 
-    let webrtc_api = build_webrtc_api();
+    let webrtc_api = build_webrtc_api().await;
 
     // Minted on first boot and reused forever after: every browser
     // subscription is bound to the public key it enrolled with.
