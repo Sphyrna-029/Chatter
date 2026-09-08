@@ -132,12 +132,12 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle>Appearance</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="theme">
+        <Tabs defaultValue="theme" className="min-h-0">
           <TabsList className="w-full">
             <TabsTrigger value="theme" className="flex-1">
               Theme
@@ -147,7 +147,10 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="theme" className="mt-4 space-y-4">
+          <TabsContent
+            value="theme"
+            className="mt-4 min-h-0 space-y-4 overflow-y-auto pr-1"
+          >
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => setTheme(SYSTEM_THEME_ID)}
@@ -573,7 +576,10 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
           )}
           </TabsContent>
 
-          <TabsContent value="display" className="mt-4 space-y-5">
+          <TabsContent
+            value="display"
+            className="mt-4 min-h-0 space-y-5 overflow-y-auto pr-1"
+          >
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <Label>Text size</Label>

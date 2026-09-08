@@ -161,12 +161,12 @@ export function VoiceSettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle>Voice &amp; Audio</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="input">
+        <Tabs defaultValue="input" className="min-h-0">
           <TabsList className="w-full">
             <TabsTrigger value="input" className="flex-1">
               Input
@@ -180,7 +180,7 @@ export function VoiceSettingsDialog({
           </TabsList>
 
           {/* ── Input Tab ── */}
-          <TabsContent value="input" className="space-y-5 mt-4">
+          <TabsContent value="input" className="space-y-5 mt-4 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-2">
               <Label>Microphone</Label>
               <select
@@ -320,7 +320,7 @@ export function VoiceSettingsDialog({
           </TabsContent>
 
           {/* ── Output Tab ── */}
-          <TabsContent value="output" className="space-y-5 mt-4">
+          <TabsContent value="output" className="space-y-5 mt-4 min-h-0 overflow-y-auto pr-1">
             <div className="space-y-2">
               <Label>Speaker</Label>
               <select
@@ -363,7 +363,7 @@ export function VoiceSettingsDialog({
           </TabsContent>
 
           {/* ── Advanced Tab ── */}
-          <TabsContent value="advanced" className="space-y-5 mt-4">
+          <TabsContent value="advanced" className="space-y-5 mt-4 min-h-0 overflow-y-auto pr-1">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <Label>Push to Talk</Label>
