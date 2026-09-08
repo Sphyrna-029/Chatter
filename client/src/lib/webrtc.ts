@@ -59,6 +59,13 @@ export function canSignal(wsRef: React.MutableRefObject<WebSocket | null>) {
   return wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
 }
 
+// ─── Voice speaker slots ────────────────────────────────────────────────────
+// A subscription offers this many receive-only transceivers, and the server
+// puts whoever is currently loudest into them. Keep in sync with
+// VOICE_MAX_ACTIVE_SPEAKERS in src/backend/constants.rs — the server answers
+// with exactly this many tracks.
+export const VOICE_SLOT_COUNT = 12;
+
 // ─── Voice channel bitrate ──────────────────────────────────────────────────
 // Per-channel Opus bitrate, configured by room owners/moderators and applied by
 // every publisher in that channel. Keep in sync with VOICE_BITRATE_* in

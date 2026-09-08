@@ -8,8 +8,7 @@ use super::{
     voice_webrtc::{
         handle_voice_webrtc_publish_candidate, handle_voice_webrtc_publish_offer,
         handle_voice_webrtc_subscribe_candidate, handle_voice_webrtc_subscribe_offer,
-        teardown_voice_publisher, teardown_voice_subscriptions_for_listener,
-        teardown_voice_subscriptions_for_speaker,
+        teardown_voice_listener, teardown_voice_publisher,
     },
     webcam_webrtc::{
         handle_webcam_webrtc_publish_candidate, handle_webcam_webrtc_publish_offer,
@@ -522,7 +521,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
 
             // Teardowns and broadcasts happen after the lock is released
             for (old_cid, remaining_members, was_screen_sharing) in old_channels {
-                teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                teardown_voice_listener(&state, user_id).await;
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let publisher_room = teardown_screen_publisher(&state, user_id).await;
@@ -571,7 +570,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             // device publishes. It does: that offer is a later message on the
             // socket this one arrived on.
             if let Some(displaced) = displaced_conn {
-                teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                teardown_voice_listener(&state, user_id).await;
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let screen_room = teardown_screen_publisher(&state, user_id).await;
@@ -651,37 +650,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             });
             broadcast_to_room(&state, room_id, &event).await;
 
-            // Send list of existing voice publishers to the new joiner.
-            // Only include publishers whose audio track is already ready (has codec).
-            // Publishers still negotiating will send publisher_ready when their
-            // track arrives, triggering subscription at that point.
-            let existing_publishers: Vec<String> = {
-                let publishers = state.voice_publishers.read().await;
-                let vc = state.voice_channels.read().await;
-                if let Some(chan_vc) = vc.get(channel_id) {
-                    chan_vc
-                        .keys()
-                        .filter(|uid| {
-                            uid.as_str() != user_id
-                                && publishers
-                                    .get(*uid)
-                                    .is_some_and(|p| p.audio_codec.is_some())
-                        })
-                        .cloned()
-                        .collect()
-                } else {
-                    vec![]
-                }
-            };
-            if !existing_publishers.is_empty() {
-                let publishers_msg = json!({
-                    "type": "voice_webrtc_publishers_list",
-                    "room_id": room_id,
-                    "channel_id": channel_id,
-                    "publishers": existing_publishers
-                });
-                send_to_user(&state, user_id, &publishers_msg).await;
-            }
+            // No publisher list is sent: a joiner opens one subscription and the
+            // server decides which speakers occupy its slots, so who is audible
+            // is never the client's to work out.
         }
         "voice_leave" => {
             let channel_id = msg
@@ -713,7 +684,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             // If result is None the user already left (e.g. via voice_join switching
             // channels), so doing nothing avoids tearing down the new connection.
             if let Some((voice_members, was_screen_sharing)) = result {
-                teardown_voice_subscriptions_for_listener(&state, user_id).await;
+                teardown_voice_listener(&state, user_id).await;
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
                 let publisher_room = teardown_screen_publisher(&state, user_id).await;
@@ -957,7 +928,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
 
                     // The peer mesh is per channel, so every existing pairing
                     // for this user is stale after the move.
-                    teardown_voice_subscriptions_for_listener(&state, target).await;
+                    teardown_voice_listener(&state, target).await;
                     let _ = teardown_voice_publisher(&state, target).await;
 
                     let remaining = {
@@ -1030,8 +1001,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         return;
                     }
 
-                    teardown_voice_subscriptions_for_listener(&state, target).await;
-                    teardown_voice_subscriptions_for_speaker(&state, target).await;
+                    teardown_voice_listener(&state, target).await;
                     let _ = teardown_voice_publisher(&state, target).await;
                     teardown_screen_subscriptions_for_viewer(&state, target).await;
                     let _ = teardown_screen_publisher(&state, target).await;
@@ -1293,32 +1263,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
         }
         "voice_webrtc_subscribe_offer" => {
             let sdp = msg.get("sdp").and_then(|v| v.as_str()).unwrap_or("");
-            let speaker_user_id = msg
-                .get("speaker_user_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            handle_voice_webrtc_subscribe_offer(
-                state.clone(),
-                user_id,
-                room_id,
-                speaker_user_id,
-                sdp,
-            )
-            .await;
+            handle_voice_webrtc_subscribe_offer(state.clone(), user_id, room_id, sdp).await;
         }
         "voice_webrtc_subscribe_candidate" => {
-            let speaker_user_id = msg
-                .get("speaker_user_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
             if let Some(candidate_value) = msg.get("candidate") {
-                handle_voice_webrtc_subscribe_candidate(
-                    &state,
-                    user_id,
-                    speaker_user_id,
-                    candidate_value,
-                )
-                .await;
+                handle_voice_webrtc_subscribe_candidate(&state, user_id, candidate_value).await;
             }
         }
         "set_custom_status" => {
@@ -2226,7 +2175,7 @@ async fn current_is_mobile(state: &AppState, user_id: &str) -> bool {
 
 pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id: u64) {
     // Teardown voice WebRTC
-    teardown_voice_subscriptions_for_listener(state, user_id).await;
+    teardown_voice_listener(state, user_id).await;
     let _ = teardown_voice_publisher(state, user_id).await;
 
     teardown_screen_subscriptions_for_viewer(state, user_id).await;

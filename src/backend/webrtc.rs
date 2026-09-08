@@ -23,7 +23,11 @@ use webrtc::{
     },
     interceptor::registry::Registry,
     peer_connection::{configuration::RTCConfiguration, RTCPeerConnection},
+    rtp_transceiver::rtp_codec::{RTCRtpHeaderExtensionCapability, RTPCodecType},
 };
+
+/// RFC 6464 audio level. Every browser sends it on audio by default.
+pub(crate) const AUDIO_LEVEL_EXTENSION_URI: &str = "urn:ietf:params:rtp-hdrext:ssrc-audio-level";
 
 /// Port every peer connection is multiplexed onto unless `WEBRTC_UDP_PORT`
 /// says otherwise. Matches the HTTP listener's port number — UDP and TCP are
@@ -68,6 +72,20 @@ pub(crate) async fn build_webrtc_api() -> Arc<API> {
     media_engine
         .register_default_codecs()
         .expect("register_default_codecs failed");
+
+    // Browsers already stamp every audio packet with how loud it is. Keeping
+    // the extension through negotiation lets the SFU rank speakers by reading
+    // a byte of RTP header, instead of decoding Opus it would otherwise only
+    // ever forward.
+    media_engine
+        .register_header_extension(
+            RTCRtpHeaderExtensionCapability {
+                uri: AUDIO_LEVEL_EXTENSION_URI.to_string(),
+            },
+            RTPCodecType::Audio,
+            None,
+        )
+        .expect("register audio level header extension failed");
 
     let mut registry = Registry::new();
     registry = register_default_interceptors(registry, &mut media_engine)

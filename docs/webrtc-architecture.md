@@ -4,7 +4,16 @@
 
 Chatter uses an **SFU (Selective Forwarding Unit)** architecture. Each user publishes
 one audio (voice) or video (screen share) stream to the server, and the server relays
-it to every subscriber via individual peer connections.
+it to subscribers.
+
+**Voice** relays through a fixed set of *slots*. A listener holds one connection
+carrying `VOICE_MAX_ACTIVE_SPEAKERS` (12) receive-only tracks, and the server
+decides which speakers occupy them, a few times a second, by reading the RTP
+audio-level header extension. The cost of a call is therefore bounded by the
+slot count rather than the headcount — the server holds `2N` peer connections
+for `N` participants, and sends each listener at most 12 streams whether the
+call has 10 people in it or 300. Screen share and webcam still use one
+connection per viewer-publisher pair, which is fine at their fan-out.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -121,8 +130,11 @@ describes; TURN only changes the route a stream takes to get there.
 
 ## Voice Call Signaling Sequence
 
+A listener subscribes once, on join, and never renegotiates. Who is audible
+changes by websocket message, not by SDP.
+
 ```
-  Client A (Publisher)          Chatter Server               Client B (Subscriber)
+  Client A (Publisher)          Chatter Server               Client B (Listener)
         │                            │                              │
         │  voice_join                │                              │
         │  ─────────────────────►    │                              │
@@ -145,29 +157,47 @@ describes; TURN only changes the route a stream takes to get there.
         │                            │                              │
         │  ═══ DTLS + SRTP ════════  │  (media flows)              │
         │                            │                              │
-        │                            │  voice_webrtc_publisher_ready│
-        │                            │  ──────────────────────────► │
-        │                            │                              │
         │                            │  voice_webrtc_subscribe_offer│
+        │                            │  (12 recvonly transceivers)  │
         │                            │  ◄────────────────────────── │
         │                            │                              │
         │                            │  Create server-side PC       │
-        │                            │  Attach relay track          │
+        │                            │  Add 12 slot tracks          │
         │                            │  (TrackLocalStaticRTP)       │
         │                            │  Create answer               │
         │                            │                              │
         │                            │  voice_webrtc_subscribe_answer
         │                            │  ──────────────────────────► │
+        │                            │  voice_slot_map (all empty)  │
+        │                            │  ──────────────────────────► │
         │                            │                              │
         │                            │  ◄── ICE candidates ──────► │
         │                            │                              │
-        │    RTP packets             │         RTP packets          │
-        │  ═══════════════════►      │  ═══════════════════════►    │
+        │  RTP + audio level ext     │  every 200ms: rank speakers  │
+        │  ═══════════════════►      │                              │
+        │                            │  voice_slot_map  (A → slot 0)│
+        │                            │  voice_speaking  [A]         │
+        │                            │  ──────────────────────────► │
         │                            │                              │
-        │  Publisher reads RTP       │  Subscriber receives via     │
-        │  from track, broadcasts    │  relay track connected to    │
-        │  to tokio channel          │  broadcast::channel          │
+        │                            │         RTP into slot 0      │
+        │                            │  ═══════════════════════►    │
 ```
+
+### Slots
+
+- **Ranking** (`src/backend/ws/voice_slots.rs`) puts anyone currently talking
+  first, loudest first; then anyone who spoke within `VOICE_SPEAKER_HOLD_MS`
+  (2s). The hold window stops two people trading remarks from swapping slots
+  several times a second.
+- **Stability**: a speaker who stays in the set keeps their slot index, so only
+  slots that genuinely change hands are touched.
+- **Re-stamping**: a slot keeps one SSRC while the speaker feeding it changes,
+  so the server rewrites sequence numbers and timestamps to stay continuous and
+  sets the marker bit on a handover. Without this the receiver's jitter buffer
+  stalls every time a slot changes hands.
+- **Speaking indicators** come from the server (`voice_speaking`), because a
+  client can only measure the ~12 people it can hear, and most of a large call
+  is outside that.
 
 ## Media Relay Detail (SFU)
 
@@ -270,10 +300,11 @@ describes; TURN only changes the route a stream takes to get there.
 | File | Purpose |
 |------|---------|
 | `client/src/lib/webrtc.ts` | ICE server fetch, config cache, retry constants |
-| `client/src/hooks/useWebRTCVoice.ts` | Voice publish/subscribe, trickle ICE, retries |
+| `client/src/hooks/useWebRTCVoice.ts` | Voice publish, one slot subscription, trickle ICE, retries |
 | `client/src/hooks/useWebRTCScreen.ts` | Screen share publish/subscribe |
 | `src/backend/webrtc.rs` | Server PC creation, ICE config, RTCP rewriting |
-| `src/backend/ws/voice_webrtc.rs` | Voice signaling handlers, RTP relay |
+| `src/backend/ws/voice_webrtc.rs` | Voice signaling handlers, publisher RTP + audio levels |
+| `src/backend/ws/voice_slots.rs` | Speaker ranking, slot assignment, RTP re-stamping |
 | `src/backend/ws/screen_webrtc.rs` | Screen share signaling handlers |
 | `src/backend/routes/auth.rs` | `/api/ice-servers` endpoint |
 | `src/backend/state.rs` | Publisher/Subscriber state structs |

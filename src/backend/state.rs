@@ -3,14 +3,19 @@ use mongodb::Database;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicU64, AtomicU8},
+        Arc, Mutex,
+    },
 };
 use tokio::{
     sync::{broadcast, mpsc, RwLock},
     task::JoinHandle,
 };
 use webrtc::{
-    api::API, peer_connection::RTCPeerConnection, rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    api::API, peer_connection::RTCPeerConnection,
+    rtp_transceiver::rtp_codec::RTCRtpCodecCapability,
+    track::track_local::track_local_static_rtp::TrackLocalStaticRTP,
 };
 
 pub(crate) type WsSender = mpsc::UnboundedSender<Message>;
@@ -66,9 +71,9 @@ pub struct AppState {
     pub(crate) voice_force_muted: RwLock<HashMap<String, Vec<String>>>,
     // Timestamp (ms since epoch) when each voice channel went from empty to occupied
     pub(crate) voice_channel_occupied_since: RwLock<HashMap<String, u64>>,
-    // Queued subscribe offers waiting for a publisher's audio track to arrive
-    // Key = speaker_user_id
-    pub(crate) pending_voice_subscribes: RwLock<HashMap<String, Vec<PendingVoiceSubscribe>>>,
+    // Last speaking set broadcast per voice channel, so the periodic sweep only
+    // sends an update when it actually changes.
+    pub(crate) voice_speaking: RwLock<HashMap<String, Vec<String>>>,
     pub(crate) user_presence: RwLock<HashMap<String, PresenceRecord>>,
     pub(crate) webrtc_api: Arc<API>,
     pub(crate) screen_publishers: RwLock<HashMap<String, ScreenPublisherState>>,
@@ -76,7 +81,8 @@ pub struct AppState {
     pub(crate) webcam_publishers: RwLock<HashMap<String, WebcamPublisherState>>,
     pub(crate) webcam_subscribers: RwLock<HashMap<String, WebcamSubscriberState>>,
     pub(crate) voice_publishers: RwLock<HashMap<String, VoicePublisherState>>,
-    pub(crate) voice_subscribers: RwLock<HashMap<String, VoiceSubscriberState>>,
+    // One entry per listener, keyed by their user id.
+    pub(crate) voice_listeners: RwLock<HashMap<String, VoiceListenerState>>,
     pub(crate) link_previews: RwLock<HashMap<String, CachedPreview>>,
     pub(crate) totp_attempts: RwLock<HashMap<String, TotpAttemptRecord>>,
     // Token buckets for rate limiting and slowmode, keyed by "<bucket>:<who>".
@@ -806,12 +812,6 @@ pub(crate) struct WatchPartyState {
 }
 
 #[derive(Clone)]
-pub(crate) struct PendingVoiceSubscribe {
-    pub(crate) listener_user_id: String,
-    pub(crate) sdp: String,
-}
-
-#[derive(Clone)]
 pub(crate) struct VoiceMemberState {
     pub(crate) muted: bool,
     pub(crate) deafened: bool,
@@ -908,11 +908,54 @@ pub(crate) struct VoicePublisherState {
     pub(crate) peer_connection: Arc<RTCPeerConnection>,
     pub(crate) audio_codec: Option<RTCRtpCodecCapability>,
     pub(crate) rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
+    /// Most recent RTP audio level, in -dBov: 0 is loudest, 127 is silence.
+    /// Read straight off the header extension the browser already sends, so
+    /// ranking speakers costs no decoding.
+    pub(crate) audio_level: Arc<AtomicU8>,
+    /// Epoch millis of the last packet loud enough to count as speech. Drives
+    /// the hold window that keeps a slot with someone through a short pause.
+    pub(crate) last_voice_ms: Arc<AtomicU64>,
 }
 
-pub(crate) struct VoiceSubscriberState {
-    pub(crate) listener_user_id: String,
-    pub(crate) speaker_user_id: String,
+/// One listener's single subscription to the call.
+///
+/// Audio from whoever is currently loudest is written into a fixed set of
+/// slots, so the server holds one connection per participant rather than one
+/// per pair of them, and sends each listener a bounded number of streams
+/// however many people are in the room.
+pub(crate) struct VoiceListenerState {
+    pub(crate) room_id: String,
+    pub(crate) channel_id: String,
     pub(crate) peer_connection: Arc<RTCPeerConnection>,
+    pub(crate) slots: Vec<Arc<VoiceSlot>>,
+    /// The mapping this listener was last told about.
+    ///
+    /// Compared against rather than the live slot state, because a slot can be
+    /// vacated outside the sweep — when a speaker disconnects, say. Diffing
+    /// against the slots themselves would then find nothing to do and leave the
+    /// client believing someone still occupies a slot they have left.
+    pub(crate) last_sent_map: Mutex<Vec<Option<String>>>,
+}
+
+pub(crate) struct VoiceSlot {
+    pub(crate) track: Arc<TrackLocalStaticRTP>,
+    pub(crate) assignment: Mutex<Option<VoiceSlotAssignment>>,
+    /// Outgoing numbering, kept across speakers. See `restamp`.
+    pub(crate) restamp: Mutex<SlotRestamp>,
+}
+
+pub(crate) struct VoiceSlotAssignment {
+    pub(crate) speaker_user_id: String,
     pub(crate) forward_task: JoinHandle<()>,
+}
+
+/// A slot keeps one SSRC for the life of the connection while the speaker
+/// feeding it changes. The receiver's jitter buffer tracks a stream by SSRC,
+/// so the sequence numbers and timestamps it sees have to stay continuous
+/// across a handover that the input knows nothing about.
+#[derive(Default)]
+pub(crate) struct SlotRestamp {
+    pub(crate) out_seq: u16,
+    pub(crate) out_ts: u32,
+    pub(crate) prev_in: Option<(u16, u32)>,
 }

@@ -3,7 +3,7 @@ import type { PeerStats } from "@/lib/webrtc";
 
 interface PeerConnectionSource {
   voicePublisherPcRef: React.MutableRefObject<RTCPeerConnection | null>;
-  voiceSubscriberPcsRef: React.MutableRefObject<Map<string, RTCPeerConnection>>;
+  voiceSubscriberPcRef: React.MutableRefObject<RTCPeerConnection | null>;
   screenPubPcRef: React.MutableRefObject<RTCPeerConnection | null>;
   screenSubPcsRef: React.MutableRefObject<Map<string, RTCPeerConnection>>;
 }
@@ -28,7 +28,7 @@ export function useConnectionStats(
       const pcs: [string, RTCPeerConnection | null][] = [
         ["voice-pub", sources.voicePublisherPcRef.current],
       ];
-      sources.voiceSubscriberPcsRef.current.forEach((pc, uid) => pcs.push([`voice-sub:${uid}`, pc]));
+      pcs.push(["voice-sub", sources.voiceSubscriberPcRef.current]);
       pcs.push(["screen-pub", sources.screenPubPcRef.current]);
       sources.screenSubPcsRef.current.forEach((pc, uid) => pcs.push([`screen-sub:${uid}`, pc]));
 

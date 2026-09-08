@@ -7,7 +7,7 @@ import {
   playSound,
   type SoundPack,
 } from "@/lib/sounds";
-import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SUB_STUCK_NEW_MS, VOICE_SUB_STUCK_CONNECTING_MS, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
+import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SLOT_COUNT, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 import { toast } from "sonner";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
@@ -23,17 +23,22 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
 
   const localStreamRef = useRef<MediaStream | null>(null);
   const voicePublisherPcRef = useRef<RTCPeerConnection | null>(null);
-  const voiceSubscriberPcsRef = useRef<Map<string, RTCPeerConnection>>(new Map());
-  const voiceAudioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
-  // One AudioContext for the whole call, with a gain node per speaker hanging
-  // off it. A context per speaker capped call size far below anything else
-  // here — browsers limit how many a single document may hold.
+  // One connection for the whole call. The server writes whoever is currently
+  // loudest into a fixed set of slots on it, so this stays a single connection
+  // whether the call has three people in it or three hundred.
+  const voiceSubscriberPcRef = useRef<RTCPeerConnection | null>(null);
+  // Everything below is keyed by slot index, not by user: a slot outlives the
+  // speakers that pass through it.
+  const voiceSlotAudioRef = useRef<Map<number, HTMLAudioElement>>(new Map());
+  const voiceSlotGainRef = useRef<Map<number, GainNode>>(new Map());
+  const voiceSlotUsersRef = useRef<Map<number, string>>(new Map());
+  // One AudioContext for the whole call, with a gain node per slot hanging off
+  // it. A context per speaker capped call size far below anything else here —
+  // browsers limit how many a single document may hold.
   const voiceAudioCtxRef = useRef<AudioContext | null>(null);
-  const voiceGainNodesRef = useRef<Map<string, GainNode>>(new Map());
   const voiceUserVolumesRef = useRef<Record<string, number>>({});
-  const pendingVoiceSubsRef = useRef<Set<string>>(new Set());
-  const voiceRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-  const voiceRetryCountsRef = useRef<Map<string, number>>(new Map());
+  const voiceSubscribeRetryCountRef = useRef(0);
+  const createVoiceSubscriptionRef = useRef<() => Promise<void>>(async () => {});
   const voicePublishRetryCountRef = useRef(0);
   const voicePublishAnswerReceivedRef = useRef(false);
   const createVoicePublisherRef = useRef<() => Promise<void>>(async () => {});
@@ -83,15 +88,28 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     return voiceAudioCtxRef.current;
   };
 
-  // Drop every speaker's gain node and the context they share. Used by the
-  // teardown paths; a single speaker leaving only disconnects their own node.
+  // Drop every slot's gain node and the context they share.
   const closeVoiceAudioGraph = () => {
-    voiceGainNodesRef.current.forEach((gain) => { try { gain.disconnect(); } catch {} });
-    voiceGainNodesRef.current.clear();
+    voiceSlotGainRef.current.forEach((gain) => { try { gain.disconnect(); } catch {} });
+    voiceSlotGainRef.current.clear();
+    voiceSlotAudioRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
+    voiceSlotAudioRef.current.clear();
+    voiceSlotUsersRef.current.clear();
     if (voiceAudioCtxRef.current) {
       voiceAudioCtxRef.current.close().catch(() => {});
       voiceAudioCtxRef.current = null;
     }
+  };
+
+  // A slot plays at the volume set for whoever currently occupies it, and is
+  // silent while empty — an unassigned slot still carries whatever the previous
+  // speaker left in the pipeline.
+  const applySlotGain = (slot: number) => {
+    const gain = voiceSlotGainRef.current.get(slot);
+    if (!gain) return;
+    const userId = voiceSlotUsersRef.current.get(slot);
+    gain.gain.value =
+      isDeafenedRef.current || !userId ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
   };
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
@@ -180,152 +198,125 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   createVoicePublisherRef.current = createVoicePublisher;
 
   // ─── Voice subscriber ─────────────────────────────────────────────────────
-  const createVoiceSub = useCallback((speakerUserId: string) => {
-    if (speakerUserId === state.userId || !canSignal(wsRef)) return;
-    if (voiceSubscriberPcsRef.current.has(speakerUserId) || pendingVoiceSubsRef.current.has(speakerUserId)) return;
+  // One connection carries the entire call. It offers a fixed number of
+  // receive-only transceivers — slots — and the server decides which speaker
+  // occupies each one, announcing the mapping over the websocket. Nobody
+  // joining or leaving the call renegotiates anything, which is what lets the
+  // same connection serve a call of any size.
+  const createVoiceSubscription = useCallback(async () => {
+    if (!canSignal(wsRef) || voiceSubscriberPcRef.current) return;
 
     const pc = new RTCPeerConnection(getWebRTCConfig());
-    voiceSubscriberPcsRef.current.set(speakerUserId, pc);
-    pendingVoiceSubsRef.current.add(speakerUserId);
+    voiceSubscriberPcRef.current = pc;
 
     pc.onicecandidate = (ev) => {
       if (!ev.candidate || !canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_candidate",
         room_id: voiceRoomIdRef.current || currentRoomRef.current,
-        speaker_user_id: speakerUserId,
         candidate: { candidate: ev.candidate.candidate, sdpMid: ev.candidate.sdpMid, sdpMLineIndex: ev.candidate.sdpMLineIndex, usernameFragment: ev.candidate.usernameFragment },
       }));
     };
 
     pc.ontrack = (ev) => {
-      // Guard: if this PC was replaced, ignore stale track events
-      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
-      let audioEl = voiceAudioElementsRef.current.get(speakerUserId);
+      if (pc !== voiceSubscriberPcRef.current) return;
+      // Slot index is the transceiver's position, which the server matches by
+      // adding its slot tracks in the same order our offer listed them.
+      const slot = pc.getTransceivers().indexOf(ev.transceiver);
+      if (slot < 0) return;
+
+      let audioEl = voiceSlotAudioRef.current.get(slot);
       if (!audioEl) {
         audioEl = new Audio();
         audioEl.autoplay = true;
-        voiceAudioElementsRef.current.set(speakerUserId, audioEl);
+        voiceSlotAudioRef.current.set(slot, audioEl);
       }
       const stream = ev.streams[0] || new MediaStream([ev.track]);
       audioEl.srcObject = stream;
 
       // Route through a GainNode so per-user volume can exceed 100%
-      if (!voiceGainNodesRef.current.has(speakerUserId)) {
+      if (!voiceSlotGainRef.current.has(slot)) {
         const ctx = getVoiceAudioCtx();
         const source = ctx.createMediaStreamSource(stream);
         const gain = ctx.createGain();
-        // Deafened means deafened to everyone, including whoever joins next —
-        // and on a rejoin every speaker is a new one.
-        gain.gain.value = isDeafenedRef.current
-          ? 0
-          : (voiceUserVolumesRef.current[speakerUserId] ?? 1.0);
+        gain.gain.value = 0;
         source.connect(gain);
         gain.connect(ctx.destination);
-        voiceGainNodesRef.current.set(speakerUserId, gain);
+        voiceSlotGainRef.current.set(slot, gain);
         // Mute the HTML element since GainNode handles playback
         audioEl.volume = 0;
       }
-
+      applySlotGain(slot);
       audioEl.play().catch(() => {});
     };
 
-    // Detect failed or stuck connections and retry
     pc.onconnectionstatechange = () => {
-      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
+      if (pc !== voiceSubscriberPcRef.current) return;
       if (pc.connectionState === "connected") {
-        // Successful connection — reset backoff counter
-        voiceRetryCountsRef.current.delete(speakerUserId);
+        voiceSubscribeRetryCountRef.current = 0;
       } else if (pc.connectionState === "disconnected") {
         // Transient loss — attempt ICE restart before giving up
         try { pc.restartIce(); } catch {}
       } else if (pc.connectionState === "failed") {
+        const attempt = voiceSubscribeRetryCountRef.current + 1;
+        console.warn(`[voice] Subscription failed (attempt ${attempt}/${VOICE_SUBSCRIBE_MAX_RETRIES})`);
         try { pc.close(); } catch {}
-        voiceSubscriberPcsRef.current.delete(speakerUserId);
-        pendingVoiceSubsRef.current.delete(speakerUserId);
-        scheduleVoiceRetry(speakerUserId);
+        voiceSubscriberPcRef.current = null;
+        closeVoiceAudioGraph();
+        if (attempt <= VOICE_SUBSCRIBE_MAX_RETRIES && inVoiceRef.current) {
+          voiceSubscribeRetryCountRef.current = attempt;
+          const delay = Math.min(VOICE_SUBSCRIBE_RETRY_MS * 2 ** (attempt - 1), VOICE_SUBSCRIBE_MAX_BACKOFF_MS);
+          setTimeout(async () => {
+            if (!inVoiceRef.current || voiceSubscriberPcRef.current) return;
+            await fetchIceServers();
+            await createVoiceSubscriptionRef.current();
+          }, delay);
+        } else {
+          voiceSubscribeRetryCountRef.current = 0;
+        }
       }
     };
 
-    // Timeout: if still "new" after 2.5s, the signaling was lost — tear down and retry
-    setTimeout(() => {
-      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
-      if (pc.connectionState === "new") {
-        console.warn("[voice] Subscription to", speakerUserId, "stuck in 'new', retrying");
-        try { pc.close(); } catch {}
-        voiceSubscriberPcsRef.current.delete(speakerUserId);
-        pendingVoiceSubsRef.current.delete(speakerUserId);
-        scheduleVoiceRetry(speakerUserId);
-      }
-    }, VOICE_SUB_STUCK_NEW_MS);
+    for (let i = 0; i < VOICE_SLOT_COUNT; i++) {
+      pc.addTransceiver("audio", { direction: "recvonly" });
+    }
 
-    // Timeout: if still "connecting" after 10s, ICE negotiation is stuck — tear down and retry
-    setTimeout(() => {
-      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
-      if (pc.connectionState === "connecting") {
-        console.warn("[voice] Subscription to", speakerUserId, "stuck in 'connecting', retrying");
-        try { pc.close(); } catch {}
-        voiceSubscriberPcsRef.current.delete(speakerUserId);
-        pendingVoiceSubsRef.current.delete(speakerUserId);
-        scheduleVoiceRetry(speakerUserId);
-      }
-    }, VOICE_SUB_STUCK_CONNECTING_MS);
-
-    pc.addTransceiver("audio", { direction: "recvonly" });
-    pc.createOffer().then(async (offer) => {
-      // Guard: if this PC was replaced before the offer resolved, don't send a stale offer
-      if (pc !== voiceSubscriberPcsRef.current.get(speakerUserId)) return;
+    try {
+      const offer = await pc.createOffer();
+      // Guard: if this PC was replaced before the offer resolved, drop it
+      if (pc !== voiceSubscriberPcRef.current) return;
       await pc.setLocalDescription(offer);
       if (!canSignal(wsRef)) return;
       wsRef.current!.send(JSON.stringify({
         type: "voice_webrtc_subscribe_offer",
         room_id: voiceRoomIdRef.current || currentRoomRef.current,
-        speaker_user_id: speakerUserId,
         sdp: offer.sdp,
       }));
-    }).catch(() => {
-      // Offer creation failed — tear down so retry can start fresh
+    } catch {
       try { pc.close(); } catch {}
-      voiceSubscriberPcsRef.current.delete(speakerUserId);
-      pendingVoiceSubsRef.current.delete(speakerUserId);
-      scheduleVoiceRetry(speakerUserId);
-    });
-  }, [state.userId]);
-
-  const scheduleVoiceRetryRef = useRef<(speakerUserId: string) => void>(() => {});
-  scheduleVoiceRetryRef.current = (speakerUserId: string) => {
-    if (voiceRetryTimersRef.current.has(speakerUserId)) return;
-    if (voiceSubscriberPcsRef.current.has(speakerUserId)) return;
-
-    const attempt = (voiceRetryCountsRef.current.get(speakerUserId) ?? 0) + 1;
-    if (attempt > VOICE_SUBSCRIBE_MAX_RETRIES) {
-      console.warn("[voice] Max retries reached for", speakerUserId, "— giving up");
-      voiceRetryCountsRef.current.delete(speakerUserId);
-      return;
+      if (pc === voiceSubscriberPcRef.current) voiceSubscriberPcRef.current = null;
     }
-    voiceRetryCountsRef.current.set(speakerUserId, attempt);
+  }, []);
+  createVoiceSubscriptionRef.current = createVoiceSubscription;
 
-    // Exponential backoff: 1.5s, 3s, 6s, 12s … capped at 30s
-    const delay = Math.min(VOICE_SUBSCRIBE_RETRY_MS * 2 ** (attempt - 1), VOICE_SUBSCRIBE_MAX_BACKOFF_MS);
-
-    const timer = setTimeout(async () => {
-      voiceRetryTimersRef.current.delete(speakerUserId);
-      if (
-        inVoiceRef.current &&
-        speakerUserId !== state.userId &&
-        !voiceSubscriberPcsRef.current.has(speakerUserId) &&
-        !pendingVoiceSubsRef.current.has(speakerUserId)
-      ) {
-        // Re-fetch ICE config in case TURN credentials rotated
-        await fetchIceServers();
-        console.log(`[voice] Retrying subscription to ${speakerUserId} (attempt ${attempt})`);
-        createVoiceSub(speakerUserId);
+  // Point each slot at the user the server says is in it. Only the mapping
+  // changes here — the tracks and gain nodes are already wired up.
+  const applySlotMap = (slots: { slot: number; user_id: string | null }[]) => {
+    const seen = new Set<number>();
+    for (const { slot, user_id } of slots) {
+      seen.add(slot);
+      if (user_id) voiceSlotUsersRef.current.set(slot, user_id);
+      else voiceSlotUsersRef.current.delete(slot);
+      applySlotGain(slot);
+    }
+    // Anything the server did not mention is empty.
+    for (const slot of [...voiceSlotUsersRef.current.keys()]) {
+      if (!seen.has(slot)) {
+        voiceSlotUsersRef.current.delete(slot);
+        applySlotGain(slot);
       }
-    }, delay);
-
-    voiceRetryTimersRef.current.set(speakerUserId, timer);
+    }
   };
-  const scheduleVoiceRetry = (speakerUserId: string) => scheduleVoiceRetryRef.current(speakerUserId);
 
   // ─── WS Message handler for Voice WebRTC signaling ─────────────────────────
   useEffect(() => {
@@ -343,66 +334,17 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       } else if (msg.type === "voice_webrtc_publish_candidate" && voicePublisherPcRef.current) {
         try { await voicePublisherPcRef.current.addIceCandidate(msg.candidate); } catch {}
       } else if (msg.type === "voice_webrtc_subscribe_answer") {
-        const pc = voiceSubscriberPcsRef.current.get(msg.speaker_user_id);
+        const pc = voiceSubscriberPcRef.current;
         if (pc && msg.sdp) {
-          try {
-            await pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
-            pendingVoiceSubsRef.current.delete(msg.speaker_user_id);
-          } catch {}
+          try { await pc.setRemoteDescription({ type: "answer", sdp: msg.sdp }); } catch {}
         }
       } else if (msg.type === "voice_webrtc_subscribe_candidate") {
-        const pc = voiceSubscriberPcsRef.current.get(msg.speaker_user_id);
+        const pc = voiceSubscriberPcRef.current;
         if (pc && msg.candidate) {
           try { await pc.addIceCandidate(msg.candidate); } catch {}
         }
-      } else if (msg.type === "voice_webrtc_publishers_list") {
-        if (msg.publishers && state.inVoiceChannel) {
-          for (const uid of msg.publishers) {
-            if (uid !== state.userId) createVoiceSub(uid);
-          }
-        }
-      } else if (msg.type === "voice_user_left") {
-        // Immediately tear down the subscriber PC for a user who left the channel.
-        // Without this, audio continues until the server-side close propagates, and
-        // the failed-state retry loop can re-subscribe them after they've switched channels.
-        const leftId = msg.user_id;
-        if (leftId && leftId !== state.userId) {
-          const oldPc = voiceSubscriberPcsRef.current.get(leftId);
-          if (oldPc) {
-            try { oldPc.close(); } catch {}
-            voiceSubscriberPcsRef.current.delete(leftId);
-          }
-          pendingVoiceSubsRef.current.delete(leftId);
-          const timer = voiceRetryTimersRef.current.get(leftId);
-          if (timer) { clearTimeout(timer); voiceRetryTimersRef.current.delete(leftId); }
-          voiceRetryCountsRef.current.delete(leftId);
-          const audioEl = voiceAudioElementsRef.current.get(leftId);
-          if (audioEl) { audioEl.pause(); audioEl.srcObject = null; voiceAudioElementsRef.current.delete(leftId); }
-          const gain = voiceGainNodesRef.current.get(leftId);
-          if (gain) { try { gain.disconnect(); } catch {} voiceGainNodesRef.current.delete(leftId); }
-        }
-      } else if (msg.type === "voice_webrtc_publisher_ready") {
-        if (state.inVoiceChannel && msg.user_id !== state.userId) {
-          // Only subscribe if the publisher is in our voice channel.
-          // When someone switches channels their new publisher fires publisher_ready
-          // for the new channel — users in the old channel must not subscribe.
-          if (msg.channel_id && msg.channel_id !== voiceChannelIdRef.current) return;
-          // Clean up any previously failed attempt so we can retry fresh
-          const oldPc = voiceSubscriberPcsRef.current.get(msg.user_id);
-          if (oldPc) {
-            try { oldPc.close(); } catch {}
-            voiceSubscriberPcsRef.current.delete(msg.user_id);
-          }
-          pendingVoiceSubsRef.current.delete(msg.user_id);
-          const timer = voiceRetryTimersRef.current.get(msg.user_id);
-          if (timer) {
-            clearTimeout(timer);
-            voiceRetryTimersRef.current.delete(msg.user_id);
-          }
-          // Fresh publisher — reset backoff so we start from the beginning
-          voiceRetryCountsRef.current.delete(msg.user_id);
-          createVoiceSub(msg.user_id);
-        }
+      } else if (msg.type === "voice_slot_map") {
+        if (Array.isArray(msg.slots)) applySlotMap(msg.slots);
       } else if (msg.type === "voice_force_muted") {
         // A moderator muted or unmuted us. The SFU already refuses our audio
         // while muted, so tearing the publisher down here just stops sending
@@ -437,21 +379,20 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         if (inVoiceRef.current) await leaveVoiceRef.current();
       } else if (msg.type === "voice_webrtc_error") {
         console.warn("[voice] WebRTC error:", msg.detail || msg);
-        if (msg.scope === "subscribe" && msg.speaker_user_id) {
-          const failedPc = voiceSubscriberPcsRef.current.get(msg.speaker_user_id);
-          if (failedPc) {
-            try { failedPc.close(); } catch {}
-            voiceSubscriberPcsRef.current.delete(msg.speaker_user_id);
-          }
-          pendingVoiceSubsRef.current.delete(msg.speaker_user_id);
-          scheduleVoiceRetry(msg.speaker_user_id);
+        if (msg.scope === "subscribe" && voiceSubscriberPcRef.current) {
+          // The subscription is the only way to hear anyone, so a refusal is
+          // rebuilt from scratch rather than left in place.
+          try { voiceSubscriberPcRef.current.close(); } catch {}
+          voiceSubscriberPcRef.current = null;
+          closeVoiceAudioGraph();
+          if (inVoiceRef.current) await createVoiceSubscriptionRef.current();
         }
       }
     };
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId, createVoiceSub, dispatch]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, dispatch]);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
   const joinVoice = useCallback(async (channelId?: string) => {
@@ -468,16 +409,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         voicePublisherPcRef.current.close();
         voicePublisherPcRef.current = null;
       }
-      voiceSubscriberPcsRef.current.forEach((pc) => pc.close());
-      voiceSubscriberPcsRef.current.clear();
-      voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
-      voiceAudioElementsRef.current.clear();
+      if (voiceSubscriberPcRef.current) {
+        try { voiceSubscriberPcRef.current.close(); } catch {}
+        voiceSubscriberPcRef.current = null;
+      }
       closeVoiceAudioGraph();
-      voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
-      voiceRetryTimersRef.current.clear();
-      voiceRetryCountsRef.current.clear();
       voicePublishRetryCountRef.current = 0;
-      pendingVoiceSubsRef.current.clear();
+      voiceSubscribeRetryCountRef.current = 0;
 
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
@@ -551,11 +489,15 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         }
       }
       await createVoicePublisher();
+      // One subscription covers everyone in the call, so it is opened on join
+      // rather than in response to anybody publishing. Its slots start empty
+      // and the server fills them as people speak.
+      await createVoiceSubscription();
       await loadVoiceMembers();
     } catch {
       toast.error("Could not access microphone. Please check permissions.");
     }
-  }, [state.currentRoomId, state.voiceChannelId, state.channels, createVoicePublisher, loadVoiceMembers, dispatch]);
+  }, [state.currentRoomId, state.voiceChannelId, state.channels, createVoicePublisher, createVoiceSubscription, loadVoiceMembers, dispatch]);
 
   // Announce the departure while the socket is still open.
   //
@@ -601,15 +543,13 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voicePublisherPcRef.current.close();
       voicePublisherPcRef.current = null;
     }
-    voiceSubscriberPcsRef.current.forEach((pc) => pc.close());
-    voiceSubscriberPcsRef.current.clear();
-    voiceAudioElementsRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
-    voiceAudioElementsRef.current.clear();
+    if (voiceSubscriberPcRef.current) {
+      try { voiceSubscriberPcRef.current.close(); } catch {}
+      voiceSubscriberPcRef.current = null;
+    }
     closeVoiceAudioGraph();
-    voiceRetryTimersRef.current.forEach((t) => clearTimeout(t));
-    voiceRetryTimersRef.current.clear();
     voicePublishRetryCountRef.current = 0;
-    pendingVoiceSubsRef.current.clear();
+    voiceSubscribeRetryCountRef.current = 0;
     // Every exit runs through here, so an entrance sting still waiting on a
     // connection is dropped whichever way the call ended — left deliberately,
     // taken by another device, or released after too long off the socket.
@@ -712,13 +652,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   // ─── Volume control ───────────────────────────────────────────────────────
   const setUserVolume = useCallback((userId: string, vol: number) => {
     voiceUserVolumesRef.current[userId] = vol;
-    const gain = voiceGainNodesRef.current.get(userId);
-    if (gain) {
-      gain.gain.value = vol;
-    } else {
-      // Fallback if GainNode not yet created (clamped to 1.0 by browser)
-      const audioEl = voiceAudioElementsRef.current.get(userId);
-      if (audioEl) audioEl.volume = Math.min(vol, 1);
+    // Only takes effect now if they currently hold a slot; otherwise it is
+    // waiting for them in voiceUserVolumesRef when they next occupy one.
+    for (const [slot, occupant] of voiceSlotUsersRef.current) {
+      if (occupant === userId) applySlotGain(slot);
     }
   }, []);
 
@@ -732,13 +669,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         t.enabled = newDeafened ? false : !state.isMuted;
       });
     }
-    voiceGainNodesRef.current.forEach((gain, userId) => {
-      gain.gain.value = newDeafened ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
-    });
-    // Set alongside the dispatch, not by the effect that mirrors it: a
-    // speaker's track can arrive before the next render, and would be built a
-    // gain node at full volume while the user is deafened.
+    // Set before the gains are recomputed: applySlotGain reads this ref, and a
+    // slot map arriving before the next render would otherwise be built at full
+    // volume while the user is deafened.
     isDeafenedRef.current = newDeafened;
+    voiceSlotGainRef.current.forEach((_, slot) => applySlotGain(slot));
     dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({
@@ -757,8 +692,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   return {
     localStreamRef,
     voicePublisherPcRef,
-    voiceSubscriberPcsRef,
-    voiceAudioElementsRef,
+    voiceSubscriberPcRef,
     joinVoice,
     leaveVoice,
     /** Drop the local half of a call without announcing a leave — for when the

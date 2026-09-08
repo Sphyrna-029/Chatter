@@ -123,7 +123,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, releaseVoiceRef, to
   // Connection stats polling
   const connStats = useConnectionStats(state.inVoiceChannel, {
     voicePublisherPcRef: voice.voicePublisherPcRef,
-    voiceSubscriberPcsRef: voice.voiceSubscriberPcsRef,
+    voiceSubscriberPcRef: voice.voiceSubscriberPcRef,
     screenPubPcRef: screen.screenPubPcRef,
     screenSubPcsRef: screen.screenSubPcsRef,
   });
@@ -149,7 +149,6 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, releaseVoiceRef, to
     state.inVoiceChannel,
     state.userId,
     voice.localStreamRef,
-    voice.voiceAudioElementsRef,
   );
   // Expose to parent (e.g. ChannelList speaking indicator)
   if (speakingUsersRef) speakingUsersRef.current = speakingUsers;

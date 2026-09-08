@@ -8,9 +8,9 @@ use super::super::{
         broadcast_to_room, can_manage_messages, channel_permissions, effective_permissions,
         error_response, extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
         get_media_dimensions_for_urls, get_reactions_for_events, get_thread_counts_for_events,
-        get_user_custom_role_ids, media_urls_in_body,
-        get_user_from_token, get_user_role, is_blocked_between, is_moderator_or_owner, now_millis,
-        rate_limited, regex_escape, send_to_user,
+        get_user_custom_role_ids, get_user_from_token, get_user_role, is_blocked_between,
+        is_moderator_or_owner, media_urls_in_body, now_millis, rate_limited, regex_escape,
+        send_to_user,
     },
     push::{spawn_message_push, MessageNotification},
     ratelimit,
@@ -829,7 +829,6 @@ pub(crate) async fn get_room_messages(
             }
         }
     }
-
 
     attach_media_dimensions(&state, &mut chunk).await;
     Ok(Json(json!({

@@ -66,7 +66,7 @@ pub async fn build_state() -> Arc<AppState> {
         voice_channels: RwLock::new(HashMap::new()),
         voice_force_muted: RwLock::new(HashMap::new()),
         voice_channel_occupied_since: RwLock::new(HashMap::new()),
-        pending_voice_subscribes: RwLock::new(HashMap::new()),
+        voice_speaking: RwLock::new(HashMap::new()),
         user_presence: RwLock::new(HashMap::new()),
         webrtc_api,
         screen_publishers: RwLock::new(HashMap::new()),
@@ -74,7 +74,7 @@ pub async fn build_state() -> Arc<AppState> {
         webcam_publishers: RwLock::new(HashMap::new()),
         webcam_subscribers: RwLock::new(HashMap::new()),
         voice_publishers: RwLock::new(HashMap::new()),
-        voice_subscribers: RwLock::new(HashMap::new()),
+        voice_listeners: RwLock::new(HashMap::new()),
         link_previews: RwLock::new(HashMap::new()),
         totp_attempts: RwLock::new(HashMap::new()),
         rate_limits: RwLock::new(HashMap::new()),
@@ -567,6 +567,13 @@ pub async fn run() {
     // Measure images uploaded before their dimensions were recorded, so old
     // history reserves space for them the same way new messages do.
     tokio::spawn(media::backfill_image_dimensions(Arc::clone(&state)));
+
+    // Decides who each listener hears, a few times a second. Without it every
+    // voice slot would stay empty, so it runs for the life of the process
+    // rather than being started with the first call.
+    tokio::spawn(super::ws::voice_slots::run_voice_slot_scheduler(
+        Arc::clone(&state),
+    ));
 
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {

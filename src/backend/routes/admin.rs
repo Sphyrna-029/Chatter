@@ -107,7 +107,7 @@ pub(crate) async fn admin_metrics(
     };
 
     let voice_publishers = state.voice_publishers.read().await.len();
-    let voice_subscribers = state.voice_subscribers.read().await.len();
+    let voice_listeners = state.voice_listeners.read().await.len();
     let screen_publishers = state.screen_publishers.read().await.len();
     let screen_subscribers = state.screen_subscribers.read().await.len();
     let webcam_publishers = state.webcam_publishers.read().await.len();
@@ -120,7 +120,7 @@ pub(crate) async fn admin_metrics(
         "link_previews": state.link_previews.read().await.len(),
         "presence_entries": state.user_presence.read().await.len(),
         "watch_parties": state.watch_party_rooms.read().await.len(),
-        "pending_voice_subscribes": state.pending_voice_subscribes.read().await.len(),
+        "voice_speaking_channels": state.voice_speaking.read().await.len(),
         "room_member_cache": state.room_members.read().await.len(),
     });
 
@@ -140,7 +140,7 @@ pub(crate) async fn admin_metrics(
                 "voice_channels_active": voice_channels_active,
                 "voice_members": voice_members,
                 "voice_publishers": voice_publishers,
-                "voice_subscribers": voice_subscribers,
+                "voice_listeners": voice_listeners,
                 "screen_publishers": screen_publishers,
                 "screen_subscribers": screen_subscribers,
                 "webcam_publishers": webcam_publishers,
