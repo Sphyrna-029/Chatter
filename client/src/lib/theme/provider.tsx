@@ -16,12 +16,12 @@ import {
   DEFAULT_DISPLAY,
   type DisplaySettings,
 } from "./display";
+import { encodeThemeShare, parseThemeInput } from "./share";
 import {
   customThemeCss,
   getPrefersDark,
   loadCustomThemes,
   newThemeId,
-  parseImportedTheme,
   persistCustomThemes,
   removeCustomThemeStyle,
   resolveThemeColors,
@@ -224,30 +224,26 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const exportTheme = useCallback(
+  /** A share code for any theme, built-in ones included — a built-in resolves
+   *  its colours out of the stylesheet first, so what is shared is what it
+   *  actually looks like rather than an approximation of it. */
+  const shareTheme = useCallback(
     (id: string): string | null => {
       const theme = themes.find((t) => t.id === id);
       if (!theme) return null;
-      const colors = resolveThemeColors(theme);
-      return JSON.stringify(
-        {
-          name: theme.name,
-          mode: theme.mode,
-          ...colors,
-          // Omitted entirely when a theme derives everything, so the common
-          // export stays the four colours it always was.
-          ...(theme.advanced ? { advanced: theme.advanced } : {}),
-        },
-        null,
-        2,
-      );
+      return encodeThemeShare({
+        name: theme.name,
+        mode: theme.mode,
+        colors: resolveThemeColors(theme),
+        advanced: theme.advanced,
+      });
     },
     [themes],
   );
 
   const importTheme = useCallback(
-    (json: string): ThemeDefinition => {
-      const theme = parseImportedTheme(json);
+    (input: string): ThemeDefinition => {
+      const theme = parseThemeInput(input);
       setCustomThemes((prev) => persistCustomThemes([...prev, theme]));
       return theme;
     },
@@ -269,7 +265,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       addCustomTheme,
       updateCustomTheme,
       deleteCustomTheme,
-      exportTheme,
+      shareTheme,
       importTheme,
     }),
     [
@@ -286,7 +282,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       addCustomTheme,
       updateCustomTheme,
       deleteCustomTheme,
-      exportTheme,
+      shareTheme,
       importTheme,
     ],
   );

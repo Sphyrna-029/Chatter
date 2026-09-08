@@ -33,3 +33,11 @@ export {
   RADIUS_RANGE,
 } from "./display";
 export type { Density, DisplaySettings, MotionPreference } from "./display";
+export {
+  decodeThemeShare,
+  encodeThemeShare,
+  extractShareCode,
+  parseThemeInput,
+  themeShareLink,
+  THEME_PARAM,
+} from "./share";

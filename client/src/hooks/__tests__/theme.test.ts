@@ -11,7 +11,11 @@ import {
   deriveThemeVars,
   parseImportedTheme,
   checkContrast,
+  decodeThemeShare,
+  encodeThemeShare,
+  extractShareCode,
   isSafeThemeId,
+  parseThemeInput,
   normalizeAdvanced,
   MIN_TEXT_CONTRAST,
   THEMES,
@@ -420,5 +424,100 @@ describe("importing a theme with overrides", () => {
       }),
     );
     expect(theme.advanced).toEqual({ sidebar: "#eeeeee", borderStrength: 0.5 });
+  });
+});
+
+describe("share codes", () => {
+  const theme = {
+    name: "Parchment",
+    mode: "light" as const,
+    colors: PALE,
+  };
+
+  it("round-trips a theme", () => {
+    const decoded = decodeThemeShare(encodeThemeShare(theme));
+    expect(decoded.name).toBe("Parchment");
+    expect(decoded.mode).toBe("light");
+    expect(decoded.colors).toEqual(PALE);
+    expect(decoded.advanced).toBeUndefined();
+  });
+
+  it("round-trips overrides and omits them when there are none", () => {
+    const withAdvanced = {
+      ...theme,
+      advanced: { sidebar: "#eeeeee", borderStrength: 0.5 },
+    };
+    expect(decodeThemeShare(encodeThemeShare(withAdvanced)).advanced).toEqual({
+      sidebar: "#eeeeee",
+      borderStrength: 0.5,
+    });
+    // The plain form carries no seventh element at all, which is what keeps
+    // the common code short.
+    expect(encodeThemeShare(theme).length).toBeLessThan(
+      encodeThemeShare(withAdvanced).length,
+    );
+  });
+
+  it("survives a name that is not ASCII", () => {
+    // btoa alone throws on these; the code goes through TextEncoder.
+    const named = { ...theme, name: "Solarpunk ☀ — Ökologie" };
+    expect(decodeThemeShare(encodeThemeShare(named)).name).toBe(named.name);
+  });
+
+  it("gives every decode its own id", () => {
+    const code = encodeThemeShare(theme);
+    expect(decodeThemeShare(code).id).not.toBe(decodeThemeShare(code).id);
+  });
+
+  it("refuses a code that is damaged or of another version", () => {
+    const code = encodeThemeShare(theme);
+    expect(() => decodeThemeShare(code.slice(0, 12))).toThrow();
+    expect(() => decodeThemeShare("ct2_abcdef")).toThrow(/not a theme/i);
+    expect(() => decodeThemeShare("hello")).toThrow(/not a theme/i);
+  });
+});
+
+describe("extractShareCode", () => {
+  const code = encodeThemeShare({
+    name: "Parchment",
+    mode: "light",
+    colors: PALE,
+  });
+
+  it("finds the code in a link, in prose, and on its own", () => {
+    expect(extractShareCode(code)).toBe(code);
+    expect(extractShareCode(`https://chat.example/?theme=${code}`)).toBe(code);
+    expect(extractShareCode(`try my theme ${code} it's nice`)).toBe(code);
+  });
+
+  it("finds nothing where there is nothing", () => {
+    expect(extractShareCode("https://chat.example/")).toBeNull();
+  });
+});
+
+describe("parseThemeInput", () => {
+  const code = encodeThemeShare({
+    name: "Parchment",
+    mode: "light",
+    colors: PALE,
+  });
+
+  it("takes a code, a link, and the JSON older versions exported", () => {
+    expect(parseThemeInput(code).name).toBe("Parchment");
+    expect(parseThemeInput(`https://chat.example/?theme=${code}`).name).toBe(
+      "Parchment",
+    );
+    expect(
+      parseThemeInput(JSON.stringify({ name: "Legacy", ...PALE })).name,
+    ).toBe("Legacy");
+  });
+
+  it("says what is wrong with what was actually pasted", () => {
+    expect(() => parseThemeInput("")).toThrow(/nothing to import/i);
+    expect(() => parseThemeInput("https://example.com/")).toThrow(
+      /does not contain a theme/i,
+    );
+    expect(() => parseThemeInput("what")).toThrow(/share code/i);
+    expect(() => parseThemeInput('{"name":"x"}')).toThrow(/background/);
   });
 });

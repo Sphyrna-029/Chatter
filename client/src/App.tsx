@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeSync } from "@/components/ThemeSync";
+import { ThemeInvite } from "@/components/ThemeInvite";
 
 // Only ever reached by following an invite link, which is a fresh navigation
 // anyway — no reason for every other load to carry it.
@@ -73,6 +74,7 @@ function App() {
         <TooltipProvider>
           <ConfirmProvider>
             <ThemeSync />
+            <ThemeInvite />
             <AppContent />
           </ConfirmProvider>
         </TooltipProvider>

@@ -25,6 +25,7 @@ import {
   type ThemeMode,
 } from "@/lib/theme";
 import { isDarkColor, mixColors } from "@/lib/color";
+import { themeShareLink } from "@/lib/theme";
 
 const NEW_THEME_COLORS: ThemeColors = {
   background: "#1a1a2e",
@@ -51,7 +52,7 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
     addCustomTheme,
     updateCustomTheme,
     deleteCustomTheme,
-    exportTheme,
+    shareTheme,
     importTheme,
   } = useThemeSettings();
 
@@ -87,11 +88,13 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
   // colours of its own — it previews whichever built-in it resolves to now.
   const systemColors = resolveThemeColors(systemTheme);
 
+  /** Copies a link rather than the code alone: a link is what survives being
+   *  pasted into a chat message, and it carries the code inside it. */
   const copy = async (id: string) => {
-    const json = exportTheme(id);
-    if (!json) return;
+    const code = shareTheme(id);
+    if (!code) return;
     try {
-      await navigator.clipboard.writeText(json);
+      await navigator.clipboard.writeText(themeShareLink(code));
       setCopiedThemeId(id);
       setTimeout(() => setCopiedThemeId(null), 2000);
     } catch {
@@ -227,7 +230,7 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                         className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-white hover:bg-black/80"
                         onClick={() => copy(theme.id)}
                       >
-                        {copiedThemeId === theme.id ? "Copied!" : "Copy"}
+                        {copiedThemeId === theme.id ? "Copied!" : "Share"}
                       </button>
                       <button
                         className="rounded bg-black/60 px-1.5 py-0.5 text-3xs text-destructive hover:bg-black/80"
@@ -512,7 +515,7 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
                 className="flex-1"
                 onClick={() => copy(activeTheme.id)}
               >
-                {copiedThemeId === activeTheme.id ? "Copied!" : "Export Current"}
+                {copiedThemeId === activeTheme.id ? "Link copied!" : "Share Current"}
               </Button>
             </div>
           )}
@@ -523,7 +526,7 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
               <textarea
                 className="w-full h-24 rounded bg-background border border-input px-2 py-1.5 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-ring"
                 placeholder={
-                  'Paste theme JSON here...\n{\n  "name": "...",\n  "background": "#...",\n  "card": "#...",\n  "accent": "#...",\n  "primary": "#..."\n}'
+                  "Paste a theme link, a share code, or theme JSON…\n\nhttps://…/?theme=ct1_…\nct1_…"
                 }
                 value={importJson}
                 onChange={(e) => {

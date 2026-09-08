@@ -470,6 +470,8 @@ export interface ThemeSettings {
     advanced?: ThemeAdvanced,
   ) => void;
   deleteCustomTheme: (id: string) => void;
-  exportTheme: (id: string) => string | null;
-  importTheme: (json: string) => ThemeDefinition;
+  /** A share code for a theme, or null if there is no such theme. */
+  shareTheme: (id: string) => string | null;
+  /** Accepts a share link, a share code, or exported JSON. */
+  importTheme: (input: string) => ThemeDefinition;
 }
