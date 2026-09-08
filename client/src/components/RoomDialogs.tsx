@@ -21,6 +21,7 @@ import { AuthImage } from "@/components/AuthImage";
 import { toast } from "sonner";
 import { apiGetAuditLog, type AuditEntry } from "@/lib/api";
 import { MAX_SOUND_SECS, playSound, type SoundEvent, type SoundPack } from "@/lib/sounds";
+import { decodeThemeShare, extractShareCode, useThemeSettings } from "@/lib/theme";
 
 /** Readable phrasing for each audit action. An unknown action falls back to
  *  its raw string, so a newly added server action still renders. */
@@ -468,6 +469,7 @@ interface RoomSettingsDialogProps {
 export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsDialogProps) {
   const confirm = useConfirm();
   const { state, updateRoomSettings } = useAppContext();
+  const { activeTheme, shareTheme } = useThemeSettings();
   const info = state.roomInfoMap[roomId];
   const [name, setName] = useState("");
   const [tags, setTags] = useState<string[]>([]);
@@ -492,6 +494,17 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
   // The room's sound pack, edited as a whole and saved with the rest.
   const [roomSounds, setRoomSounds] = useState<Record<string, string>>({});
   const [entranceSoundsEnabled, setEntranceSoundsEnabled] = useState(true);
+  const [suggestedTheme, setSuggestedTheme] = useState("");
+  /** null when the stored code will not decode — shown as such rather than
+   *  silently presenting an empty suggestion as none at all. */
+  const suggestedThemeName = useMemo(() => {
+    if (!suggestedTheme) return null;
+    try {
+      return decodeThemeShare(suggestedTheme).name;
+    } catch {
+      return null;
+    }
+  }, [suggestedTheme]);
   const [uploadingSound, setUploadingSound] = useState<SoundEvent | null>(null);
   const [auditEntries, setAuditEntries] = useState<AuditEntry[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -566,6 +579,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       setCopiedBotToken(false);
       setRoomSounds({ ...(info?.sounds || {}) });
       setEntranceSoundsEnabled(info?.entrance_sounds_enabled !== false);
+      setSuggestedTheme(info?.suggested_theme || "");
       setUploadingSound(null);
       setAuditEntries([]);
       setAuditOffset(0);
@@ -610,7 +624,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
         const uploaded = await apiUploadFile(iconFile);
         iconUrl = uploaded.url;
       }
-      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean } = {};
+      const settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean; suggested_theme?: string } = {};
       if (name !== info?.name) settings.name = name;
       if (iconUrl !== undefined) settings.icon_url = iconUrl;
       const infoTags = info?.tags || [];
@@ -624,6 +638,9 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
       if (settingsPassword) settings.password = settingsPassword;
       const infoSounds = info?.sounds || {};
       if (JSON.stringify(roomSounds) !== JSON.stringify(infoSounds)) settings.sounds = roomSounds;
+      if (suggestedTheme !== (info?.suggested_theme || "")) {
+        settings.suggested_theme = suggestedTheme;
+      }
       if (entranceSoundsEnabled !== (info?.entrance_sounds_enabled !== false)) {
         settings.entrance_sounds_enabled = entranceSoundsEnabled;
       }
@@ -913,6 +930,52 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     )}
                   </div>
                 ))}
+                <div className="space-y-2 border-t border-border/40 pt-3">
+                  <Label>Suggested theme</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Offer members a theme when they open this room. They are
+                    asked once and can decline — nothing changes for anyone who
+                    does not accept.
+                  </p>
+                  {suggestedTheme ? (
+                    <div className="flex items-center gap-2">
+                      <span className="ui-meta truncate flex-1">
+                        {suggestedThemeName ?? "Not a readable share code"}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setSuggestedTheme("")}
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  ) : (
+                    <p className="ui-hint">No theme suggested.</p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => {
+                        const code = shareTheme(activeTheme.id);
+                        if (code) setSuggestedTheme(code);
+                      }}
+                    >
+                      Suggest my current theme
+                    </Button>
+                    <Input
+                      className="flex-1 h-8 text-xs"
+                      placeholder="…or paste a share link"
+                      value=""
+                      onChange={(e) => {
+                        const code = extractShareCode(e.target.value);
+                        if (code) setSuggestedTheme(code);
+                      }}
+                    />
+                  </div>
+                </div>
                 <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-3">
                   <div className="min-w-0">
                     <Label>Entrance sounds</Label>

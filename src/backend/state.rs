@@ -202,6 +202,15 @@ pub(crate) struct RoomRecord {
     /// everyone rather than asking each member to.
     #[serde(default = "default_true")]
     pub(crate) entrance_sounds_enabled: bool,
+    /// A theme this room offers its members, as a `ct1_` share code.
+    ///
+    /// A suggestion, never an imposition: the client shows it once and applies
+    /// nothing on its own. Stored as the code rather than as a theme document
+    /// because the client already has one decoder for these that validates
+    /// every field — modelling a theme a second time on this side would be a
+    /// second place for the two to disagree, and nothing here renders it.
+    #[serde(default)]
+    pub(crate) suggested_theme: String,
 }
 
 /// A thread, kept as its own record rather than derived from its messages.

@@ -103,6 +103,7 @@ pub(crate) async fn create_room(
                     dm_name_override: false,
                     sounds: std::collections::HashMap::new(),
                     entrance_sounds_enabled: true,
+                    suggested_theme: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -231,6 +232,7 @@ pub(crate) async fn create_room(
                     dm_name_override: false,
                     sounds: std::collections::HashMap::new(),
                     entrance_sounds_enabled: true,
+                    suggested_theme: String::new(),
                 };
                 let rooms_coll = state.db.collection::<RoomRecord>("rooms");
                 let _ = rooms_coll.insert_one(room_record).await;
@@ -415,6 +417,7 @@ pub(crate) async fn create_room(
         dm_name_override: false,
         sounds: std::collections::HashMap::new(),
         entrance_sounds_enabled: true,
+        suggested_theme: String::new(),
     };
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let _ = rooms_coll.insert_one(room_record).await;
@@ -1058,7 +1061,8 @@ pub(crate) async fn update_room_settings(
             || req.read_only.is_some()
             || req.banner_url.is_some()
             || req.sounds.is_some()
-            || req.entrance_sounds_enabled.is_some();
+            || req.entrance_sounds_enabled.is_some()
+            || req.suggested_theme.is_some();
         if has_non_name {
             return Err(error_response(
                 StatusCode::FORBIDDEN,
@@ -1084,6 +1088,7 @@ pub(crate) async fn update_room_settings(
             && req.banner_url.is_none()
             && req.sounds.is_none()
             && req.entrance_sounds_enabled.is_none()
+            && req.suggested_theme.is_none()
             && (req.custom_emojis.is_some() || req.emoji_aliases.is_some());
 
         let allowed = if emoji_only {
@@ -1228,6 +1233,20 @@ pub(crate) async fn update_room_settings(
     if let Some(enabled) = req.entrance_sounds_enabled {
         set_doc.insert("entrance_sounds_enabled", enabled);
         content.insert("entrance_sounds_enabled".to_string(), json!(enabled));
+    }
+    if let Some(ref code) = req.suggested_theme {
+        // Shape only. The code is opaque here — the client decodes it and
+        // validates every colour inside — but an unbounded string broadcast to
+        // every member of a room is worth refusing on its own.
+        let trimmed = code.trim();
+        if !trimmed.is_empty() && !crate::backend::helpers::valid_theme_share_code(trimmed) {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                "Not a theme share code",
+            ));
+        }
+        set_doc.insert("suggested_theme", trimmed);
+        content.insert("suggested_theme".to_string(), json!(trimmed));
     }
     if let Some(ref banner_url) = req.banner_url {
         set_doc.insert("banner_url", banner_url.as_str());

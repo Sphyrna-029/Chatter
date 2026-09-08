@@ -1696,3 +1696,128 @@ async fn appearance_contract_round_trip_and_validation() {
         .unwrap();
     assert!(theirs["theme_id"].is_null());
 }
+
+#[tokio::test]
+async fn room_suggested_theme_contract() {
+    let server = spawn_server().await;
+    let client = Client::new();
+    let (_, owner_token) = register_user(&client, &server.base_url, "host", "pw").await;
+    let (_, member_token) = register_user(&client, &server.base_url, "guest", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &owner_token,
+        "Study",
+        None,
+        false,
+    )
+    .await;
+
+    let settings_url = format!(
+        "{}/_matrix/client/r0/rooms/{}/state/m.room.settings",
+        server.base_url, room_id
+    );
+    let code = "ct1_WyJQYXJjaG1lbnQiLCJsaWdodCIsImZkZmFmNiIsImYxZWNlNCIsImMyNDEwYyIsIjFjMTkxNyJd";
+
+    let set = client
+        .put(&settings_url)
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "suggested_theme": code }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(set.status(), StatusCode::OK);
+
+    // The suggestion reaches members through room state, like the sound pack.
+    let sync: Value = client
+        .get(format!("{}/_matrix/client/r0/sync", server.base_url))
+        .header("authorization", bearer(&owner_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let events = sync["rooms"]["join"][&room_id]["state"]["events"]
+        .as_array()
+        .unwrap();
+    let theme_event = events
+        .iter()
+        .find(|e| e["type"] == "m.room.theme")
+        .expect("room state carries m.room.theme");
+    assert_eq!(theme_event["content"]["suggested_theme"], code);
+
+    // Shape is checked even though the payload is opaque here: an unbounded
+    // string would be broadcast to every member of the room.
+    for bad in ["not-a-code", "ct1_has spaces", "ct2_WyJQIl0"] {
+        let rejected = client
+            .put(&settings_url)
+            .header("authorization", bearer(&owner_token))
+            .json(&json!({ "suggested_theme": bad }))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            rejected.status(),
+            StatusCode::BAD_REQUEST,
+            "expected {bad} to be refused"
+        );
+    }
+
+    let too_long = format!("ct1_{}", "a".repeat(600));
+    let rejected = client
+        .put(&settings_url)
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "suggested_theme": too_long }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), StatusCode::BAD_REQUEST);
+
+    // Suggesting a theme is a room setting, so it needs the permission that
+    // covers room settings — a member cannot repaint everyone else's app.
+    client
+        .post(format!(
+            "{}/_matrix/client/r0/rooms/{}/join",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&member_token))
+        .send()
+        .await
+        .unwrap();
+    let forbidden = client
+        .put(&settings_url)
+        .header("authorization", bearer(&member_token))
+        .json(&json!({ "suggested_theme": code }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    // Clearing is an empty string, not a separate route.
+    let cleared = client
+        .put(&settings_url)
+        .header("authorization", bearer(&owner_token))
+        .json(&json!({ "suggested_theme": "" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(cleared.status(), StatusCode::OK);
+
+    let after: Value = client
+        .get(format!("{}/_matrix/client/r0/sync", server.base_url))
+        .header("authorization", bearer(&owner_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let theme_event = after["rooms"]["join"][&room_id]["state"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["type"] == "m.room.theme")
+        .unwrap();
+    assert_eq!(theme_event["content"]["suggested_theme"], "");
+}

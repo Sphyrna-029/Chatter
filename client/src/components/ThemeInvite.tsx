@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useAppState } from "@/lib/store";
 import {
   Dialog,
   DialogContent,
@@ -13,16 +14,44 @@ import {
   type ThemeDefinition,
 } from "@/lib/theme";
 
+/** Codes already offered and answered, so nobody is asked twice. Keyed by the
+ *  code rather than by the room: two rooms suggesting the same theme is one
+ *  question, and a room changing its suggestion is a new one. */
+const SEEN_KEY = "chatter_theme_offers_seen";
+
+function loadSeen(): string[] {
+  try {
+    const raw = localStorage.getItem(SEEN_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((c) => typeof c === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberSeen(code: string, previous: string[]): string[] {
+  // Bounded: this only exists to stop a repeat question, and an unbounded list
+  // in localStorage would outlive every room that put entries in it.
+  const next = [...previous.filter((c) => c !== code), code].slice(-100);
+  try {
+    localStorage.setItem(SEEN_KEY, JSON.stringify(next));
+  } catch {
+    // Worst case the offer is made again next time.
+  }
+  return next;
+}
+
 /**
- * Offers a theme that arrived on the URL.
+ * Offers a theme somebody else picked — from a share link, or from the room
+ * being viewed.
  *
- * A share link is someone else's suggestion, so it is shown and not applied:
- * opening a link should never silently repaint the app. The parameter is taken
- * off the URL as soon as it is read, so a refresh — or a bookmark made
- * afterwards — does not ask again.
+ * Shown, never applied. Following a link or opening a room should not silently
+ * repaint the app, so both paths end at the same question and the answer is
+ * remembered. A room's suggestion is exactly that: declining it leaves nothing
+ * changed, and the room cannot ask again unless it suggests something else.
  *
- * This works signed out as well as in. A theme is local until it syncs, and
- * being handed one at the login screen is a perfectly ordinary way to arrive.
+ * The URL path works signed out as well as in. Being handed a theme at the
+ * login screen is a perfectly ordinary way to arrive.
  */
 /**
  * Read at import rather than in an effect.
@@ -61,13 +90,37 @@ const arrivingShare: { theme: ThemeDefinition | null; error: string | null } =
 
 export function ThemeInvite() {
   const { addCustomTheme, setTheme } = useThemeSettings();
-  const [offered, setOffered] = useState<ThemeDefinition | null>(
+  const { currentRoomId, roomInfoMap } = useAppState();
+
+  const [linkOffer, setLinkOffer] = useState<ThemeDefinition | null>(
     arrivingShare.theme,
   );
   const [error, setError] = useState<string | null>(arrivingShare.error);
+  const [seen, setSeen] = useState<string[]>(loadSeen);
+
+  const roomCode = currentRoomId
+    ? roomInfoMap[currentRoomId]?.suggested_theme || ""
+    : "";
+
+  // Derived rather than pushed into state from an effect: the offer is a
+  // function of which room is open and what has already been answered.
+  const roomOffer = useMemo(() => {
+    if (!roomCode || seen.includes(roomCode)) return null;
+    try {
+      return decodeThemeShare(roomCode);
+    } catch {
+      // A room holding a code this client cannot read is not the member's
+      // problem to see.
+      return null;
+    }
+  }, [roomCode, seen]);
+
+  const offered = linkOffer ?? roomOffer;
+  const fromRoom = !linkOffer && roomOffer !== null;
 
   const close = () => {
-    setOffered(null);
+    if (linkOffer) setLinkOffer(null);
+    else if (roomCode) setSeen((prev) => rememberSeen(roomCode, prev));
     setError(null);
   };
 
@@ -105,8 +158,9 @@ export function ThemeInvite() {
               </div>
             </div>
             <p className="ui-hint">
-              Someone shared this with you. Adding it keeps it in your themes;
-              nothing changes until you do.
+              {fromRoom
+                ? `${roomInfoMap[currentRoomId!]?.name || "This room"} suggests this theme. Declining changes nothing.`
+                : "Someone shared this with you. Adding it keeps it in your themes; nothing changes until you do."}
             </p>
             <div className="flex gap-2">
               <Button

@@ -277,6 +277,12 @@ pub(crate) async fn sync(
                 },
                 "sender": room_data.creator
             }),
+            json!({
+                "type": "m.room.theme",
+                "state_key": "",
+                "content": {"suggested_theme": room_data.suggested_theme},
+                "sender": room_data.creator
+            }),
         ];
         if room_data.is_dm {
             // Who the DM is *with*, so the client can show their face without

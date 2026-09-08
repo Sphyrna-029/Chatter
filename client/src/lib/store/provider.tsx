@@ -611,6 +611,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const soundsEvent = roomData.state.events.find(
           (e: any) => e.type === "m.room.sounds"
         );
+        const themeEvent = roomData.state.events.find(
+          (e: any) => e.type === "m.room.theme"
+        );
         roomInfoMap[roomId] = {
           room_id: roomId,
           name: nameEvent?.content?.name || "Unnamed Room",
@@ -647,6 +650,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           // missing, keep entrance sounds on — the field's default.
           entrance_sounds_enabled:
             soundsEvent?.content?.entrance_sounds_enabled !== false,
+          suggested_theme: themeEvent?.content?.suggested_theme || "",
         };
       } else {
         roomInfoMap[roomId] = {

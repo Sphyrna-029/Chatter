@@ -180,6 +180,22 @@ pub(crate) fn validate_username(username: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Whether a string has the shape of a theme share code.
+///
+/// Deliberately shallow: the payload is base64url that only the client decodes,
+/// and duplicating that decoder here would be a second implementation to keep
+/// in step. What this does stop is an unbounded or oddly-charactered string
+/// being stored on a room and broadcast to everyone in it.
+pub(crate) fn valid_theme_share_code(code: &str) -> bool {
+    const MAX_SHARE_CODE_LEN: usize = 512;
+    code.len() > 4
+        && code.len() <= MAX_SHARE_CODE_LEN
+        && code.starts_with("ct1_")
+        && code[4..]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)

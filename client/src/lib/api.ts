@@ -948,6 +948,8 @@ export interface RoomInfo {
   sounds?: Record<string, string>;
   /** Whether members' entrance stings play in this room's voice channels. */
   entrance_sounds_enabled?: boolean;
+  /** A `ct1_` theme share code this room offers its members, or "". */
+  suggested_theme?: string;
 }
 
 // ─── Channels ───────────────────────────────────────────────────────────────
@@ -1427,7 +1429,7 @@ export async function apiGetLinkPreview(url: string): Promise<LinkPreview> {
 
 export async function apiUpdateRoomSettings(
   roomId: string,
-  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; banner_url?: string; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean }
+  settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; read_only?: boolean; banner_url?: string; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean; suggested_theme?: string }
 ) {
   const res = await authenticatedFetch(
     `/_matrix/client/r0/rooms/${roomId}/state/m.room.settings`,

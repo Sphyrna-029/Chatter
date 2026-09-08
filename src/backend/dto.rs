@@ -151,6 +151,13 @@ pub(crate) struct UpdateRoomSettingsRequest {
     /// client's built-in sound.
     pub(crate) sounds: Option<std::collections::HashMap<String, String>>,
     pub(crate) entrance_sounds_enabled: Option<bool>,
+    /// A theme share code the room offers its members. Empty clears it.
+    ///
+    /// Stored as the code rather than as a theme document: the client already
+    /// has one decoder for these and it validates every field, so modelling a
+    /// theme a second time here would be a second place for the two to
+    /// disagree. Nothing on this server renders it.
+    pub(crate) suggested_theme: Option<String>,
 }
 
 #[derive(Deserialize)]
