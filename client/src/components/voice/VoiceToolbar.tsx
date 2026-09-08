@@ -48,48 +48,6 @@ export function VoiceToolbar({
 
   return (
     <div className="flex flex-col gap-1.5 border-t p-2">
-      <Button
-        size="sm"
-        variant="destructive"
-        onClick={onLeaveVoice}
-        className="text-xs w-full"
-      >
-        🔇 Leave Voice
-      </Button>
-
-      {voiceInputMode === "open" && (
-        <div className="flex gap-1.5">
-          <Button
-            size="sm"
-            variant={isMuted || isDeafened ? "destructive" : "outline"}
-            onClick={onToggleMute}
-            className="text-xs flex-1"
-            disabled={isDeafened}
-            title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
-          >
-            {isMuted || isDeafened ? "🔇 Unmute" : "🎤 Mute"}
-          </Button>
-          <Button
-            size="sm"
-            variant={isDeafened ? "destructive" : "outline"}
-            onClick={onToggleDeafen}
-            className="text-xs flex-1"
-            title={isDeafened ? "Undeafen" : "Deafen"}
-          >
-            {isDeafened ? "🔕 Undeafen" : "🔕 Deafen"}
-          </Button>
-        </div>
-      )}
-
-      <Button
-        size="sm"
-        variant={voiceInputMode === "ptt" ? "secondary" : "outline"}
-        onClick={onToggleInputMode}
-        className="text-xs w-full"
-      >
-        {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
-      </Button>
-
       <div className="flex items-center gap-1.5">
         <Button
           size="sm"
@@ -124,6 +82,52 @@ export function VoiceToolbar({
           </div>
         )}
       </div>
+
+      {/* Three across: labels give way to icons so mute, deafen and hang up
+          fit one row of the narrow sidebar. */}
+      <div className="flex items-center gap-1.5">
+        {voiceInputMode === "open" && (
+          <>
+            <Button
+              size="sm"
+              variant={isMuted || isDeafened ? "destructive" : "outline"}
+              onClick={onToggleMute}
+              className="text-xs px-2"
+              disabled={isDeafened}
+              title={isDeafened ? "Undeafen to unmute" : isMuted ? "Unmute" : "Mute"}
+            >
+              {isMuted || isDeafened ? "🔇" : "🎤"}
+            </Button>
+            <Button
+              size="sm"
+              variant={isDeafened ? "destructive" : "outline"}
+              onClick={onToggleDeafen}
+              className="text-xs px-2"
+              title={isDeafened ? "Undeafen" : "Deafen"}
+            >
+              {isDeafened ? "🔕" : "🎧"}
+            </Button>
+          </>
+        )}
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={onLeaveVoice}
+          className="text-xs flex-1"
+          title="Leave voice channel"
+        >
+          📞 Leave
+        </Button>
+      </div>
+
+      <Button
+        size="sm"
+        variant={voiceInputMode === "ptt" ? "secondary" : "outline"}
+        onClick={onToggleInputMode}
+        className="text-xs w-full"
+      >
+        {voiceInputMode === "ptt" ? "🔑 PTT (`)" : "🎙 Open Mic"}
+      </Button>
 
       {voiceInputMode === "ptt" && !isMuted && (
         <span className="text-xs text-success font-semibold animate-pulse text-center">
