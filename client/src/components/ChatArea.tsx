@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { firstVisibleRow } from "@/lib/scrollAnchor";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
@@ -117,8 +118,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // The reader's place in history, held as "this message was this far down
   // the viewport" rather than as a scroll offset — an offset means nothing
   // once a page of older messages has been inserted above it.
-  const scrollAnchorRef = useRef<{ eventId: string; top: number } | null>(null);
-  const oldestEventIdRef = useRef<string | null>(null);
+  const scrollAnchorRef = useRef<{ eventId: string; offset: number } | null>(null);
   // Set on a channel switch so the landing scroll is instant rather than smooth.
   const justSwitchedChannelRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -281,25 +281,53 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
   }, [getViewport]);
 
-  // Anchor on the oldest message on screen. Everything a load of older history
-  // inserts — the pending indicator, the messages themselves, and the images
-  // and embeds inside them as they resolve their heights a moment later — is
-  // inserted above that message, so holding it still holds the reader still.
+  // Anchor on the topmost message still on screen, and hold *that* still.
+  //
+  // The oldest message in the list is the obvious candidate and the wrong one.
+  // It is the right element for exactly one frame — the one that prepends a
+  // page, where it does sit at the top of the viewport — and from the next
+  // frame on it is fifty messages above the reader, with all of that page's
+  // images between the two. Attachments render without a reserved height, so
+  // each one grows from nothing to as much as 480px as it arrives. Every one
+  // of those pushes the reader down without moving an anchor above them, so
+  // the shift measures zero and nothing is corrected. Anchoring on what the
+  // reader can actually see puts the whole of that growth above the anchor,
+  // which is the only place a shift can be measured from.
   const captureAnchor = useCallback(() => {
     const viewport = getViewport();
-    const eventId = oldestEventIdRef.current;
-    if (!viewport || !eventId) return null;
-    const el = viewport.querySelector(`[data-event-id="${eventId}"]`);
-    return el ? { eventId, top: el.getBoundingClientRect().top } : null;
+    if (!viewport) return null;
+    const rows = viewport.querySelectorAll<HTMLElement>("[data-anchor-id]");
+    if (rows.length === 0) return null;
+    const viewportTop = viewport.getBoundingClientRect().top;
+    // Measuring every row on every scroll event is what the search avoids.
+    const index = firstVisibleRow(
+      rows.length,
+      (i) => rows[i].getBoundingClientRect().bottom,
+      viewportTop,
+    );
+    // Every row above the viewport means the reader is past the end of the
+    // list — the last one is the closest thing to what they are looking at.
+    const row = index === -1 ? rows[rows.length - 1] : rows[index];
+    const eventId = row.dataset.anchorId;
+    if (!eventId) return null;
+    return { eventId, offset: row.getBoundingClientRect().top - viewportTop };
   }, [getViewport]);
 
   const restoreAnchor = useCallback(() => {
     const anchor = scrollAnchorRef.current;
     const viewport = getViewport();
     if (!anchor || !viewport) return;
-    const el = viewport.querySelector(`[data-event-id="${anchor.eventId}"]`);
-    if (!el) return;
-    const shift = el.getBoundingClientRect().top - anchor.top;
+    const row = viewport.querySelector<HTMLElement>(
+      `[data-anchor-id="${anchor.eventId}"]`,
+    );
+    // The anchored message is gone — deleted, or the channel changed under us.
+    // Drop it rather than holding a position that no longer means anything.
+    if (!row) {
+      scrollAnchorRef.current = null;
+      return;
+    }
+    const viewportTop = viewport.getBoundingClientRect().top;
+    const shift = row.getBoundingClientRect().top - viewportTop - anchor.offset;
     // Sub-pixel drift is not worth a scroll event.
     if (Math.abs(shift) < 0.5) return;
     viewport.scrollTop += shift;
@@ -511,7 +539,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // switched off on the list so this is the only thing moving the viewport.
   useLayoutEffect(() => {
     restoreAnchor();
-    oldestEventIdRef.current = state.messages[0]?.event_id ?? null;
   }, [state.messages, restoreAnchor]);
 
   // Scroll to bottom on initial room load
@@ -1476,7 +1503,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               });
               const showUnreadDivider = showNewDivider && msg.event_id === firstUnreadEventId;
               return (
-                <div key={msg.event_id}>
+                <div key={msg.event_id} data-anchor-id={msg.event_id}>
                   {showUnreadDivider && (
                     <div ref={newDividerRef} className="flex items-center gap-2 py-1.5 px-2">
                       <div className="h-px flex-1 bg-destructive" />
