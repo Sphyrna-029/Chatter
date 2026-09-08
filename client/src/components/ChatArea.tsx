@@ -35,6 +35,20 @@ import { displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
 import { scrollBehavior } from "@/lib/theme/display";
 
+// Opening a channel holds the newest message while the page settles: avatars,
+// images and embeds all resolve their heights after the first render, and each
+// one that lands pushes the bottom further down. The hold ends when nothing has
+// changed height for a moment, or when the reader takes over, whichever first.
+const LANDING_SETTLED_MS = 400;
+const LANDING_MAX_MS = 6000;
+// How long after one of our own scrolls to keep reading scroll events as ours.
+// A smooth scroll reports every position on the way and none of them are where
+// the reader chose to be.
+const PROGRAMMATIC_SCROLL_MS = 120;
+const PROGRAMMATIC_SMOOTH_MS = 800;
+// Any of these means the reader is driving, and outranks both of the above.
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown"] as const;
+
 const MAX_MESSAGE_LENGTH = 4000;
 
 async function stripExifData(file: File): Promise<File> {
@@ -119,6 +133,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // the viewport" rather than as a scroll offset — an offset means nothing
   // once a page of older messages has been inserted above it.
   const scrollAnchorRef = useRef<{ eventId: string; offset: number } | null>(null);
+  // Set while a freshly opened channel is being held at its newest message.
+  const landingRef = useRef(false);
+  // While this is in the future, scroll events are our own doing rather than a
+  // choice the reader made, and must not be read as one.
+  const programmaticUntilRef = useRef(0);
   // Set on a channel switch so the landing scroll is instant rather than smooth.
   const justSwitchedChannelRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -278,7 +297,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // scroll overflow:hidden ancestors in Chromium, causing layout shifts.
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "instant") => {
     const viewport = getViewport();
-    if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+    if (!viewport) return;
+    programmaticUntilRef.current =
+      performance.now() +
+      (behavior === "smooth" ? PROGRAMMATIC_SMOOTH_MS : PROGRAMMATIC_SCROLL_MS);
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
   }, [getViewport]);
 
   // Anchor on the topmost message still on screen, and hold *that* still.
@@ -391,7 +414,13 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = viewport;
       const nearBottom = scrollHeight - scrollTop - clientHeight < 100;
-      isNearBottomRef.current = nearBottom;
+      // A scroll we caused says nothing about where the reader wants to be.
+      // Reading one as intent is how a channel ends up short of its newest
+      // message: the content grows, a stale or mid-animation position reports
+      // "not at the bottom", and the pin that was holding it there stands down.
+      if (performance.now() >= programmaticUntilRef.current) {
+        isNearBottomRef.current = nearBottom;
+      }
       setShowScrollToBottom(!nearBottom);
       // Re-anchor wherever the reader has come to rest. Doing it here rather
       // than at the moment a load starts keeps the anchor honest as content
@@ -436,8 +465,18 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
         setRoomUnreadBannerCount(0);
       }
     };
+    // Real input beats any scroll of ours still in flight.
+    const userTookOver = () => { programmaticUntilRef.current = 0; };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
-    return () => viewport.removeEventListener("scroll", handleScroll);
+    for (const name of USER_SCROLL_EVENTS) {
+      viewport.addEventListener(name, userTookOver, { passive: true });
+    }
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      for (const name of USER_SCROLL_EVENTS) {
+        viewport.removeEventListener(name, userTookOver);
+      }
+    };
   }, [getViewport, loadOlderMessages, captureAnchor, state.currentRoomId, dispatch, markChannelRead]);
 
   // Auto-scroll to bottom on new messages, but only for a reader who is already
@@ -484,7 +523,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     if (!viewport || !content) return;
 
     const observer = new ResizeObserver(() => {
-      if (isNearBottomRef.current) {
+      if (landingRef.current || isNearBottomRef.current) {
         viewport.scrollTop = viewport.scrollHeight;
         // A first page shorter than the viewport leaves nothing to scroll up
         // through, so the reader can never ask for the rest of it. Fetch the
@@ -498,12 +537,62 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     return () => observer.disconnect();
   }, [getViewport, state.currentChannelId, restoreAnchor, loadOlderMessages]);
 
-  // Scroll to bottom on channel switch
+  // Open a channel at its newest message, and hold it there until the page
+  // stops changing height.
+  //
+  // One scroll on arrival is not enough and never was. The messages render
+  // first and everything with a height of its own — avatars, images, embeds,
+  // code blocks — resolves afterwards, each one adding to the bottom the
+  // viewport was sent to. The observer above re-pins on every one of those,
+  // but only while it believes the reader is at the bottom, and that belief is
+  // derived from scroll events that our own scrolling also produces. This hold
+  // does not depend on that belief: for as long as the page is still settling,
+  // the newest message is where the viewport goes, full stop.
+  //
+  // It ends the moment the reader does anything, so it can hold hard without
+  // ever taking the timeline away from someone who has started reading.
   useEffect(() => {
-    if (state.currentChannelId) {
-      scrollToBottom();
+    const viewport = getViewport();
+    if (!viewport || !state.currentChannelId) return;
+
+    landingRef.current = true;
+    const startedAt = performance.now();
+    let stableSince = startedAt;
+    let lastHeight = -1;
+    let raf = 0;
+
+    const stop = () => {
+      landingRef.current = false;
+      cancelAnimationFrame(raf);
+      for (const name of USER_SCROLL_EVENTS) {
+        viewport.removeEventListener(name, stop);
+      }
+    };
+
+    const tick = () => {
+      if (!landingRef.current) return;
+      const now = performance.now();
+      const height = viewport.scrollHeight;
+      if (height !== lastHeight) {
+        lastHeight = height;
+        stableSince = now;
+      }
+      viewport.scrollTop = height;
+      programmaticUntilRef.current = now + PROGRAMMATIC_SCROLL_MS;
+      // Settled, or held long enough that something is not going to load.
+      if (now - stableSince > LANDING_SETTLED_MS || now - startedAt > LANDING_MAX_MS) {
+        stop();
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
+    for (const name of USER_SCROLL_EVENTS) {
+      viewport.addEventListener(name, stop, { passive: true });
     }
-  }, [state.currentChannelId, scrollToBottom]);
+    raf = requestAnimationFrame(tick);
+    return stop;
+  }, [state.currentChannelId, state.currentRoomId, getViewport]);
 
   // Advance the stored read marker while the user is sitting at the bottom of an
   // active channel. Debounced — a busy channel would otherwise be one request
@@ -1204,6 +1293,8 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   useEffect(() => {
     if (!scrollToEventId) return;
     // Use requestAnimationFrame to wait for DOM to render
+    // Landing on the newest message would fight a jump to a named one.
+    landingRef.current = false;
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
       if (el) {
