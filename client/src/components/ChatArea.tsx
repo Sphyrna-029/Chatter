@@ -114,8 +114,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   const scrollWrapperRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const prevScrollHeightRef = useRef<number>(0);
-  const wasLoadingOlderRef = useRef(false);
+  // The reader's place in history, held as "this message was this far down
+  // the viewport" rather than as a scroll offset — an offset means nothing
+  // once a page of older messages has been inserted above it.
+  const scrollAnchorRef = useRef<{ eventId: string; top: number } | null>(null);
+  const oldestEventIdRef = useRef<string | null>(null);
   // Set on a channel switch so the landing scroll is instant rather than smooth.
   const justSwitchedChannelRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
@@ -278,6 +281,30 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior });
   }, [getViewport]);
 
+  // Anchor on the oldest message on screen. Everything a load of older history
+  // inserts — the pending indicator, the messages themselves, and the images
+  // and embeds inside them as they resolve their heights a moment later — is
+  // inserted above that message, so holding it still holds the reader still.
+  const captureAnchor = useCallback(() => {
+    const viewport = getViewport();
+    const eventId = oldestEventIdRef.current;
+    if (!viewport || !eventId) return null;
+    const el = viewport.querySelector(`[data-event-id="${eventId}"]`);
+    return el ? { eventId, top: el.getBoundingClientRect().top } : null;
+  }, [getViewport]);
+
+  const restoreAnchor = useCallback(() => {
+    const anchor = scrollAnchorRef.current;
+    const viewport = getViewport();
+    if (!anchor || !viewport) return;
+    const el = viewport.querySelector(`[data-event-id="${anchor.eventId}"]`);
+    if (!el) return;
+    const shift = el.getBoundingClientRect().top - anchor.top;
+    // Sub-pixel drift is not worth a scroll event.
+    if (Math.abs(shift) < 0.5) return;
+    viewport.scrollTop += shift;
+  }, [getViewport]);
+
   // Capture room-level unread count on room change and show banner
   useEffect(() => {
     if (state.currentRoomId !== prevRoomIdRef.current) {
@@ -305,8 +332,12 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       const count = state.channelUnreadCounts[channelId ?? ""] || 0;
       unreadCountRef.current = count;
       if (state.currentRoomId) markChannelRead(state.currentRoomId, channelId ?? undefined);
-      // Either way we open at the newest message, so the tracking ref agrees.
+      // Either way we open at the newest message, so the tracking ref agrees,
+      // and the place we were holding in the channel we just left is not a
+      // place in this one — reopening a channel would otherwise find the
+      // anchored message still in the list and hold it instead of the newest.
       isNearBottomRef.current = true;
+      scrollAnchorRef.current = null;
       justSwitchedChannelRef.current = true;
       if (count > 0) {
         pendingDividerRef.current = true;
@@ -334,7 +365,18 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       const nearBottom = scrollHeight - scrollTop - clientHeight < 100;
       isNearBottomRef.current = nearBottom;
       setShowScrollToBottom(!nearBottom);
-      if (scrollTop < 100) {
+      // Re-anchor wherever the reader has come to rest. Doing it here rather
+      // than at the moment a load starts keeps the anchor honest as content
+      // above the viewport keeps resolving its height.
+      scrollAnchorRef.current = nearBottom ? null : captureAnchor();
+      // Two guards, both there to stop a channel asking for older history
+      // while it is still landing on its newest message. `nearBottom` is the
+      // real one: a reader pinned to the bottom is not reading history, even
+      // though a list that has not filled the viewport yet also sits at
+      // scrollTop 0. The load that used to fire here suppressed the
+      // bottom-pin below for a whole network round trip, which is what
+      // "it doesn't open at the newest message" looked like.
+      if (!nearBottom && scrollTop < 100 && scrollHeight > clientHeight) {
         loadOlderMessages();
       }
       // Clear unread divider when user scrolls to bottom
@@ -356,7 +398,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     };
     viewport.addEventListener("scroll", handleScroll, { passive: true });
     return () => viewport.removeEventListener("scroll", handleScroll);
-  }, [getViewport, loadOlderMessages, state.currentRoomId, dispatch, markChannelRead]);
+  }, [getViewport, loadOlderMessages, captureAnchor, state.currentRoomId, dispatch, markChannelRead]);
 
   // Auto-scroll to bottom on new messages, but only for a reader who is already
   // there. state.messages changes for reasons other than a new arrival — an
@@ -402,13 +444,19 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     if (!viewport || !content) return;
 
     const observer = new ResizeObserver(() => {
-      if (!isNearBottomRef.current) return;
-      if (state.loadingOlderMessages) return;
-      viewport.scrollTop = viewport.scrollHeight;
+      if (isNearBottomRef.current) {
+        viewport.scrollTop = viewport.scrollHeight;
+        // A first page shorter than the viewport leaves nothing to scroll up
+        // through, so the reader can never ask for the rest of it. Fetch the
+        // next page until there is something to scroll.
+        if (viewport.scrollHeight <= viewport.clientHeight) loadOlderMessages();
+        return;
+      }
+      restoreAnchor();
     });
     observer.observe(content);
     return () => observer.disconnect();
-  }, [getViewport, state.currentChannelId, state.loadingOlderMessages]);
+  }, [getViewport, state.currentChannelId, restoreAnchor, loadOlderMessages]);
 
   // Scroll to bottom on channel switch
   useEffect(() => {
@@ -446,27 +494,25 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // routinely — that clamps to zero and dropped you at the very top of history
   // instead of the newest message.
 
-  // Preserve scroll position after prepending older messages.
+  // Hold the reader's place across a change to the message list.
   //
-  // Only a completed older-page load may move scrollTop. PREPEND_MESSAGES sets
-  // the messages and clears loadingOlderMessages in one action, so that
-  // transition marks the render where content appeared *above* the viewport.
-  // Any other growth is a message appended below, where the browser already
-  // holds position — compensating there would nudge the reader downwards.
+  // This used to compare scrollHeight before and after a completed load and
+  // add the difference to scrollTop. Two things made that unreliable. The
+  // browser's own scroll anchoring was already compensating for the same
+  // insertion, so the adjustment landed twice — but only sometimes, because
+  // anchoring switches off at scrollTop 0, which is roughly where a load
+  // triggers. And a height measured on the render that prepends the messages
+  // is taken before their images and embeds have resolved, so whatever they
+  // added afterwards moved the reader again, uncompensated.
+  //
+  // Anchoring on an element rather than on a height answers both: it does not
+  // care what caused the shift or how many times the content settles, only
+  // that one known message ends up where it started. Scroll anchoring is
+  // switched off on the list so this is the only thing moving the viewport.
   useLayoutEffect(() => {
-    const viewport = getViewport();
-    if (!viewport) return;
-    const finishedLoadingOlder =
-      wasLoadingOlderRef.current && state.loadingOlderMessages === false;
-    wasLoadingOlderRef.current = state.loadingOlderMessages;
-    if (finishedLoadingOlder && prevScrollHeightRef.current > 0) {
-      const delta = viewport.scrollHeight - prevScrollHeightRef.current;
-      if (delta > 0) {
-        viewport.scrollTop += delta;
-      }
-    }
-    prevScrollHeightRef.current = viewport.scrollHeight;
-  }, [state.messages, state.loadingOlderMessages, getViewport]);
+    restoreAnchor();
+    oldestEventIdRef.current = state.messages[0]?.event_id ?? null;
+  }, [state.messages, restoreAnchor]);
 
   // Scroll to bottom on initial room load
   useEffect(() => {
@@ -1393,7 +1439,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
         <ScrollArea className={`h-full py-2 ${isMobile ? "px-1" : "px-2"}`}>
-          <div>
+          <div style={{ overflowAnchor: "none" }}>
             {state.loadingOlderMessages && (
               <div className="text-center text-xs text-muted-foreground py-2">
                 Loading older messages...
