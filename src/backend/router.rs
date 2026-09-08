@@ -7,6 +7,7 @@ use super::{
             admin_get_settings, admin_list_rooms, admin_list_users, admin_metrics,
             admin_refresh_invite, admin_reset_password, admin_stats, admin_update_settings,
         },
+        appearance::{get_appearance, set_appearance},
         audit::{admin_export, list_audit_log},
         auth::{
             account_status, change_password, check_username, delete_account, force_reset_password,
@@ -355,6 +356,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/push/unsubscribe", post(push_unsubscribe))
         // Cross-device continuity: unsent drafts and video resume points
         .route("/api/continuity", get(get_continuity))
+        .route("/api/appearance", get(get_appearance).put(set_appearance))
         .route("/api/rooms/{room_id}/draft", put(set_draft))
         .route("/api/media/resume", put(set_resume_point))
         // Read markers / unread counts

@@ -207,13 +207,22 @@ export function deriveThemeVars(colors: ThemeColors): Record<string, string> {
   };
 }
 
+/** Ids reach a CSS attribute selector, so they are limited to characters that
+ *  cannot end the quoted string or open anything. `newThemeId` only ever
+ *  produces these; the check is for ids arriving from storage or a server. */
+const SAFE_THEME_ID = /^[A-Za-z0-9_-]+$/;
+
+export function isSafeThemeId(id: unknown): id is string {
+  return typeof id === "string" && id.length <= 64 && SAFE_THEME_ID.test(id);
+}
+
 /** The rule a custom theme is applied through, as text.
  *
  *  `html[...]` rather than a bare attribute selector: the base blocks are class
  *  and attribute rules of equal weight, and relying on this sheet being the
  *  last one in the head loses the tie whenever HMR re-injects index.css. */
 export function customThemeCss(theme: ThemeDefinition): string {
-  if (!theme.colors) return "";
+  if (!theme.colors || !isSafeThemeId(theme.id)) return "";
   const body = Object.entries(deriveThemeVars(theme.colors))
     .map(([k, v]) => `${k}: ${v};`)
     .join("\n  ");
@@ -276,7 +285,7 @@ function normalizeStoredTheme(raw: unknown): ThemeDefinition | null {
   ) as unknown as ThemeColors;
 
   return {
-    id: typeof t.id === "string" ? t.id : newThemeId(),
+    id: isSafeThemeId(t.id) ? t.id : newThemeId(),
     name: typeof t.name === "string" ? t.name : "Custom",
     mode:
       t.mode === "light" || t.mode === "dark"
@@ -376,6 +385,12 @@ export interface ThemeSettings {
   /** Merge a change into the display settings. */
   setDisplay: (patch: Partial<DisplaySettings>) => void;
   resetDisplay: () => void;
+  /** Adopt settings fetched from the server. See the provider. */
+  adoptRemote: (remote: {
+    themeId: string | null;
+    customThemes: ThemeDefinition[] | null;
+    display: DisplaySettings | null;
+  }) => void;
   /** What the user picked — a theme id, or `SYSTEM_THEME_ID`. */
   themeId: string;
   /** The theme actually in force, resolved past `system` and past a stale or

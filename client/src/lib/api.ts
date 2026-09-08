@@ -2364,6 +2364,49 @@ export interface ResumeEntry {
 }
 
 /** Everything that should follow this user to another device, in one call. */
+/** The shape stored by `GET /api/appearance`; nulls mean "never saved". */
+export interface AppearancePayload {
+  theme_id: string | null;
+  custom_themes:
+    | {
+        id: string;
+        name: string;
+        mode: string;
+        colors: {
+          background: string;
+          card: string;
+          accent: string;
+          primary: string;
+        };
+      }[]
+    | null;
+  display: {
+    font_scale: number;
+    radius: number;
+    density: string;
+    motion: string;
+  } | null;
+  updated_at: number;
+}
+
+export async function apiGetAppearance() {
+  const res = await authenticatedFetch("/api/appearance");
+  if (!res.ok) throw new Error("Failed to load appearance settings");
+  return res.json() as Promise<AppearancePayload>;
+}
+
+/** A whole-document replace — a merge could not express deleting a theme. */
+export async function apiSetAppearance(
+  body: Omit<AppearancePayload, "updated_at">,
+) {
+  const res = await authenticatedFetch("/api/appearance", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error("Failed to save appearance settings");
+  return res.json() as Promise<{ saved: boolean; updated_at: number }>;
+}
+
 export async function apiGetContinuity() {
   const res = await authenticatedFetch("/api/continuity");
   if (!res.ok) throw new Error("Failed to load continuity state");

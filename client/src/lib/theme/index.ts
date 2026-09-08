@@ -3,6 +3,7 @@ export { useThemeSettings } from "./context";
 export {
   checkContrast,
   deriveThemeVars,
+  isSafeThemeId,
   parseImportedTheme,
   resolveThemeColors,
   DEFAULT_THEME_ID,

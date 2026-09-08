@@ -121,6 +121,35 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, [activeTheme]);
 
 
+  /**
+   * Take settings that came from the server as the current ones.
+   *
+   * Separate from the setters so a sync can tell its own write apart from a
+   * change the person in front of it made — adopting must not bounce straight
+   * back up as an edit.
+   */
+  const adoptRemote = useCallback(
+    (remote: {
+      themeId: string | null;
+      customThemes: ThemeDefinition[] | null;
+      display: DisplaySettings | null;
+    }) => {
+      if (remote.customThemes) {
+        setCustomThemes(persistCustomThemes(remote.customThemes));
+      }
+      if (remote.themeId) {
+        setThemeId(remote.themeId);
+        try {
+          localStorage.setItem(STORAGE_KEY, remote.themeId);
+        } catch {
+          // Applied now, forgotten on reload.
+        }
+      }
+      if (remote.display) setDisplayState(saveDisplay(remote.display));
+    },
+    [],
+  );
+
   const setTheme = useCallback((id: string) => {
     setThemeId(id);
     try {
@@ -205,6 +234,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       display,
       setDisplay,
       resetDisplay,
+      adoptRemote,
       themeId,
       activeTheme,
       systemTheme,
@@ -221,6 +251,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       display,
       setDisplay,
       resetDisplay,
+      adoptRemote,
       themeId,
       activeTheme,
       systemTheme,

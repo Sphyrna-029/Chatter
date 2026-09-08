@@ -11,6 +11,7 @@ import {
   deriveThemeVars,
   parseImportedTheme,
   checkContrast,
+  isSafeThemeId,
   MIN_TEXT_CONTRAST,
   THEMES,
   type ThemeColors,
@@ -321,5 +322,25 @@ describe("derived muted foreground", () => {
     expect(vars["--muted-foreground"]).toBe(
       mixColors(background, primary, 0.55),
     );
+  });
+});
+
+describe("isSafeThemeId", () => {
+  it("accepts the ids the app mints", () => {
+    expect(isSafeThemeId("dark")).toBe(true);
+    expect(isSafeThemeId("cotton-candy")).toBe(true);
+    expect(isSafeThemeId("custom-m1x2y3-a9f0kd")).toBe(true);
+  });
+
+  it("rejects anything that could end the CSS selector's string", () => {
+    // The id is interpolated into html[data-theme="..."]; a quote in it would
+    // let a stored theme write arbitrary rules into the page.
+    expect(isSafeThemeId('x"] { display: none } html[data-theme="x')).toBe(
+      false,
+    );
+    expect(isSafeThemeId("has space")).toBe(false);
+    expect(isSafeThemeId("")).toBe(false);
+    expect(isSafeThemeId(null)).toBe(false);
+    expect(isSafeThemeId("x".repeat(65))).toBe(false);
   });
 });

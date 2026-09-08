@@ -1471,3 +1471,168 @@ async fn category_permissions_are_inherited_until_a_channel_opts_out() {
         .unwrap();
     assert_eq!(peeking.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn appearance_contract_round_trip_and_validation() {
+    let server = spawn_server().await;
+    let client = Client::new();
+    let (_, token) = register_user(&client, &server.base_url, "painter", "pw").await;
+
+    // An account that has never saved answers with nulls, not a 404: "nothing
+    // stored" is the normal first-visit state.
+    let empty: Value = client
+        .get(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(empty["theme_id"].is_null());
+    assert!(empty["custom_themes"].is_null());
+    assert!(empty["display"].is_null());
+
+    let settings = json!({
+        "theme_id": "custom-abc123",
+        "custom_themes": [{
+            "id": "custom-abc123",
+            "name": "Parchment",
+            "mode": "light",
+            "colors": {
+                "background": "#FDFAF6",
+                "card": "#f1ece4",
+                "accent": "#c2410c",
+                "primary": "#1c1917",
+            },
+        }],
+        "display": {
+            "font_scale": 1.15,
+            "radius": 0.25,
+            "density": "compact",
+            "motion": "reduce",
+        },
+    });
+
+    let saved = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&settings)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(saved.status(), StatusCode::OK);
+
+    let stored: Value = client
+        .get(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(stored["theme_id"], "custom-abc123");
+    assert_eq!(stored["display"]["font_scale"], 1.15);
+    assert_eq!(stored["display"]["density"], "compact");
+    assert_eq!(stored["custom_themes"][0]["name"], "Parchment");
+    assert_eq!(stored["custom_themes"][0]["mode"], "light");
+    // Colours are stored lowercased so two spellings of one theme compare equal.
+    assert_eq!(
+        stored["custom_themes"][0]["colors"]["background"],
+        "#fdfaf6"
+    );
+
+    // A theme id is interpolated into a CSS attribute selector by the client,
+    // so anything that could end that string is refused here too.
+    let injected = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&json!({
+            "theme_id": "x\"] { display: none } html[data-theme=\"x",
+            "custom_themes": [],
+            "display": {
+                "font_scale": 1.0, "radius": 0.875,
+                "density": "comfortable", "motion": "system",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(injected.status(), StatusCode::BAD_REQUEST);
+
+    // Colours become custom properties, so they are constrained to hex.
+    let bad_colour = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&json!({
+            "theme_id": "dark",
+            "custom_themes": [{
+                "id": "custom-xyz",
+                "name": "Bad",
+                "mode": "dark",
+                "colors": {
+                    "background": "url(https://example.com)",
+                    "card": "#111111",
+                    "accent": "#222222",
+                    "primary": "#eeeeee",
+                },
+            }],
+            "display": {
+                "font_scale": 1.0, "radius": 0.875,
+                "density": "comfortable", "motion": "system",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_colour.status(), StatusCode::BAD_REQUEST);
+
+    let bad_display = client
+        .put(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .json(&json!({
+            "theme_id": "dark",
+            "custom_themes": [],
+            "display": {
+                "font_scale": 40.0, "radius": 0.875,
+                "density": "comfortable", "motion": "system",
+            },
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_display.status(), StatusCode::BAD_REQUEST);
+
+    // A rejected write leaves what was already stored alone.
+    let unchanged: Value = client
+        .get(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(unchanged["theme_id"], "custom-abc123");
+
+    // Appearance is per-user and nobody else's business.
+    let anonymous = client
+        .get(format!("{}/api/appearance", server.base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let (_, other_token) = register_user(&client, &server.base_url, "stranger", "pw").await;
+    let theirs: Value = client
+        .get(format!("{}/api/appearance", server.base_url))
+        .header("authorization", bearer(&other_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(theirs["theme_id"].is_null());
+}

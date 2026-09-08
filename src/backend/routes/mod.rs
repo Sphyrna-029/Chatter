@@ -1,5 +1,6 @@
 pub(crate) mod activity;
 pub(crate) mod admin;
+pub(crate) mod appearance;
 pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod bots;
