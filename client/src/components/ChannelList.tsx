@@ -1012,8 +1012,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         </div>
       </ScrollArea>
 
-      {/* Voice controls toolbar */}
-      {!panelCollapsed && state.inVoiceChannel && (
+      {/* Voice controls toolbar, for the room the call is actually in.
+          `inVoiceChannel` is global, so on its own it put a set of controls at
+          the foot of every room's channel list — including rooms with no
+          connection to the call. Browsing away from a call already raises the
+          voice bar along the bottom of the window, which is reachable from
+          wherever the reader has wandered to; a second copy buried in the
+          channel list of an unrelated room was only ever a duplicate. */}
+      {!panelCollapsed && state.inVoiceChannel && state.voiceRoomId === roomId && (
         <div className="border-t px-2 py-2 space-y-1.5 shrink-0">
           <div className="flex items-center gap-1 px-1">
             {(() => {
