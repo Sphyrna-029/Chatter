@@ -363,6 +363,14 @@ pub(crate) struct UploadRecord {
     pub(crate) disk_path: String,
     pub(crate) size: u64,
     pub(crate) uploaded_at: i64,
+    /// Pixel dimensions of an image, so a message can be laid out at the right
+    /// height before the image itself has loaded. Optional and defaulted
+    /// because every upload predating this has none, and because plenty of
+    /// uploads are not images at all.
+    #[serde(default)]
+    pub(crate) width: Option<u32>,
+    #[serde(default)]
+    pub(crate) height: Option<u32>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

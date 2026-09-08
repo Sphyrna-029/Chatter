@@ -17,6 +17,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn, displayUserId } from "@/lib/utils";
+import { reservedBox } from "@/lib/mediaBox";
 import { can, canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
 import {
@@ -865,7 +866,7 @@ function EmbedCard({ embed, eventId }: { embed: Embed; eventId?: string }) {
 /** Memoized media preview — React preserves these DOM nodes across parent re-renders */
 const gifUrlPattern = /\.gif(\?.*)?$/i;
 
-const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onReveal }: { body: string; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
+const MediaPreview = memo(function MediaPreview({ body, media, hiddenBySpoiler, onReveal }: { body: string; media?: Record<string, { w: number; h: number }>; hiddenBySpoiler?: boolean; onReveal?: () => void }) {
   const { state } = useAppContext();
   const { images, videos, audios, files, links, youtubeIds } = useMemo(() => extractMediaUrls(body), [body]);
   const [lightbox, setLightbox] = useState<{ url: string; type: "image" | "video" } | null>(null);
@@ -906,7 +907,8 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
               src={url}
               alt="Image"
               preview={false}
-              className="max-w-full max-h-80 rounded-md cursor-pointer"
+              className="max-w-full max-h-80 h-auto rounded-md cursor-pointer"
+              style={reservedBox(media?.[url])}
               onClick={() => setLightbox({ url, type: "image" })}
             />
             <button
@@ -930,7 +932,8 @@ const MediaPreview = memo(function MediaPreview({ body, hiddenBySpoiler, onRevea
             key={url}
             src={url}
             alt="Image"
-            className="max-w-full max-h-80 rounded-md cursor-pointer"
+            className="max-w-full max-h-80 h-auto rounded-md cursor-pointer"
+            style={reservedBox(media?.[url])}
             onClick={() => setLightbox({ url, type: "image" })}
           />
         );
@@ -1516,7 +1519,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           )}
 
           {/* Media rendered as stable React elements — not inside innerHTML */}
-          {!isDeleted && <MediaPreview body={message.content.body} hiddenBySpoiler={showSpoilerMask} onReveal={() => setSpoilerRevealed(true)} />}
+          {!isDeleted && <MediaPreview body={message.content.body} media={message.media} hiddenBySpoiler={showSpoilerMask} onReveal={() => setSpoilerRevealed(true)} />}
 
           {/* Rich embeds */}
           {!isDeleted && message.content.embeds?.map((embed, i) => (

@@ -546,6 +546,62 @@ async fn thumb_needs_update(video: &str) -> bool {
 /// Idempotent — healthy (newer-generation) thumbnails are left untouched, and
 /// a regenerated thumbnail meets the width target, so it is never
 /// re-processed on restart.
+/// Startup migration: measure images uploaded before dimensions were recorded.
+///
+/// Without this the reflow only stops for images uploaded from here on, and the
+/// timeline that actually moves under a reader is old history — which is all
+/// of it. Runs once in the background, skips anything already measured, and
+/// leaves a record alone if the file behind it has gone.
+pub(crate) async fn backfill_image_dimensions(state: Arc<AppState>) {
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    // Only records that have never been measured. A record whose file is not an
+    // image is measured once, comes back None, and is marked so with a zero so
+    // it is not probed again on every boot.
+    let filter = doc! { "width": { "$exists": false } };
+    let mut cursor = match uploads.find(filter).await {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let mut measured = 0u32;
+    let mut records = Vec::new();
+    while let Ok(Some(record)) = cursor.try_next().await {
+        records.push(record);
+    }
+    for record in records {
+        let ext = record
+            .filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        // Marked as measured either way, so a directory full of documents and
+        // videos is walked once rather than on every restart.
+        let dims = if is_measurable_image(&ext) {
+            probe_image_dimensions(&record.disk_path).await
+        } else {
+            None
+        };
+        let (w, h) = match dims {
+            Some((w, h)) => (w as i64, h as i64),
+            None => (0, 0),
+        };
+        let updated = uploads
+            .update_one(
+                doc! { "url": &record.url },
+                doc! { "$set": { "width": w, "height": h } },
+            )
+            .await;
+        if updated.is_ok() && w > 0 {
+            measured += 1;
+        }
+    }
+
+    if measured > 0 {
+        println!("Measured {measured} existing image upload(s) at startup");
+    }
+}
+
 pub(crate) async fn fix_black_thumbnails() {
     let root = "external";
     let mut stack = vec![std::path::PathBuf::from(root)];
@@ -625,6 +681,53 @@ async fn generate_image_preview(path: &str) {
         .stderr(std::process::Stdio::null())
         .status()
         .await;
+}
+
+/// Pixel dimensions of a still image, read without decoding the whole file.
+///
+/// Recorded at upload so a message carrying the image can reserve its space
+/// before a byte of it has arrived. Without that the row is laid out at no
+/// height and jumps to full height when the image lands, which is what moves
+/// the timeline under a reader scrolling through history.
+///
+/// Deliberately wider than `is_previewable_image`: a GIF gets no preview but
+/// still has a size, and animated media is the worst offender for reflow.
+pub(crate) async fn probe_image_dimensions(path: &str) -> Option<(u32, u32)> {
+    let out = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=s=x:p=0",
+            path,
+        ])
+        .output()
+        .await
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().next()?.trim();
+    let (w, h) = line.split_once('x')?;
+    let w: u32 = w.trim().parse().ok()?;
+    let h: u32 = h.trim().parse().ok()?;
+    // A zero on either axis is ffprobe failing to read rather than a real
+    // image, and storing it would reserve a box that can never be right.
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some((w, h))
+}
+
+/// Extensions worth probing. Video is excluded on purpose — it already renders
+/// into a fixed aspect box, so it never reflowed in the first place.
+pub(crate) fn is_measurable_image(ext: &str) -> bool {
+    matches!(
+        ext,
+        "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "gif" | "avif"
+    )
 }
 
 pub(crate) async fn upload_file(
@@ -793,6 +896,20 @@ pub(crate) async fn upload_file(
     let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
 
     // Track the upload in MongoDB
+    // Measured here rather than on the way out: the answer never changes, and a
+    // reader scrolling history cannot wait on an ffprobe per image.
+    let (width, height) = {
+        let ext = filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if is_measurable_image(&ext) {
+            probe_image_dimensions(&path).await.unzip()
+        } else {
+            (None, None)
+        }
+    };
     let record = UploadRecord {
         user_id: user_id.clone(),
         filename: filename.clone(),
@@ -800,6 +917,8 @@ pub(crate) async fn upload_file(
         disk_path: path,
         size: final_size,
         uploaded_at: chrono::Utc::now().timestamp(),
+        width,
+        height,
     };
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");
     let _ = uploads_coll.insert_one(record).await;
@@ -1137,6 +1256,20 @@ pub(crate) async fn upload_complete(
     let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
 
     // Track in MongoDB
+    // Measured here rather than on the way out: the answer never changes, and a
+    // reader scrolling history cannot wait on an ffprobe per image.
+    let (width, height) = {
+        let ext = filename
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if is_measurable_image(&ext) {
+            probe_image_dimensions(&path).await.unzip()
+        } else {
+            (None, None)
+        }
+    };
     let record = UploadRecord {
         user_id: user_id.clone(),
         filename: filename.clone(),
@@ -1144,6 +1277,8 @@ pub(crate) async fn upload_complete(
         disk_path: path,
         size: final_size,
         uploaded_at: chrono::Utc::now().timestamp(),
+        width,
+        height,
     };
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");
     let _ = uploads_coll.insert_one(record).await;

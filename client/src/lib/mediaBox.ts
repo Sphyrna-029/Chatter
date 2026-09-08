@@ -1,0 +1,47 @@
+/**
+ * Holding an image's space in a message before the image has loaded.
+ *
+ * Lives here rather than beside the markup because the sizing rule is the part
+ * worth checking: it decides the geometry of every attachment in the timeline,
+ * and getting it wrong either squashes pictures or fails to reserve anything —
+ * both of which look like a bug in the scrolling rather than in a stylesheet.
+ */
+
+/** Matches the `max-h-80` message images are capped at. In rem rather than px
+ *  because the app scales its root font size, which moves the cap with it. */
+export const MESSAGE_IMAGE_MAX_H_REM = 20;
+
+export interface MediaDimensions {
+  w: number;
+  h: number;
+}
+
+/**
+ * The size an image will occupy, expressed so the browser can apply it before
+ * the image arrives.
+ *
+ * The obvious approach — width and height attributes — reserves a box, but the
+ * wrong one: an attribute width is a *used* width, so when `max-height` clamps
+ * a tall image the width has nothing left to give and the picture is squashed.
+ * Only a replaced element with `width: auto` shrinks both axes together, and
+ * one with `width: auto` reserves nothing at all.
+ *
+ * So the height cap is restated as a bound on width, the axis that can shrink
+ * while keeping the shape: the narrowest of the column, the image's own size,
+ * and the width at which it would stand exactly `max-h-80` tall. The ratio
+ * alongside it settles the height, and the box comes out the same before and
+ * after the image loads.
+ *
+ * Returns undefined when nothing is known about the image, leaving it to size
+ * itself as it always has.
+ */
+export function reservedBox(dims: MediaDimensions | undefined) {
+  if (!dims) return undefined;
+  const { w, h } = dims;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined;
+  const ratio = (w / h).toFixed(4);
+  return {
+    aspectRatio: `${w} / ${h}`,
+    width: `min(100%, ${w}px, calc(${MESSAGE_IMAGE_MAX_H_REM}rem * ${ratio}))`,
+  };
+}

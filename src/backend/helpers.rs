@@ -2,7 +2,7 @@ use super::{
     constants::{MAX_USERNAME_LENGTH, MIN_USERNAME_LENGTH},
     state::{
         AppState, ChannelRecord, PermissionOverwrite, PresenceRecord, ReactionRecord,
-        RolePermissions, RoomMemberRecord,
+        RolePermissions, RoomMemberRecord, UploadRecord,
     },
 };
 use axum::{
@@ -1189,9 +1189,105 @@ pub(crate) async fn get_reactions_for_events(
     result
 }
 
+/// URLs appearing in a message body.
+///
+/// Attachments travel as bare links in the body rather than as structured
+/// content, so this is the only place a message says what media it carries.
+/// Trailing punctuation is trimmed because a link written into a sentence
+/// collects it, and the stored URL never has any.
+pub(crate) fn media_urls_in_body(body: &str) -> Vec<String> {
+    body.split_whitespace()
+        .filter(|token| token.starts_with("http://") || token.starts_with("https://"))
+        .map(|token| token.trim_end_matches([',', '.', ')', ']', '!', '?', ';', ':']))
+        .filter(|token| !token.is_empty())
+        .map(String::from)
+        .collect()
+}
+
+/// Batch-query pixel dimensions for uploaded media, keyed by URL.
+///
+/// Sent alongside a page of messages so the client can reserve each image's
+/// space before loading it. One query per page rather than one per image: a
+/// reader scrolling through history cannot wait on a round trip per attachment,
+/// which is the whole point of knowing the size in advance.
+pub(crate) async fn get_media_dimensions_for_urls(
+    state: &AppState,
+    urls: &[String],
+) -> std::collections::HashMap<String, (u32, u32)> {
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+
+    let mut result: std::collections::HashMap<String, (u32, u32)> =
+        std::collections::HashMap::new();
+    if urls.is_empty() {
+        return result;
+    }
+
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let bson_urls: Vec<mongodb::bson::Bson> = urls
+        .iter()
+        .map(|u| mongodb::bson::Bson::String(u.clone()))
+        .collect();
+
+    // A zero width is the backfill's record of "measured, not an image", so it
+    // is excluded here the same as an unmeasured one.
+    if let Ok(mut cursor) = uploads
+        .find(doc! { "url": { "$in": bson_urls }, "width": { "$gt": 0 } })
+        .await
+    {
+        while let Ok(Some(record)) = cursor.try_next().await {
+            if let (Some(w), Some(h)) = (record.width, record.height) {
+                if w > 0 && h > 0 {
+                    result.insert(record.url, (w, h));
+                }
+            }
+        }
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn media_urls_reads_links_out_of_a_body() {
+        // The composer joins text and uploads with newlines.
+        let body = "look at this\nhttps://host/external/a/pic.png";
+        assert_eq!(
+            media_urls_in_body(body),
+            vec!["https://host/external/a/pic.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn media_urls_finds_every_attachment_in_one_message() {
+        let body = "https://host/external/a/one.png https://host/external/a/two.png";
+        assert_eq!(media_urls_in_body(body).len(), 2);
+    }
+
+    #[test]
+    fn media_urls_trims_punctuation_a_sentence_leaves_behind() {
+        // A link written mid-sentence collects punctuation the stored URL
+        // never has, and would otherwise miss its dimensions.
+        let body = "see https://host/external/a/pic.png, then https://host/external/a/b.png.";
+        assert_eq!(
+            media_urls_in_body(body),
+            vec![
+                "https://host/external/a/pic.png".to_string(),
+                "https://host/external/a/b.png".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn media_urls_ignores_everything_that_is_not_a_link() {
+        assert!(media_urls_in_body("no links here at all").is_empty());
+        assert!(media_urls_in_body("").is_empty());
+        // Not a scheme we serve uploads over, so nothing to look up.
+        assert!(media_urls_in_body("ftp://host/pic.png").is_empty());
+    }
 
     fn overwrite(
         target_type: &str,

@@ -872,6 +872,10 @@ export interface Embed {
 
 export interface MatrixMessage {
   event_id: string;
+  /** Pixel dimensions of media this message links to, keyed by URL. Sent with
+   * the page so an image's space can be reserved before it loads; absent for
+   * anything the server has not measured. */
+  media?: Record<string, { w: number; h: number }>;
   sender: string;
   room_id: string;
   channel_id?: string;

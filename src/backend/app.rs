@@ -564,6 +564,10 @@ pub async fn run() {
     // Regenerate any legacy all-black video thumbnails in the background.
     tokio::spawn(media::fix_black_thumbnails());
 
+    // Measure images uploaded before their dimensions were recorded, so old
+    // history reserves space for them the same way new messages do.
+    tokio::spawn(media::backfill_image_dimensions(Arc::clone(&state)));
+
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {
         let state_for_poller = Arc::clone(&state);

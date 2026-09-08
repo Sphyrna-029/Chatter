@@ -7,7 +7,8 @@ use super::super::{
     helpers::{
         broadcast_to_room, can_manage_messages, channel_permissions, effective_permissions,
         error_response, extract_token, generate_id, get_allowed_channel_ids, get_bot_from_token,
-        get_reactions_for_events, get_thread_counts_for_events, get_user_custom_role_ids,
+        get_media_dimensions_for_urls, get_reactions_for_events, get_thread_counts_for_events,
+        get_user_custom_role_ids, media_urls_in_body,
         get_user_from_token, get_user_role, is_blocked_between, is_moderator_or_owner, now_millis,
         rate_limited, regex_escape, send_to_user,
     },
@@ -587,6 +588,43 @@ async fn fetch_page(
     Ok(out)
 }
 
+/// Attach the pixel dimensions of any media a page of messages links to.
+///
+/// Attachments travel as bare links in the body, so this is the only chance to
+/// say how big they are. Without it a message is laid out at no height and
+/// grows when its image lands, which moves the timeline under whoever is
+/// reading it — the reason it is worth a query at all. One query for the page
+/// rather than one per attachment: a reader scrolling through history cannot
+/// wait on a round trip per image, which is the whole point of knowing the
+/// size in advance.
+async fn attach_media_dimensions(state: &AppState, messages: &mut [Value]) {
+    let body_of = |m: &Value| -> Vec<String> {
+        m.get("content")
+            .and_then(|c| c.get("body"))
+            .and_then(|b| b.as_str())
+            .map(media_urls_in_body)
+            .unwrap_or_default()
+    };
+    let urls: Vec<String> = messages.iter().flat_map(&body_of).collect();
+    let dims = get_media_dimensions_for_urls(state, &urls).await;
+    if dims.is_empty() {
+        return;
+    }
+    for msg in messages.iter_mut() {
+        let mut media = serde_json::Map::new();
+        for url in body_of(msg) {
+            if let Some(&(w, h)) = dims.get(&url) {
+                media.insert(url, json!({ "w": w, "h": h }));
+            }
+        }
+        if !media.is_empty() {
+            if let Some(obj) = msg.as_object_mut() {
+                obj.insert("media".to_string(), Value::Object(media));
+            }
+        }
+    }
+}
+
 pub(crate) async fn get_room_messages(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
@@ -792,6 +830,8 @@ pub(crate) async fn get_room_messages(
         }
     }
 
+
+    attach_media_dimensions(&state, &mut chunk).await;
     Ok(Json(json!({
         "has_more": has_more,
         "chunk": chunk
@@ -1214,6 +1254,8 @@ pub(crate) async fn get_thread_messages(
             }
         }
     }
+
+    attach_media_dimensions(&state, &mut messages).await;
 
     Ok(Json(json!({
         "root": root_msg,
