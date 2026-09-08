@@ -9,6 +9,14 @@ import {
 import { isDarkColor } from "@/lib/color";
 import { ThemeContext } from "./context";
 import {
+  applyDisplaySettings,
+  loadDisplay,
+  normalizeDisplay,
+  saveDisplay,
+  DEFAULT_DISPLAY,
+  type DisplaySettings,
+} from "./display";
+import {
   customThemeCss,
   getPrefersDark,
   loadCustomThemes,
@@ -41,6 +49,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const [customThemes, setCustomThemes] =
     useState<ThemeDefinition[]>(loadCustomThemes);
+
+  const [display, setDisplayState] = useState<DisplaySettings>(loadDisplay);
+
+  useEffect(() => {
+    applyDisplaySettings(display);
+  }, [display]);
+
+  const setDisplay = useCallback((patch: Partial<DisplaySettings>) => {
+    setDisplayState((prev) => saveDisplay(normalizeDisplay({ ...prev, ...patch })));
+  }, []);
+
+  const resetDisplay = useCallback(() => {
+    setDisplayState(saveDisplay(DEFAULT_DISPLAY));
+  }, []);
 
   // Subscribed rather than mirrored into state: the OS can flip between the
   // first render and an effect, and a snapshot read has no window to miss it in.
@@ -180,6 +202,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<ThemeSettings>(
     () => ({
+      display,
+      setDisplay,
+      resetDisplay,
       themeId,
       activeTheme,
       systemTheme,
@@ -193,6 +218,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       importTheme,
     }),
     [
+      display,
+      setDisplay,
+      resetDisplay,
       themeId,
       activeTheme,
       systemTheme,

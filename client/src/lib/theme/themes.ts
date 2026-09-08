@@ -12,6 +12,7 @@ import {
   mixColors,
   normalizeToHex,
 } from "@/lib/color";
+import type { DisplaySettings } from "./display";
 
 export type ThemeMode = "light" | "dark";
 
@@ -326,6 +327,11 @@ export function getPrefersDark(): boolean {
 }
 
 export interface ThemeSettings {
+  /** Appearance that is not colour — text size, radius, density, motion. */
+  display: DisplaySettings;
+  /** Merge a change into the display settings. */
+  setDisplay: (patch: Partial<DisplaySettings>) => void;
+  resetDisplay: () => void;
   /** What the user picked — a theme id, or `SYSTEM_THEME_ID`. */
   themeId: string;
   /** The theme actually in force, resolved past `system` and past a stale or

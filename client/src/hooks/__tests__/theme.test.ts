@@ -13,6 +13,14 @@ import {
   THEMES,
   type ThemeColors,
 } from "@/lib/theme";
+import {
+  applyDisplaySettings,
+  normalizeDisplay,
+  prefersReducedMotion,
+  scrollBehavior,
+  DEFAULT_DISPLAY,
+  FONT_SCALE_RANGE,
+} from "@/lib/theme";
 import { isDarkColor, mixColors, normalizeToHex } from "@/lib/color";
 
 const PALE: ThemeColors = {
@@ -127,5 +135,77 @@ describe("mixColors", () => {
   it("returns the endpoints at 0 and 1", () => {
     expect(mixColors("#000000", "#ffffff", 0)).toBe("#000000");
     expect(mixColors("#000000", "#ffffff", 1)).toBe("#ffffff");
+  });
+});
+
+describe("normalizeDisplay", () => {
+  it("falls back per field rather than discarding the set", () => {
+    // A bad radius should not cost someone their text size.
+    const d = normalizeDisplay({ fontScale: 1.2, radius: "big", density: "compact" });
+    expect(d.fontScale).toBe(1.2);
+    expect(d.radius).toBe(DEFAULT_DISPLAY.radius);
+    expect(d.density).toBe("compact");
+    expect(d.motion).toBe("system");
+  });
+
+  it("clamps a scale that would make the app unusable", () => {
+    expect(normalizeDisplay({ fontScale: 40 }).fontScale).toBe(
+      FONT_SCALE_RANGE.max,
+    );
+    expect(normalizeDisplay({ fontScale: 0 }).fontScale).toBe(
+      FONT_SCALE_RANGE.min,
+    );
+  });
+
+  it("reads anything unrecognised as the defaults", () => {
+    expect(normalizeDisplay(null)).toEqual(DEFAULT_DISPLAY);
+    expect(normalizeDisplay("compact")).toEqual(DEFAULT_DISPLAY);
+    expect(normalizeDisplay({ motion: "sideways" }).motion).toBe("system");
+  });
+});
+
+describe("applyDisplaySettings", () => {
+  const html = () => document.documentElement;
+
+  it("writes a default as an absence, not as its value", () => {
+    // So a later change to what "comfortable" means still reaches everyone who
+    // never touched the setting.
+    applyDisplaySettings(DEFAULT_DISPLAY);
+    expect(html().getAttribute("data-density")).toBeNull();
+    expect(html().getAttribute("data-motion")).toBeNull();
+    expect(html().style.getPropertyValue("--font-scale")).toBe("");
+    expect(html().style.getPropertyValue("--radius")).toBe("");
+  });
+
+  it("applies and then clears a non-default", () => {
+    applyDisplaySettings({
+      ...DEFAULT_DISPLAY,
+      fontScale: 1.2,
+      radius: 0,
+      density: "compact",
+      motion: "reduce",
+    });
+    expect(html().style.getPropertyValue("--font-scale")).toBe("1.2");
+    expect(html().style.getPropertyValue("--radius")).toBe("0rem");
+    expect(html().getAttribute("data-density")).toBe("compact");
+    expect(html().getAttribute("data-motion")).toBe("reduce");
+
+    applyDisplaySettings(DEFAULT_DISPLAY);
+    expect(html().getAttribute("data-density")).toBeNull();
+    expect(html().style.getPropertyValue("--font-scale")).toBe("");
+  });
+});
+
+describe("prefersReducedMotion", () => {
+  it("lets the in-app choice override the OS either way", () => {
+    document.documentElement.setAttribute("data-motion", "reduce");
+    expect(prefersReducedMotion()).toBe(true);
+    expect(scrollBehavior()).toBe("auto");
+
+    document.documentElement.setAttribute("data-motion", "full");
+    expect(prefersReducedMotion()).toBe(false);
+    expect(scrollBehavior()).toBe("smooth");
+
+    document.documentElement.removeAttribute("data-motion");
   });
 });

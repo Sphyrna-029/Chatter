@@ -14,3 +14,15 @@ export type {
   ThemeMode,
   ThemeSettings,
 } from "./themes";
+export {
+  applyDisplaySettings,
+  loadDisplay,
+  normalizeDisplay,
+  prefersReducedMotion,
+  scrollBehavior,
+  DEFAULT_DISPLAY,
+  DISPLAY_STORAGE_KEY,
+  FONT_SCALE_RANGE,
+  RADIUS_RANGE,
+} from "./display";
+export type { Density, DisplaySettings, MotionPreference } from "./display";

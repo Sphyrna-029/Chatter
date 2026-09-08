@@ -51,6 +51,19 @@
             var meta = document.querySelector('meta[name="theme-color"]');
             if (meta) meta.setAttribute("content", bg);
           }
+          /* Text size, radius, density and motion. Same four assignments
+             applyDisplaySettings makes, and defaults are absences in both. */
+          var d = JSON.parse(localStorage.getItem("chatter_display") || "null");
+          if (d) {
+            if (typeof d.fontScale === "number" && d.fontScale !== 1)
+              html.style.setProperty("--font-scale", String(d.fontScale));
+            if (typeof d.radius === "number" && d.radius !== 0.875)
+              html.style.setProperty("--radius", d.radius + "rem");
+            if (d.density === "compact")
+              html.setAttribute("data-density", "compact");
+            if (d.motion === "reduce" || d.motion === "full")
+              html.setAttribute("data-motion", d.motion);
+          }
         } catch (e) {
           /* Any failure just means the theme lands a frame later. */
         }

@@ -77,7 +77,10 @@
 }
 
 html {
-  font-size: 17.6px; /* 16px × 1.1 — scales all rem-based sizes without overflowing the viewport */
+  /* 16px × 1.1 — scales all rem-based sizes without overflowing the viewport.
+     --font-scale is the reader's own multiplier on top, set inline on <html>
+     and absent at its default so this stays the one number to change. */
+  font-size: calc(17.6px * var(--font-scale, 1));
 }
 
 @layer components {
@@ -99,6 +102,28 @@ html {
     font-size: var(--text-2xs);
     line-height: 1.45;
     color: color-mix(in oklab, var(--muted-foreground) 80%, transparent);
+  }
+
+  /* Message row spacing, named so density has one place to change it. The
+     comfortable values are exactly what the utility classes here used to be:
+     pt-4 pb-2 for a message with a header, py-1 with a negative top margin for
+     one grouped under the message above, and the tighter pair mobile already
+     used. Compact tightens all three; nothing else on the row moves, so the
+     avatar column and the text keep their relationship. */
+  .msg-row-full {
+    padding-top: var(--msg-row-top, 1rem);
+    padding-bottom: var(--msg-row-bottom, 0.5rem);
+  }
+
+  .msg-row-mobile {
+    padding-top: var(--msg-row-mobile-top, 0.5rem);
+    padding-bottom: var(--msg-row-mobile-bottom, 0.25rem);
+  }
+
+  .msg-row-grouped {
+    padding-top: var(--msg-row-grouped-y, 0.25rem);
+    padding-bottom: var(--msg-row-grouped-y, 0.25rem);
+    margin-top: -0.125rem;
   }
 
   /* Timestamps, counts, and the byline under a row. */
@@ -473,6 +498,49 @@ em, i {
   .watchparty-float {
     animation: watchparty-float 2.6s step-end forwards;
   }
+}
+
+html[data-density="compact"] {
+  --msg-row-top: 0.5rem;
+  --msg-row-bottom: 0.25rem;
+  --msg-row-mobile-top: 0.25rem;
+  --msg-row-mobile-bottom: 0.125rem;
+  --msg-row-grouped-y: 0.0625rem;
+}
+
+/* ── Motion ──
+   The OS preference is the default and needs no attribute. data-motion is the
+   in-app override for the two cases the media query cannot express: wanting
+   stillness here but not everywhere, and wanting the animations back on a
+   machine whose OS asks for stillness.
+
+   Colour transitions are left alone deliberately — nothing moves — and
+   .watchparty-float is excluded because it has its own reduced form above,
+   which shows the emoji in steps rather than not at all. */
+@media (prefers-reduced-motion: reduce) {
+  html:not([data-motion="full"]) *:not(.watchparty-float),
+  html:not([data-motion="full"]) *:not(.watchparty-float)::before,
+  html:not([data-motion="full"]) *:not(.watchparty-float)::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html[data-motion="reduce"] *:not(.watchparty-float),
+html[data-motion="reduce"] *:not(.watchparty-float)::before,
+html[data-motion="reduce"] *:not(.watchparty-float)::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-motion="reduce"] {
+  scroll-behavior: auto !important;
+}
+
+html[data-motion="reduce"] .watchparty-float {
+  animation: watchparty-float 2.6s step-end forwards;
 }
 
 @layer base {

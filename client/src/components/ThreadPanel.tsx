@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { PendingAttachments } from "./PendingAttachments";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { scrollBehavior } from "@/lib/theme/display";
 
 export function ThreadPanel() {
   const confirm = useConfirm();
@@ -44,7 +45,7 @@ export function ThreadPanel() {
   const emojiAliases = currentRoomId ? (roomInfoMap[currentRoomId]?.emoji_aliases ?? {}) : {};
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: scrollBehavior() });
   }, [threadMessages.length]);
 
   const handleSend = useCallback(async () => {

@@ -38,6 +38,7 @@ import { CodeBlock } from "./CodeBlock";
 // ─── Custom name font registration ──────────────────────────────────────────
 import { ensureFontFace } from "@/lib/fontFace";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { scrollBehavior } from "@/lib/theme/display";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
@@ -1322,7 +1323,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     if (!message.content.in_reply_to) return;
     const el = document.querySelector(`[data-event-id="${message.content.in_reply_to}"]`);
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
       el.classList.add("bg-accent");
       setTimeout(() => el.classList.remove("bg-accent"), 1500);
     }
@@ -1333,7 +1334,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     : null;
 
   return (
-    <div className={cn("group relative px-2 rounded-md transition-colors", isMentioned ? "bg-amber-400/10 hover:bg-amber-400/15" : "hover:bg-accent/50", grouped ? "py-1 -mt-0.5" : isMobile ? "pt-2 pb-1" : "pt-4 pb-2")} data-event-id={message.event_id}>
+    <div className={cn("group relative px-2 rounded-md transition-colors", isMentioned ? "bg-amber-400/10 hover:bg-amber-400/15" : "hover:bg-accent/50", grouped ? "msg-row-grouped" : isMobile ? "msg-row-mobile" : "msg-row-full")} data-event-id={message.event_id}>
       <div className={cn("flex items-start", isMobile ? "gap-2" : "gap-3")}>
         {grouped ? (
           <span className={cn("flex-shrink-0", isMobile ? "w-7" : "w-10")} />

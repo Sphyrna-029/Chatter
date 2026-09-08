@@ -6,11 +6,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   useThemeSettings,
   resolveThemeColors,
+  DEFAULT_DISPLAY,
+  FONT_SCALE_RANGE,
+  RADIUS_RANGE,
   SYSTEM_THEME_ID,
   type ThemeColors,
   type ThemeMode,
@@ -31,6 +36,9 @@ interface AppearanceDialogProps {
 
 export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) {
   const {
+    display,
+    setDisplay,
+    resetDisplay,
     themeId,
     activeTheme,
     systemTheme,
@@ -96,7 +104,17 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
           <DialogTitle>Appearance</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <Tabs defaultValue="theme">
+          <TabsList className="w-full">
+            <TabsTrigger value="theme" className="flex-1">
+              Theme
+            </TabsTrigger>
+            <TabsTrigger value="display" className="flex-1">
+              Display
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="theme" className="mt-4 space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <button
               onClick={() => setTheme(SYSTEM_THEME_ID)}
@@ -398,7 +416,121 @@ export function AppearanceDialog({ open, onOpenChange }: AppearanceDialogProps) 
               </div>
             </div>
           )}
-        </div>
+          </TabsContent>
+
+          <TabsContent value="display" className="mt-4 space-y-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Text size</Label>
+                <span className="w-12 text-right text-xs text-muted-foreground">
+                  {Math.round(display.fontScale * 100)}%
+                </span>
+              </div>
+              <Slider
+                min={FONT_SCALE_RANGE.min}
+                max={FONT_SCALE_RANGE.max}
+                step={FONT_SCALE_RANGE.step}
+                value={[display.fontScale]}
+                onValueChange={([fontScale]) => setDisplay({ fontScale })}
+              />
+              <p className="ui-hint">
+                Scales the whole interface, not just message text — spacing and
+                controls are sized from the same root.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <Label>Corner radius</Label>
+                <span className="w-12 text-right text-xs text-muted-foreground">
+                  {display.radius}rem
+                </span>
+              </div>
+              <Slider
+                min={RADIUS_RANGE.min}
+                max={RADIUS_RANGE.max}
+                step={RADIUS_RANGE.step}
+                value={[display.radius]}
+                onValueChange={([radius]) => setDisplay({ radius })}
+              />
+              <div
+                className="h-8 border border-border bg-secondary"
+                style={{ borderRadius: `${display.radius}rem` }}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Density</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {(
+                  [
+                    ["comfortable", "Comfortable"],
+                    ["compact", "Compact"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setDisplay({ density: value })}
+                    className={`rounded-md border px-3 py-2 text-xs transition-colors ${
+                      display.density === value
+                        ? "border-primary bg-accent/40"
+                        : "border-muted-foreground/20 hover:border-muted-foreground/40"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="ui-hint">
+                Compact tightens the space above and below each message.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Motion</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {(
+                  [
+                    ["system", "System"],
+                    ["reduce", "Reduced"],
+                    ["full", "Full"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => setDisplay({ motion: value })}
+                    className={`rounded-md border px-3 py-2 text-xs transition-colors ${
+                      display.motion === value
+                        ? "border-primary bg-accent/40"
+                        : "border-muted-foreground/20 hover:border-muted-foreground/40"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <p className="ui-hint">
+                System follows what the operating system asks for. The other two
+                override it here only.
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={
+                display.fontScale === DEFAULT_DISPLAY.fontScale &&
+                display.radius === DEFAULT_DISPLAY.radius &&
+                display.density === DEFAULT_DISPLAY.density &&
+                display.motion === DEFAULT_DISPLAY.motion
+              }
+              onClick={resetDisplay}
+            >
+              Reset to defaults
+            </Button>
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );

@@ -22,6 +22,7 @@ import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { scrollBehavior } from "@/lib/theme/display";
 
 function isCustomEmojiUrl(s: string) {
   return s.startsWith("/") || s.startsWith("http");
@@ -155,7 +156,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
 
   // Scroll to bottom on new comment
   useEffect(() => {
-    commentsEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    commentsEndRef.current?.scrollIntoView({ behavior: scrollBehavior() });
   }, [comments.length]);
 
   const handleSubmitComment = async () => {

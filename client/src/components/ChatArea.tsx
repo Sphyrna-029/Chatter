@@ -32,6 +32,7 @@ import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
+import { scrollBehavior } from "@/lib/theme/display";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -375,7 +376,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       scrollToBottom();
       return;
     }
-    scrollToBottom("smooth");
+    scrollToBottom(scrollBehavior());
   }, [state.messages, scrollToBottom]);
 
   // Scroll to show reactions added to the last message
@@ -383,7 +384,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     const lastMessage = state.messages[state.messages.length - 1];
     if (!lastMessage) return;
     if (state.messageReactions[lastMessage.event_id] && isNearBottomRef.current) {
-      scrollToBottom("smooth");
+      scrollToBottom(scrollBehavior());
     }
   }, [state.messageReactions, state.messages, scrollToBottom]);
 
@@ -1121,7 +1122,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     const raf = requestAnimationFrame(() => {
       const el = document.querySelector(`[data-event-id="${scrollToEventId}"]`);
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
         el.classList.add("bg-accent");
         setTimeout(() => el.classList.remove("bg-accent"), 1500);
       }
@@ -1465,7 +1466,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
             variant="secondary"
             size="icon"
             className="absolute bottom-3 right-5 h-8 w-8 rounded-full shadow-lg border opacity-80 hover:opacity-100 transition-opacity z-10"
-            onClick={() => scrollToBottom("smooth")}
+            onClick={() => scrollToBottom(scrollBehavior())}
           >
             <ArrowDown className="h-4 w-4" />
           </Button>

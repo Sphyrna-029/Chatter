@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Lock, Smile, Image as ImageIcon, Settings, X, UserPlus } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
+import { scrollBehavior } from "@/lib/theme/display";
 
 const MAX_MESSAGE_LENGTH = 4000;
 
@@ -109,7 +110,7 @@ function ShowcaseChatPane({
   // Auto-scroll to bottom on new messages
   useEffect(() => {
     if (isNearBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      messagesEndRef.current?.scrollIntoView({ behavior: scrollBehavior() });
     }
   }, [messages]);
 
@@ -348,7 +349,7 @@ function ShowcaseChatPane({
 
         {showScrollToBottom && (
           <button
-            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })}
+            onClick={() => messagesEndRef.current?.scrollIntoView({ behavior: scrollBehavior() })}
             className="absolute bottom-4 right-4 h-8 w-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md hover:bg-primary/90 transition-colors z-10"
             title="Scroll to bottom"
           >
