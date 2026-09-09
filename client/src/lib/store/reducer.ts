@@ -630,6 +630,17 @@ export function reducer(state: AppState, action: Action): AppState {
         pinsHasMore: false,
         pinsNextOffset: 0,
         loadingMorePins: false,
+        // A thread belongs to the channel it was opened from, so picking a
+        // different channel leaves it behind — as switching room already did.
+        // The panel renders on activeThreadEventId, so leaving it set meant
+        // clicking a channel appeared to do nothing at all.
+        //
+        // Opening a thread from the sidebar selects its channel first and only
+        // opens once the fetch returns, so this clear lands before that and
+        // does not undo it.
+        activeThreadEventId: null,
+        threadRootMessage: null,
+        threadMessages: [],
       };
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;
