@@ -9,6 +9,7 @@ import {
 } from "@/lib/sounds";
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SLOT_COUNT, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 import { toast } from "sonner";
+import type { VoiceRestoreState } from "@/lib/voiceRejoin";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
 const VOICE_PUBLISH_ANSWER_TIMEOUT_MS = 10_000;
@@ -46,7 +47,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voiceBitrateRef = useRef(VOICE_BITRATE_DEFAULT_BPS);
   // Set below; lets the moderation handlers call join/leave without adding them
   // to the WS effect's dependencies.
-  const joinVoiceRef = useRef<(channelId?: string) => Promise<void>>(async () => {});
+  const joinVoiceRef = useRef<(channelId?: string, restore?: VoiceRestoreState) => Promise<void>>(async () => {});
   const leaveVoiceRef = useRef<() => Promise<void>>(async () => {});
   const releaseVoiceRef = useRef<() => Promise<void>>(async () => {});
 
@@ -110,6 +111,34 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     const userId = voiceSlotUsersRef.current.get(slot);
     gain.gain.value =
       isDeafenedRef.current || !userId ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
+  };
+
+  // Write down enough to put the call back after a refresh. Mute and deafen
+  // are included and kept current, because a refresh discards the state they
+  // otherwise live in — and coming back on an open mic is the one mistake here
+  // the person cannot see.
+  const persistVoiceSession = (over: {
+    roomId?: string | null;
+    channelId?: string | null;
+    muted?: boolean;
+    deafened?: boolean;
+  } = {}) => {
+    // The refs behind these are mirrored by effects, so a caller acting on a
+    // change it just made passes the new value rather than reading one a render
+    // behind.
+    const roomId = over.roomId ?? voiceRoomIdRef.current ?? currentRoomRef.current;
+    if (!roomId) return;
+    try {
+      sessionStorage.setItem("voiceSession", JSON.stringify({
+        roomId,
+        channelId: over.channelId !== undefined ? over.channelId : voiceChannelIdRef.current,
+        muted: over.muted ?? isMutedRef.current,
+        deafened: over.deafened ?? isDeafenedRef.current,
+        timestamp: Date.now(),
+      }));
+    } catch {
+      // Only costs the restore; the call itself is unaffected.
+    }
   };
 
   // ─── Voice publisher ──────────────────────────────────────────────────────
@@ -395,7 +424,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   }, [state.inVoiceChannel, state.userId, state.currentRoomId, dispatch]);
 
   // ─── Join/Leave voice ─────────────────────────────────────────────────────
-  const joinVoice = useCallback(async (channelId?: string) => {
+  const joinVoice = useCallback(async (channelId?: string, restore?: VoiceRestoreState) => {
     if (!state.currentRoomId) return;
 
     // If already in a voice channel, tear down local state first.
@@ -427,9 +456,12 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     // after the socket dropped. Either way mute and deafen belong to the
     // person, not to the channel: resetting them would put someone who has
     // every reason to believe they are muted back on an open mic.
+    // A refresh loses the refs along with the rest of the page, so a caller
+    // restoring a persisted call hands back what it recorded. Without that the
+    // rejoin looks like a fresh one and puts a muted person on an open mic.
     const rejoining = inVoiceRef.current;
-    const nextMuted = rejoining ? isMutedRef.current : false;
-    const nextDeafened = rejoining ? isDeafenedRef.current : false;
+    const nextMuted = restore?.muted ?? (rejoining ? isMutedRef.current : false);
+    const nextDeafened = restore?.deafened ?? (rejoining ? isDeafenedRef.current : false);
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -455,13 +487,12 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       voiceChannelIdRef.current = resolvedChannelId ?? null;
 
       // Persist voice session for auto-rejoin on refresh
-      try {
-        sessionStorage.setItem("voiceSession", JSON.stringify({
-          roomId: state.currentRoomId,
-          channelId: resolvedChannelId ?? null,
-          timestamp: Date.now(),
-        }));
-      } catch {}
+      persistVoiceSession({
+        roomId: state.currentRoomId,
+        channelId: resolvedChannelId ?? null,
+        muted: nextMuted,
+        deafened: nextDeafened,
+      });
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         const joinMsg: any = { type: "voice_join", room_id: state.currentRoomId };
@@ -594,7 +625,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     if (!localStreamRef.current) return;
     const newMuted = !state.isMuted;
     localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = !newMuted; });
+    isMutedRef.current = newMuted;
     dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: newMuted } });
+    persistVoiceSession({ muted: newMuted });
     playSound(newMuted ? "mute" : "unmute", roomSoundsRef.current);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: newMuted }));
@@ -674,6 +707,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     // volume while the user is deafened.
     isDeafenedRef.current = newDeafened;
     voiceSlotGainRef.current.forEach((_, slot) => applySlotGain(slot));
+    persistVoiceSession({ deafened: newDeafened });
     dispatch({ type: "SET_VOICE_STATE", payload: { isDeafened: newDeafened } });
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({

@@ -11,6 +11,7 @@ import { useWebRTCScreen } from "@/hooks/useWebRTCScreen";
 import { useWebRTCWebcam } from "@/hooks/useWebRTCWebcam";
 import { useConnectionStats } from "@/hooks/useConnectionStats";
 import { useSpeakingDetection } from "@/hooks/useSpeakingDetection";
+import type { VoiceRestoreState } from "@/lib/voiceRejoin";
 import { VoiceToolbar } from "./voice/VoiceToolbar";
 import { VoiceDebugPanel } from "./voice/VoiceDebugPanel";
 import { VoiceMemberList } from "./voice/VoiceMemberList";
@@ -20,7 +21,9 @@ export type ConnectionQuality = 0 | 1 | 2 | 3 | 4;
 export interface ConnQualityData { quality: ConnectionQuality; pingMs: number | null; }
 
 interface VoiceControlsProps {
-  joinVoiceRef?: React.MutableRefObject<((channelId?: string) => void) | null>;
+  joinVoiceRef?: React.MutableRefObject<
+    ((channelId?: string, restore?: VoiceRestoreState) => void) | null
+  >;
   leaveVoiceRef?: React.MutableRefObject<(() => void) | null>;
   releaseVoiceRef?: React.MutableRefObject<(() => void) | null>;
   toggleMuteRef?: React.MutableRefObject<(() => void) | null>;

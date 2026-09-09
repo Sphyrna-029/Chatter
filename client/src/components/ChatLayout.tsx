@@ -47,7 +47,8 @@ const ActivityPage = lazy(() =>
 );
 import { displayUserId } from "@/lib/utils";
 import { syncPushSubscription } from "@/lib/push";
-import { decideVoiceRejoin } from "@/lib/voiceRejoin";
+import { decideVoiceRejoin, parseStoredVoiceSession } from "@/lib/voiceRejoin";
+import type { VoiceRestoreState } from "@/lib/voiceRejoin";
 import { toast } from "sonner";
 
 // ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
@@ -155,7 +156,9 @@ export function ChatLayout() {
   const [mobileDrawer, setMobileDrawer] = useState<{ kind: "channels" | "members"; roomId: string | null } | null>(null);
   const viewerContainerRef = useRef<HTMLDivElement>(null);
   const pipVideoRef = useRef<HTMLVideoElement>(null);
-  const joinVoiceRef = useRef<((channelId?: string) => void) | null>(null);
+  const joinVoiceRef = useRef<
+    ((channelId?: string, restore?: VoiceRestoreState) => void) | null
+  >(null);
   // The video area, whose pointer activity keeps the stream controls awake.
   const videoPanelRef = useRef<HTMLDivElement | null>(null);
   const leaveVoiceRef = useRef<(() => void) | null>(null);
@@ -317,22 +320,25 @@ export function ChatLayout() {
     autoRejoinAttemptedRef.current = true;
 
     try {
-      const raw = sessionStorage.getItem("voiceSession");
-      if (!raw) return;
-      const session = JSON.parse(raw) as { roomId: string; channelId: string | null; timestamp: number };
-      if (Date.now() - session.timestamp > 30_000) {
-        sessionStorage.removeItem("voiceSession");
-        return;
-      }
-      // Clear so we don't retry on subsequent renders
+      const session = parseStoredVoiceSession(
+        sessionStorage.getItem("voiceSession"),
+        Date.now(),
+      );
+      // Clear either way, so a stale or expired entry cannot be retried
       sessionStorage.removeItem("voiceSession");
+      if (!session) return;
 
       // Navigate to the room then join voice after a short delay for state to settle
       selectRoom(session.roomId);
       setTimeout(() => {
         const ch = state.channels.find((c) => c.channel_id === session.channelId);
         if (ch) dispatch({ type: "SET_VOICE_STATE", payload: { voiceChannelName: ch.name } });
-        joinVoiceRef.current?.(session.channelId ?? undefined);
+        // The refresh threw away the mute and deafen this call was left in, so
+        // they travel with the session rather than defaulting to a fresh join.
+        joinVoiceRef.current?.(session.channelId ?? undefined, {
+          muted: session.muted,
+          deafened: session.deafened,
+        });
       }, 500);
     } catch {
       sessionStorage.removeItem("voiceSession");
