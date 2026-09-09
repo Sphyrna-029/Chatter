@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
@@ -99,6 +99,24 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     return () => clearInterval(id);
   }, [state.accessToken, fetchSummaries]);
 
+  // Head-counts and share badges, per room, from the live voice state.
+  //
+  // The poll above answers the same question five seconds late, which is what
+  // made a call look like it was still running after everyone had left. It
+  // stays as the answer before the socket has said anything.
+  const liveVoice = useMemo(() => {
+    const counts: Record<string, { count: number; sharing: boolean }> = {};
+    for (const [channelId, members] of Object.entries(state.voiceChannelMembers)) {
+      const roomId = state.voiceChannelRooms[channelId];
+      if (!roomId) continue;
+      const entry = counts[roomId] ?? { count: 0, sharing: false };
+      entry.count += members.length;
+      entry.sharing = entry.sharing || members.some((m) => m.screen_sharing);
+      counts[roomId] = entry;
+    }
+    return counts;
+  }, [state.voiceChannelMembers, state.voiceChannelRooms]);
+
   const regularRoomIds = state.joinedRoomIds.filter(
     (id) => !state.roomInfoMap[id]?.is_direct
   );
@@ -117,8 +135,15 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const isWhiteboardRoom = info?.room_type === "whiteboard";
     const isWatchPartyRoom = info?.room_type === "watchparty";
     const memberCount = summary?.member_count ?? 0;
-    const voiceCount = isDm ? (info?.dm_voice_count ?? 0) : (summary?.voice_count ?? 0);
-    const screenShareActive = summary?.screen_share_active ?? false;
+    // Once the socket is up the store has been handed the whole voice picture,
+    // so it is the fresher of the two — including when it says nobody is there.
+    // A room with no entry has nobody in it — absent is an answer, not a gap.
+    const live = state.wsConnected
+      ? (liveVoice[roomId] ?? { count: 0, sharing: false })
+      : undefined;
+    const voiceCount =
+      live?.count ?? (isDm ? (info?.dm_voice_count ?? 0) : (summary?.voice_count ?? 0));
+    const screenShareActive = live?.sharing ?? (summary?.screen_share_active ?? false);
 
     let roomName: string;
     if (isDm && info?.name) {

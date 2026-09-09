@@ -203,3 +203,150 @@ async fn presence_transitions_active_to_offline_on_connect_disconnect() {
         "offline"
     );
 }
+
+#[tokio::test]
+async fn a_reconnecting_client_is_handed_the_whole_voice_picture() {
+    // A voice event describes a change, so one sent while a socket was down
+    // reaches nobody and leaves that client permanently wrong. The snapshot on
+    // connect is what makes it right again without it knowing what it missed.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "General",
+        Some(vec![bob_user_id]),
+        false,
+    )
+    .await;
+
+    let mut alice_ws = ws_connect_authenticated(&server.ws_url, &alice_token).await;
+    let _ = recv_event_type(&mut alice_ws, "connected").await;
+
+    alice_ws
+        .send(Message::Text(
+            json!({"type": "voice_join", "room_id": room_id}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let _ = recv_event_type(&mut alice_ws, "voice_user_joined").await;
+
+    alice_ws
+        .send(Message::Text(
+            json!({"type": "voice_mute", "room_id": room_id, "muted": true}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let _ = recv_event_type(&mut alice_ws, "voice_user_muted").await;
+
+    // Bob arrives after all of it, the way a reconnecting client does.
+    let mut bob_ws = ws_connect_authenticated(&server.ws_url, &bob_token).await;
+    let snapshot = recv_event_type(&mut bob_ws, "voice_state_sync").await;
+
+    let channel = &snapshot["channels"][&room_id];
+    assert_eq!(channel["room_id"], room_id);
+    let alice = channel["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["user_id"] == "@alice:localhost")
+        .expect("alice should be in the snapshot");
+    // The mute happened before Bob had a socket at all.
+    assert_eq!(alice["muted"], true);
+    assert_eq!(alice["deafened"], false);
+
+    // And the same picture on demand, for a tab coming back from the
+    // background with its connection intact.
+    bob_ws
+        .send(Message::Text(
+            json!({"type": "voice_state_request"}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let requested = recv_event_type(&mut bob_ws, "voice_state_sync").await;
+    assert_eq!(
+        requested["channels"][&room_id]["members"],
+        channel["members"]
+    );
+}
+
+#[tokio::test]
+async fn voice_events_carry_every_members_state() {
+    // The list of ids alone left a client that had not seen a member before to
+    // invent their flags, and it invented them unmuted.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "General",
+        Some(vec![bob_user_id]),
+        false,
+    )
+    .await;
+
+    let mut alice_ws = ws_connect_authenticated(&server.ws_url, &alice_token).await;
+    let _ = recv_event_type(&mut alice_ws, "connected").await;
+    let mut bob_ws = ws_connect_authenticated(&server.ws_url, &bob_token).await;
+    let _ = recv_event_type(&mut bob_ws, "connected").await;
+
+    alice_ws
+        .send(Message::Text(
+            json!({"type": "voice_join", "room_id": room_id}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let _ = recv_event_type(&mut alice_ws, "voice_user_joined").await;
+    alice_ws
+        .send(Message::Text(
+            json!({"type": "voice_deafen", "room_id": room_id, "deafened": true}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let _ = recv_event_type(&mut bob_ws, "voice_user_deafened").await;
+
+    // Bob joining is told about Alice as she actually is.
+    bob_ws
+        .send(Message::Text(
+            json!({"type": "voice_join", "room_id": room_id}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let joined = recv_matching(&mut bob_ws, |event| {
+        event.get("type").and_then(Value::as_str) == Some("voice_user_joined")
+            && event.get("user_id").and_then(Value::as_str) == Some("@bob:localhost")
+    })
+    .await;
+
+    let alice = joined["voice_states"]
+        .as_array()
+        .expect("a join names every member's state")
+        .iter()
+        .find(|m| m["user_id"] == "@alice:localhost")
+        .expect("alice is still in the channel");
+    assert_eq!(alice["deafened"], true);
+
+    // And so is the leave that follows.
+    alice_ws
+        .send(Message::Text(
+            json!({"type": "voice_leave", "room_id": room_id}).to_string(),
+        ))
+        .await
+        .unwrap();
+    let left = recv_event_type(&mut bob_ws, "voice_user_left").await;
+    let remaining = left["voice_states"].as_array().unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0]["user_id"], "@bob:localhost");
+}

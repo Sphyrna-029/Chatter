@@ -103,6 +103,7 @@ import {
   THREAD_ACTIVE_WINDOW_MS,
   THREAD_PREVIEW_LIMIT,
   type ThreadPreview,
+  type VoiceChannelMember,
 } from "./types";
 import { reducer } from "./reducer";
 import { createWsMessageHandler } from "./wsHandler";
@@ -299,7 +300,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Defined further down, but needed by the reconnect handler above it.
   const loadUnreadsRef = useRef<() => Promise<void>>(() => Promise.resolve());
-  const loadVoiceMembersRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const loadVoiceMembersRef = useRef<(roomId?: string) => Promise<void>>(() => Promise.resolve());
+  const loadPresenceRef = useRef<(roomId?: string) => Promise<void>>(() => Promise.resolve());
   const loadActiveThreadsRef = useRef<(roomId: string) => Promise<void>>(() =>
     Promise.resolve(),
   );
@@ -335,7 +337,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // from events, and every event sent while the socket was down reached
     // nobody. Nothing else refetches it, so a single missed join left the call
     // looking wrong until the room was reselected. Ask the server outright.
+    //
+    // (The server pushes the same snapshot when the socket opens; this covers
+    // the case where the connection survived and only the events were lost.)
     void loadVoiceMembersRef.current();
+    // Online, idle and offline are broadcast the same way, and were missed the
+    // same way. The poll would correct it within ten seconds, but only for the
+    // room on screen and only once it next fires.
+    void loadPresenceRef.current();
 
     const { currentRoomId, currentChannelId, messages } = stateRef.current;
     if (!currentRoomId) return;
@@ -480,6 +489,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (action === "nothing") return;
       if (action === "resync") {
         void loadVoiceMembersRef.current();
+        void loadPresenceRef.current();
         return;
       }
       // Drop whatever is left of the old socket without letting its onclose
@@ -544,16 +554,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Presence polling
   useEffect(() => {
     if (!state.currentRoomId || !state.accessToken) return;
-    const interval = setInterval(async () => {
-      try {
-        const data = await apiGetPresence(stateRef.current.currentRoomId!);
-        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
-        for (const [uid, p] of Object.entries(data.presence)) {
-          const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
-        }
-        dispatch({ type: "SET_PRESENCE", payload: mapped });
-      } catch {}
+    const interval = setInterval(() => {
+      void loadPresenceRef.current();
     }, 10000);
     return () => clearInterval(interval);
   }, [state.currentRoomId, state.accessToken]);
@@ -906,32 +908,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       }
 
-      // Load voice channel members for non-DM rooms
-      if (!isDm) {
-        try {
-          const voiceData = await apiGetVoiceMembers(roomId);
-          if (voiceData.voice_channels) {
-            const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]> = {};
-            for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
-              mapped[chId] = (members as any[]).map((m: any) => ({
-                userId: m.user_id || m.userId,
-                muted: m.muted,
-                deafened: m.deafened ?? false,
-                screen_sharing: m.screen_sharing,
-                force_muted: m.force_muted ?? false,
-              }));
-            }
-            // Only show voice members for the room being viewed — don't carry
-            // over members from a different room's voice channels.
-            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
-            dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: (voiceData.occupied_since as Record<string, number>) || {} });
-          } else {
-            dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: {} });
-            dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: {} });
-          }
-        } catch {}
-      }
-
       // Load messages (with channel_id if available)
       const msgData = await apiGetMessages(roomId, 50, undefined, undefined, selectedChannelId);
       const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
@@ -990,43 +966,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           })),
         });
       }
-      // Load presence
-      try {
-        const presData = await apiGetPresence(roomId);
-        const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; nameFontUrl?: string; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
-        for (const [uid, p] of Object.entries(presData.presence)) {
-          const pAny = p as any;
-          mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, nameFontUrl: pAny.name_font_url || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
-        }
-        dispatch({ type: "SET_PRESENCE", payload: mapped });
-      } catch {}
-      // Load voice members — skip if we're in a voice channel on a different room
-      // to avoid overwriting preserved voice/screen state
-      const inVoice = stateRef.current.inVoiceChannel;
-      const voiceRoom = stateRef.current.voiceRoomId;
-      if (!inVoice || roomId === voiceRoom) {
-        try {
-          const voiceData = await apiGetVoiceMembers(roomId);
-          const members = voiceData.voice_members.map((m) => m.user_id);
-          const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
-          const sharers: string[] = [];
-          voiceData.voice_members.forEach((m) => {
-            states[m.user_id] = {
-              muted: m.muted,
-              screen_sharing: m.screen_sharing,
-            };
-            if (m.screen_sharing) sharers.push(m.user_id);
-          });
-          dispatch({
-            type: "SET_VOICE_MEMBERS",
-            payload: { members, states },
-          });
-          dispatch({
-            type: "SET_ACTIVE_SCREEN_SHARERS",
-            payload: sharers,
-          });
-        } catch {}
-      }
+      // Load presence. The same call the poll makes, rather than a second copy
+      // of the mapping that could drift from it — this one dropped `is_mobile`,
+      // so opening a room took the phone badge off everyone in it until the
+      // poll next ran.
+      void loadPresenceRef.current(roomId);
+      // Who is in this room's voice channels. Opening a room used to load the
+      // flat member list and nothing per channel, so the channel list showed
+      // empty voice channels however many people were sitting in them — and it
+      // skipped the load entirely while a call was running in another room,
+      // which is the case where the client is furthest behind. The snapshot
+      // covers every room at once, so neither is a reason to ask for less.
+      void loadVoiceMembersRef.current(roomId);
     },
     []
   );
@@ -1310,46 +1261,69 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [loadRooms]
   );
 
-  const loadVoiceMembers = useCallback(async () => {
-    if (!stateRef.current.currentRoomId) return;
+  /**
+   * Ask the server to describe every call it knows this user can see.
+   *
+   * The socket answers from memory and covers every room at once, so it is both
+   * cheaper than the REST call and wider — which matters because a call in a
+   * room that is not on screen still has a sidebar row and a DM bar to keep
+   * right. Answers false when there is no open socket to ask on.
+   */
+  const requestVoiceSync = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ type: "voice_state_request" }));
+    return true;
+  }, []);
+
+  const loadVoiceMembers = useCallback(async (forRoomId?: string) => {
+    if (requestVoiceSync()) return;
+    // No socket: fall back to the one room the REST endpoint can describe.
+    // A caller mid-room-switch names it, since the store may not have caught up.
+    const roomId = forRoomId ?? stateRef.current.currentRoomId;
+    if (!roomId) return;
     try {
-      const voiceData = await apiGetVoiceMembers(stateRef.current.currentRoomId);
-      const members = voiceData.voice_members.map((m) => m.user_id);
-      const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
-      const sharers: string[] = [];
-      voiceData.voice_members.forEach((m) => {
-        states[m.user_id] = {
-          muted: m.muted,
-          screen_sharing: m.screen_sharing,
-        };
-        if (m.screen_sharing) sharers.push(m.user_id);
-      });
-      dispatch({
-        type: "SET_VOICE_MEMBERS",
-        payload: { members, states },
-      });
-      dispatch({
-        type: "SET_ACTIVE_SCREEN_SHARERS",
-        payload: sharers,
-      });
-      // Also load per-channel voice members
-      if (voiceData.voice_channels) {
-        const mapped: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean }[]> = {};
-        for (const [chId, members] of Object.entries(voiceData.voice_channels)) {
-          mapped[chId] = (members as any[]).map((m: any) => ({
+      const voiceData = await apiGetVoiceMembers(roomId);
+      const channels: Record<string, { roomId: string; occupiedSince: number | null; members: VoiceChannelMember[] }> = {};
+      for (const [channelId, members] of Object.entries(voiceData.voice_channels || {})) {
+        channels[channelId] = {
+          roomId,
+          occupiedSince: voiceData.occupied_since?.[channelId] ?? null,
+          members: (members as any[]).map((m: any) => ({
             userId: m.user_id || m.userId,
-            muted: m.muted,
+            muted: !!m.muted,
             deafened: m.deafened ?? false,
-            screen_sharing: m.screen_sharing,
+            screen_sharing: !!m.screen_sharing,
             force_muted: m.force_muted ?? false,
-          }));
-        }
-        dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: mapped });
-        dispatch({ type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE", payload: (voiceData.occupied_since as Record<string, number>) || {} });
+            clipping: m.clipping ?? false,
+          })),
+        };
       }
+      // Scoped to this room: the endpoint was told nothing about the others, so
+      // it must not be read as saying their calls have ended.
+      dispatch({ type: "SYNC_VOICE_STATE", payload: { roomId, channels } });
+    } catch {}
+  }, [requestVoiceSync]);
+  loadVoiceMembersRef.current = loadVoiceMembers;
+
+  /** Presence for everyone in the room on screen.
+   *
+   *  Polled, and asked for again whenever the socket has been away: a status
+   *  that changed while it was down was broadcast to nobody. */
+  const loadPresence = useCallback(async (forRoomId?: string) => {
+    const roomId = forRoomId ?? stateRef.current.currentRoomId;
+    if (!roomId) return;
+    try {
+      const data = await apiGetPresence(roomId);
+      const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
+      for (const [uid, p] of Object.entries(data.presence)) {
+        const pAny = p as any;
+        mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
+      }
+      dispatch({ type: "SET_PRESENCE", payload: mapped });
     } catch {}
   }, []);
-  loadVoiceMembersRef.current = loadVoiceMembers;
+  loadPresenceRef.current = loadPresence;
 
   const selectChannel = useCallback(async (channelId: string) => {
     dispatch({ type: "SELECT_CHANNEL", payload: channelId });

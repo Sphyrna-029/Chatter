@@ -495,29 +495,17 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       });
 
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        const joinMsg: any = { type: "voice_join", room_id: state.currentRoomId };
+        // Mute and deafen ride along with the join. They used to follow it as
+        // two more messages, and each one was a second broadcast — so everyone
+        // else saw the arrival unmuted first and corrected a moment later.
+        const joinMsg: any = {
+          type: "voice_join",
+          room_id: state.currentRoomId,
+          muted: nextMuted,
+          deafened: nextDeafened,
+        };
         if (resolvedChannelId) joinMsg.channel_id = resolvedChannelId;
         wsRef.current.send(JSON.stringify(joinMsg));
-
-        // The server treats a join as a fresh, unmuted arrival, so a preserved
-        // state has to be announced or the rest of the room sees an open mic
-        // on someone who is muted.
-        if (nextMuted) {
-          wsRef.current.send(JSON.stringify({
-            type: "voice_mute",
-            room_id: state.currentRoomId,
-            channel_id: resolvedChannelId || undefined,
-            muted: true,
-          }));
-        }
-        if (nextDeafened) {
-          wsRef.current.send(JSON.stringify({
-            type: "voice_deafen",
-            room_id: state.currentRoomId,
-            channel_id: resolvedChannelId || undefined,
-            deafened: true,
-          }));
-        }
       }
       await createVoicePublisher();
       // One subscription covers everyone in the call, so it is opened on join

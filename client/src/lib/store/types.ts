@@ -4,6 +4,20 @@ import type { NotificationLevel, NotificationSettings } from "../notifications";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+/** One member of a voice channel, with every flag the UI renders.
+ *
+ * The server sends the whole record with each voice event and snapshot, so a
+ * client never has to invent the flags for someone it has not seen before —
+ * which it used to do, always as unmuted and undeafened. */
+export interface VoiceChannelMember {
+  userId: string;
+  muted: boolean;
+  deafened: boolean;
+  screen_sharing: boolean;
+  force_muted?: boolean;
+  clipping?: boolean;
+}
+
 export interface SearchState {
   open: boolean;
   query: string;
@@ -41,8 +55,16 @@ export interface AppState {
   channels: Channel[];
   channelCategories: ChannelCategory[];
   currentChannelId: string | null;
-  // Voice channels: channel_id -> list of user_ids in that voice channel
-  voiceChannelMembers: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean; clipping?: boolean }[]>;
+  // Voice channels: channel_id -> the members of that voice channel.
+  //
+  // Global, not scoped to the room on screen: a call in another room still has
+  // to show in the sidebar, and a DM's call bar has to survive navigating away
+  // from it. The server's snapshot covers every room the user is in at once,
+  // which is what keeps this correct without the client having to ask per room.
+  voiceChannelMembers: Record<string, VoiceChannelMember[]>;
+  /** channel_id -> the room it belongs to. A channel can be in the map before
+   *  its room has ever been opened, so its channel list is no help. */
+  voiceChannelRooms: Record<string, string>;
   voiceChannelId: string | null;
   // Voice
   inVoiceChannel: boolean;
@@ -262,9 +284,23 @@ export type Action =
   | { type: "ADD_CHANNEL"; payload: Channel }
   | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
   | { type: "REMOVE_CHANNEL"; payload: string }
-  | { type: "SET_VOICE_CHANNEL_MEMBERS"; payload: Record<string, { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; clipping?: boolean }[]> }
-  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; members: { userId: string; muted: boolean; deafened: boolean; screen_sharing: boolean; force_muted?: boolean; clipping?: boolean }[] } }
-  | { type: "SET_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: Record<string, number> }
+  | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; roomId?: string; members: VoiceChannelMember[] } }
+  /** Replace what this client believes about voice.
+   *
+   *  `roomId` says how far the snapshot reaches: `null` for the server's
+   *  cross-room push, which is authoritative for everything, or one room for
+   *  the REST fallback, which knows nothing about the others and must leave
+   *  them alone. */
+  | {
+      type: "SYNC_VOICE_STATE";
+      payload: {
+        roomId: string | null;
+        channels: Record<
+          string,
+          { roomId: string; occupiedSince: number | null; members: VoiceChannelMember[] }
+        >;
+      };
+    }
   | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
@@ -298,6 +334,7 @@ export const initialState: AppState = {
   channelCategories: [],
   currentChannelId: null,
   voiceChannelMembers: {},
+  voiceChannelRooms: {},
   voiceChannelId: null,
   inVoiceChannel: false,
   isMuted: false,

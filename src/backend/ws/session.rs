@@ -78,6 +78,93 @@ fn holds_voice_session(
         .is_some_and(|member| member.conn_id == conn_id)
 }
 
+/// One voice channel's members, with every flag a client renders.
+///
+/// Live voice events used to name only the user ids left in the channel, so a
+/// client that had never seen a member had to invent the rest — and invented
+/// them unmuted and undeafened. Sending the state alongside the list means a
+/// client never guesses.
+fn voice_member_states(members: &HashMap<String, VoiceMemberState>) -> Vec<Value> {
+    let mut states: Vec<Value> = members
+        .iter()
+        .map(|(uid, member)| {
+            json!({
+                "user_id": uid,
+                "muted": member.muted,
+                "deafened": member.deafened,
+                "screen_sharing": member.screen_sharing,
+                "force_muted": member.force_muted,
+                "clipping": member.clipping,
+            })
+        })
+        .collect();
+    // A HashMap iterates in whatever order it likes; a stable list keeps the
+    // member tiles from reshuffling on every event.
+    states.sort_by(|a, b| a["user_id"].as_str().cmp(&b["user_id"].as_str()));
+    states
+}
+
+/// Every occupied voice channel in the rooms this user belongs to.
+///
+/// A voice event describes a change, not a state, so a client that missed one —
+/// its socket was down, or it had not opened that room yet — cannot work out
+/// what it missed. This is the whole picture across every room at once, which
+/// is what makes a client correct again without it having to know what it got
+/// wrong. It reads only in-memory state, so answering one costs nothing.
+pub(crate) async fn voice_state_snapshot(state: &AppState, user_id: &str) -> Value {
+    let user_rooms: HashSet<String> = {
+        let rm = state.room_members.read().await;
+        rm.iter()
+            .filter(|(_, members)| members.iter().any(|m| m == user_id))
+            .map(|(rid, _)| rid.clone())
+            .collect()
+    };
+
+    let vc = state.voice_channels.read().await;
+    let occupied = state.voice_channel_occupied_since.read().await;
+
+    let mut channels = serde_json::Map::new();
+    for (channel_id, members) in vc.iter() {
+        // An empty channel is absent rather than empty: the client clears every
+        // channel the snapshot does not name, so the two say the same thing.
+        let Some(member) = members.values().next() else {
+            continue;
+        };
+        // Rooms that predate channels key themselves by room id.
+        let room_id = if member.room_id.is_empty() {
+            channel_id.clone()
+        } else {
+            member.room_id.clone()
+        };
+        if !user_rooms.contains(&room_id) {
+            continue;
+        }
+        channels.insert(
+            channel_id.clone(),
+            json!({
+                "room_id": room_id,
+                "occupied_since": occupied.get(channel_id).copied(),
+                "members": voice_member_states(members),
+            }),
+        );
+    }
+
+    json!({
+        "type": "voice_state_sync",
+        "channels": Value::Object(channels),
+    })
+}
+
+/// A voice channel a closing connection was holding a session in: what the room
+/// has to be told, and who is left behind.
+struct DepartedVoiceChannel {
+    room_id: String,
+    channel_id: String,
+    was_screen_sharing: bool,
+    remaining: Vec<String>,
+    remaining_states: Vec<Value>,
+}
+
 pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
     let (mut ws_sink, mut ws_stream) = socket.split();
 
@@ -296,6 +383,17 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         ))
         .await;
 
+    // Who is in a call, muted, deafened or sharing is assembled entirely from
+    // events, and every event sent while this socket was down reached nobody.
+    // A reconnecting client would otherwise go on showing the call as it was
+    // when it dropped, so hand it the whole picture before anything else.
+    if !is_bot_connection {
+        let snapshot = voice_state_snapshot(&state, &user_id).await;
+        let _ = ws_sink
+            .send(Message::Text(snapshot.to_string().into()))
+            .await;
+    }
+
     // Spawn task to forward from mpsc channel -> ws sink
     let sink_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
@@ -389,6 +487,13 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             }
             broadcast_to_room(&state, room_id, &event).await;
         }
+        // A client asking to be made correct: opening a room, coming back from a
+        // backgrounded tab, or repairing after a reconnection. Answering the one
+        // connection that asked keeps a second device's view untouched.
+        "voice_state_request" => {
+            let snapshot = voice_state_snapshot(&state, user_id).await;
+            send_to_conn(&state, user_id, conn_id, &snapshot).await;
+        }
         "voice_join" => {
             let channel_id = msg
                 .get("channel_id")
@@ -442,6 +547,16 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 }
             }
 
+            // Mute and deafen belong to the person, not the channel, so a rejoin
+            // or a channel switch carries them in. Registering them with the
+            // join rather than in a message after it is what stops the room
+            // seeing an open mic on someone who arrived muted.
+            let joined_muted = msg.get("muted").and_then(|v| v.as_bool()).unwrap_or(false);
+            let joined_deafened = msg
+                .get("deafened")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             // A voice session belongs to one connection, and the newest join wins.
             // The user may be in this very channel from another device: that is a
             // handover, not a second membership. The room is told nothing — from
@@ -466,14 +581,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             // channel in one write-lock hold. This prevents a second voice_join from racing
             // in between the removal and the insert, which caused users to appear in two
             // channels simultaneously.
-            let (old_channels, voice_members, channel_was_empty) = {
+            let (old_channels, voice_members, voice_states, channel_was_empty) = {
                 let mut vc = state.voice_channels.write().await;
-                let mut old_channels: Vec<(String, Vec<String>, bool)> = Vec::new();
+                let mut old_channels: Vec<(String, Vec<String>, Vec<Value>, bool)> = Vec::new();
                 for (old_cid, members) in vc.iter_mut() {
                     if old_cid != channel_id {
                         if let Some(member) = members.remove(user_id) {
                             let remaining = members.keys().cloned().collect::<Vec<_>>();
-                            old_channels.push((old_cid.clone(), remaining, member.screen_sharing));
+                            old_channels.push((
+                                old_cid.clone(),
+                                remaining,
+                                voice_member_states(members),
+                                member.screen_sharing,
+                            ));
                         }
                     }
                 }
@@ -484,8 +604,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 chan_vc.insert(
                     user_id.to_string(),
                     VoiceMemberState {
-                        muted: force_muted,
-                        deafened: false,
+                        muted: force_muted || joined_muted,
+                        deafened: joined_deafened,
                         screen_sharing: false,
                         force_muted,
                         clipping: false,
@@ -494,7 +614,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
-                (old_channels, voice_members, channel_was_empty)
+                let voice_states = voice_member_states(chan_vc);
+                (old_channels, voice_members, voice_states, channel_was_empty)
             };
 
             // Record when this channel became occupied (0 -> 1 members)
@@ -520,7 +641,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             };
 
             // Teardowns and broadcasts happen after the lock is released
-            for (old_cid, remaining_members, was_screen_sharing) in old_channels {
+            for (old_cid, remaining_members, remaining_states, was_screen_sharing) in old_channels {
                 teardown_voice_listener(&state, user_id).await;
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
@@ -533,7 +654,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     "room_id": room_id,
                     "channel_id": old_cid,
                     "user_id": user_id,
-                    "voice_members": remaining_members
+                    "voice_members": remaining_members,
+                    "voice_states": remaining_states
                 });
                 broadcast_to_room(&state, room_id, &leave_event).await;
 
@@ -644,6 +766,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "channel_id": channel_id,
                 "user_id": user_id,
                 "voice_members": voice_members,
+                "voice_states": voice_states,
                 "force_muted": force_muted,
                 "occupied_since": occupied_since_ms,
                 "entrance_sound_url": entrance_sound_url
@@ -669,6 +792,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         chan_vc.remove(user_id).map(|member| {
                             (
                                 chan_vc.keys().cloned().collect::<Vec<_>>(),
+                                voice_member_states(chan_vc),
                                 member.screen_sharing,
                             )
                         })
@@ -683,7 +807,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             // Only teardown and broadcast if the user was actually in this channel.
             // If result is None the user already left (e.g. via voice_join switching
             // channels), so doing nothing avoids tearing down the new connection.
-            if let Some((voice_members, was_screen_sharing)) = result {
+            if let Some((voice_members, voice_states, was_screen_sharing)) = result {
                 teardown_voice_listener(&state, user_id).await;
                 let _ = teardown_voice_publisher(&state, user_id).await;
                 teardown_screen_subscriptions_for_viewer(&state, user_id).await;
@@ -714,6 +838,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     "channel_id": channel_id,
                     "user_id": user_id,
                     "voice_members": voice_members,
+                    "voice_states": voice_states,
                     "occupied_since": occupied_since_ms
                 });
                 broadcast_to_room(&state, room_id, &event).await;
@@ -897,7 +1022,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         return;
                     }
 
-                    let (old_channel, moved, new_members) = {
+                    let (old_channel, moved, new_members, new_states) = {
                         let mut vc = state.voice_channels.write().await;
                         let mut old_channel = String::new();
                         let mut moved_state: Option<VoiceMemberState> = None;
@@ -917,9 +1042,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                                     .or_insert_with(HashMap::new);
                                 chan.insert(target.to_string(), member);
                                 let members = chan.keys().cloned().collect::<Vec<_>>();
-                                (old_channel, true, members)
+                                let states = voice_member_states(chan);
+                                (old_channel, true, members, states)
                             }
-                            None => (old_channel, false, Vec::new()),
+                            None => (old_channel, false, Vec::new(), Vec::new()),
                         }
                     };
                     if !moved {
@@ -931,11 +1057,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     teardown_voice_listener(&state, target).await;
                     let _ = teardown_voice_publisher(&state, target).await;
 
-                    let remaining = {
+                    let (remaining, remaining_states) = {
                         let vc = state.voice_channels.read().await;
-                        vc.get(&old_channel)
-                            .map(|m| m.keys().cloned().collect::<Vec<_>>())
-                            .unwrap_or_default()
+                        match vc.get(&old_channel) {
+                            Some(m) => (
+                                m.keys().cloned().collect::<Vec<_>>(),
+                                voice_member_states(m),
+                            ),
+                            None => (Vec::new(), Vec::new()),
+                        }
                     };
                     // Emptying a channel stops its occupancy clock; leaving the
                     // stale timestamp makes the next joiner show a bogus timer.
@@ -955,6 +1085,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                             "channel_id": old_channel,
                             "user_id": target,
                             "voice_members": remaining,
+                            "voice_states": remaining_states,
                         }),
                     )
                     .await;
@@ -967,6 +1098,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                             "channel_id": target_channel,
                             "user_id": target,
                             "voice_members": new_members,
+                            "voice_states": new_states,
                         }),
                     )
                     .await;
@@ -1008,11 +1140,15 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     teardown_webcam_subscriptions_for_viewer(&state, target).await;
                     let _ = teardown_webcam_publisher(&state, target).await;
 
-                    let remaining = {
+                    let (remaining, remaining_states) = {
                         let vc = state.voice_channels.read().await;
-                        vc.get(&old_channel)
-                            .map(|m| m.keys().cloned().collect::<Vec<_>>())
-                            .unwrap_or_default()
+                        match vc.get(&old_channel) {
+                            Some(m) => (
+                                m.keys().cloned().collect::<Vec<_>>(),
+                                voice_member_states(m),
+                            ),
+                            None => (Vec::new(), Vec::new()),
+                        }
                     };
                     if remaining.is_empty() {
                         state
@@ -1030,6 +1166,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                             "channel_id": old_channel,
                             "user_id": target,
                             "voice_members": remaining,
+                            "voice_states": remaining_states,
                         }),
                     )
                     .await;
@@ -2187,7 +2324,7 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
     // Remove from voice channels and broadcast leaves
     // (room, channel, was_sharing, who is left). The map is keyed by channel, so
     // the room has to come off the member record.
-    let voice_rooms: Vec<(String, String, bool, Vec<String>)> = {
+    let voice_rooms: Vec<DepartedVoiceChannel> = {
         let mut vc = state.voice_channels.write().await;
         let mut results = Vec::new();
         for (channel_key, members) in vc.iter_mut() {
@@ -2204,7 +2341,13 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
                 } else {
                     member.room_id.clone()
                 };
-                results.push((room, channel_key.clone(), member.screen_sharing, remaining));
+                results.push(DepartedVoiceChannel {
+                    room_id: room,
+                    channel_id: channel_key.clone(),
+                    was_screen_sharing: member.screen_sharing,
+                    remaining_states: voice_member_states(members),
+                    remaining,
+                });
             }
         }
         results
@@ -2234,7 +2377,14 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 
     let mut stopped_screen_rooms = HashSet::new();
 
-    for (room_id_for_channel, channel_key, was_screen_sharing, voice_members) in voice_rooms {
+    for departed in voice_rooms {
+        let DepartedVoiceChannel {
+            room_id: room_id_for_channel,
+            channel_id: channel_key,
+            was_screen_sharing,
+            remaining: voice_members,
+            remaining_states: voice_states,
+        } = departed;
         // Clear occupied_since if channel is now empty
         let occupied_since_ms: Option<u64> = if voice_members.is_empty() {
             state
@@ -2262,6 +2412,7 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
             "channel_id": channel_key,
             "user_id": user_id,
             "voice_members": voice_members,
+            "voice_states": voice_states,
             "occupied_since": occupied_since_ms
         });
         broadcast_to_room(state, &room_id_for_channel, &event).await;

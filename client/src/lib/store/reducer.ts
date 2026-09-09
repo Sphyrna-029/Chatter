@@ -1,5 +1,73 @@
-import type { AppState, Action } from "./types";
+import type { AppState, Action, VoiceChannelMember } from "./types";
 import { initialState, THREAD_PREVIEW_LIMIT } from "./types";
+
+/**
+ * The room whose call this client is showing.
+ *
+ * The one it is actually in, when it is in one — a call keeps its panel while
+ * you read another room — and otherwise the room on screen.
+ */
+function focusVoiceRoomId(state: AppState): string | null {
+  if (state.inVoiceChannel && state.voiceRoomId) return state.voiceRoomId;
+  return state.currentRoomId;
+}
+
+/**
+ * Re-derive the flat, room-wide voice view from the per-channel map.
+ *
+ * The two used to be maintained side by side from different events, which is
+ * why the member list and the channel list could disagree about who was muted.
+ * The per-channel map is the one the server describes, so everything else is
+ * computed from it.
+ */
+function deriveRoomVoice(state: AppState): AppState {
+  const roomId = focusVoiceRoomId(state);
+  const members: string[] = [];
+  const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
+  const sharers: string[] = [];
+  if (roomId) {
+    for (const [channelId, channelMembers] of Object.entries(state.voiceChannelMembers)) {
+      if (state.voiceChannelRooms[channelId] !== roomId) continue;
+      for (const member of channelMembers) {
+        if (!members.includes(member.userId)) members.push(member.userId);
+        states[member.userId] = {
+          muted: member.muted,
+          screen_sharing: member.screen_sharing,
+        };
+        if (member.screen_sharing && !sharers.includes(member.userId)) {
+          sharers.push(member.userId);
+        }
+      }
+    }
+  }
+  return {
+    ...state,
+    voiceMembers: members,
+    voiceMemberStates: states,
+    activeScreenSharers: sharers,
+  };
+}
+
+/** Voice head-counts per room, folded back into the room list so a DM row and
+ *  a room card show the call without waiting for the next poll. */
+function withRoomVoiceCounts(state: AppState): AppState {
+  const counts: Record<string, number> = {};
+  for (const [channelId, members] of Object.entries(state.voiceChannelMembers)) {
+    const roomId = state.voiceChannelRooms[channelId];
+    if (!roomId) continue;
+    const seen = counts[roomId] ?? 0;
+    counts[roomId] = seen + members.length;
+  }
+  let changed = false;
+  const roomInfoMap = { ...state.roomInfoMap };
+  for (const [roomId, info] of Object.entries(roomInfoMap)) {
+    const count = counts[roomId] ?? 0;
+    if ((info.dm_voice_count ?? 0) === count) continue;
+    roomInfoMap[roomId] = { ...info, dm_voice_count: count };
+    changed = true;
+  }
+  return changed ? { ...state, roomInfoMap } : state;
+}
 
 export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -25,7 +93,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SELECT_ROOM": {
       // When in a voice channel, preserve voice/screen share state across room switches
       const preserveVoice = state.inVoiceChannel;
-      return {
+      // `voiceChannelMembers` is deliberately not cleared: it describes every
+      // room, not the one being left, and the flat view below is derived from
+      // it. Clearing it used to blank the new room's voice channels until
+      // something happened to refetch them — which, on a room switch, nothing
+      // did.
+      return deriveRoomVoice({
         ...state,
         currentRoomId: action.payload,
         currentChannelId: null,
@@ -35,11 +108,6 @@ export function reducer(state: AppState, action: Action): AppState {
         hasMoreMessages: false,
         loadingOlderMessages: false,
         roomMembers: [],
-        voiceMembers: preserveVoice ? state.voiceMembers : [],
-        voiceMemberStates: preserveVoice ? state.voiceMemberStates : {},
-        voiceChannelMembers: preserveVoice ? state.voiceChannelMembers : {},
-        voiceChannelOccupiedSince: preserveVoice ? state.voiceChannelOccupiedSince : {},
-        activeScreenSharers: preserveVoice ? state.activeScreenSharers : [],
         screenViewerOpen: preserveVoice ? state.screenViewerOpen : false,
         selectedScreenSharer: preserveVoice ? state.selectedScreenSharer : null,
         selectedWebcamStreamer: preserveVoice ? state.selectedWebcamStreamer : null,
@@ -58,7 +126,7 @@ export function reducer(state: AppState, action: Action): AppState {
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
-      };
+      });
     }
     case "SET_MESSAGES":
       return {
@@ -163,7 +231,10 @@ export function reducer(state: AppState, action: Action): AppState {
         userPresence: { ...state.userPresence, ...action.payload },
       };
     case "SET_VOICE_STATE":
-      return { ...state, ...action.payload };
+      // Joining or leaving a call moves which room the member list describes,
+      // so the flat view is re-derived rather than left until the next event
+      // happens to correct it.
+      return deriveRoomVoice({ ...state, ...action.payload });
     case "SET_VOICE_MEMBERS":
       return {
         ...state,
@@ -661,18 +732,64 @@ export function reducer(state: AppState, action: Action): AppState {
         currentChannelId:
           state.currentChannelId === action.payload ? null : state.currentChannelId,
       };
-    case "SET_VOICE_CHANNEL_MEMBERS":
-      return { ...state, voiceChannelMembers: action.payload };
-    case "SET_VOICE_CHANNEL":
-      return {
-        ...state,
-        voiceChannelMembers: {
-          ...state.voiceChannelMembers,
-          [action.payload.channelId]: action.payload.members,
-        },
-      };
-    case "SET_VOICE_CHANNEL_OCCUPIED_SINCE":
-      return { ...state, voiceChannelOccupiedSince: action.payload };
+    case "SET_VOICE_CHANNEL": {
+      const { channelId, roomId, members } = action.payload;
+      // An emptied channel is removed rather than kept as an empty list, so
+      // "is anyone in there" is one question with one answer.
+      const voiceChannelMembers = { ...state.voiceChannelMembers };
+      const voiceChannelRooms = { ...state.voiceChannelRooms };
+      const voiceChannelOccupiedSince = { ...state.voiceChannelOccupiedSince };
+      if (members.length === 0) {
+        delete voiceChannelMembers[channelId];
+        delete voiceChannelRooms[channelId];
+        delete voiceChannelOccupiedSince[channelId];
+      } else {
+        voiceChannelMembers[channelId] = members;
+        if (roomId) voiceChannelRooms[channelId] = roomId;
+      }
+      return withRoomVoiceCounts(
+        deriveRoomVoice({
+          ...state,
+          voiceChannelMembers,
+          voiceChannelRooms,
+          voiceChannelOccupiedSince,
+        }),
+      );
+    }
+    case "SYNC_VOICE_STATE": {
+      const { roomId: scope, channels } = action.payload;
+      // A snapshot is authoritative for everything it covers, so channels it
+      // does not name within that scope are empty — not merely unchanged.
+      const voiceChannelMembers: Record<string, VoiceChannelMember[]> = {};
+      const voiceChannelRooms: Record<string, string> = {};
+      const voiceChannelOccupiedSince: Record<string, number> = {};
+      if (scope) {
+        for (const [channelId, members] of Object.entries(state.voiceChannelMembers)) {
+          const room = state.voiceChannelRooms[channelId];
+          if (room === scope) continue;
+          voiceChannelMembers[channelId] = members;
+          if (room) voiceChannelRooms[channelId] = room;
+          const since = state.voiceChannelOccupiedSince[channelId];
+          if (since !== undefined) voiceChannelOccupiedSince[channelId] = since;
+        }
+      }
+      for (const [channelId, channel] of Object.entries(channels)) {
+        if (channel.members.length === 0) continue;
+        voiceChannelMembers[channelId] = channel.members;
+        voiceChannelRooms[channelId] = channel.roomId;
+        if (channel.occupiedSince != null) {
+          voiceChannelOccupiedSince[channelId] = channel.occupiedSince;
+        }
+      }
+      return withRoomVoiceCounts(
+        deriveRoomVoice({
+          ...state,
+          voiceChannelMembers,
+          voiceChannelRooms,
+          voiceChannelOccupiedSince,
+        }),
+      );
+    }
     case "SET_WATCH_VIEWERS":
       return {
         ...state,

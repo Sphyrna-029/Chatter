@@ -215,12 +215,17 @@ export function useWebRTCScreen() {
       wsRef.current.send(JSON.stringify(screenStopMsg));
     }
     // Update per-channel voice members locally
-    if (state.voiceChannelId && state.userId) {
-      const cur = { ...state.voiceChannelMembers };
-      cur[state.voiceChannelId] = (cur[state.voiceChannelId] || []).map((m: any) =>
-        m.userId === state.userId ? { ...m, screen_sharing: false } : m
-      );
-      dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
+    if (state.voiceChannelId && state.userId && state.currentRoomId) {
+      dispatch({
+        type: "SET_VOICE_CHANNEL",
+        payload: {
+          channelId: state.voiceChannelId,
+          roomId: state.currentRoomId,
+          members: (state.voiceChannelMembers[state.voiceChannelId] || []).map((m) =>
+            m.userId === state.userId ? { ...m, screen_sharing: false } : m
+          ),
+        },
+      });
     }
   }, [state.currentRoomId, state.userId, state.voiceChannelId, state.voiceChannelMembers, dispatch, wsRef]);
 
@@ -472,6 +477,22 @@ export function useWebRTCScreen() {
       window.dispatchEvent(new CustomEvent("screen-stream-update"));
       dispatch({ type: "SET_VOICE_STATE", payload: { isScreenSharing: true } });
       dispatch({ type: "SCREEN_SHARE_STARTED", payload: state.userId! });
+      // The channel map is what the member tiles and the sidebar are derived
+      // from, so the sharer has to appear in it now rather than when the
+      // server's echo arrives — otherwise any voice event in between
+      // re-derives the old answer and the badge flickers off.
+      if (state.voiceChannelId && state.currentRoomId) {
+        dispatch({
+          type: "SET_VOICE_CHANNEL",
+          payload: {
+            channelId: state.voiceChannelId,
+            roomId: state.currentRoomId,
+            members: (state.voiceChannelMembers[state.voiceChannelId] || []).map((m) =>
+              m.userId === state.userId ? { ...m, screen_sharing: true } : m
+            ),
+          },
+        });
+      }
       dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: state.userId! } });
       if (canSignal(wsRef)) {
         const screenStartMsg: any = { type: "screen_share_start", room_id: state.currentRoomId };

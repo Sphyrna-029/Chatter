@@ -1,5 +1,5 @@
 import type { Dispatch, MutableRefObject } from "react";
-import type { Action, AppState } from "./types";
+import type { Action, AppState, VoiceChannelMember } from "./types";
 import { apiSync, apiGetPresence } from "../api";
 import { displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
@@ -21,6 +21,112 @@ import {
 // Warm the derived leave sound now, so the first leave is not silent while
 // it decodes. See lib/sounds.ts.
 prewarmSounds();
+
+/** The member records the server sends with a voice event or snapshot. */
+function voiceMemberRecords(states: unknown): VoiceChannelMember[] {
+  if (!Array.isArray(states)) return [];
+  return states.map((m: any) => ({
+    userId: m.user_id ?? m.userId,
+    muted: !!m.muted,
+    deafened: !!m.deafened,
+    screen_sharing: !!m.screen_sharing,
+    force_muted: !!m.force_muted,
+    clipping: !!m.clipping,
+  }));
+}
+
+/**
+ * The channel's membership after a join or leave.
+ *
+ * `voice_states` carries every remaining member's flags, so nothing has to be
+ * inferred. A server that predates it names only the ids, and then the flags of
+ * anyone this client has not seen are genuinely unknown — carried over where
+ * they are known, and assumed off only where they are not.
+ */
+function voiceMembersFromEvent(
+  msg: { voice_states?: unknown; voice_members?: unknown },
+  existing: VoiceChannelMember[],
+): VoiceChannelMember[] | null {
+  if (Array.isArray(msg.voice_states)) return voiceMemberRecords(msg.voice_states);
+  if (!Array.isArray(msg.voice_members)) return null;
+  return (msg.voice_members as string[]).map(
+    (uid) =>
+      existing.find((m) => m.userId === uid) ?? {
+        userId: uid,
+        muted: false,
+        deafened: false,
+        screen_sharing: false,
+      },
+  );
+}
+
+/** A `voice_state_sync` payload in the store's shape. */
+function voiceChannelsFromSync(
+  channels: Record<string, any> | undefined,
+): Record<
+  string,
+  { roomId: string; occupiedSince: number | null; members: VoiceChannelMember[] }
+> {
+  const out: Record<
+    string,
+    { roomId: string; occupiedSince: number | null; members: VoiceChannelMember[] }
+  > = {};
+  for (const [channelId, channel] of Object.entries(channels || {})) {
+    out[channelId] = {
+      roomId: channel.room_id,
+      occupiedSince: channel.occupied_since ?? null,
+      members: voiceMemberRecords(channel.members),
+    };
+  }
+  return out;
+}
+
+/**
+ * Apply a join or leave to the channel map.
+ *
+ * The server names every remaining member and their state, so this replaces the
+ * channel outright rather than editing what the client happened to hold — which
+ * is what makes a client that missed the previous event correct again.
+ */
+function applyVoiceChannelUpdate(
+  msg: any,
+  stateRef: MutableRefObject<AppState>,
+  dispatch: Dispatch<Action>,
+) {
+  if (!msg.channel_id || !msg.room_id) return;
+  const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
+  const members = voiceMembersFromEvent(msg, existing);
+  if (!members) return;
+  dispatch({
+    type: "SET_VOICE_CHANNEL",
+    payload: { channelId: msg.channel_id, roomId: msg.room_id, members },
+  });
+  if (members.length > 0 && msg.occupied_since) {
+    dispatch({
+      type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE",
+      payload: { channelId: msg.channel_id, since: msg.occupied_since as number },
+    });
+  }
+}
+
+/** Change one member's flags in whichever channel they are in. */
+function patchVoiceMember(
+  msg: any,
+  stateRef: MutableRefObject<AppState>,
+  dispatch: Dispatch<Action>,
+  patch: (member: VoiceChannelMember) => Partial<VoiceChannelMember>,
+) {
+  if (!msg.channel_id) return;
+  const existing = stateRef.current.voiceChannelMembers[msg.channel_id];
+  if (!existing?.some((m) => m.userId === msg.user_id)) return;
+  const members = existing.map((m) =>
+    m.userId === msg.user_id ? { ...m, ...patch(m) } : m,
+  );
+  dispatch({
+    type: "SET_VOICE_CHANNEL",
+    payload: { channelId: msg.channel_id, roomId: msg.room_id, members },
+  });
+}
 
 /**
  * Raise a notification for a thread reply, when it is addressed to this user.
@@ -440,43 +546,22 @@ export function createWsMessageHandler(
           },
         });
       }
+    } else if (msg.type === "voice_state_sync") {
+      // The whole picture, across every room this user is in. Voice events
+      // describe changes, so one missed while the socket was down leaves a
+      // client wrong with no way to notice; this is what makes it right again.
+      dispatch({
+        type: "SYNC_VOICE_STATE",
+        payload: { roomId: null, channels: voiceChannelsFromSync(msg.channels) },
+      });
     } else if (msg.type === "voice_user_joined") {
-      // Before the room filter: a DM's call has to reach its row in the list
-      // even when that conversation is not the one on screen. This is the only
-      // notice the other person gets that a call has started.
-      if (msg.room_id && Array.isArray(msg.voice_members)) {
-        dispatch({ type: "SET_DM_VOICE_COUNT", payload: { roomId: msg.room_id, count: msg.voice_members.length } });
-      }
+      // Deliberately not filtered by the room on screen: the channel map covers
+      // every room, so a call starting in one you are not looking at still has
+      // to reach the sidebar, the DM row and — when it is your own call in
+      // another room — the voice panel.
+      applyVoiceChannelUpdate(msg, stateRef, dispatch);
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
-        dispatch({ type: "VOICE_USER_JOINED", payload: msg.user_id });
-        // Use the server's authoritative voice_members list and dispatch a single-channel
-        // update (SET_VOICE_CHANNEL) so rapid join+leave events for different channels
-        // cannot clobber each other via a stale stateRef snapshot.
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom && Array.isArray(msg.voice_members)) {
-          const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
-          const members = (msg.voice_members as string[]).map((uid: string) => {
-            const ex = existing.find((m) => m.userId === uid);
-            // A server-muted user rejoining must not look unmuted to everyone
-            // else, so the joiner's own flag rides along on the event.
-            if (uid === msg.user_id) {
-              const forceMuted: boolean = msg.force_muted ?? ex?.force_muted ?? false;
-              return {
-                userId: uid,
-                deafened: ex?.deafened ?? false,
-                screen_sharing: ex?.screen_sharing ?? false,
-                muted: forceMuted || (ex?.muted ?? false),
-                force_muted: forceMuted,
-              };
-            }
-            return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
-          });
-          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
-          if (msg.occupied_since) {
-            dispatch({ type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE", payload: { channelId: msg.channel_id, since: msg.occupied_since as number } });
-          }
-        }
         const inSameChannel = stateRef.current.inVoiceChannel &&
           (msg.channel_id
             ? msg.channel_id === stateRef.current.voiceChannelId
@@ -502,23 +587,9 @@ export function createWsMessageHandler(
         }
       }
     } else if (msg.type === "voice_user_left") {
-      if (msg.room_id && Array.isArray(msg.voice_members)) {
-        dispatch({ type: "SET_DM_VOICE_COUNT", payload: { roomId: msg.room_id, count: msg.voice_members.length } });
-      }
+      applyVoiceChannelUpdate(msg, stateRef, dispatch);
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
-        dispatch({ type: "VOICE_USER_LEFT", payload: msg.user_id });
-        // Same pattern: use server's authoritative remaining list and a single-channel dispatch.
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom && Array.isArray(msg.voice_members)) {
-          const existing = stateRef.current.voiceChannelMembers[msg.channel_id] || [];
-          const members = (msg.voice_members as string[]).map((uid: string) => {
-            const ex = existing.find((m) => m.userId === uid);
-            return ex ?? { userId: uid, muted: false, deafened: false, screen_sharing: false };
-          });
-          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
-          dispatch({ type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE", payload: { channelId: msg.channel_id, since: msg.occupied_since as number | null ?? null } });
-        }
         const inSameChannelLeave = stateRef.current.inVoiceChannel &&
           (msg.channel_id
             ? msg.channel_id === stateRef.current.voiceChannelId
@@ -530,43 +601,17 @@ export function createWsMessageHandler(
     } else if (msg.type === "voice_user_clipping") {
       // Someone armed or disarmed a clip buffer on a screen share in this
       // channel. Surfaced on their voice tile so it is never silent.
-      if (msg.channel_id) {
-        const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
-          m.userId === msg.user_id ? { ...m, clipping: !!msg.clipping } : m
-        );
-        dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
-      }
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ clipping: !!msg.clipping }));
     } else if (msg.type === "voice_user_muted") {
-      const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
-      if (isVoiceRoom) {
-        dispatch({ type: "VOICE_USER_MUTED", payload: { userId: msg.user_id, muted: msg.muted } });
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
-            m.userId === msg.user_id
-              ? {
-                  ...m,
-                  muted: msg.muted as boolean,
-                  // Absent on a self-mute; only moderation carries the flag.
-                  force_muted: msg.force_muted ?? m.force_muted ?? false,
-                }
-              : m
-          );
-          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
-        }
-      }
+      patchVoiceMember(msg, stateRef, dispatch, (member) => ({
+        muted: msg.muted as boolean,
+        // Absent on a self-mute; only moderation carries the flag.
+        force_muted: msg.force_muted ?? member.force_muted ?? false,
+      }));
     } else if (msg.type === "voice_user_deafened") {
-      const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
-      if (isVoiceRoom) {
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const members = (stateRef.current.voiceChannelMembers[msg.channel_id] || []).map((m) =>
-            m.userId === msg.user_id ? { ...m, deafened: msg.deafened as boolean } : m
-          );
-          dispatch({ type: "SET_VOICE_CHANNEL", payload: { channelId: msg.channel_id, members } });
-        }
-      }
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ deafened: msg.deafened as boolean }));
     } else if (msg.type === "screen_share_started") {
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ screen_sharing: true }));
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
@@ -574,29 +619,12 @@ export function createWsMessageHandler(
         if (msg.user_id !== stateRef.current.userId && stateRef.current.inVoiceChannel) {
           dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: msg.user_id } });
         }
-        // Only update per-channel voice members if the event is for the currently viewed room
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const cur = { ...stateRef.current.voiceChannelMembers };
-          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
-            m.userId === msg.user_id ? { ...m, screen_sharing: true } : m
-          );
-          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
-        }
       }
     } else if (msg.type === "screen_share_stopped") {
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ screen_sharing: false }));
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "SCREEN_SHARE_STOPPED", payload: msg.user_id });
-        // Only update per-channel voice members if the event is for the currently viewed room
-        const isCurrentRoom = msg.room_id === stateRef.current.currentRoomId;
-        if (msg.channel_id && isCurrentRoom) {
-          const cur = { ...stateRef.current.voiceChannelMembers };
-          cur[msg.channel_id] = (cur[msg.channel_id] || []).map((m: any) =>
-            m.userId === msg.user_id ? { ...m, screen_sharing: false } : m
-          );
-          dispatch({ type: "SET_VOICE_CHANNEL_MEMBERS", payload: cur });
-        }
       }
     } else if (msg.type === "screen_viewers_update") {
       dispatch({
