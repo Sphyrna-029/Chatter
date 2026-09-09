@@ -6,6 +6,7 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { decideResumeAction } from "@/lib/wsResume";
 import { useVersionCheck } from "@/hooks/useVersionCheck";
 import { displayUserId } from "@/lib/utils";
 import { settingsKey, type NotificationLevel, type NotificationSettings } from "@/lib/notifications";
@@ -311,6 +312,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /** False until the socket has connected once, so the first open is not
    *  mistaken for a reconnection. */
   const hasConnectedRef = useRef(false);
+  // When the page was last backgrounded, so a resume can tell a glance away
+  // from a phone that was put down.
+  const hiddenAtRef = useRef<number | null>(null);
 
   /**
    * Replay whatever arrived while the socket was down.
@@ -454,6 +458,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const total = Object.values(state.roomMentions).reduce((a, b) => a + b, 0);
     document.title = total > 0 ? `(${total}) Chatter` : "Chatter";
   }, [state.roomMentions]);
+
+  // A backgrounded phone freezes the page: timers stop, and the socket the
+  // server timed out is not necessarily reported closed on this side either.
+  // Reconnection is driven entirely by onclose, so without this the page comes
+  // back showing whoever was in a call when it was put down.
+  useEffect(() => {
+    if (!state.accessToken) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAtRef.current = Date.now();
+        return;
+      }
+      const hiddenAt = hiddenAtRef.current;
+      hiddenAtRef.current = null;
+
+      const action = decideResumeAction({
+        socketOpen: wsRef.current?.readyState === WebSocket.OPEN,
+        hiddenForMs: hiddenAt === null ? 0 : Date.now() - hiddenAt,
+      });
+      if (action === "nothing") return;
+      if (action === "resync") {
+        void loadVoiceMembersRef.current();
+        return;
+      }
+      // Drop whatever is left of the old socket without letting its onclose
+      // schedule a second connection on top of this one.
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        try { wsRef.current.close(); } catch { /* already gone */ }
+        wsRef.current = null;
+      }
+      void connectWebSocket();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [state.accessToken, connectWebSocket]);
 
   // Connect WS when logged in
   useEffect(() => {
