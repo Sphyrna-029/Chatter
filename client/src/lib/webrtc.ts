@@ -66,6 +66,23 @@ export function canSignal(wsRef: React.MutableRefObject<WebSocket | null>) {
 // with exactly this many tracks.
 export const VOICE_SLOT_COUNT = 12;
 
+// ─── Voice packetisation ────────────────────────────────────────────────────
+// How much audio a publisher puts in one packet, in milliseconds.
+//
+// A voice stream's cost on the wire is mostly headers, not Opus: at the 32 kbps
+// default a 20 ms packet carries 80 bytes of payload under 50 bytes of
+// IP/UDP/RTP/SRTP. Doubling the frame takes about a fifth off the bandwidth and
+// halves the packet rate — and the packet rate is what the SFU spends its CPU
+// on, once per listener, so this is the cheapest capacity there is. The price
+// is 20 ms of latency against a mouth-to-ear budget of roughly 150.
+//
+// Keep in sync with VOICE_PTIME_MS in src/backend/constants.rs, which derives
+// the SFU's frame size from it.
+export const VOICE_PTIME_MS = 40;
+// The longest frame we will accept. Opus supports up to 120 ms; anything that
+// long is a client deciding latency matters less than we do.
+export const VOICE_MAXPTIME_MS = 120;
+
 // ─── Voice channel bitrate ──────────────────────────────────────────────────
 // Per-channel Opus bitrate, configured by room owners/moderators and applied by
 // every publisher in that channel. Keep in sync with VOICE_BITRATE_* in
@@ -99,12 +116,37 @@ export function mungeVoiceAudioSdp(sdp: string, bitrateBps: number): string {
   // so a mostly-listening call costs the same as one where everybody talks.
   params.push("usedtx=1");
   const line = `a=fmtp:${pt} ${params.join(";")}`;
-  if (existing) return sdp.replace(existingFmtp, line);
-  // No existing fmtp line — insert one after the rtpmap line
-  return sdp.replace(
-    new RegExp(`(a=rtpmap:${pt} opus\\/48000[^\r\n]*\r?\n)`),
-    `$1${line}\r\n`,
-  );
+  const withFmtp = existing
+    ? sdp.replace(existingFmtp, line)
+    : // No existing fmtp line — insert one after the rtpmap line
+      sdp.replace(
+        new RegExp(`(a=rtpmap:${pt} opus\\/48000[^\r\n]*\r?\n)`),
+        `$1${line}\r\n`,
+      );
+  return withVoicePtime(withFmtp, line);
+}
+
+/**
+ * Ask the publisher's encoder for longer frames.
+ *
+ * `ptime` is a media-level attribute rather than an fmtp parameter, so it
+ * cannot ride along with the bitrate above. Like the bitrate it belongs in the
+ * SDP the encoder *receives* — this is applied to the SFU's answer, and the
+ * browser reads it as "send me packets this long", clamping to the frame
+ * lengths Opus actually supports.
+ *
+ * The publish answer describes a single audio m-section, so the existing lines
+ * can be replaced wherever they appear.
+ */
+function withVoicePtime(sdp: string, afterLine: string): string {
+  const stripped = sdp.replace(/\r?\na=(?:max)?ptime:\d+/g, "");
+  const ptimeLines = `\r\na=ptime:${VOICE_PTIME_MS}\r\na=maxptime:${VOICE_MAXPTIME_MS}`;
+  // Anchored to the fmtp line just written, so the attributes land inside the
+  // audio section rather than wherever the first match happens to be.
+  const anchor = stripped.indexOf(afterLine);
+  if (anchor === -1) return stripped;
+  const insertAt = anchor + afterLine.length;
+  return stripped.slice(0, insertAt) + ptimeLines + stripped.slice(insertAt);
 }
 
 // Cap the publisher's outgoing audio bitrate. Unlike SDP munging this takes

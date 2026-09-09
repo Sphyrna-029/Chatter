@@ -192,17 +192,39 @@ fn spawn_slot_forwarder(
                         continue;
                     };
 
-                    let mut out = packet.clone();
-                    out.header.sequence_number = sequence_number;
-                    out.header.timestamp = timestamp;
-                    out.header.marker = discontinuity;
+                    // Built rather than cloned and then emptied. Every
+                    // publisher packet carries the audio-level extension, so
+                    // `packet.clone()` heap-allocated an extension vector once
+                    // per packet *per listener* purely for the next few lines
+                    // to throw away — and this is the hottest loop the server
+                    // has. `payload` is `Bytes`, so carrying it over is a
+                    // refcount bump rather than a copy.
+                    //
                     // Extension ids are negotiated per connection, so the
                     // publisher's numbering means nothing on this leg. Speaking
                     // state reaches clients over the websocket instead.
-                    out.header.extension = false;
-                    out.header.extension_profile = 0;
-                    out.header.extensions.clear();
-                    out.header.extensions_padding = 0;
+                    let out = rtp::packet::Packet {
+                        header: rtp::header::Header {
+                            version: packet.header.version,
+                            padding: packet.header.padding,
+                            extension: false,
+                            marker: discontinuity,
+                            payload_type: packet.header.payload_type,
+                            sequence_number,
+                            timestamp,
+                            // Both are overwritten per binding inside
+                            // `write_rtp`; carried anyway so the packet is
+                            // coherent on its own.
+                            ssrc: packet.header.ssrc,
+                            // Empty in practice — nothing upstream mixes — so
+                            // this clone does not allocate either.
+                            csrc: packet.header.csrc.clone(),
+                            extension_profile: 0,
+                            extensions: Vec::new(),
+                            extensions_padding: 0,
+                        },
+                        payload: packet.payload.clone(),
+                    };
 
                     match slot.track.write_rtp(&out).await {
                         Ok(bytes) => METRICS.record_out(MediaKind::Voice, bytes),

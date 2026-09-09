@@ -5,6 +5,8 @@ import {
   VOICE_BITRATE_MIN_BPS,
   VOICE_BITRATE_MAX_BPS,
   VOICE_BITRATE_DEFAULT_BPS,
+  VOICE_PTIME_MS,
+  VOICE_MAXPTIME_MS,
 } from "@/lib/webrtc";
 
 const SDP_WITH_FMTP = [
@@ -74,5 +76,44 @@ describe("mungeVoiceAudioSdp", () => {
   it("leaves SDP without an opus track untouched", () => {
     const sdp = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n";
     expect(mungeVoiceAudioSdp(sdp, 64_000)).toBe(sdp);
+  });
+});
+
+describe("voice packetisation", () => {
+  it("asks the publisher for the longer frame", () => {
+    // The cheapest capacity there is: half the packets for 20ms of latency.
+    const out = mungeVoiceAudioSdp(SDP_WITH_FMTP, VOICE_BITRATE_DEFAULT_BPS);
+    expect(out).toContain(`a=ptime:${VOICE_PTIME_MS}`);
+    expect(out).toContain(`a=maxptime:${VOICE_MAXPTIME_MS}`);
+  });
+
+  it("replaces the answer's own ptime rather than adding a second one", () => {
+    const sdp = SDP_WITH_FMTP.replace(
+      "a=fmtp:111 minptime=10;useinbandfec=1",
+      "a=fmtp:111 minptime=10;useinbandfec=1\r\na=ptime:20\r\na=maxptime:60",
+    );
+    const out = mungeVoiceAudioSdp(sdp, VOICE_BITRATE_DEFAULT_BPS);
+    expect(out).not.toContain("a=ptime:20");
+    expect(out).not.toContain("a=maxptime:60");
+    expect(out.match(/a=ptime:/g)).toHaveLength(1);
+    expect(out.match(/a=maxptime:/g)).toHaveLength(1);
+  });
+
+  it("puts them inside the audio section, after the fmtp line", () => {
+    // A media-level attribute landing above the m= line applies to the session
+    // and is ignored; one landing in another section applies to the wrong media.
+    const out = mungeVoiceAudioSdp(SDP_WITH_FMTP, VOICE_BITRATE_DEFAULT_BPS);
+    const lines = out.split("\r\n");
+    expect(lines.indexOf(`a=ptime:${VOICE_PTIME_MS}`)).toBeGreaterThan(
+      lines.findIndex((l) => l.startsWith("m=audio")),
+    );
+    expect(lines.indexOf(`a=ptime:${VOICE_PTIME_MS}`)).toBe(
+      lines.findIndex((l) => l.startsWith("a=fmtp:111")) + 1,
+    );
+  });
+
+  it("leaves an SDP with no opus alone", () => {
+    const noOpus = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=rtpmap:96 VP8/90000\r\n";
+    expect(mungeVoiceAudioSdp(noOpus, VOICE_BITRATE_DEFAULT_BPS)).toBe(noOpus);
   });
 });
