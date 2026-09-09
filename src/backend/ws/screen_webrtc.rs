@@ -69,18 +69,27 @@ pub(crate) async fn user_is_sharing_screen(
     })
 }
 
+/// Set a member's screen-sharing flag wherever they are in voice, returning the
+/// channel it was changed in so callers can say which one they mean.
+///
+/// `voice_channels` is keyed by channel id, so the room id this used to be
+/// given only ever matched a channel whose id happened to equal the room's —
+/// everywhere else the flag was left set, and the sharer went on showing as
+/// sharing after their connection had gone. Searching for the member makes it
+/// independent of how the channel is identified.
 pub(crate) async fn set_user_screen_sharing(
     state: &AppState,
-    room_id: &str,
     user_id: &str,
     sharing: bool,
-) {
+) -> Option<String> {
     let mut vc = state.voice_channels.write().await;
-    if let Some(room_vc) = vc.get_mut(room_id) {
-        if let Some(member) = room_vc.get_mut(user_id) {
+    for (channel_id, members) in vc.iter_mut() {
+        if let Some(member) = members.get_mut(user_id) {
             member.screen_sharing = sharing;
+            return Some(channel_id.clone());
         }
     }
+    None
 }
 
 pub(crate) async fn teardown_screen_subscriber_pair(
@@ -315,10 +324,15 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
                         }
                     }
                     if teardown_screen_publisher(&state, &user_id).await.is_some() {
-                        set_user_screen_sharing(&state, &room_id, &user_id, false).await;
+                        let channel_id = set_user_screen_sharing(&state, &user_id, false).await;
+                        // Carrying the channel matters: clients only update
+                        // their per-channel member list when told which channel,
+                        // so without it the icon stayed lit on a share that had
+                        // already stopped.
                         let event = json!({
                             "type": "screen_share_stopped",
                             "room_id": room_id,
+                            "channel_id": channel_id,
                             "user_id": user_id
                         });
                         broadcast_to_room(&state, &room_id, &event).await;
@@ -456,6 +470,12 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
             "sdp": local_desc.sdp
         });
         send_to_user(&state, user_id, &response).await;
+        // State the viewer list at the start of a share, even though it is
+        // empty. The sharer's client keeps the last list it was sent, and
+        // otherwise nothing corrects it: after a restart the server has
+        // forgotten every subscription, so a viewer from the previous share
+        // would go on being displayed until somebody happened to subscribe.
+        send_screen_viewers_update(&state, user_id).await;
     } else {
         let _ = teardown_screen_publisher(&state, user_id).await;
         let error = json!({
@@ -986,11 +1006,75 @@ pub(crate) async fn handle_screen_webrtc_subscribe_candidate(
 
 #[cfg(test)]
 mod tests {
-    use super::{subscriber_key, teardown_screen_subscriber_pair};
+    use super::{send_screen_viewers_update, subscriber_key, teardown_screen_subscriber_pair};
     use crate::backend::{
         app::build_state, state::ScreenSubscriberState, webrtc::create_peer_connection,
     };
     use tokio::time::{sleep, Duration};
+
+    /// A sharer's client keeps whatever viewer list it was last sent, so the
+    /// server has to state an empty one rather than stay quiet. A restart
+    /// forgets every subscription, and without this the sharer would go on
+    /// displaying viewers from before it — people who are no longer in the call.
+    /// The flag lives in a channel-keyed map, and a voice channel's id is not
+    /// its room's. Passing a room id therefore cleared nothing, and a sharer
+    /// whose connection dropped went on being shown as sharing.
+    #[tokio::test]
+    async fn screen_sharing_clears_in_the_channel_the_user_is_actually_in() {
+        let state = build_state().await;
+        state.voice_channels.write().await.insert(
+            "!voice-channel:localhost".to_string(),
+            std::collections::HashMap::from([(
+                "@sharer:localhost".to_string(),
+                crate::backend::state::VoiceMemberState {
+                    muted: false,
+                    deafened: false,
+                    screen_sharing: true,
+                    force_muted: false,
+                    clipping: false,
+                    room_id: "!room:localhost".to_string(),
+                    conn_id: 1,
+                },
+            )]),
+        );
+
+        let channel = super::set_user_screen_sharing(&state, "@sharer:localhost", false).await;
+
+        assert_eq!(channel.as_deref(), Some("!voice-channel:localhost"));
+        let vc = state.voice_channels.read().await;
+        assert!(
+            !vc["!voice-channel:localhost"]["@sharer:localhost"].screen_sharing,
+            "the flag must clear even though the channel id is not the room id"
+        );
+    }
+
+    #[tokio::test]
+    async fn viewers_update_reports_an_empty_list_when_nobody_is_watching() {
+        let state = build_state().await;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        state
+            .active_websockets
+            .write()
+            .await
+            .entry("@sharer:localhost".to_string())
+            .or_default()
+            .insert(1, tx);
+
+        send_screen_viewers_update(&state, "@sharer:localhost").await;
+
+        let sent = rx.try_recv().expect("the sharer should be told");
+        let axum::extract::ws::Message::Text(text) = sent else {
+            panic!("expected a text frame");
+        };
+        let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(msg["type"], "screen_viewers_update");
+        assert_eq!(msg["sharer_user_id"], "@sharer:localhost");
+        assert_eq!(
+            msg["viewers"].as_array().map(|v| v.len()),
+            Some(0),
+            "an empty list is what clears a stale viewer, so it must be sent"
+        );
+    }
 
     #[test]
     fn subscriber_key_is_stable() {

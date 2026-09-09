@@ -196,6 +196,7 @@ export type Action =
   | { type: "SET_ACTIVE_SCREEN_SHARERS"; payload: string[] }
   | { type: "SET_SCREEN_VIEWER"; payload: { open?: boolean; sharer?: string | null; webcamStreamer?: string | null } }
   | { type: "SET_SCREEN_VIEWERS"; payload: { sharerId: string; viewers: string[] } }
+  | { type: "CLEAR_SCREEN_VIEWERS" }
   | { type: "WEBCAM_SHARE_STARTED"; payload: string }
   | { type: "WEBCAM_SHARE_STOPPED"; payload: string }
   | { type: "SET_ACTIVE_WEBCAM_STREAMERS"; payload: string[] }

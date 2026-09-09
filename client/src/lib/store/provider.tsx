@@ -298,6 +298,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const loadRoomsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Defined further down, but needed by the reconnect handler above it.
   const loadUnreadsRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const loadVoiceMembersRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const loadActiveThreadsRef = useRef<(roomId: string) => Promise<void>>(() =>
     Promise.resolve(),
   );
@@ -326,6 +327,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const recoverMissedMessages = useCallback(async () => {
     // Server-computed, so these are right even where the timeline is not.
     void loadUnreadsRef.current();
+    // Who is in a call, who is muted, who is sharing — all of it is assembled
+    // from events, and every event sent while the socket was down reached
+    // nobody. Nothing else refetches it, so a single missed join left the call
+    // looking wrong until the room was reselected. Ask the server outright.
+    void loadVoiceMembersRef.current();
 
     const { currentRoomId, currentChannelId, messages } = stateRef.current;
     if (!currentRoomId) return;
@@ -418,7 +424,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // Live events only exist while the socket does. Anything sent while it
       // was down reached nobody, so the first connection is a load and every
       // one after it is a repair.
-      if (hasConnectedRef.current) void recoverMissedMessages();
+      if (hasConnectedRef.current) {
+        void recoverMissedMessages();
+        // Viewer lists describe live subscriptions the server keeps only in
+        // memory. Reconnecting may mean reconnecting to a restarted server
+        // that has none, so drop ours and wait to be told again rather than
+        // going on showing people who were watching a share that is over.
+        dispatch({ type: "CLEAR_SCREEN_VIEWERS" });
+      }
       hasConnectedRef.current = true;
     };
 
@@ -1296,6 +1309,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
   }, []);
+  loadVoiceMembersRef.current = loadVoiceMembers;
 
   const selectChannel = useCallback(async (channelId: string) => {
     dispatch({ type: "SELECT_CHANNEL", payload: channelId });

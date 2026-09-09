@@ -276,6 +276,11 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload.sharerId]: action.payload.viewers,
         },
       };
+    // Who is watching is the server's to know, and it only holds it in memory.
+    // A reconnect may be to a server that has forgotten, so the last list we
+    // were sent is not evidence of anything until it tells us again.
+    case "CLEAR_SCREEN_VIEWERS":
+      return { ...state, screenViewers: {} };
     case "WEBCAM_SHARE_STARTED":
       return {
         ...state,
