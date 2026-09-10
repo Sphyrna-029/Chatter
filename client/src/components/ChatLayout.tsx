@@ -11,6 +11,7 @@ import { ChannelList } from "./ChannelList";
 import { VoiceControls, type ConnQualityData } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
 import { StreamOptInBar } from "./voice/StreamOptInBar";
+import { MobileCallBar } from "./voice/MobileCallBar";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import {
@@ -671,7 +672,7 @@ export function ChatLayout() {
             {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
             {/* VoiceControls is always mounted here (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              <div className={!state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
+              <div className={isMobile || !state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
                 <VoiceControls
                   joinVoiceRef={joinVoiceRef}
                   leaveVoiceRef={leaveVoiceRef}
@@ -712,7 +713,10 @@ export function ChatLayout() {
                       orientation="vertical"
                       className="flex-1"
                     >
-                      <ResizablePanel defaultSize={50} minSize={15}>
+                      {/* A phone gives the video the smaller half: at 50/50
+                          the chat below it is about six messages tall, and the
+                          video is already past 16:9 at 40% of the column. */}
+                      <ResizablePanel defaultSize={isMobile ? 40 : 50} minSize={15}>
                         {/* The header overlays the video rather than sitting
                             above it: as a row of its own it took height from
                             the video *and* the chat below, for a strip that is
@@ -730,8 +734,17 @@ export function ChatLayout() {
                           <ScreenShareViewer />
                         </div>
                       </ResizablePanel>
-                      <ResizableHandle withHandle />
-                      <ResizablePanel defaultSize={50} minSize={15}>
+                      {/* The default separator is a 1px line with a 4px
+                          grab band — findable with a mouse, not with a thumb. */}
+                      <ResizableHandle
+                        withHandle
+                        className={
+                          isMobile
+                            ? "aria-[orientation=horizontal]:after:h-6 [&>div]:h-10 [&>div]:w-4"
+                            : undefined
+                        }
+                      />
+                      <ResizablePanel defaultSize={isMobile ? 60 : 50} minSize={15}>
                         <div className="h-full flex flex-col min-h-0">
                           {state.activeThreadEventId ? (
                             <ThreadPanel />
@@ -767,9 +780,34 @@ export function ChatLayout() {
               </Suspense>
             </div>
             {/* Voice bar: shown when in voice while viewing a different room, and
-                always on mobile — the channel column's voice controls live in a
-                drawer there, so this is the only reachable mute/hang-up. */}
+                always on mobile — there the channel column is a drawer, so this
+                is the only reachable mute and hang-up. The mobile bar is its
+                own component: a phone needs thumb-sized targets and a place to
+                see who is in the call, neither of which fits in this strip. */}
             {state.inVoiceChannel && (!isOnVoiceRoom || isMobile) && (
+              isMobile ? (
+              <MobileCallBar
+                channelName={state.voiceChannelName || "Voice"}
+                roomName={voiceRoomName}
+                occupiedSince={state.voiceChannelId ? state.voiceChannelOccupiedSince[state.voiceChannelId] : undefined}
+                connQualityRef={connQualityRef}
+                speakingUsersRef={speakingUsersRef}
+                setUserVolumeRef={setUserVolumeRef}
+                onVoiceRoom={isOnVoiceRoom}
+                onNavigate={() => { if (state.voiceRoomId) selectRoom(state.voiceRoomId); }}
+                onToggleMute={() => toggleMuteRef.current?.()}
+                onToggleDeafen={() => toggleDeafenRef.current?.()}
+                onToggleScreenShare={() => {
+                  if (state.isScreenSharing) stopScreenShareRef.current?.();
+                  else startScreenShareRef.current?.();
+                }}
+                onToggleWebcam={() => {
+                  if (state.isWebcamActive) stopWebcamRef.current?.();
+                  else startWebcamRef.current?.();
+                }}
+                onHangUp={() => leaveVoiceRef.current?.()}
+              />
+              ) : (
               <VoiceBar
                 channelName={state.voiceChannelName || "Voice"}
                 roomName={voiceRoomName}
@@ -791,6 +829,7 @@ export function ChatLayout() {
                 }}
                 onHangUp={() => leaveVoiceRef.current?.()}
               />
+              )
             )}
           </SidebarInset>
         </div>

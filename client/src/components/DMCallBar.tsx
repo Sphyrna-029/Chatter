@@ -81,7 +81,7 @@ export function DMCallBar({
             {members.length === 1 ? " is in a call" : " are in a call"}
           </span>
         </span>
-        <Button size="sm" className="shrink-0 gap-1.5" onClick={onJoin}>
+        <Button size="sm" className="h-11 shrink-0 gap-1.5 md:h-8" onClick={onJoin}>
           <Phone className="h-3.5 w-3.5" />
           Join
         </Button>
@@ -114,7 +114,7 @@ export function DMCallBar({
                   payload: { open: true, sharer: m.userId },
                 })
               }
-              className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-info transition-colors hover:bg-info/20 cursor-pointer"
+              className="flex min-h-11 shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-xs text-info transition-colors hover:bg-info/20 cursor-pointer md:min-h-0"
               title={`Watch ${name(m.userId)}'s screen`}
             >
               <Monitor className="h-3 w-3" />
@@ -123,7 +123,10 @@ export function DMCallBar({
           ))}
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
+      {/* On a phone the call bar along the bottom of the window carries these,
+          at a size a thumb can hit; a second set of 28px ghosts up here would
+          only be the harder way to press the same thing. */}
+      <div className="hidden shrink-0 items-center gap-1 md:flex">
         <Button
           size="icon"
           variant="ghost"

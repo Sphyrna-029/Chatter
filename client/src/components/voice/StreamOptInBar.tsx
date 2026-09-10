@@ -60,9 +60,11 @@ export function StreamOptInBar() {
         {label}
       </span>
       {/* With more than one to choose from, a per-person way in beats picking
-          for them — the viewer's thumbnail strip only exists once it is open. */}
+          for them — the viewer's thumbnail strip only exists once it is open.
+          A phone has no room for the row, and once open its thumbnail strip is
+          the better switcher anyway, so there it is just the one button. */}
       {streamers.length > 1 && (
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="hidden shrink-0 items-center gap-1 md:flex">
           {streamers.map((userId) => (
             <button
               key={userId}
@@ -82,7 +84,7 @@ export function StreamOptInBar() {
           ))}
         </div>
       )}
-      <Button size="sm" className="h-7 shrink-0 gap-1.5" onClick={openViewer}>
+      <Button size="sm" className="h-11 shrink-0 gap-1.5 md:h-7" onClick={openViewer}>
         <Monitor className="h-3.5 w-3.5" />
         View stream
       </Button>

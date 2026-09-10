@@ -6,11 +6,16 @@ import { cn, displayUserId } from "@/lib/utils";
 import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { ClipControls } from "./voice/ClipControls";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 
 /** Header bar shown above the resizable panel group — always visible */
 /** How long the overlay stays up after the last sign of life. */
 const CONTROLS_IDLE_MS = 2500;
+
+/** Below this a press is a tap rather than the start of a pan or a pinch. */
+const TAP_SLOP_PX = 10;
+const TAP_MAX_MS = 500;
 
 /**
  * Fade the overlay out when nothing is happening, back in on any pointer
@@ -22,6 +27,12 @@ const CONTROLS_IDLE_MS = 2500;
  * render their content in a portal, so neither the pointer nor focus is inside
  * the header while one is open, and the bar would otherwise fade out from
  * under a menu the user was reading.
+ *
+ * A touch screen has no pointer to move and none to rest on the bar, so the
+ * fade there was one-way: the bar went after two and a half seconds and
+ * nothing could bring it back, taking Close, the sharer switcher and
+ * fullscreen with it. On touch a tap on the video toggles it instead, and
+ * only a tap — a pan or a pinch leaves it alone.
  */
 function useIdleFade(
   hostRef: React.RefObject<HTMLElement | null>,
@@ -60,13 +71,39 @@ function useIdleFade(
       settle();
     };
 
+    let downAt = 0;
+    let downX = 0;
+    let downY = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") {
+        wake();
+        return;
+      }
+      downAt = e.timeStamp;
+      downX = e.clientX;
+      downY = e.clientY;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.pointerType === "mouse") return;
+      const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
+      if (e.timeStamp - downAt > TAP_MAX_MS || moved > TAP_SLOP_PX) return;
+      // Revealed by a tap, it stays until another one: 2.5s is not long
+      // enough to notice the bar and reach the button you wanted.
+      clearTimeout(timer);
+      setVisible((v) => !v);
+    };
+
     wake();
     host.addEventListener("mousemove", wake);
     host.addEventListener("mouseenter", wake);
+    host.addEventListener("pointerdown", onPointerDown);
+    host.addEventListener("pointerup", onPointerUp);
     return () => {
       clearTimeout(timer);
       host.removeEventListener("mousemove", wake);
       host.removeEventListener("mouseenter", wake);
+      host.removeEventListener("pointerdown", onPointerDown);
+      host.removeEventListener("pointerup", onPointerUp);
     };
   }, [hostRef, headerRef]);
 
@@ -87,6 +124,13 @@ export function ScreenShareHeader({
 }) {
   const headerRef = useRef<HTMLDivElement | null>(null);
   const controlsVisible = useIdleFade(hostRef, headerRef);
+  const isMobile = useIsMobile();
+  // 28px squares are a mouse size. A thumb needs the best part of 40, which
+  // the bar can afford because it floats over the video rather than above it.
+  const ctrlBtn = isMobile
+    ? "h-10 w-10 p-0 text-muted-foreground hover:text-foreground"
+    : "h-7 w-7 p-0 text-muted-foreground hover:text-foreground";
+  const iconPx = isMobile ? 18 : 14;
   const { state, dispatch } = useAppContext();
   const { screenFps } = useScreenShareFps();
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -178,7 +222,8 @@ export function ScreenShareHeader({
                   })
                 }
                 className={cn(
-                  "px-2 py-1 rounded text-xs font-medium transition-colors cursor-pointer",
+                  "rounded text-xs font-medium transition-colors cursor-pointer",
+                  isMobile ? "px-3 py-2.5" : "px-2 py-1",
                   sharerId === state.selectedScreenSharer
                     ? "bg-info text-background"
                     : "bg-info/20 text-info hover:bg-info/30"
@@ -195,7 +240,7 @@ export function ScreenShareHeader({
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              className={cn("px-2 text-xs font-medium text-muted-foreground hover:text-foreground", isMobile ? "h-10" : "h-7")}
               title="Screen share quality"
             >
               {screenFps} FPS
@@ -206,15 +251,15 @@ export function ScreenShareHeader({
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+            className={ctrlBtn}
             onClick={onTogglePiP}
             title={isPiP ? "Exit Picture-in-Picture" : "Picture-in-Picture"}
           >
             {isPiP ? (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
+                width={iconPx}
+                height={iconPx}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -229,8 +274,8 @@ export function ScreenShareHeader({
             ) : (
               <svg
                 xmlns="http://www.w3.org/2000/svg"
-                width="14"
-                height="14"
+                width={iconPx}
+                height={iconPx}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -247,15 +292,15 @@ export function ScreenShareHeader({
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+          className={ctrlBtn}
           onClick={toggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
         >
           {isFullscreen ? (
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width={iconPx}
+              height={iconPx}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -271,8 +316,8 @@ export function ScreenShareHeader({
           ) : (
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width={iconPx}
+              height={iconPx}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -290,14 +335,14 @@ export function ScreenShareHeader({
         <Button
           size="sm"
           variant="ghost"
-          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+          className={ctrlBtn}
           onClick={closeViewer}
           title="Close viewer"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
+            width={iconPx}
+            height={iconPx}
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -334,6 +379,11 @@ export function ScreenShareViewer() {
   const isDragging = useRef(false);
   const dragStart = useRef({ x: 0, y: 0 });
   const panStart = useRef({ x: 0, y: 0 });
+  // Every pointer currently down on the video, so one finger can pan and two
+  // can pinch. A mouse only ever puts one entry in here.
+  const pointers = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null);
+  const lastTapAt = useRef(0);
 
   // Reset zoom/pan when switching sharers
   useEffect(() => {
@@ -358,16 +408,55 @@ export function ScreenShareViewer() {
   const clampPanRef = useRef(clampPan);
   clampPanRef.current = clampPan;
 
-  // Mouse drag pan handlers
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  const resetZoom = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, []);
+
+  const spread = () => {
+    const [a, b] = [...pointers.current.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+
+  // One set of handlers for mouse, pen and touch. Panning a zoomed image was
+  // mouse-only before, and zooming was the scroll wheel — between them a phone
+  // could neither zoom nor move around a screen share, which is where reading
+  // someone's terminal actually needs it.
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.current.size === 2) {
+      // A second finger cancels the pan it interrupted and starts a pinch.
+      isDragging.current = false;
+      pinch.current = { dist: spread(), zoom };
+      return;
+    }
+    if (pointers.current.size > 2) return;
     if (zoom <= 1) return;
+    // Capture rather than a mouseleave handler: the drag now survives the
+    // pointer leaving the video, and ends wherever it is actually released.
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    // Without this a drag across the video starts a native selection instead.
     e.preventDefault();
     isDragging.current = true;
     dragStart.current = { x: e.clientX, y: e.clientY };
     panStart.current = { ...pan };
   }, [zoom, pan]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.current.size >= 2 && pinch.current) {
+      const start = pinch.current;
+      if (start.dist <= 0) return;
+      const next = Math.max(1, Math.min(10, (start.zoom * spread()) / start.dist));
+      setZoom(next);
+      setPan((prev) =>
+        next <= 1 ? { x: 0, y: 0 } : clampPanRef.current(prev.x, prev.y, next),
+      );
+      return;
+    }
+
     if (!isDragging.current || !videoContainerRef.current) return;
     const rect = videoContainerRef.current.getBoundingClientRect();
     const dx = ((e.clientX - dragStart.current.x) / rect.width) * 100;
@@ -375,15 +464,26 @@ export function ScreenShareViewer() {
     setPan(clampPan(panStart.current.x + dx, panStart.current.y + dy, zoom));
   }, [zoom, clampPan]);
 
-  const handleMouseUp = useCallback(() => {
-    isDragging.current = false;
-  }, []);
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
+    const down = pointers.current.get(e.pointerId);
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinch.current = null;
+    if (pointers.current.size === 0) isDragging.current = false;
 
-  // Reset zoom on double-click
-  const handleDoubleClick = useCallback(() => {
-    setZoom(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
+    // Double-tap to reset, the touch counterpart of the double-click below.
+    // `dblclick` is synthesised inconsistently on mobile browsers, so it is
+    // measured here rather than relied on.
+    if (e.pointerType === "mouse" || !down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y);
+    if (moved > TAP_SLOP_PX) return;
+    const now = e.timeStamp;
+    if (now - lastTapAt.current < 300) {
+      resetZoom();
+      lastTapAt.current = 0;
+    } else {
+      lastTapAt.current = now;
+    }
+  }, [resetZoom]);
 
   const sharers = state.activeScreenSharers;
   const webcamStreamers = state.activeWebcamStreamers;
@@ -504,14 +604,18 @@ export function ScreenShareViewer() {
         ref={videoContainerRef}
         className={cn(
           "flex-1 flex items-center justify-center bg-black min-h-0 relative group overflow-hidden",
-          zoom > 1 && "cursor-grab",
-          zoom > 1 && isDragging.current && "cursor-grabbing",
+          // `active:` rather than the drag flag: that lives in a ref, which
+          // never re-renders, so the grabbing cursor never actually appeared.
+          zoom > 1 && "cursor-grab active:cursor-grabbing",
         )}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onDoubleClick={handleDoubleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onDoubleClick={resetZoom}
+        // The browser must not claim the gesture for scrolling or its own
+        // pinch-zoom — nothing here scrolls, and the pinch is ours.
+        style={{ touchAction: "none" }}
       >
         {showingWebcam && focusedWebcam && webcamStreamsMap.has(focusedWebcam) ? (
           <div className="w-full h-full flex items-center justify-center">
@@ -570,8 +674,8 @@ export function ScreenShareViewer() {
           <span className="tabular-nums">{Math.round(zoom * 100)}%</span>
           <button
             className="text-white/60 hover:text-white cursor-pointer"
-            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
-            title="Reset zoom (or double-click)"
+            onClick={resetZoom}
+            title="Reset zoom (or double-tap)"
           >
             <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />

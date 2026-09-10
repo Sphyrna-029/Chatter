@@ -59,6 +59,20 @@ export function canSignal(wsRef: React.MutableRefObject<WebSocket | null>) {
   return wsRef.current && wsRef.current.readyState === WebSocket.OPEN;
 }
 
+/**
+ * Whether this browser can capture a screen at all.
+ *
+ * No mobile browser implements getDisplayMedia — iOS Safari and Chrome for
+ * Android both leave it undefined — so on a phone the share button is an
+ * offer that can only end in an error toast. Better not to make it.
+ */
+export function canShareScreen(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    typeof navigator.mediaDevices?.getDisplayMedia === "function"
+  );
+}
+
 // ─── Voice speaker slots ────────────────────────────────────────────────────
 // A subscription offers this many receive-only transceivers, and the server
 // puts whoever is currently loudest into them. Keep in sync with

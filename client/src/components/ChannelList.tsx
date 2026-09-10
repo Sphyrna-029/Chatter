@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from "react";
 import type { ConnectionQuality, ConnQualityData } from "./VoiceControls";
+import { canShareScreen } from "@/lib/webrtc";
 import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
@@ -638,7 +639,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                             e.stopPropagation();
                             dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, webcamStreamer: m.userId } });
                           }}
-                          className="shrink-0 p-0.5 rounded hover:bg-blue-500/20 transition-colors"
+                          className="shrink-0 p-0.5 rounded hover:bg-blue-500/20 transition-colors flex items-center justify-center min-h-9 min-w-9 md:min-h-0 md:min-w-0"
                           title={`Watch ${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))}'s camera`}
                         >
                           <Camera className="h-3 w-3 text-blue-400" />
@@ -651,7 +652,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                             e.stopPropagation();
                             dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: m.userId } });
                           }}
-                          className="shrink-0 p-0.5 rounded hover:bg-info/20 transition-colors"
+                          className="shrink-0 p-0.5 rounded hover:bg-info/20 transition-colors flex items-center justify-center min-h-9 min-w-9 md:min-h-0 md:min-w-0"
                           title={`Watch ${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))}'s screen`}
                         >
                           <Monitor className="h-3 w-3 text-info" />
@@ -1055,7 +1056,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             <button
               onClick={onToggleMute}
               disabled={state.isDeafened}
-              className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 min-h-11 md:min-h-0 text-xs font-medium transition-colors ${
                 state.isMuted || state.isDeafened
                   ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -1066,7 +1067,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             </button>
             <button
               onClick={onToggleDeafen}
-              className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+              className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 min-h-11 md:min-h-0 text-xs font-medium transition-colors ${
                 state.isDeafened
                   ? "bg-destructive/20 text-destructive hover:bg-destructive/30"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -1078,7 +1079,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             {onToggleWebcam && (
               <button
                 onClick={onToggleWebcam}
-                className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                className={`flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 min-h-11 md:min-h-0 text-xs font-medium transition-colors ${
                   isWebcamActive
                     ? "bg-success/20 text-success hover:bg-success/30"
                     : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -1088,11 +1089,11 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                 <Camera className="h-3.5 w-3.5" />
               </button>
             )}
-            {onToggleScreenShare && (
+            {onToggleScreenShare && canShareScreen() && (
               <div className="flex-1 flex">
                 <button
                   onClick={onToggleScreenShare}
-                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-l-md px-2 py-1.5 text-xs font-medium transition-colors ${
+                  className={`flex-1 flex items-center justify-center gap-1.5 rounded-l-md px-2 py-1.5 min-h-11 md:min-h-0 text-xs font-medium transition-colors ${
                     isScreenSharing
                       ? "bg-info/20 text-info hover:bg-info/30"
                       : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -1117,7 +1118,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             )}
             <button
               onClick={onLeaveVoice}
-              className="flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
+              className="flex-1 flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 min-h-11 md:min-h-0 text-xs font-medium bg-destructive/20 text-destructive hover:bg-destructive/30 transition-colors"
               title="Disconnect"
             >
               <PhoneOff className="h-3.5 w-3.5" />

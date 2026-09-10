@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { ScreenFpsMenu } from "./ScreenFpsMenu";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
+import { canShareScreen } from "@/lib/webrtc";
 
 interface VoiceToolbarProps {
   inVoiceChannel: boolean;
@@ -59,7 +60,7 @@ export function VoiceToolbar({
           📷
         </Button>
 
-        {!hideScreenShare && (
+        {!hideScreenShare && canShareScreen() && (
           <div className="flex items-center flex-1">
             <Button
               size="sm"
