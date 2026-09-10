@@ -155,6 +155,28 @@ pub(crate) async fn voice_state_snapshot(state: &AppState, user_id: &str) -> Val
     })
 }
 
+/// Whether a message is evidence that somebody is at their machine.
+///
+/// Most of what arrives on this socket is the client talking to itself: a
+/// keepalive, a resync after a tab wakes up, the ICE and SDP traffic of a call
+/// that is already running. None of it means the person is there, and counting
+/// it is why the idle status never once appeared.
+///
+/// A denylist rather than an allowlist: a new *user* action should count
+/// without anyone remembering to add it, and the automatic traffic is the part
+/// that is easy to enumerate.
+fn marks_user_active(msg_type: &str) -> bool {
+    !matches!(
+        msg_type,
+        // Liveness only. The websocket's own ping/pong already proves the
+        // socket is alive, so this says nothing that was not already known.
+        "heartbeat"
+            // Housekeeping after a reconnect or a room switch.
+            | "voice_state_request"
+            | "watchparty_request_sync"
+    ) && !msg_type.contains("_webrtc_")
+}
+
 /// A voice channel a closing connection was holding a session in: what the room
 /// has to be told, and who is left behind.
 struct DepartedVoiceChannel {
@@ -457,15 +479,19 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
         Err(_) => return,
     };
 
-    // Update last active
-    {
+    let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Being idle is about the person, not the socket. This used to run for
+    // every message that arrived, and the client sends a keepalive every
+    // minute, so `last_active` was never more than 60s old and nobody was ever
+    // idle — the status existed, rendered, and could not happen.
+    if marks_user_active(msg_type) {
         let mut up = state.user_presence.write().await;
         if let Some(p) = up.get_mut(user_id) {
             p.last_active = now_secs();
         }
     }
 
-    let msg_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("");
     let room_id = msg.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
 
     match msg_type {
@@ -1434,16 +1460,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = custom_status.clone();
-                    let eff = match &p.manual_status {
-                        Some(ms) => ms.clone(),
-                        None => {
-                            if now_secs() - p.last_active < 300.0 {
-                                "active".to_string()
-                            } else {
-                                "idle".to_string()
-                            }
-                        }
-                    };
+                    // One definition of what a status is, in helpers.rs.
+                    // These copies hardcoded the threshold and ignored
+                    // `connected`, so they would have called a departing user
+                    // active.
+                    let eff = presence_status(p, now_secs()).to_string();
                     (
                         eff,
                         p.is_mobile,
@@ -1537,16 +1558,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.manual_status = manual_status;
-                    let eff = match &p.manual_status {
-                        Some(ms) => ms.clone(),
-                        None => {
-                            if now_secs() - p.last_active < 300.0 {
-                                "active".to_string()
-                            } else {
-                                "idle".to_string()
-                            }
-                        }
-                    };
+                    // One definition of what a status is, in helpers.rs.
+                    // These copies hardcoded the threshold and ignored
+                    // `connected`, so they would have called a departing user
+                    // active.
+                    let eff = presence_status(p, now_secs()).to_string();
                     (
                         eff,
                         p.custom_status.clone(),
@@ -1684,16 +1700,11 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             ) = {
                 let up = state.user_presence.read().await;
                 if let Some(p) = up.get(user_id) {
-                    let eff = match &p.manual_status {
-                        Some(ms) => ms.clone(),
-                        None => {
-                            if now_secs() - p.last_active < 300.0 {
-                                "active".to_string()
-                            } else {
-                                "idle".to_string()
-                            }
-                        }
-                    };
+                    // One definition of what a status is, in helpers.rs.
+                    // These copies hardcoded the threshold and ignored
+                    // `connected`, so they would have called a departing user
+                    // active.
+                    let eff = presence_status(p, now_secs()).to_string();
                     (
                         p.custom_status.clone(),
                         eff,
@@ -2232,6 +2243,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 broadcast_to_room(&state, room_id, &event).await;
             }
         }
+        // The client says its person is still there. Sent only when there has
+        // been real input since the last one, and never from a hidden tab, so
+        // unlike the keepalive it means something.
+        "activity" => {}
         "heartbeat" => {}
         "embed_interaction" => {
             // User clicked a button or used a select on a bot embed.
@@ -2560,7 +2575,7 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 
 #[cfg(test)]
 mod tests {
-    use super::{displaced_voice_conn, holds_voice_session};
+    use super::{displaced_voice_conn, holds_voice_session, marks_user_active};
     use crate::backend::state::VoiceMemberState;
     use std::collections::HashMap;
 
@@ -2595,6 +2610,47 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    #[test]
+    fn a_keepalive_is_not_a_person() {
+        // The bug this predicate exists for: the client sends one of these
+        // every minute, the server refreshed `last_active` for anything that
+        // arrived, and so nobody was ever idle.
+        assert!(!marks_user_active("heartbeat"));
+    }
+
+    #[test]
+    fn the_clients_own_housekeeping_does_not_count() {
+        // A tab waking up and a call renegotiating are the client talking to
+        // itself; neither means anyone is at the keyboard.
+        assert!(!marks_user_active("voice_state_request"));
+        assert!(!marks_user_active("watchparty_request_sync"));
+        assert!(!marks_user_active("voice_webrtc_publish_offer"));
+        assert!(!marks_user_active("voice_webrtc_subscribe_candidate"));
+        assert!(!marks_user_active("screen_webrtc_publish_offer"));
+        assert!(!marks_user_active("webcam_webrtc_subscribe_offer"));
+    }
+
+    #[test]
+    fn doing_something_counts() {
+        assert!(marks_user_active("activity"));
+        assert!(marks_user_active("typing"));
+        assert!(marks_user_active("voice_join"));
+        assert!(marks_user_active("voice_mute"));
+        assert!(marks_user_active("whiteboard_stroke"));
+        assert!(marks_user_active("set_custom_status"));
+        // Unknown types count: a new user action should not need anyone to
+        // remember this list, and the automatic traffic is the enumerable half.
+        assert!(marks_user_active("something_added_later"));
+    }
+
+    #[test]
+    fn starting_and_stopping_a_share_counts_even_though_webrtc_does_not() {
+        // These are buttons; the signalling they set off is not.
+        assert!(marks_user_active("screen_share_start"));
+        assert!(marks_user_active("screen_share_stop"));
+        assert!(marks_user_active("webcam_share_start"));
     }
 
     #[test]

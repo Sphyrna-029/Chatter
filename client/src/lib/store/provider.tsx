@@ -113,6 +113,13 @@ import { createWsMessageHandler } from "./wsHandler";
 /** How long to wait before opening the socket again after it closed. */
 const WS_RECONNECT_MS = 3000;
 
+/** How often, at most, to report that someone is still at their machine.
+ *
+ * A ceiling on chatter rather than a schedule: the ping is skipped entirely
+ * when there has been no input since the last one. The server's idle threshold
+ * is measured in minutes, so reporting oftener than this would buy nothing. */
+const ACTIVITY_PING_MS = 60_000;
+
 /** Retry schedule for restoring a session at page load when nothing answers.
  *
  * Backed off rather than hammered, and bounded: a server that has not come
@@ -539,16 +546,52 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("pagehide", onPageHide);
   }, []);
 
-  // Send periodic heartbeats to keep presence active
+  // Tell the server its person is still there.
+  //
+  // This replaced an unconditional keepalive on the same cadence, which is what
+  // made the idle status unreachable: the server refreshed `last_active` for
+  // anything that arrived, so a tab left open overnight reported someone at
+  // their desk. The socket's own ping/pong already proves the connection is
+  // alive, so nothing is lost by only speaking up when there is something to
+  // say.
+  //
+  // "Something to say" is real input since the last ping, and a visible tab. A
+  // page left open in the background stops reporting and decays to idle on the
+  // server's own clock, which is the behaviour anyone would expect of it.
   useEffect(() => {
     if (!state.accessToken) return;
+
+    let interacted = true; // opening the app is itself an interaction
+    const noteInteraction = () => {
+      interacted = true;
+    };
+    const events: (keyof DocumentEventMap)[] = [
+      "pointerdown",
+      "keydown",
+      "wheel",
+      "touchstart",
+    ];
+    for (const event of events) {
+      document.addEventListener(event, noteInteraction, { passive: true });
+    }
+    window.addEventListener("focus", noteInteraction);
+
     const interval = setInterval(() => {
+      if (!interacted || document.visibilityState === "hidden") return;
+      interacted = false;
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "heartbeat" }));
+        ws.send(JSON.stringify({ type: "activity" }));
       }
-    }, 60000);
-    return () => clearInterval(interval);
+    }, ACTIVITY_PING_MS);
+
+    return () => {
+      clearInterval(interval);
+      for (const event of events) {
+        document.removeEventListener(event, noteInteraction);
+      }
+      window.removeEventListener("focus", noteInteraction);
+    };
   }, [state.accessToken]);
 
   // Presence polling

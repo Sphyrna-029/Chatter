@@ -56,6 +56,16 @@ pub(crate) const VOICE_PTIME_MS: u32 = 40;
 /// telling the decoder to reset anyway.
 pub(crate) const OPUS_FRAME_SAMPLES: u32 = 48 * VOICE_PTIME_MS;
 
+// ─── Presence ───────────────────────────────────────────────────────────────
+
+/// How often connected users are re-examined for a status change.
+///
+/// Going idle is the one presence transition nothing announces: it is the
+/// absence of activity, so no event marks it and no client can work it out
+/// about somebody else. Without a sweep it would surface only when a client
+/// happened to poll the room it was looking at.
+pub(crate) const PRESENCE_SWEEP_SECS: u64 = 30;
+
 /// Largest input timestamp jump carried through to a slot's output. Anything
 /// beyond a second is treated as a discontinuity rather than trusted.
 pub(crate) const VOICE_MAX_TS_DELTA: u32 = 48_000;

@@ -575,6 +575,10 @@ pub async fn run() {
         Arc::clone(&state),
     ));
 
+    // Nothing else can announce somebody going idle — it is the absence of an
+    // event — so this runs for the life of the process.
+    tokio::spawn(presence_sweeper(Arc::clone(&state)));
+
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {
         let state_for_poller = Arc::clone(&state);
@@ -597,6 +601,100 @@ pub async fn run() {
     )
     .await
     .unwrap();
+}
+
+/// Announce presence transitions that nothing else can.
+///
+/// Every other status change is the result of something happening — a socket
+/// opening, a socket closing, someone choosing a manual status — and is
+/// broadcast where it happens. Going idle is the absence of anything happening,
+/// so it has no event of its own: without this, a user went idle only in the
+/// eyes of whichever client next polled the room they were in, and stayed
+/// active everywhere else.
+///
+/// Statuses last announced are held in the task rather than in `AppState`: they
+/// are this loop's bookkeeping, nobody else reads them, and a status the loop
+/// re-sends after a restart is one the client merges to the value it already
+/// had.
+async fn presence_sweeper(state: Arc<AppState>) {
+    use crate::backend::constants::PRESENCE_SWEEP_SECS;
+    use crate::backend::helpers::{broadcast_to_room, now_secs, presence_status};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(PRESENCE_SWEEP_SECS));
+    interval.tick().await; // skip the immediate first tick
+
+    let mut announced: HashMap<String, String> = HashMap::new();
+
+    loop {
+        interval.tick().await;
+
+        // Sitting in a call is being present, whether or not anyone is talking
+        // or touching the keyboard. Refreshing the record rather than special
+        // casing the status keeps every reader — this loop, the REST endpoint,
+        // the pollers — agreeing without any of them knowing about voice.
+        let in_a_call: Vec<String> = {
+            let vc = state.voice_channels.read().await;
+            vc.values()
+                .flat_map(|members| members.keys().cloned())
+                .collect()
+        };
+        if !in_a_call.is_empty() {
+            let now = now_secs();
+            let mut up = state.user_presence.write().await;
+            for user_id in &in_a_call {
+                if let Some(p) = up.get_mut(user_id) {
+                    p.last_active = now;
+                }
+            }
+        }
+
+        let changed: Vec<(String, String)> = {
+            let now = now_secs();
+            let up = state.user_presence.read().await;
+            // A user who has gone offline is dropped: the disconnect announced
+            // it, and keeping them would re-announce it every sweep forever.
+            announced.retain(|user_id, _| up.get(user_id).is_some_and(|p| p.connected));
+            up.iter()
+                .filter(|(_, p)| p.connected)
+                .filter_map(|(user_id, p)| {
+                    let status = presence_status(p, now);
+                    match announced.get(user_id) {
+                        Some(last) if last == status => None,
+                        // First sight of a connected user is recorded without
+                        // announcing: their connection already did that.
+                        None => {
+                            announced.insert(user_id.clone(), status.to_string());
+                            None
+                        }
+                        _ => Some((user_id.clone(), status.to_string())),
+                    }
+                })
+                .collect()
+        };
+
+        for (user_id, status) in changed {
+            announced.insert(user_id.clone(), status.clone());
+            let user_rooms: Vec<String> = {
+                let rm = state.room_members.read().await;
+                rm.iter()
+                    .filter(|(_, members)| members.contains(&user_id))
+                    .map(|(rid, _)| rid.clone())
+                    .collect()
+            };
+            // Only the field that changed: the client merges a presence update
+            // field by field, so naming nothing else leaves the rest alone.
+            let event = json!({
+                "type": "presence_update",
+                "user_id": user_id,
+                "status": status,
+            });
+            for rid in user_rooms {
+                broadcast_to_room(&state, &rid, &event).await;
+            }
+        }
+    }
 }
 
 async fn steam_presence_poller(state: Arc<AppState>) {
