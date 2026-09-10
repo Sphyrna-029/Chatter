@@ -500,6 +500,18 @@ pub(crate) async fn join_room(
         .flatten()
         .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
 
+    // A DM is not a room you can walk into. Membership of one is established
+    // when it is created or when a member adds someone (`add_to_dm`), and it
+    // carries no password to stop anyone else — so this endpoint was the way
+    // into a private conversation for anybody holding its id, and the way back
+    // in for anybody who had once been in a group DM and left.
+    if room.is_dm {
+        return Err(error_response(
+            StatusCode::FORBIDDEN,
+            "You cannot join a direct message",
+        ));
+    }
+
     // Check password if room is password-protected
     if !room.password_hash.is_empty() {
         let provided = body
