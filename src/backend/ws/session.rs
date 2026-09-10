@@ -177,6 +177,70 @@ fn marks_user_active(msg_type: &str) -> bool {
     ) && !msg_type.contains("_webrtc_")
 }
 
+/// Whether a message's `room_id` names a room the sender has to belong to.
+///
+/// Every id in a websocket frame comes from the client, and the socket is
+/// authenticated as a *person* — nothing about it is scoped to a room. So a
+/// handler that reads `room_id` and acts on it is trusting the caller unless
+/// it checks, and the ones listed here were not: naming another room's id was
+/// enough to draw on its whiteboard, erase the whiteboard outright, drive its
+/// watch party, write a message into its timeline and put a typing indicator
+/// or a screen-share badge on someone who was not there. `list_all_rooms`
+/// hands every account the ids to try.
+///
+/// An allowlist rather than a denylist, because the cost of the two mistakes
+/// is not symmetric: forgetting to add a new room-scoped type here refuses an
+/// action that should have been allowed, and it is visible immediately.
+/// `voice_*` is absent on purpose — `voice_join` runs the fuller check
+/// (membership, bans, channel overwrites, `connect`), and the rest act only on
+/// the caller's own voice state or gate on room role.
+fn needs_room_membership(msg_type: &str) -> bool {
+    matches!(
+        msg_type,
+        "typing"
+            | "whiteboard_stroke"
+            | "whiteboard_cursor"
+            | "whiteboard_clear"
+            | "whiteboard_undo"
+            | "watchparty_set_video"
+            | "watchparty_control"
+            | "watchparty_reaction"
+            | "watchparty_ended"
+            | "watchparty_request_sync"
+            | "watchparty_viewer_join"
+            | "watchparty_viewer_leave"
+            | "screen_share_start"
+            | "screen_share_stop"
+            | "webcam_share_start"
+            | "webcam_share_stop"
+    )
+}
+
+/// Whether the caller may act on this room at all: in it, and not banned from
+/// it. The same pair `voice_join` checks, kept in one place so the answer
+/// cannot differ between two handlers.
+async fn may_act_in_room(state: &AppState, room_id: &str, user_id: &str) -> bool {
+    if room_id.is_empty() {
+        return false;
+    }
+    let is_member = {
+        let rm = state.room_members.read().await;
+        rm.get(room_id)
+            .map(|m| m.iter().any(|u| u == user_id))
+            .unwrap_or(false)
+    };
+    if !is_member {
+        return false;
+    }
+    !state
+        .banned_users
+        .read()
+        .await
+        .get(room_id)
+        .map(|banned| banned.iter().any(|u| u == user_id))
+        .unwrap_or(false)
+}
+
 /// A voice channel a closing connection was holding a session in: what the room
 /// has to be told, and who is left behind.
 struct DepartedVoiceChannel {
@@ -493,6 +557,23 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
     }
 
     let room_id = msg.get("room_id").and_then(|v| v.as_str()).unwrap_or("");
+
+    // Checked once, here, rather than in each handler: the id arrives from the
+    // client and every one of these acts on the room it names.
+    if needs_room_membership(msg_type) && !may_act_in_room(&state, room_id, user_id).await {
+        send_to_conn(
+            &state,
+            user_id,
+            conn_id,
+            &json!({
+                "type": "error",
+                "error": "room_forbidden",
+                "message": "You are not a member of this room"
+            }),
+        )
+        .await;
+        return;
+    }
 
     match msg_type {
         "typing" => {
