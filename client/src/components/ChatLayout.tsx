@@ -10,6 +10,7 @@ import { ThreadPanel } from "./ThreadPanel";
 import { ChannelList } from "./ChannelList";
 import { VoiceControls, type ConnQualityData } from "./VoiceControls";
 import { ScreenShareViewer, ScreenShareHeader } from "./ScreenShareViewer";
+import { StreamOptInBar } from "./voice/StreamOptInBar";
 import { CreateRoomDialog, JoinRoomDialog } from "./RoomDialogs";
 import { SidebarProvider, SidebarInset, useSidebar } from "@/components/ui/sidebar";
 import {
@@ -741,10 +742,17 @@ export function ChatLayout() {
                       </ResizablePanel>
                     </ResizablePanelGroup>
                   </div>
-                ) : state.activeThreadEventId ? (
-                  <ThreadPanel />
                 ) : (
-                  <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} dmCall={dmCall} />
+                  <div className="flex-1 flex flex-col min-h-0 min-w-0">
+                    {/* Nothing opens the viewer on its own any more, so the
+                        offer to open it has to live where the user is. */}
+                    {isOnVoiceRoom && <StreamOptInBar />}
+                    {state.activeThreadEventId ? (
+                      <ThreadPanel />
+                    ) : (
+                      <ChatArea onJoinVoice={() => joinVoiceRef.current?.()} dmCall={dmCall} />
+                    )}
+                  </div>
                 )}
                 {!isMobile && (
                   <MembersPanel

@@ -62,10 +62,14 @@ export function useWebRTCWebcam() {
   const voiceRoomIdRef = useRef(state.voiceRoomId);
   const inVoiceChannelRef = useRef(state.inVoiceChannel);
   const activeWebcamStreamersRef = useRef(state.activeWebcamStreamers);
+  // The viewer being open is what consents to a subscription — see the same
+  // ref in useWebRTCScreen.
+  const screenViewerOpenRef = useRef(state.screenViewerOpen);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
   useEffect(() => { inVoiceChannelRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
   useEffect(() => { activeWebcamStreamersRef.current = state.activeWebcamStreamers; }, [state.activeWebcamStreamers]);
+  useEffect(() => { screenViewerOpenRef.current = state.screenViewerOpen; }, [state.screenViewerOpen]);
 
   const ensureWebcamSub = (sharerId: string) => {
     if (!canSignal(wsRef) || sharerId === state.userId) return;
@@ -158,6 +162,7 @@ export function useWebRTCWebcam() {
       webcamRetryTimersRef.current.delete(sharerId);
       if (
         inVoiceChannelRef.current &&
+        screenViewerOpenRef.current &&
         activeWebcamStreamersRef.current.includes(sharerId) &&
         sharerId !== state.userId &&
         !webcamSubPcsRef.current.has(sharerId) &&
@@ -220,7 +225,7 @@ export function useWebRTCWebcam() {
           try { await pc.addIceCandidate(msg.candidate); } catch { /* noop */ }
         }
       } else if (msg.type === "webcam_webrtc_publisher_ready") {
-        if (state.inVoiceChannel && msg.user_id !== state.userId) {
+        if (state.inVoiceChannel && screenViewerOpenRef.current && msg.user_id !== state.userId) {
           const sharerId = msg.user_id;
           const oldPc = webcamSubPcsRef.current.get(sharerId);
           if (oldPc) {
@@ -257,10 +262,13 @@ export function useWebRTCWebcam() {
     return () => window.removeEventListener("ws-message", handler);
   }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopWebcam]);
 
-  // Subscribe to webcam streams from other users
+  // Subscribe to webcam streams from other users — only once the viewer is
+  // open, so a camera nobody asked to watch is never pulled down.
   useEffect(() => {
-    if (!state.inVoiceChannel) return;
-    for (const sharerId of state.activeWebcamStreamers) {
+    const wanted =
+      state.inVoiceChannel && state.screenViewerOpen ? state.activeWebcamStreamers : [];
+
+    for (const sharerId of wanted) {
       if (
         sharerId !== state.userId &&
         !webcamSubPcsRef.current.has(sharerId) &&
@@ -270,22 +278,25 @@ export function useWebRTCWebcam() {
         ensureWebcamSub(sharerId);
       }
     }
+    let dropped = false;
     webcamSubPcsRef.current.forEach((pc, sharerId) => {
-      if (!state.activeWebcamStreamers.includes(sharerId)) {
+      if (!wanted.includes(sharerId)) {
         pc.close();
         webcamSubPcsRef.current.delete(sharerId);
         pendingWebcamSubsRef.current.delete(sharerId);
         webcamStreamsMap.delete(sharerId);
+        dropped = true;
       }
     });
     webcamRetryTimersRef.current.forEach((timer, sharerId) => {
-      if (!state.activeWebcamStreamers.includes(sharerId)) {
+      if (!wanted.includes(sharerId)) {
         clearTimeout(timer);
         webcamRetryTimersRef.current.delete(sharerId);
         pendingWebcamSubsRef.current.delete(sharerId);
       }
     });
-  }, [state.activeWebcamStreamers, state.inVoiceChannel, state.userId]);
+    if (dropped) window.dispatchEvent(new CustomEvent("webcam-stream-update"));
+  }, [state.activeWebcamStreamers, state.inVoiceChannel, state.screenViewerOpen, state.userId]);
 
   // Notify viewer when streams change
   useEffect(() => {

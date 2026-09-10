@@ -614,11 +614,11 @@ export function createWsMessageHandler(
       patchVoiceMember(msg, stateRef, dispatch, () => ({ screen_sharing: true }));
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
+        // Only the badge, never the viewer: watching is opt-in, so someone
+        // else starting a share must not take over the screen of everyone in
+        // the call. Opening the viewer is what subscribes to the video, so
+        // leaving it shut also means nothing is pulled down unasked.
         dispatch({ type: "SCREEN_SHARE_STARTED", payload: msg.user_id });
-        // Auto-open the screen viewer for other users when someone starts sharing
-        if (msg.user_id !== stateRef.current.userId && stateRef.current.inVoiceChannel) {
-          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, sharer: msg.user_id } });
-        }
       }
     } else if (msg.type === "screen_share_stopped") {
       patchVoiceMember(msg, stateRef, dispatch, () => ({ screen_sharing: false }));
@@ -634,11 +634,8 @@ export function createWsMessageHandler(
     } else if (msg.type === "webcam_share_started") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
+        // Opt-in, the same as a screen share above.
         dispatch({ type: "WEBCAM_SHARE_STARTED", payload: msg.user_id });
-        // Auto-open the viewer for other users when someone starts webcam
-        if (msg.user_id !== stateRef.current.userId && stateRef.current.inVoiceChannel) {
-          dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true } });
-        }
       }
     } else if (msg.type === "webcam_share_stopped") {
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;

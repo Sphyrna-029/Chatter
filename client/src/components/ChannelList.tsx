@@ -636,10 +636,10 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true } });
+                            dispatch({ type: "SET_SCREEN_VIEWER", payload: { open: true, webcamStreamer: m.userId } });
                           }}
                           className="shrink-0 p-0.5 rounded hover:bg-blue-500/20 transition-colors"
-                          title={`${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))} is sharing their camera`}
+                          title={`Watch ${(state.userPresence[m.userId]?.displayName || displayUserId(m.userId))}'s camera`}
                         >
                           <Camera className="h-3 w-3 text-blue-400" />
                         </button>

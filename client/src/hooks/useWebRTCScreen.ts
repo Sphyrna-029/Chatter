@@ -74,10 +74,14 @@ export function useWebRTCScreen() {
   const voiceRoomIdRef = useRef(state.voiceRoomId);
   const inVoiceChannelRef = useRef(state.inVoiceChannel);
   const activeScreenSharersRef = useRef(state.activeScreenSharers);
+  // Watching is opt-in: the viewer being open is the subscription's consent,
+  // and every path that can create one is judged against it.
+  const screenViewerOpenRef = useRef(state.screenViewerOpen);
   useEffect(() => { currentRoomRef.current = state.currentRoomId; }, [state.currentRoomId]);
   useEffect(() => { voiceRoomIdRef.current = state.voiceRoomId; }, [state.voiceRoomId]);
   useEffect(() => { inVoiceChannelRef.current = state.inVoiceChannel; }, [state.inVoiceChannel]);
   useEffect(() => { activeScreenSharersRef.current = state.activeScreenSharers; }, [state.activeScreenSharers]);
+  useEffect(() => { screenViewerOpenRef.current = state.screenViewerOpen; }, [state.screenViewerOpen]);
 
   const ensureScreenSub = (sharerId: string) => {
     if (!canSignal(wsRef) || sharerId === state.userId) return;
@@ -184,6 +188,7 @@ export function useWebRTCScreen() {
       // Only retry if still in voice and the sharer is still active
       if (
         inVoiceChannelRef.current &&
+        screenViewerOpenRef.current &&
         activeScreenSharersRef.current.includes(sharerId) &&
         sharerId !== state.userId &&
         !screenSubPcsRef.current.has(sharerId) &&
@@ -261,8 +266,9 @@ export function useWebRTCScreen() {
           try { await pc.addIceCandidate(msg.candidate); } catch { /* noop */ }
         }
       } else if (msg.type === "screen_webrtc_publisher_ready") {
-        // The sharer's track is now ready on the server — safe to subscribe
-        if (state.inVoiceChannel && msg.user_id !== state.userId) {
+        // The sharer's track is now ready on the server — safe to subscribe,
+        // but only for someone who has actually opened the viewer.
+        if (state.inVoiceChannel && screenViewerOpenRef.current && msg.user_id !== state.userId) {
           const sharerId = msg.user_id;
           // Clean up any previously failed attempt
           const oldPc = screenSubPcsRef.current.get(sharerId);
@@ -300,10 +306,14 @@ export function useWebRTCScreen() {
     return () => window.removeEventListener("ws-message", handler);
   }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps]);
 
-  // Subscribe to screen shares from other users
+  // Subscribe to screen shares from other users — but only once this user has
+  // opened the viewer. A share nobody asked to watch costs nothing: no peer
+  // connection, no bandwidth, and no place in the sharer's viewer count.
   useEffect(() => {
-    if (!state.inVoiceChannel) return;
-    for (const sharerId of state.activeScreenSharers) {
+    const wanted =
+      state.inVoiceChannel && state.screenViewerOpen ? state.activeScreenSharers : [];
+
+    for (const sharerId of wanted) {
       if (
         sharerId !== state.userId &&
         !screenSubPcsRef.current.has(sharerId) &&
@@ -313,24 +323,28 @@ export function useWebRTCScreen() {
         ensureScreenSub(sharerId);
       }
     }
-    // Clean up subscriptions for sharers who stopped
+    // Drop subscriptions for sharers who stopped — and, when the viewer is
+    // closed, for every sharer, since that is the user opting back out.
+    let dropped = false;
     screenSubPcsRef.current.forEach((pc, sharerId) => {
-      if (!state.activeScreenSharers.includes(sharerId)) {
+      if (!wanted.includes(sharerId)) {
         pc.close();
         screenSubPcsRef.current.delete(sharerId);
         pendingScreenSubsRef.current.delete(sharerId);
         screenStreamsMap.delete(sharerId);
+        dropped = true;
       }
     });
-    // Also cancel pending retry timers for sharers who stopped
+    // Also cancel pending retry timers for those same sharers
     screenRetryTimersRef.current.forEach((timer, sharerId) => {
-      if (!state.activeScreenSharers.includes(sharerId)) {
+      if (!wanted.includes(sharerId)) {
         clearTimeout(timer);
         screenRetryTimersRef.current.delete(sharerId);
         pendingScreenSubsRef.current.delete(sharerId);
       }
     });
-  }, [state.activeScreenSharers, state.inVoiceChannel, state.userId]);
+    if (dropped) window.dispatchEvent(new CustomEvent("screen-stream-update"));
+  }, [state.activeScreenSharers, state.inVoiceChannel, state.screenViewerOpen, state.userId]);
 
   // Notify ScreenShareViewer when streams change
   useEffect(() => {
