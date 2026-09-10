@@ -14,7 +14,11 @@ services:
       - 127.0.0.1:8067:8000/udp
     environment:
       MONGODB_URI: mongodb://mongodb:27017
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      # No default on purpose: a fallback here is a signing key published in
+      # the repository, and anyone holding it can mint a token for any account
+      # on this server. Put one in a .env beside this file:
+      #   echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env — see the comment above}
 
       #################  KLIPY  #################
       #KLIPY_API_KEY: your-klipy-key (for gif pallette)

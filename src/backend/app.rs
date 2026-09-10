@@ -14,13 +14,65 @@ pub fn build_app(state: Arc<AppState>) -> Router {
     router::build_router().with_state(state)
 }
 
+/// The placeholder that ships in `.env.example` and the compose file.
+///
+/// It is in the public repository, so a deployment that kept it is signing
+/// sessions with a key anybody can look up: forging `sub` for any account —
+/// including an admin's — takes one line. Refusing to start is the only
+/// honest answer; a warning here would be read once and scrolled past.
+const PLACEHOLDER_JWT_SECRET: &str = "change-me-in-production";
+
+/// The key every session token is signed with.
+///
+/// Unset is survivable and generated per boot, which is what keeps `cargo run`
+/// and the test suite working with no setup. It costs everyone their session
+/// on each restart, so it says so — loudly enough that a real deployment sets
+/// the variable instead of living with it.
+fn resolve_jwt_secret() -> String {
+    // An empty value is someone who copied `.env.example` and did not fill it
+    // in, which is the unset case wearing a different hat.
+    match std::env::var("JWT_SECRET").map(|s| s.trim().to_string()) {
+        Ok(s) if s.is_empty() => resolve_jwt_secret_unset(),
+        Ok(s) if s == PLACEHOLDER_JWT_SECRET => {
+            panic!(
+                "JWT_SECRET is still the placeholder from .env.example. It is published in \
+                 the repository, so anyone could mint a token for any account on this server. \
+                 Set it to a secret of your own — `openssl rand -base64 48` — and restart."
+            );
+        }
+        // A short key is a weak key: HS256 is only as strong as what it is
+        // keyed with, and 16 bytes is the floor worth accepting.
+        Ok(s) if s.len() < 16 => {
+            panic!(
+                "JWT_SECRET is too short ({} characters). Use at least 16 — \
+                 `openssl rand -base64 48` gives a good one.",
+                s.len()
+            );
+        }
+        Ok(s) => s,
+        Err(_) => resolve_jwt_secret_unset(),
+    }
+}
+
+/// No key configured: mint one for this process rather than fall back to a
+/// shared constant. Nobody can forge a token against it, and the cost — every
+/// session ending at restart — is the part worth saying out loud.
+fn resolve_jwt_secret_unset() -> String {
+    use base64::Engine;
+    let bytes: [u8; 32] = rand::random();
+    eprintln!(
+        "[auth] JWT_SECRET is not set — generated a random one for this process. \
+         Every session ends when the server restarts. Set JWT_SECRET to keep them."
+    );
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
 pub async fn build_state() -> Arc<AppState> {
     let _ = dotenvy::dotenv();
 
     let mongodb_uri =
         std::env::var("MONGODB_URI").unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
-    let jwt_secret =
-        std::env::var("JWT_SECRET").unwrap_or_else(|_| "change-me-in-production".to_string());
+    let jwt_secret = resolve_jwt_secret();
     let klipy_api_key = std::env::var("KLIPY_API_KEY").unwrap_or_default();
     let steam_api_key = std::env::var("STEAM_API_KEY").unwrap_or_default();
     let spotify_client_id = std::env::var("SPOTIFY_CLIENT_ID").unwrap_or_default();
