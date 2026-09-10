@@ -1716,7 +1716,24 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 update_doc.insert("display_name", dn);
             }
             if let Some(nfu) = msg.get("name_font_url").and_then(|v| v.as_str()) {
-                update_doc.insert("name_font_url", nfu);
+                // Checked rather than trusted: this one is written into a
+                // stylesheet on every client that renders the name, so a bad
+                // value is other people's CSS, not just a broken font.
+                if crate::backend::helpers::valid_name_font_url(nfu) {
+                    update_doc.insert("name_font_url", nfu);
+                } else {
+                    send_to_conn(
+                        &state,
+                        user_id,
+                        conn_id,
+                        &json!({
+                            "type": "error",
+                            "error": "invalid_font_url",
+                            "message": "That font must be a file uploaded to this server"
+                        }),
+                    )
+                    .await;
+                }
             }
             if let Some(sting) = msg.get("entrance_sound_url").and_then(|v| v.as_str()) {
                 // Played to everyone in a voice channel without their asking,

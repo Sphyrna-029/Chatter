@@ -917,16 +917,24 @@ pub(crate) async fn upload_file(
         .unwrap_or(data.len() as u64);
 
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    // The quote/paren/backslash group is not about URL parsing: these URLs get
+    // written into CSS (`url('…')` for a name font) and into HTML attributes,
+    // and a filename is user-chosen. Encoding them here means an upload's URL
+    // is inert in every context that later quotes it.
     const ENCODE_SET: &AsciiSet = &CONTROLS
         .add(b' ')
         .add(b'"')
+        .add(b'\'')
         .add(b'<')
         .add(b'>')
         .add(b'`')
         .add(b'#')
         .add(b'?')
         .add(b'{')
-        .add(b'}');
+        .add(b'}')
+        .add(b'(')
+        .add(b')')
+        .add(b'\\');
     let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
 
     let host = headers
@@ -1281,16 +1289,24 @@ pub(crate) async fn upload_complete(
 
     // Build URL
     use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    // The quote/paren/backslash group is not about URL parsing: these URLs get
+    // written into CSS (`url('…')` for a name font) and into HTML attributes,
+    // and a filename is user-chosen. Encoding them here means an upload's URL
+    // is inert in every context that later quotes it.
     const ENCODE_SET: &AsciiSet = &CONTROLS
         .add(b' ')
         .add(b'"')
+        .add(b'\'')
         .add(b'<')
         .add(b'>')
         .add(b'`')
         .add(b'#')
         .add(b'?')
         .add(b'{')
-        .add(b'}');
+        .add(b'}')
+        .add(b'(')
+        .add(b')')
+        .add(b'\\');
     let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
 
     let host = headers

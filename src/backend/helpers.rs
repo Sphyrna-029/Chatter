@@ -196,6 +196,52 @@ pub(crate) fn valid_theme_share_code(code: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Whether a string is safe to use as a custom name font.
+///
+/// The value ends up interpolated into a stylesheet on every client that
+/// renders the person's name — `url('<here>')` — so an unchecked one is not a
+/// bad link, it is a CSS injection into everybody else's page: close the
+/// quote and the rule and the rest of the string is arbitrary CSS, which
+/// reads attributes back out through selectors and can cover the UI with
+/// anything it likes. It reached that sink verbatim, and the upload URL keeps
+/// literal `'` and `(` in a filename, so a crafted upload was enough.
+///
+/// Fonts are uploaded to this instance and referred to by the URL that upload
+/// answered with, so the shape is known: same-origin, under `/external/`, and
+/// free of the characters that end a CSS string or a rule.
+pub(crate) fn valid_name_font_url(url: &str) -> bool {
+    const MAX_FONT_URL_LEN: usize = 512;
+    if url.is_empty() {
+        return true; // clearing the font
+    }
+    if url.len() > MAX_FONT_URL_LEN {
+        return false;
+    }
+    // Nothing that can leave the `url('…')` string, end the declaration, or
+    // start a comment.
+    if url
+        .chars()
+        .any(|c| c.is_whitespace() || c.is_control() || "'\"\\();{}<>".contains(c))
+    {
+        return false;
+    }
+
+    let path = if let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    {
+        // Absolute form: skip the authority, judge the path.
+        match rest.find('/') {
+            Some(i) => &rest[i..],
+            None => return false,
+        }
+    } else {
+        url
+    };
+
+    path.starts_with("/external/") && !path.contains("..")
+}
+
 pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1526,5 +1572,42 @@ mod tests {
     fn mention_token_uses_the_localpart() {
         assert_eq!(mention_token("@buck:localhost"), "@buck");
         assert_eq!(mention_token("buck"), "@buck");
+    }
+
+    #[test]
+    fn name_font_url_accepts_what_an_upload_answers_with() {
+        assert!(valid_name_font_url(""));
+        assert!(valid_name_font_url("/external/a1b2/My%20Font.woff2"));
+        assert!(valid_name_font_url(
+            "https://chat.example/external/a1b2/font.ttf"
+        ));
+        assert!(valid_name_font_url(
+            "http://localhost:8000/external/a1b2/font.otf"
+        ));
+    }
+
+    #[test]
+    fn name_font_url_rejects_an_escape_from_the_css_string() {
+        // The payload this exists for: close the url(), close the rule, and
+        // the rest is CSS in every viewer's page.
+        assert!(!valid_name_font_url(
+            "/external/a/f.ttf'); } :root { --x: url('https://evil/x"
+        ));
+        assert!(!valid_name_font_url("/external/a/f.ttf\"); }"));
+        assert!(!valid_name_font_url("/external/a/f(x).ttf"));
+        assert!(!valid_name_font_url("/external/a/f.ttf; color: red"));
+        assert!(!valid_name_font_url("/external/a/ f.ttf"));
+    }
+
+    #[test]
+    fn name_font_url_stays_on_this_server() {
+        assert!(!valid_name_font_url("https://evil.example/font.ttf"));
+        assert!(!valid_name_font_url("/etc/passwd"));
+        assert!(!valid_name_font_url("/external/../../etc/passwd"));
+        assert!(!valid_name_font_url("javascript:alert(1)"));
+        assert!(!valid_name_font_url(&format!(
+            "/external/a/{}.ttf",
+            "x".repeat(600)
+        )));
     }
 }
