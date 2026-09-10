@@ -17,7 +17,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn, displayUserId } from "@/lib/utils";
-import { reservedBox } from "@/lib/mediaBox";
+import { reservedBox, thumbnailBox, type MediaDimensions } from "@/lib/mediaBox";
 import { can, canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
 import {
@@ -498,7 +498,7 @@ function CcControls({
 }
 
 /** Lazy video — shows a first-frame thumbnail with a play button; only loads the video when clicked */
-function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand: () => void; onCast?: (url: string) => void; castState?: string }) {
+function LazyVideo({ url, dims, onExpand, onCast, castState }: { url: string; dims?: MediaDimensions; onExpand: () => void; onCast?: (url: string) => void; castState?: string }) {
   const [activated, setActivated] = useState(false);
   const isLocal = url.includes("/external/");
   const thumbUrl = `${url}.thumb.jpg`;
@@ -529,6 +529,10 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
             src={thumbUrl}
             alt=""
             className="max-w-[min(640px,100%)] max-h-[480px] rounded-md object-contain"
+            // Without this the wrapper takes the thumbnail's full 640px even
+            // when `max-h` has drawn it narrower, and its dark background fills
+            // the difference. See `thumbnailBox`.
+            style={thumbnailBox(dims)}
             onError={(e) => {
               const el = e.currentTarget as HTMLImageElement;
               el.style.display = "none";
@@ -587,6 +591,11 @@ function LazyVideo({ url, onExpand, onCast, castState }: { url: string; onExpand
         controls
         preload="auto"
         className="max-w-[min(640px,100%)] max-h-[480px] rounded-md cursor-pointer"
+        // Same box as the thumbnail it replaces, for the same reason: the
+        // wrapper is shrink-to-fit and `CcControls` hangs off its right edge,
+        // which on a tall video sat out in space beside the picture. Matching
+        // the thumbnail also means clicking play moves nothing.
+        style={thumbnailBox(dims)}
         onClick={(e) => {
           const video = e.currentTarget;
           video.pause();
@@ -939,7 +948,7 @@ const MediaPreview = memo(function MediaPreview({ body, media, hiddenBySpoiler, 
         );
       })}
       {videos.map((url) => (
-        <LazyVideo key={url} url={url} onExpand={() => { lightboxDidAutoPlay.current = false; setLightbox({ url, type: "video" }); }} onCast={(u) => castVideo(u)} castState={castState} />
+        <LazyVideo key={url} url={url} dims={media?.[url]} onExpand={() => { lightboxDidAutoPlay.current = false; setLightbox({ url, type: "video" }); }} onCast={(u) => castVideo(u)} castState={castState} />
       ))}
       {audios.map((url) => (
         <audio

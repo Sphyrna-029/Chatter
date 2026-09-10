@@ -35,6 +35,37 @@ export interface MediaDimensions {
  * Returns undefined when nothing is known about the image, leaving it to size
  * itself as it always has.
  */
+/** The caps a video thumbnail is rendered under, matching the classes on it. */
+export const THUMBNAIL_MAX_W_PX = 640;
+export const THUMBNAIL_MAX_H_PX = 480;
+
+/**
+ * The same rule for a video's thumbnail, and the fix for a black box beside it.
+ *
+ * The thumbnail sits in a shrink-to-fit container with a dark background, and a
+ * replaced element contributes its *intrinsic* width to that container —
+ * `max-height` does not feed back into the calculation. So a thumbnail taller
+ * than the cap was drawn narrow inside a box still the full 640 wide, and the
+ * background showed to the right of it: a portrait video rendered 270px of
+ * picture against 370px of black, while a landscape one, never reaching the
+ * cap, looked perfect. Giving the image a width the container can agree with
+ * settles both.
+ *
+ * The video's own width is not a bound here the way an image's is. Thumbnails
+ * are generated at exactly `THUMBNAIL_MAX_W_PX` across whatever the source
+ * resolution, so that is already the widest it can be drawn without upscaling.
+ */
+export function thumbnailBox(dims: MediaDimensions | undefined) {
+  if (!dims) return undefined;
+  const { w, h } = dims;
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return undefined;
+  const ratio = (w / h).toFixed(4);
+  return {
+    aspectRatio: `${w} / ${h}`,
+    width: `min(100%, ${THUMBNAIL_MAX_W_PX}px, calc(${THUMBNAIL_MAX_H_PX}px * ${ratio}))`,
+  };
+}
+
 export function reservedBox(dims: MediaDimensions | undefined) {
   if (!dims) return undefined;
   const { w, h } = dims;

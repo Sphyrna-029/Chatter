@@ -6,7 +6,7 @@
  * the timeline moves again.
  */
 import { describe, it, expect } from "vitest";
-import { reservedBox, MESSAGE_IMAGE_MAX_H_REM } from "@/lib/mediaBox";
+import { reservedBox, thumbnailBox, MESSAGE_IMAGE_MAX_H_REM } from "@/lib/mediaBox";
 
 describe("reservedBox", () => {
   it("bounds width by the column, the image, and the height cap", () => {
@@ -44,5 +44,36 @@ describe("reservedBox", () => {
     expect(reservedBox({ w: -5, h: 100 })).toBeUndefined();
     expect(reservedBox({ w: Number.NaN, h: 100 })).toBeUndefined();
     expect(reservedBox({ w: Number.POSITIVE_INFINITY, h: 100 })).toBeUndefined();
+  });
+});
+
+describe("thumbnailBox", () => {
+  it("holds a landscape thumbnail at its full width", () => {
+    // 16:9 never reaches the height cap, which is why these always looked fine.
+    const box = thumbnailBox({ w: 640, h: 360 })!;
+    expect(box.width).toBe("min(100%, 640px, calc(480px * 1.7778))");
+    expect(box.aspectRatio).toBe("640 / 360");
+  });
+
+  it("narrows a portrait thumbnail to the width its height cap implies", () => {
+    // The bug: 640 wide in the container, 270 wide on screen, 370px of the
+    // container's black background in between.
+    const box = thumbnailBox({ w: 640, h: 1138 })!;
+    expect(box.width).toBe("min(100%, 640px, calc(480px * 0.5624))");
+    expect(box.aspectRatio).toBe("640 / 1138");
+  });
+
+  it("narrows a square thumbnail too", () => {
+    // Anything narrower than 4:3 reaches the cap, not just portrait.
+    expect(thumbnailBox({ w: 640, h: 640 })!.width).toBe(
+      "min(100%, 640px, calc(480px * 1.0000))",
+    );
+  });
+
+  it("says nothing when the size is unknown or nonsense", () => {
+    expect(thumbnailBox(undefined)).toBeUndefined();
+    expect(thumbnailBox({ w: 640, h: 0 })).toBeUndefined();
+    expect(thumbnailBox({ w: 0, h: 480 })).toBeUndefined();
+    expect(thumbnailBox({ w: Number.NaN, h: 480 })).toBeUndefined();
   });
 });

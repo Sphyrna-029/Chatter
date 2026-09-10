@@ -540,24 +540,22 @@ async fn thumb_needs_update(video: &str) -> bool {
     width < THUMB_TARGET_WIDTH
 }
 
-/// Startup migration: regenerate existing video thumbnails that were produced
-/// by a legacy generator (narrower than THUMB_TARGET_WIDTH — the old frame-0
-/// captures that render all black).
-/// Idempotent — healthy (newer-generation) thumbnails are left untouched, and
-/// a regenerated thumbnail meets the width target, so it is never
-/// re-processed on restart.
-/// Startup migration: measure images uploaded before dimensions were recorded.
+/// Startup migration: measure uploads whose dimensions were never recorded.
 ///
-/// Without this the reflow only stops for images uploaded from here on, and the
+/// Without this the reflow only stops for media uploaded from here on, and the
 /// timeline that actually moves under a reader is old history — which is all
 /// of it. Runs once in the background, skips anything already measured, and
 /// leaves a record alone if the file behind it has gone.
 pub(crate) async fn backfill_image_dimensions(state: Arc<AppState>) {
     let uploads = state.db.collection::<UploadRecord>("uploads");
-    // Only records that have never been measured. A record whose file is not an
-    // image is measured once, comes back None, and is marked so with a zero so
-    // it is not probed again on every boot.
-    let filter = doc! { "width": { "$exists": false } };
+    // Records never measured, plus those a previous run marked with a zero.
+    // The zeroes have to be revisited because that run recorded one for every
+    // video: dimensions were an image concern until a tall video turned out to
+    // lay its thumbnail out in a box the width of a wide one.
+    let filter = doc! { "$or": [
+        { "width": { "$exists": false } },
+        { "width": 0 },
+    ] };
     let mut cursor = match uploads.find(filter).await {
         Ok(c) => c,
         Err(_) => return,
@@ -575,13 +573,30 @@ pub(crate) async fn backfill_image_dimensions(state: Arc<AppState>) {
             .next()
             .unwrap_or("")
             .to_ascii_lowercase();
-        // Marked as measured either way, so a directory full of documents and
-        // videos is walked once rather than on every restart.
+        // Marked as measured either way, so a directory full of documents is
+        // walked once rather than on every restart.
         let dims = if is_measurable_image(&ext) {
-            probe_image_dimensions(&record.disk_path).await
+            // A zero already standing against an image is a probe that failed;
+            // repeating it every boot would not make it succeed.
+            match record.width {
+                Some(_) => None,
+                None => probe_image_dimensions(&record.disk_path).await,
+            }
+        } else if is_thumbnailed_video(&ext) {
+            // Measured through the thumbnail, which may not exist yet: these
+            // are generated on first view, and a video nobody has opened has
+            // none. Generating it here is what the migration is for, and it
+            // returns immediately when one is already there.
+            generate_thumbnail(&record.disk_path).await;
+            probe_video_dimensions(&record.disk_path).await
         } else {
             None
         };
+        // Nothing learned and a zero already recorded: leave the record alone
+        // rather than rewriting the same value on every restart.
+        if dims.is_none() && record.width.is_some() {
+            continue;
+        }
         let (w, h) = match dims {
             Some((w, h)) => (w as i64, h as i64),
             None => (0, 0),
@@ -598,10 +613,17 @@ pub(crate) async fn backfill_image_dimensions(state: Arc<AppState>) {
     }
 
     if measured > 0 {
-        println!("Measured {measured} existing image upload(s) at startup");
+        println!("Measured {measured} existing upload(s) at startup");
     }
 }
 
+/// Startup migration: regenerate existing video thumbnails that were produced
+/// by a legacy generator (narrower than THUMB_TARGET_WIDTH — the old frame-0
+/// captures that render all black).
+///
+/// Idempotent — healthy (newer-generation) thumbnails are left untouched, and
+/// a regenerated thumbnail meets the width target, so it is never
+/// re-processed on restart.
 pub(crate) async fn fix_black_thumbnails() {
     let root = "external";
     let mut stack = vec![std::path::PathBuf::from(root)];
@@ -721,13 +743,36 @@ pub(crate) async fn probe_image_dimensions(path: &str) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
-/// Extensions worth probing. Video is excluded on purpose — it already renders
-/// into a fixed aspect box, so it never reflowed in the first place.
+/// Still-image extensions worth probing.
 pub(crate) fn is_measurable_image(ext: &str) -> bool {
     matches!(
         ext,
         "jpg" | "jpeg" | "png" | "webp" | "bmp" | "tiff" | "gif" | "avif"
     )
+}
+
+/// Video formats a browser plays directly, and which therefore get a
+/// `.thumb.jpg` sidecar rather than a transcode.
+pub(crate) fn is_thumbnailed_video(ext: &str) -> bool {
+    matches!(ext, "mp4" | "mov" | "m4v" | "webm" | "ogg")
+}
+
+/// The size a video will occupy in the timeline: its thumbnail's, not its own.
+///
+/// Deliberately the thumbnail. It is what a message actually lays out, ffmpeg
+/// has already baked any rotation metadata into it — a phone video reports
+/// itself landscape and displays portrait, so the stream's own width and height
+/// would describe a box turned on its side — and it is always 640 across, so
+/// the ratio recorded is the one the browser will use.
+///
+/// Answers `None` until the thumbnail exists; nothing can be said about the
+/// geometry of a video before the frame that stands for it has been chosen.
+pub(crate) async fn probe_video_dimensions(video_path: &str) -> Option<(u32, u32)> {
+    let thumb = format!("{}.thumb.jpg", video_path);
+    if tokio::fs::metadata(&thumb).await.is_err() {
+        return None;
+    }
+    probe_image_dimensions(&thumb).await
 }
 
 pub(crate) async fn upload_file(
@@ -850,7 +895,7 @@ pub(crate) async fn upload_file(
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
+    if is_thumbnailed_video(&vid_ext) {
         generate_thumbnail(&path).await;
         extract_subtitles(&path).await;
     }
@@ -906,6 +951,10 @@ pub(crate) async fn upload_file(
             .to_ascii_lowercase();
         if is_measurable_image(&ext) {
             probe_image_dimensions(&path).await.unzip()
+        } else if is_thumbnailed_video(&ext) {
+            // The thumbnail was generated above, so this measures the picture
+            // the timeline will lay out rather than the video behind it.
+            probe_video_dimensions(&path).await.unzip()
         } else {
             (None, None)
         }
@@ -1209,7 +1258,7 @@ pub(crate) async fn upload_complete(
         .next()
         .unwrap_or("")
         .to_ascii_lowercase();
-    if matches!(vid_ext.as_str(), "mp4" | "mov" | "m4v" | "webm" | "ogg") {
+    if is_thumbnailed_video(&vid_ext) {
         generate_thumbnail(&path).await;
         extract_subtitles(&path).await;
     }
@@ -1266,6 +1315,10 @@ pub(crate) async fn upload_complete(
             .to_ascii_lowercase();
         if is_measurable_image(&ext) {
             probe_image_dimensions(&path).await.unzip()
+        } else if is_thumbnailed_video(&ext) {
+            // The thumbnail was generated above, so this measures the picture
+            // the timeline will lay out rather than the video behind it.
+            probe_video_dimensions(&path).await.unzip()
         } else {
             (None, None)
         }
