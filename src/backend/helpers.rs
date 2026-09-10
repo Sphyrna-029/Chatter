@@ -19,47 +19,65 @@ use std::time::SystemTime;
 
 // ─── JWT ─────────────────────────────────────────────────────────────────────
 
+/// What a token is for.
+///
+/// The two kinds were byte-identical in everything but `exp` before this, so
+/// the refresh token — seven days long, and sent to every path as a cookie —
+/// was accepted as a bearer credential on every endpoint in the API. That made
+/// the fifteen-minute access token decorative, and left logout unable to end a
+/// session it had already deleted from the database.
+pub(crate) const TOKEN_TYPE_ACCESS: &str = "access";
+pub(crate) const TOKEN_TYPE_REFRESH: &str = "refresh";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Claims {
     pub(crate) sub: String, // user_id
     pub(crate) exp: usize,
     pub(crate) iat: usize,
+    /// Absent on tokens minted before this claim existed. Those are read as
+    /// access tokens so live sessions are not signed out by the deploy: an
+    /// old refresh token stays usable as a bearer for the rest of its week,
+    /// but the first `/refresh` rotates it into a typed pair, which happens
+    /// within a quarter of an hour of the client doing anything at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) typ: Option<String>,
+}
+
+impl Claims {
+    /// Whether this token may be presented as `Authorization: Bearer`.
+    fn is_usable_as_access(&self) -> bool {
+        match self.typ.as_deref() {
+            Some(t) => t == TOKEN_TYPE_ACCESS,
+            None => true, // legacy, pre-`typ`
+        }
+    }
+}
+
+fn encode_token(user_id: &str, secret: &str, typ: &str, ttl_secs: usize) -> String {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as usize;
+    let claims = Claims {
+        sub: user_id.to_string(),
+        iat: now,
+        exp: now + ttl_secs,
+        typ: Some(typ.to_string()),
+    };
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
+    .unwrap()
 }
 
 pub(crate) fn create_access_token(user_id: &str, secret: &str) -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
-    let claims = Claims {
-        sub: user_id.to_string(),
-        iat: now,
-        exp: now + 15 * 60, // 15 minutes
-    };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .unwrap()
+    encode_token(user_id, secret, TOKEN_TYPE_ACCESS, 15 * 60)
 }
 
 pub(crate) fn create_refresh_token(user_id: &str, secret: &str) -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as usize;
-    let claims = Claims {
-        sub: user_id.to_string(),
-        iat: now,
-        exp: now + 7 * 24 * 60 * 60, // 7 days
-    };
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
-    .unwrap()
+    encode_token(user_id, secret, TOKEN_TYPE_REFRESH, 7 * 24 * 60 * 60)
 }
 
 pub(crate) fn decode_token(token: &str, secret: &str) -> Option<Claims> {
@@ -265,8 +283,14 @@ pub(crate) fn extract_token(headers: &HeaderMap) -> Option<String> {
 }
 
 /// Stateless JWT decode — no DB call needed.
+///
+/// Answers only for tokens that are allowed to act as a session: a refresh
+/// token presented here is rejected, so it stays what it is — something you
+/// trade at `/refresh`, and nothing more.
 pub(crate) fn get_user_from_token(state: &AppState, token: &str) -> Option<String> {
-    decode_token(token, &state.jwt_secret).map(|c| c.sub)
+    decode_token(token, &state.jwt_secret)
+        .filter(|c| c.is_usable_as_access())
+        .map(|c| c.sub)
 }
 
 /// Look up a bot by its opaque API token (SHA-256 hash lookup in DB).
@@ -1609,5 +1633,41 @@ mod tests {
             "/external/a/{}.ttf",
             "x".repeat(600)
         )));
+    }
+
+    #[test]
+    fn a_refresh_token_is_not_a_session() {
+        // The whole point of the `typ` claim: the seven-day token is good for
+        // one thing, and being a bearer credential is not it.
+        let secret = "test-secret-value";
+        let access = create_access_token("@buck:localhost", secret);
+        let refresh = create_refresh_token("@buck:localhost", secret);
+
+        assert!(decode_token(&access, secret).unwrap().is_usable_as_access());
+        assert!(!decode_token(&refresh, secret)
+            .unwrap()
+            .is_usable_as_access());
+    }
+
+    #[test]
+    fn a_token_minted_before_typ_still_works() {
+        // Deploying this must not sign everybody out.
+        let secret = "test-secret-value";
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as usize;
+        let legacy = encode(
+            &Header::default(),
+            &Claims {
+                sub: "@buck:localhost".to_string(),
+                iat: now,
+                exp: now + 900,
+                typ: None,
+            },
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+        assert!(decode_token(&legacy, secret).unwrap().is_usable_as_access());
     }
 }
