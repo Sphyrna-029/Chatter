@@ -312,6 +312,7 @@ pub(crate) async fn register(
 
 pub(crate) async fn totp_verify(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(req): Json<TotpVerifyRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let user_id = req.user_id;
@@ -434,7 +435,21 @@ pub(crate) async fn totp_verify(
             .into_response());
     }
 
-    // Existing user flow (e.g. TOTP setup for existing accounts)
+    // Existing user flow: finishing the 2FA setup started at /api/totp/setup.
+    //
+    // Only that. It used to answer for *any* existing account, which made a
+    // current TOTP code a complete credential on its own — no password — and
+    // handed back a fresh set of recovery codes with the session. The two
+    // conditions below put it back to what it is for: a caller who is already
+    // signed in, proving they can read the secret they just enrolled.
+    let caller = extract_token(&headers).and_then(|t| get_user_from_token(&state, &t));
+    if caller.as_deref() != Some(user_id.as_str()) {
+        return Err(error_response(
+            StatusCode::UNAUTHORIZED,
+            "Sign in before setting up 2FA",
+        ));
+    }
+
     let users = state.db.collection::<UserRecord>("users");
     let user = users
         .find_one(doc! { "_id": &user_id })
@@ -447,6 +462,16 @@ pub(crate) async fn totp_verify(
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "TOTP not configured",
+        ));
+    }
+
+    // Already-enrolled accounts go through /login, which asks for the password
+    // first. Re-running setup here would mint a session and rotate the
+    // recovery codes on nothing but a six-digit code.
+    if user.totp_verified {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "2FA is already set up",
         ));
     }
 

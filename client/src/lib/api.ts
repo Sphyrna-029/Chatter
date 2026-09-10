@@ -266,9 +266,14 @@ export async function apiCheckUsername(username: string) {
 }
 
 export async function apiVerifyTotp(userId: string, code: string) {
+  // Two callers, one endpoint. Registration has no session yet and sends no
+  // Authorization header — the server answers that from the pending-signup
+  // record. Enrolling 2FA on an existing account does have one, and the server
+  // now requires it, so it goes through authHeaders() rather than a bare
+  // Content-Type.
   const res = await fetch("/api/totp/verify", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify({ user_id: userId, code }),
   });
   if (!res.ok) {
