@@ -15,13 +15,59 @@ import {
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus, ChevronLeft, ChevronRight } from "lucide-react";
-import { displayUserId } from "@/lib/utils";
+import { X, ArrowUpDown, Search, ImagePlus, Settings, Copy, Trash2, Link, Lock, Eye, EyeOff, ShieldBan, Webhook as WebhookIcon, Bot as BotIcon, RefreshCw, Plus, ChevronLeft, ChevronRight, Volume2, Palette, Smile } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { cn, displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 import { toast } from "sonner";
 import { apiGetAuditLog, type AuditEntry } from "@/lib/api";
 import { MAX_SOUND_SECS, playSound, type SoundEvent, type SoundPack } from "@/lib/sounds";
 import { decodeThemeShare, extractShareCode, useThemeSettings } from "@/lib/theme";
+
+/** A shaded group of related settings. The room settings dialog had grown
+ *  past the point where a flat column of controls could be read: tabs
+ *  separated the broad areas, but within a tab a toggle for the public room
+ *  list sat in the same undifferentiated stack as a password field. Each
+ *  group gets a card with a heading, so the eye can find the boundary before
+ *  it reads the labels. */
+function SettingsSection({
+  title,
+  description,
+  icon: Icon,
+  action,
+  className,
+  children,
+}: {
+  title: string;
+  description?: string;
+  icon?: LucideIcon;
+  /** Rendered at the far right of the heading row — a "Create" button that
+   *  belongs to the group as a whole rather than to any one control. */
+  action?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "space-y-3 rounded-lg border border-border/40 bg-muted/20 p-3",
+        className,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
+          <h3 className="ui-heading flex items-center gap-1.5">
+            {Icon && <Icon className="w-3.5 h-3.5 shrink-0" />}
+            {title}
+          </h3>
+          {description && <p className="ui-hint">{description}</p>}
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 /** Readable phrasing for each audit action. An unknown action falls back to
  *  its raw string, so a newly added server action still renders. */
@@ -763,102 +809,167 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
             )}
           </TabsList>
 
-          <TabsContent value="general" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-            <div className="flex items-start gap-4">
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="shrink-0 w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center overflow-hidden hover:border-muted-foreground/60 transition-colors cursor-pointer"
-              >
-                {iconPreview ? (
-                  <img src={iconPreview} alt="Room icon" className="w-full h-full object-cover" />
-                ) : (
-                  <ImagePlus className="w-5 h-5 text-muted-foreground" />
+          <TabsContent value="general" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <SettingsSection title="Identity" description="How the room shows up in lists and at the top of the window.">
+              <div className="flex items-start gap-4">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="shrink-0 w-16 h-16 rounded-full border-2 border-dashed border-muted-foreground/30 flex items-center justify-center overflow-hidden hover:border-muted-foreground/60 transition-colors cursor-pointer"
+                >
+                  {iconPreview ? (
+                    <img src={iconPreview} alt="Room icon" className="w-full h-full object-cover" />
+                  ) : (
+                    <ImagePlus className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={handleIconSelect}
+                />
+                <div className="flex-1 space-y-2">
+                  <Label htmlFor="settings-room-name">Room Name</Label>
+                  <Input
+                    id="settings-room-name"
+                    placeholder="Room name"
+                    value={name}
+                    maxLength={22}
+                    onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSave()}
+                  />
+                  <p className="text-xs text-muted-foreground">{name.length}/22</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="settings-room-tags">Tags</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="settings-room-tags"
+                    placeholder="Add a tag and press Enter"
+                    value={tagInput}
+                    onChange={(e) => setTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTag();
+                      }
+                    }}
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={addTag} disabled={!tagInput.trim()}>
+                    Add
+                  </Button>
+                </div>
+                {tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {tags.map((tag) => (
+                      <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+                        {tag}
+                        <button
+                          type="button"
+                          onClick={() => removeTag(tag)}
+                          className="ml-0.5 hover:text-destructive cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
                 )}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleIconSelect}
-              />
-              <div className="flex-1 space-y-2">
-                <Label htmlFor="settings-room-name">Room Name</Label>
-                <Input
-                  id="settings-room-name"
-                  placeholder="Room name"
-                  value={name}
-                  maxLength={22}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleSave()}
-                />
-                <p className="text-xs text-muted-foreground">{name.length}/22</p>
               </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="settings-room-tags">Tags</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="settings-room-tags"
-                  placeholder="Add a tag and press Enter"
-                  value={tagInput}
-                  onChange={(e) => setTagInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addTag();
-                    }
-                  }}
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addTag} disabled={!tagInput.trim()}>
-                  Add
-                </Button>
-              </div>
-              {tags.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="gap-1 pr-1">
-                      {tag}
-                      <button
-                        type="button"
-                        onClick={() => removeTag(tag)}
-                        className="ml-0.5 hover:text-destructive cursor-pointer"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
-            {isOwner && (
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-0.5 min-w-0">
-                  <Label>Unlisted</Label>
-                  <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
-                </div>
-                <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
-              </div>
-            )}
+            </SettingsSection>
+
             {(isOwner || isModerator) && (
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-0.5 min-w-0">
-                  <Label>Read Only</Label>
-                  <p className="text-xs text-muted-foreground">Only owners and moderators can send messages</p>
+              <SettingsSection
+                title="Access"
+                icon={Lock}
+                description="Who can find this room, and who can speak in it."
+              >
+                {isOwner && (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                      <Label>Unlisted</Label>
+                      <p className="text-xs text-muted-foreground">Hidden from the public room list</p>
+                    </div>
+                    <Switch checked={settingsUnlisted} onCheckedChange={setSettingsUnlisted} />
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="space-y-0.5 min-w-0">
+                    <Label>Read Only</Label>
+                    <p className="text-xs text-muted-foreground">Only owners and moderators can send messages</p>
+                  </div>
+                  <Switch checked={settingsReadOnly} onCheckedChange={setSettingsReadOnly} />
                 </div>
-                <Switch checked={settingsReadOnly} onCheckedChange={setSettingsReadOnly} />
-              </div>
+                {isOwner && (
+                  <div className="space-y-2 border-t border-border/40 pt-3">
+                    <Label>Password Protection</Label>
+                    {info?.has_password ? (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">This room is currently password-protected.</p>
+                        <div className="relative">
+                          <Input
+                            type={showSettingsPassword ? "text" : "password"}
+                            placeholder="Change password (leave empty to keep)"
+                            value={settingsPassword}
+                            onChange={(e) => setSettingsPassword(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                            onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                          >
+                            {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={async () => {
+                            try {
+                              await updateRoomSettings(roomId, { remove_password: true });
+                            } catch (e: any) {
+                              toast.error(e.message || "Failed to remove password");
+                            }
+                          }}
+                        >
+                          Remove Password
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-xs text-muted-foreground">No password set. Add one to require a password to join.</p>
+                        <div className="relative">
+                          <Input
+                            type={showSettingsPassword ? "text" : "password"}
+                            placeholder="Set a password"
+                            value={settingsPassword}
+                            onChange={(e) => setSettingsPassword(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                            onClick={() => setShowSettingsPassword(!showSettingsPassword)}
+                          >
+                            {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </SettingsSection>
             )}
+
             {isOwner && (
-              <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
-                <div>
-                  <Label>Sound Pack</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Replace what this room sounds like. Anything left as Default
-                    uses the built-in sound. Up to {MAX_SOUND_SECS} seconds each.
-                  </p>
-                </div>
+              <SettingsSection
+                title="Sound Pack"
+                icon={Volume2}
+                description={`Replace what this room sounds like. Anything left as Default uses the built-in sound. Up to ${MAX_SOUND_SECS} seconds each.`}
+              >
                 {SOUND_EVENT_LABELS.map(({ event, label }) => (
                   <div key={event} className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground w-24 shrink-0">{label}</span>
@@ -930,52 +1041,6 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     )}
                   </div>
                 ))}
-                <div className="space-y-2 border-t border-border/40 pt-3">
-                  <Label>Suggested theme</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Offer members a theme when they open this room. They are
-                    asked once and can decline — nothing changes for anyone who
-                    does not accept.
-                  </p>
-                  {suggestedTheme ? (
-                    <div className="flex items-center gap-2">
-                      <span className="ui-meta truncate flex-1">
-                        {suggestedThemeName ?? "Not a readable share code"}
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setSuggestedTheme("")}
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  ) : (
-                    <p className="ui-hint">No theme suggested.</p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        const code = shareTheme(activeTheme.id);
-                        if (code) setSuggestedTheme(code);
-                      }}
-                    >
-                      Suggest my current theme
-                    </Button>
-                    <Input
-                      className="flex-1 h-8 text-xs"
-                      placeholder="…or paste a share link"
-                      value=""
-                      onChange={(e) => {
-                        const code = extractShareCode(e.target.value);
-                        if (code) setSuggestedTheme(code);
-                      }}
-                    />
-                  </div>
-                </div>
                 <div className="flex items-center justify-between gap-3 border-t border-border/40 pt-3">
                   <div className="min-w-0">
                     <Label>Entrance sounds</Label>
@@ -989,74 +1054,63 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     onCheckedChange={setEntranceSoundsEnabled}
                   />
                 </div>
-              </div>
+              </SettingsSection>
             )}
+
             {isOwner && (
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1.5">
-                  <Lock className="w-3.5 h-3.5" />
-                  Password Protection
-                </Label>
-                {info?.has_password ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">This room is currently password-protected.</p>
-                    <div className="relative">
-                      <Input
-                        type={showSettingsPassword ? "text" : "password"}
-                        placeholder="Change password (leave empty to keep)"
-                        value={settingsPassword}
-                        onChange={(e) => setSettingsPassword(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                        onClick={() => setShowSettingsPassword(!showSettingsPassword)}
-                      >
-                        {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
+              <SettingsSection
+                title="Suggested theme"
+                icon={Palette}
+                description="Offer members a theme when they open this room. They are asked once and can decline — nothing changes for anyone who does not accept."
+              >
+                {suggestedTheme ? (
+                  <div className="flex items-center gap-2">
+                    <span className="ui-meta truncate flex-1">
+                      {suggestedThemeName ?? "Not a readable share code"}
+                    </span>
                     <Button
-                      type="button"
-                      variant="outline"
                       size="sm"
-                      onClick={async () => {
-                        try {
-                          await updateRoomSettings(roomId, { remove_password: true });
-                        } catch (e: any) {
-                          toast.error(e.message || "Failed to remove password");
-                        }
-                      }}
+                      variant="outline"
+                      onClick={() => setSuggestedTheme("")}
                     >
-                      Remove Password
+                      Clear
                     </Button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    <p className="text-xs text-muted-foreground">No password set. Add one to require a password to join.</p>
-                    <div className="relative">
-                      <Input
-                        type={showSettingsPassword ? "text" : "password"}
-                        placeholder="Set a password"
-                        value={settingsPassword}
-                        onChange={(e) => setSettingsPassword(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
-                        onClick={() => setShowSettingsPassword(!showSettingsPassword)}
-                      >
-                        {showSettingsPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
+                  <p className="ui-hint">No theme suggested.</p>
                 )}
-              </div>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      const code = shareTheme(activeTheme.id);
+                      if (code) setSuggestedTheme(code);
+                    }}
+                  >
+                    Suggest my current theme
+                  </Button>
+                  <Input
+                    className="flex-1 h-8 text-xs"
+                    placeholder="…or paste a share link"
+                    value=""
+                    onChange={(e) => {
+                      const code = extractShareCode(e.target.value);
+                      if (code) setSuggestedTheme(code);
+                    }}
+                  />
+                </div>
+              </SettingsSection>
             )}
           </TabsContent>
 
-          <TabsContent value="emojis" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-            <div className="space-y-2">
-              <Label htmlFor="settings-room-emojis">Room Emojis</Label>
+          <TabsContent value="emojis" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+            <SettingsSection
+              title="Room Emojis"
+              icon={Smile}
+              description="Emoji anyone in this room can pick from, on top of the standard set."
+            >
               <div className="flex gap-2">
                 <Input
                   id="settings-room-emojis"
@@ -1111,10 +1165,11 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   ))}
                 </div>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label>Emoji Aliases</Label>
-              <p className="text-xs text-muted-foreground">Map shortcodes like :salute: to an emoji or custom image</p>
+            </SettingsSection>
+            <SettingsSection
+              title="Emoji Aliases"
+              description="Map shortcodes like :salute: to an emoji or custom image."
+            >
               <div className="flex gap-2">
                 <Input
                   placeholder="Alias name"
@@ -1182,17 +1237,16 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   })}
                 </div>
               )}
-            </div>
+            </SettingsSection>
           </TabsContent>
 
           {isOwner && (
-            <TabsContent value="invites" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="flex items-center gap-1.5">
-                    <Link className="w-3.5 h-3.5" />
-                    Invite Links
-                  </Label>
+            <TabsContent value="invites" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <SettingsSection
+                title="Invite Links"
+                icon={Link}
+                description="Anyone with a link can join, whatever the room's visibility."
+                action={
                   <Button
                     type="button"
                     variant="outline"
@@ -1212,7 +1266,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   >
                     {inviteLoading ? "Creating..." : "Create Invite"}
                   </Button>
-                </div>
+                }
+              >
                 {invites.length > 0 ? (
                   <div className="space-y-2 max-h-[280px] overflow-y-auto">
                     {invites.map((inv) => {
@@ -1220,7 +1275,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                       return (
                         <div
                           key={inv.code}
-                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                          className="flex items-center gap-2 p-2 rounded-md border border-border/60 bg-background/60 text-sm"
                         >
                           <div className="flex-1 min-w-0 truncate font-mono text-xs text-muted-foreground">
                             {url}
@@ -1270,17 +1325,17 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 ) : (
                   <p className="text-xs text-muted-foreground py-2">No invite links yet. Create one to share with others.</p>
                 )}
-              </div>
+              </SettingsSection>
             </TabsContent>
           )}
 
           {isOwner && (
-            <TabsContent value="bots" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1.5">
-                  <BotIcon className="w-3.5 h-3.5" />
-                  Create Bot
-                </Label>
+            <TabsContent value="bots" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <SettingsSection
+                title="Create Bot"
+                icon={BotIcon}
+                description="A bot posts with its own name and avatar, using the token you get once, here."
+              >
                 <div className="space-y-2">
                   <Input
                     placeholder="Bot name (required)"
@@ -1370,7 +1425,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     {botLoading ? "Creating..." : "Create"}
                   </Button>
                 </div>
-              </div>
+              </SettingsSection>
 
               {newBotToken && (
                 <div className="p-3 rounded-md border border-yellow-500/50 bg-warning/10 space-y-2">
@@ -1394,14 +1449,13 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label>Existing Bots</Label>
+              <SettingsSection title="Existing Bots">
                 {bots.length > 0 ? (
                   <div className="space-y-2 max-h-[280px] overflow-y-auto">
                     {bots.map((bot) => (
                       <div
                         key={bot.bot_id}
-                        className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                        className="flex items-center gap-2 p-2 rounded-md border border-border/60 bg-background/60 text-sm"
                       >
                         {bot.avatar_url ? (
                           <AuthImage src={bot.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
@@ -1473,17 +1527,17 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 ) : (
                   <p className="text-sm text-muted-foreground">No bots yet.</p>
                 )}
-              </div>
+              </SettingsSection>
             </TabsContent>
           )}
 
           {isOwner && (
-            <TabsContent value="webhooks" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1.5">
-                  <WebhookIcon className="w-3.5 h-3.5" />
-                  Create Webhook
-                </Label>
+            <TabsContent value="webhooks" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <SettingsSection
+                title="Create Webhook"
+                icon={WebhookIcon}
+                description="A URL an outside service can POST to, to drop a message into a channel."
+              >
                 <div className="space-y-2">
                   <Input
                     placeholder="Webhook name (required)"
@@ -1581,9 +1635,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     {webhookLoading ? "Creating..." : "Create"}
                   </Button>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Existing Webhooks</Label>
+              </SettingsSection>
+              <SettingsSection title="Existing Webhooks">
                 {webhooks.length > 0 ? (
                   <div className="space-y-2 max-h-[280px] overflow-y-auto">
                     {webhooks.map((wh) => {
@@ -1591,7 +1644,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                       return (
                         <div
                           key={wh.webhook_id}
-                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                          className="flex items-center gap-2 p-2 rounded-md border border-border/60 bg-background/60 text-sm"
                         >
                           {wh.avatar_url ? (
                             <AuthImage src={wh.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover shrink-0" />
@@ -1652,7 +1705,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                 ) : (
                   <p className="text-xs text-muted-foreground py-2">No webhooks yet. Create one to allow external services to post messages.</p>
                 )}
-              </div>
+              </SettingsSection>
             </TabsContent>
           )}
 
@@ -1714,12 +1767,8 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
           )}
 
           {canManageBans && (
-            <TabsContent value="moderation" className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-              <div className="space-y-2">
-                <Label className="flex items-center gap-1.5">
-                  <ShieldBan className="w-3.5 h-3.5" />
-                  Banned Users
-                </Label>
+            <TabsContent value="moderation" className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+              <SettingsSection title="Banned Users" icon={ShieldBan}>
                 {loadingBans ? (
                   <p className="text-xs text-muted-foreground py-2">Loading...</p>
                 ) : bannedUsers.length === 0 ? (
@@ -1737,7 +1786,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                       return (
                         <div
                           key={ban.user_id}
-                          className="flex items-center gap-2 p-2 rounded-md border text-sm bg-muted/30"
+                          className="flex items-center gap-2 p-2 rounded-md border border-border/60 bg-background/60 text-sm"
                         >
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-sm truncate">{username}</div>
@@ -1770,10 +1819,13 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                     })}
                   </div>
                 )}
-              </div>
+              </SettingsSection>
               {isOwner && (
-                <div className="space-y-2 border-t pt-4">
-                  <Label className="text-destructive">Danger Zone</Label>
+                <SettingsSection
+                  title="Danger Zone"
+                  icon={Trash2}
+                  className="border-destructive/40 bg-destructive/5 [&_h3]:text-destructive"
+                >
                   <p className="text-xs text-muted-foreground">
                     Deleting a room is permanent. Type the room name <span className="font-semibold text-foreground">{info?.name}</span> to confirm.
                   </p>
@@ -1801,7 +1853,7 @@ export function RoomSettingsDialog({ open, onOpenChange, roomId }: RoomSettingsD
                   >
                     {deleting ? "Deleting..." : "Delete Room"}
                   </Button>
-                </div>
+                </SettingsSection>
               )}
             </TabsContent>
           )}
