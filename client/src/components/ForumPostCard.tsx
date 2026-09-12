@@ -1,5 +1,5 @@
 import { useAppContext } from "@/lib/store";
-import type { ForumPost } from "@/lib/api";
+import { forumImages, type ForumPost } from "@/lib/api";
 import { MessageSquare, Trash2 } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
@@ -33,20 +33,27 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
   const roomId = post.room_id;
   const authorDisplay = displayUserId(post.author);
   const reactionEntries = Object.entries(post.reactions || {});
+  const images = forumImages(post);
 
   return (
     <div
       className="group relative flex gap-3 rounded-lg border p-3 transition-colors hover:bg-accent/50 cursor-pointer"
       {...clickable(onClick, `Open post: ${post.title}`)}
     >
-      {/* Thumbnail */}
-      {post.image_url && (
-        <div className="shrink-0">
+      {/* Thumbnail — the lead image, with a count when the post holds more,
+          so the row says there is a set to open without showing all of it. */}
+      {images.length > 0 && (
+        <div className="relative shrink-0">
           <AuthImage
-            src={post.image_url}
+            src={images[0]}
             alt=""
             className="w-24 h-24 object-cover rounded-md"
           />
+          {images.length > 1 && (
+            <span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-3xs font-medium tabular-nums text-white">
+              +{images.length - 1}
+            </span>
+          )}
         </div>
       )}
 

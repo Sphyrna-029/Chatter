@@ -8,18 +8,20 @@ import {
   apiEditForumComment,
   apiUploadFile,
   apiAddReaction,
+  forumImages,
   type ForumPost,
   type ForumComment,
 } from "@/lib/api";
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
-import { displayUserId } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-react";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
-import { AuthImage } from "@/components/AuthImage";
+import { ForumImageGallery } from "@/components/ForumImageGallery";
+import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { scrollBehavior } from "@/lib/theme/display";
@@ -45,8 +47,6 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const [post, setPost] = useState<ForumPost | null>(null);
   const [comments, setComments] = useState<ForumComment[]>([]);
   const [commentBody, setCommentBody] = useState("");
-  const [commentImage, setCommentImage] = useState<string | null>(null);
-  const [commentImageFile, setCommentImageFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const commentsEndRef = useRef<HTMLDivElement>(null);
@@ -62,6 +62,42 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentBody, setEditCommentBody] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+
+  const {
+    files: commentImages,
+    addMany: addCommentImages,
+    remove: removeCommentImage,
+    clear: clearCommentImages,
+    remaining: commentImagesRemaining,
+  } = usePendingFiles();
+
+  const stageCommentImages = useCallback((incoming: File[]) => {
+    const pictures = incoming.filter((f) => f.type.startsWith("image/"));
+    if (pictures.length < incoming.length) {
+      toast.error("A comment takes images only");
+    }
+    // Checked here rather than on submit: uploads run one after another, so an
+    // image the server will refuse would otherwise be found out only after the
+    // ones before it had already been sent.
+    const limit = state.uploadLimitBytes;
+    const small = limit > 0 ? pictures.filter((f) => f.size <= limit) : pictures;
+    const tooBig = pictures.length - small.length;
+    if (tooBig > 0) {
+      const mb = Math.round(limit / 1024 / 1024);
+      toast.error(
+        tooBig === 1
+          ? `That image is over the ${mb} MB limit`
+          : `${tooBig} images are over the ${mb} MB limit`,
+      );
+    }
+    if (small.length === 0) return;
+    const { rejected } = addCommentImages(small);
+    if (rejected > 0) {
+      toast.error(
+        `A comment holds ${MAX_ATTACHMENTS} images — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
+      );
+    }
+  }, [addCommentImages, state.uploadLimitBytes]);
 
   const isOwnerOrMod = useCallback(() => {
     const members = state.roomMembers;
@@ -160,19 +196,21 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   }, [comments.length]);
 
   const handleSubmitComment = async () => {
-    if (!commentBody.trim() && !commentImageFile) return;
+    if (!commentBody.trim() && commentImages.length === 0) return;
     setSubmitting(true);
     try {
-      let imageUrl: string | undefined;
-      if (commentImageFile) {
-        const uploaded = await apiUploadFile(commentImageFile);
-        imageUrl = uploaded.url;
+      const urls: string[] = [];
+      for (const pending of commentImages) {
+        const uploaded = await apiUploadFile(pending.file);
+        urls.push(uploaded.url);
       }
-      const body = commentBody.trim() || (imageUrl ? "(image)" : "");
-      await apiCreateForumComment(roomId, postId, body, imageUrl);
+      // The server wants a body; a comment that is only pictures says so.
+      const body =
+        commentBody.trim() ||
+        (urls.length > 1 ? `(${urls.length} images)` : urls.length === 1 ? "(image)" : "");
+      await apiCreateForumComment(roomId, postId, body, urls);
       setCommentBody("");
-      setCommentImage(null);
-      setCommentImageFile(null);
+      clearCommentImages();
     } catch (e: any) {
       toast.error(e.message || "Failed to post comment");
     } finally {
@@ -198,14 +236,37 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   };
 
   const handleCommentImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (file) {
-      setCommentImageFile(file);
-      const reader = new FileReader();
-      reader.onload = () => setCommentImage(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+    stageCommentImages(picked);
+  };
+
+  // Dropping images onto the comment box, the same as everywhere else.
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const onDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) setDragging(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setDragging(false);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    dragCounter.current = 0;
+    stageCommentImages(Array.from(e.dataTransfer.files ?? []));
   };
 
   // Post editing
@@ -291,14 +352,8 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto p-4 space-y-4">
-          {/* Post image */}
-          {post.image_url && (
-            <AuthImage
-              src={post.image_url}
-              alt=""
-              className="w-full max-h-96 object-contain rounded-lg bg-muted"
-            />
-          )}
+          {/* Post images */}
+          <ForumImageGallery images={forumImages(post)} />
 
           {/* Post title & meta */}
           {editingPost ? (
@@ -486,13 +541,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                       ) : (
                         <ForumMarkdown content={comment.body} className="text-sm mt-1" />
                       )}
-                      {comment.image_url && (
-                        <AuthImage
-                          src={comment.image_url}
-                          alt=""
-                          className="mt-2 max-w-xs max-h-48 object-contain rounded-md"
-                        />
-                      )}
+                      <ForumImageGallery
+                        images={forumImages(comment)}
+                        className="mt-2"
+                        compact
+                      />
                     </div>
                   </div>
                 );
@@ -504,17 +557,35 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       </div>
 
       {/* Comment input */}
-      <div className="border-t p-3 shrink-0">
+      <div
+        className={cn(
+          "border-t p-3 shrink-0 transition-colors",
+          dragging && "outline-2 outline-dashed outline-primary -outline-offset-2 bg-primary/5",
+        )}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
         <div className="max-w-3xl mx-auto">
-          {commentImage && (
-            <div className="relative inline-block mb-2">
-              <AuthImage src={commentImage} alt="" className="h-16 rounded-md" />
-              <button
-                onClick={() => { setCommentImage(null); setCommentImageFile(null); }}
-                className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 cursor-pointer"
-              >
-                <X className="w-3 h-3" />
-              </button>
+          {commentImages.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {commentImages.map((pending, i) => (
+                <div key={i} className="relative">
+                  <img
+                    src={pending.previewUrl ?? ""}
+                    alt={pending.file.name}
+                    className="h-16 w-16 rounded-md border border-border object-cover"
+                  />
+                  <button
+                    onClick={() => removeCommentImage(i)}
+                    className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
+                    title={`Remove ${pending.file.name}`}
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           <div className="flex gap-2">
@@ -522,6 +593,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
               onChange={handleCommentImageSelect}
             />
@@ -529,7 +601,13 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               variant="ghost"
               size="icon"
               className="shrink-0"
+              disabled={commentImagesRemaining === 0}
               onClick={() => fileInputRef.current?.click()}
+              title={
+                commentImagesRemaining > 0
+                  ? `Add images (${commentImagesRemaining} of ${MAX_ATTACHMENTS} left)`
+                  : `${MAX_ATTACHMENTS} images is the limit`
+              }
             >
               <ImagePlus className="w-4 h-4" />
             </Button>
@@ -550,7 +628,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               size="icon"
               className="shrink-0"
               onClick={handleSubmitComment}
-              disabled={submitting || (!commentBody.trim() && !commentImageFile)}
+              disabled={submitting || (!commentBody.trim() && commentImages.length === 0)}
             
             aria-label="Post comment">
               <Send className="w-4 h-4" />

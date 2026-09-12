@@ -30,6 +30,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
+import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 
@@ -408,49 +410,122 @@ function CreatePostDialog({
   onOpenChange: (open: boolean) => void;
   roomId: string;
 }) {
+  const { state } = useAppContext();
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Which of the images is being uploaded, so a post with ten of them is not a
+  // spinner that looks stuck.
+  const [uploadedCount, setUploadedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    files: images,
+    addMany: addImages,
+    remove: removeImage,
+    clear: clearImages,
+    remaining: imagesRemaining,
+  } = usePendingFiles();
+
+  const stageImages = useCallback((incoming: File[]) => {
+    const pictures = incoming.filter((f) => f.type.startsWith("image/"));
+    if (pictures.length < incoming.length) {
+      toast.error("A post takes images only");
+    }
+    // Checked here rather than on submit: uploads run one after another, so an
+    // image the server will refuse would otherwise be found out only after the
+    // ones before it had already been sent.
+    const limit = state.uploadLimitBytes;
+    const small = limit > 0 ? pictures.filter((f) => f.size <= limit) : pictures;
+    const tooBig = pictures.length - small.length;
+    if (tooBig > 0) {
+      const mb = Math.round(limit / 1024 / 1024);
+      toast.error(
+        tooBig === 1
+          ? `That image is over the ${mb} MB limit`
+          : `${tooBig} images are over the ${mb} MB limit`,
+      );
+    }
+    if (small.length === 0) return;
+    const { rejected } = addImages(small);
+    if (rejected > 0) {
+      toast.error(
+        `A post holds ${MAX_ATTACHMENTS} images — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
+      );
+    }
+  }, [addImages, state.uploadLimitBytes]);
 
   const handleSubmit = async () => {
     if (!title.trim()) return;
     setSubmitting(true);
+    setUploadedCount(0);
     try {
-      let imageUrl: string | undefined;
-      if (imageFile) {
-        const uploaded = await apiUploadFile(imageFile);
-        imageUrl = uploaded.url;
+      // Uploaded in order so the post shows them in the order they were added.
+      const urls: string[] = [];
+      for (const pending of images) {
+        const uploaded = await apiUploadFile(pending.file);
+        urls.push(uploaded.url);
+        setUploadedCount(urls.length);
       }
-      await apiCreateForumPost(roomId, title.trim(), body, imageUrl);
+      await apiCreateForumPost(roomId, title.trim(), body, urls);
       setTitle("");
       setBody("");
-      setImageFile(null);
-      setImagePreview(null);
+      clearImages();
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e.message || "Failed to create post");
     } finally {
       setSubmitting(false);
+      setUploadedCount(0);
     }
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const picked = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onload = () => setImagePreview(reader.result as string);
-      reader.readAsDataURL(file);
-    }
+    stageImages(picked);
+  };
+
+  // Dropping images straight onto the dialog, the same as the composers.
+  const [dragging, setDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const onDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) setDragging(true);
+  };
+  const onDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setDragging(false);
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragging(false);
+    dragCounter.current = 0;
+    stageImages(Array.from(e.dataTransfer.files ?? []));
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        className={cn(
+          "transition-colors",
+          dragging && "outline-2 outline-dashed outline-primary -outline-offset-2 bg-primary/5",
+        )}
+        onDragEnter={onDragEnter}
+        onDragLeave={onDragLeave}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
         <DialogHeader>
           <DialogTitle>Create New Post</DialogTitle>
           <DialogDescription>
@@ -480,35 +555,57 @@ function CreatePostDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>Image (Optional)</Label>
+            <Label>
+              Images (Optional)
+              {images.length > 0 && (
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  {images.length} of {MAX_ATTACHMENTS}
+                </span>
+              )}
+            </Label>
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
+              multiple
               className="hidden"
               onChange={handleImageSelect}
             />
-            {imagePreview ? (
-              <div className="relative inline-block">
-                <img src={imagePreview} alt="" className="max-h-32 rounded-md" />
-                <button
-                  onClick={() => { setImageFile(null); setImagePreview(null); }}
-                  className="absolute -top-1.5 -right-1.5 bg-destructive text-destructive-foreground rounded-full p-0.5 cursor-pointer"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+            {images.length > 0 && (
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+                {images.map((pending, i) => (
+                  <div key={i} className="group relative">
+                    <img
+                      src={pending.previewUrl ?? ""}
+                      alt={pending.file.name}
+                      className="aspect-square w-full rounded-md border border-border object-cover"
+                    />
+                    <button
+                      onClick={() => removeImage(i)}
+                      className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
+                      title={`Remove ${pending.file.name}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-                className="gap-1.5"
-              >
-                <ImagePlus className="w-4 h-4" />
-                Add Image
-              </Button>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={imagesRemaining === 0}
+              className="gap-1.5"
+            >
+              <ImagePlus className="w-4 h-4" />
+              {images.length === 0
+                ? "Add Images"
+                : imagesRemaining === 0
+                  ? `${MAX_ATTACHMENTS} images is the limit`
+                  : `Add more (${imagesRemaining} left)`}
+            </Button>
+            <p className="ui-hint">Or drop images anywhere on this dialog.</p>
           </div>
         </div>
         <DialogFooter>
@@ -516,7 +613,11 @@ function CreatePostDialog({
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {submitting ? "Creating..." : "Create Post"}
+            {!submitting
+              ? "Create Post"
+              : images.length > 1
+                ? `Uploading ${Math.min(uploadedCount + 1, images.length)} of ${images.length}…`
+                : "Creating..."}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -74,14 +74,49 @@ async fn validate_forum_member(
     Ok(user_id)
 }
 
+/// How many images one post or comment may carry. Matches the composer's
+/// attachment limit, so the two surfaces say the same thing.
+const MAX_FORUM_IMAGES: usize = 10;
+
+/// Every image on a post or comment.
+///
+/// `image_url` was the whole of it before a post could carry more than one, and
+/// rows written then have only that field. Reading through here means those
+/// posts keep their image without a migration having to touch them.
+fn images_of(single: &str, many: &[String]) -> Vec<String> {
+    if !many.is_empty() {
+        many.to_vec()
+    } else if !single.is_empty() {
+        vec![single.to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+/// The images a create request is asking for, from either shape of client.
+fn requested_images(single: &Option<String>, many: &Option<Vec<String>>) -> Vec<String> {
+    let mut urls = many.clone().unwrap_or_default();
+    if urls.is_empty() {
+        if let Some(url) = single {
+            urls.push(url.clone());
+        }
+    }
+    urls.retain(|url| !url.trim().is_empty());
+    urls
+}
+
 fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>) -> Value {
+    let images = images_of(&post.image_url, &post.image_urls);
     json!({
         "post_id": post.post_id,
         "room_id": post.room_id,
         "author": post.author,
         "title": post.title,
         "body": post.body,
-        "image_url": post.image_url,
+        // Both shapes: a client that only knows the single field still gets the
+        // lead image rather than an empty post.
+        "image_url": images.first().cloned().unwrap_or_default(),
+        "image_urls": images,
         "created_at": post.created_at,
         "comment_count": post.comment_count,
         "last_activity": if post.last_activity > 0 { post.last_activity } else { post.created_at },
@@ -92,13 +127,15 @@ fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>
 }
 
 fn comment_to_json(comment: &ForumCommentRecord) -> Value {
+    let images = images_of(&comment.image_url, &comment.image_urls);
     json!({
         "comment_id": comment.comment_id,
         "post_id": comment.post_id,
         "room_id": comment.room_id,
         "author": comment.author,
         "body": comment.body,
-        "image_url": comment.image_url,
+        "image_url": images.first().cloned().unwrap_or_default(),
+        "image_urls": images,
         "created_at": comment.created_at,
         "edited": comment.edited,
         "edited_at": comment.edited_at,
@@ -146,6 +183,14 @@ pub(crate) async fn create_post(
         ));
     }
 
+    let images = requested_images(&req.image_url, &req.image_urls);
+    if images.len() > MAX_FORUM_IMAGES {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("A post may have at most {MAX_FORUM_IMAGES} images"),
+        ));
+    }
+
     let post_id = generate_id("post_");
     let now = now_millis();
     let post = ForumPostRecord {
@@ -154,7 +199,8 @@ pub(crate) async fn create_post(
         author: user_id.clone(),
         title: title.clone(),
         body: req.body.clone(),
-        image_url: req.image_url.clone().unwrap_or_default(),
+        image_url: images.first().cloned().unwrap_or_default(),
+        image_urls: images,
         created_at: now,
         comment_count: 0,
         last_activity: now,
@@ -335,6 +381,14 @@ pub(crate) async fn create_comment(
         ));
     }
 
+    let images = requested_images(&req.image_url, &req.image_urls);
+    if images.len() > MAX_FORUM_IMAGES {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("A comment may have at most {MAX_FORUM_IMAGES} images"),
+        ));
+    }
+
     let comment_id = generate_id("cmt_");
     let now = now_millis();
     let comment = ForumCommentRecord {
@@ -343,7 +397,8 @@ pub(crate) async fn create_comment(
         room_id: room_id.clone(),
         author: user_id.clone(),
         body: req.body.clone(),
-        image_url: req.image_url.clone().unwrap_or_default(),
+        image_url: images.first().cloned().unwrap_or_default(),
+        image_urls: images,
         created_at: now,
         deleted: false,
         edited: false,
@@ -592,4 +647,68 @@ pub(crate) async fn search_posts(
     }
 
     Ok(Json(json!({ "posts": results })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn urls(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_post_written_before_multiple_images_keeps_its_one() {
+        assert_eq!(images_of("/external/a.png", &[]), urls(&["/external/a.png"]));
+    }
+
+    #[test]
+    fn the_list_wins_once_a_post_has_one() {
+        // Both fields are written now, and the single one is only the lead.
+        assert_eq!(
+            images_of("/external/a.png", &urls(&["/external/a.png", "/external/b.png"])),
+            urls(&["/external/a.png", "/external/b.png"]),
+        );
+    }
+
+    #[test]
+    fn a_post_with_no_images_reads_as_empty_rather_than_one_blank() {
+        assert!(images_of("", &[]).is_empty());
+    }
+
+    #[test]
+    fn a_request_from_an_older_client_still_carries_its_image() {
+        assert_eq!(
+            requested_images(&Some("/external/a.png".into()), &None),
+            urls(&["/external/a.png"]),
+        );
+    }
+
+    #[test]
+    fn a_request_sending_both_shapes_is_taken_as_the_list() {
+        // The client sends image_url as a courtesy to older servers; taking it
+        // as a separate image would duplicate the lead on every post.
+        assert_eq!(
+            requested_images(
+                &Some("/external/a.png".into()),
+                &Some(urls(&["/external/a.png", "/external/b.png"])),
+            ),
+            urls(&["/external/a.png", "/external/b.png"]),
+        );
+    }
+
+    #[test]
+    fn blanks_are_not_images() {
+        assert!(requested_images(&Some(String::new()), &None).is_empty());
+        assert!(requested_images(&None, &Some(urls(&["", "  "]))).is_empty());
+        assert_eq!(
+            requested_images(&None, &Some(urls(&["", "/external/b.png"]))),
+            urls(&["/external/b.png"]),
+        );
+    }
+
+    #[test]
+    fn nothing_asked_for_is_nothing_stored() {
+        assert!(requested_images(&None, &None).is_empty());
+    }
 }

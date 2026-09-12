@@ -1667,7 +1667,10 @@ export interface ForumPost {
   author: string;
   title: string;
   body: string;
+  /** The first of `image_urls`. Read posts through `forumImages`. */
   image_url: string;
+  /** Absent on posts written before one could carry more than a single image. */
+  image_urls?: string[];
   created_at: number;
   comment_count: number;
   last_activity: number;
@@ -1682,16 +1685,36 @@ export interface ForumComment {
   room_id: string;
   author: string;
   body: string;
+  /** The first of `image_urls`. Read comments through `forumImages`. */
   image_url: string;
+  image_urls?: string[];
   created_at: number;
   edited?: boolean;
   edited_at?: number;
 }
 
-export async function apiCreateForumPost(roomId: string, title: string, body: string, imageUrl?: string) {
+/**
+ * Every image on a post or comment, whichever shape the server sent.
+ *
+ * A post used to hold exactly one image, and rows written then still carry
+ * only `image_url`. Nothing reads either field directly.
+ */
+export function forumImages(item: { image_url?: string; image_urls?: string[] }): string[] {
+  if (item.image_urls && item.image_urls.length > 0) return item.image_urls;
+  return item.image_url ? [item.image_url] : [];
+}
+
+export async function apiCreateForumPost(
+  roomId: string,
+  title: string,
+  body: string,
+  imageUrls: string[] = [],
+) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts`, {
     method: "POST",
-    body: JSON.stringify({ title, body, image_url: imageUrl }),
+    // Both fields: a server that predates multi-image posts reads the first
+    // one and ignores the rest, rather than storing nothing at all.
+    body: JSON.stringify({ title, body, image_url: imageUrls[0], image_urls: imageUrls }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
@@ -1726,10 +1749,15 @@ export async function apiDeleteForumPost(roomId: string, postId: string) {
   return res.json();
 }
 
-export async function apiCreateForumComment(roomId: string, postId: string, body: string, imageUrl?: string) {
+export async function apiCreateForumComment(
+  roomId: string,
+  postId: string,
+  body: string,
+  imageUrls: string[] = [],
+) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments`, {
     method: "POST",
-    body: JSON.stringify({ body, image_url: imageUrl }),
+    body: JSON.stringify({ body, image_url: imageUrls[0], image_urls: imageUrls }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);

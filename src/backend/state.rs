@@ -257,8 +257,14 @@ pub(crate) struct ForumPostRecord {
     pub(crate) author: String,
     pub(crate) title: String,
     pub(crate) body: String,
+    /// The first of `image_urls`, still written so that anything reading a row
+    /// by the old shape sees a post's lead image rather than nothing.
     #[serde(default)]
     pub(crate) image_url: String,
+    /// Every image on the post. Absent on rows written when a post could only
+    /// carry one, which is why `image_url` is still the fallback on read.
+    #[serde(default)]
+    pub(crate) image_urls: Vec<String>,
     pub(crate) created_at: i64,
     #[serde(default)]
     pub(crate) comment_count: i64,
@@ -280,8 +286,11 @@ pub(crate) struct ForumCommentRecord {
     pub(crate) room_id: String,
     pub(crate) author: String,
     pub(crate) body: String,
+    /// As on a post: the first of `image_urls`, kept for older readers.
     #[serde(default)]
     pub(crate) image_url: String,
+    #[serde(default)]
+    pub(crate) image_urls: Vec<String>,
     pub(crate) created_at: i64,
     #[serde(default)]
     pub(crate) deleted: bool,

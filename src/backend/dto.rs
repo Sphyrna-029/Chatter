@@ -198,13 +198,17 @@ pub(crate) struct SetNameColorRequest {
 pub(crate) struct CreateForumPostRequest {
     pub(crate) title: String,
     pub(crate) body: String,
+    /// Superseded by `image_urls`; still accepted so a client that predates
+    /// multi-image posts keeps working.
     pub(crate) image_url: Option<String>,
+    pub(crate) image_urls: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct CreateForumCommentRequest {
     pub(crate) body: String,
     pub(crate) image_url: Option<String>,
+    pub(crate) image_urls: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
