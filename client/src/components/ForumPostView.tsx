@@ -20,13 +20,22 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check,
-  CornerUpLeft, ChevronDown, ChevronRight, MessageSquare,
+  CornerUpLeft, ChevronDown, ChevronRight, MessageSquare, ArrowUpDown,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { ForumMediaGallery } from "@/components/ForumMediaGallery";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
-import { buildCommentThread, countReplies, MAX_THREAD_INDENT, type ForumCommentNode } from "@/lib/forumThread";
+import {
+  buildCommentThread, countReplies, loadThreadOrder, storeThreadOrder,
+  MAX_THREAD_INDENT, type ForumCommentNode, type ThreadOrder,
+} from "@/lib/forumThread";
 import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { UploadProgressOverlay } from "@/components/UploadProgressOverlay";
@@ -68,6 +77,8 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   // is one fold away — open by default, because hidden is not the same as
   // secondary.
   const [discussionOpen, setDiscussionOpen] = useState(true);
+  /** Which way round the thread reads. Held across posts and sessions. */
+  const [threadOrder, setThreadOrder] = useState<ThreadOrder>(loadThreadOrder);
   /** A comment just posted from here, to be scrolled to once it lands. */
   const [landingCommentId, setLandingCommentId] = useState<string | null>(null);
 
@@ -425,7 +436,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
     : {};
 
-  const thread = buildCommentThread(comments);
+  const thread = buildCommentThread(comments, threadOrder);
 
   /**
    * One comment and everything hanging off it.
@@ -702,15 +713,43 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
           {/* Discussion — behind the post, not beside it: a rule, a quieter
               heading, and a fold, so the page is the post first. */}
           <div className="border-t pt-3">
-            <button
-              onClick={() => setDiscussionOpen((open) => !open)}
-              className="flex w-full items-center gap-1.5 text-left text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              {discussionOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              <MessageSquare className="w-3.5 h-3.5" />
-              Discussion
-              <span className="tabular-nums">{comments.length}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setDiscussionOpen((open) => !open)}
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {discussionOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                <MessageSquare className="w-3.5 h-3.5" />
+                Discussion
+                <span className="tabular-nums">{comments.length}</span>
+              </button>
+              {/* Beside the fold rather than inside it: a control for a list
+                  you cannot see is a control that does nothing. */}
+              {discussionOpen && comments.length > 1 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="h-7 shrink-0 gap-1.5 text-xs text-muted-foreground">
+                      <ArrowUpDown className="w-3.5 h-3.5" />
+                      {threadOrder === "newest" ? "Newest first" : "Oldest first"}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {(["oldest", "newest"] as ThreadOrder[]).map((order) => (
+                      <DropdownMenuItem
+                        key={order}
+                        onClick={() => {
+                          setThreadOrder(order);
+                          storeThreadOrder(order);
+                        }}
+                        className={threadOrder === order ? "font-semibold" : ""}
+                      >
+                        {order === "newest" ? "Newest first" : "Oldest first"}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </div>
 
             {discussionOpen && (
               <div className="mt-3 space-y-2">

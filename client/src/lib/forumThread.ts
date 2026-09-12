@@ -19,7 +19,26 @@ export interface ForumCommentNode {
  * happen, but a client that is out of date with the server, or a parent deleted
  * between two fetches, must not make a comment disappear.
  */
-export function buildCommentThread(comments: ForumComment[]): ForumCommentNode[] {
+export type ThreadOrder = "oldest" | "newest";
+
+/**
+ * Sorting happens within each set of siblings, never across the list as a
+ * whole: a reply belongs under what it answers whichever way round the thread
+ * is read, and a flat re-sort would tear the tree apart.
+ */
+function orderSiblings(nodes: ForumCommentNode[], order: ThreadOrder) {
+  nodes.sort((a, b) =>
+    order === "newest"
+      ? b.comment.created_at - a.comment.created_at
+      : a.comment.created_at - b.comment.created_at,
+  );
+  for (const node of nodes) orderSiblings(node.replies, order);
+}
+
+export function buildCommentThread(
+  comments: ForumComment[],
+  order: ThreadOrder = "oldest",
+): ForumCommentNode[] {
   const byId = new Map<string, ForumCommentNode>();
   for (const comment of comments) {
     byId.set(comment.comment_id, { comment, depth: 0, replies: [] });
@@ -48,6 +67,7 @@ export function buildCommentThread(comments: ForumComment[]): ForumCommentNode[]
     }
   };
   setDepth(roots, 0);
+  orderSiblings(roots, order);
 
   return roots;
 }
@@ -65,3 +85,23 @@ export function countReplies(node: ForumCommentNode): number {
  * by then the rail says less than the "replying to" line above the composer.
  */
 export const MAX_THREAD_INDENT = 5;
+
+const THREAD_ORDER_KEY = "chatter_forum_thread_order";
+
+/** The reader's last choice, so it holds across posts and sessions. */
+export function loadThreadOrder(): ThreadOrder {
+  try {
+    return localStorage.getItem(THREAD_ORDER_KEY) === "newest" ? "newest" : "oldest";
+  } catch {
+    // Private windows and blocked site data both throw rather than return null.
+    return "oldest";
+  }
+}
+
+export function storeThreadOrder(order: ThreadOrder): void {
+  try {
+    localStorage.setItem(THREAD_ORDER_KEY, order);
+  } catch {
+    // A preference not persisting is not worth failing a render over.
+  }
+}
