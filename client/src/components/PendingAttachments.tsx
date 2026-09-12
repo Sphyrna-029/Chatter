@@ -1,6 +1,8 @@
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PendingFile } from "@/hooks/usePendingFiles";
+import { UploadProgressOverlay } from "./UploadProgressOverlay";
+import type { UploadProgressMap } from "@/hooks/useUploadQueue";
 
 function formatSize(bytes: number) {
   return bytes < 1024 * 1024
@@ -12,18 +14,25 @@ interface PendingAttachmentsProps {
   files: PendingFile[];
   onRemove: (index: number) => void;
   className?: string;
+  /** Where each file has got to, keyed by staged id. Absent until a send. */
+  progress?: UploadProgressMap;
 }
 
 /**
  * The staged-attachment row shown above a composer: files wait here until the
  * message is sent, so the text can still be edited around them.
+ *
+ * The row stays up while the send is uploading, each tile carrying its own
+ * progress — it is the only place where which file is which is already
+ * obvious.
  */
-export function PendingAttachments({ files, onRemove, className }: PendingAttachmentsProps) {
+export function PendingAttachments({ files, onRemove, className, progress }: PendingAttachmentsProps) {
   if (files.length === 0) return null;
+  const uploading = !!progress && Object.keys(progress).length > 0;
   return (
     <div className={cn("flex flex-wrap gap-2 mb-2", className)}>
       {files.map((pf, i) => (
-        <div key={i} className="relative group">
+        <div key={pf.id} className="relative group">
           {pf.previewUrl && pf.file.type.startsWith("video/") ? (
             // A frame of the clip says more than a document icon and its name,
             // and the object URL is already there to draw it from.
@@ -49,13 +58,17 @@ export function PendingAttachments({ files, onRemove, className }: PendingAttach
               <span className="ui-hint">{formatSize(pf.file.size)}</span>
             </div>
           )}
-          <button
-            className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
-            onClick={() => onRemove(i)}
-            title={`Remove ${pf.file.name}`}
-          >
-            <X className="h-2.5 w-2.5" />
-          </button>
+          <UploadProgressOverlay progress={progress?.[pf.id]} />
+          {/* Nothing to take back once the bytes are on their way. */}
+          {!uploading && (
+            <button
+              className="absolute -top-1.5 -right-1.5 h-4 w-4 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity cursor-pointer leading-none"
+              onClick={() => onRemove(i)}
+              title={`Remove ${pf.file.name}`}
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
         </div>
       ))}
     </div>

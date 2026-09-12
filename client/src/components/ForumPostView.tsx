@@ -28,6 +28,8 @@ import { ForumMediaGallery } from "@/components/ForumMediaGallery";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { buildCommentThread, countReplies, MAX_THREAD_INDENT, type ForumCommentNode } from "@/lib/forumThread";
 import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
+import { UploadProgressOverlay } from "@/components/UploadProgressOverlay";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { scrollBehavior } from "@/lib/theme/display";
@@ -87,6 +89,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     clear: clearCommentImages,
     remaining: commentImagesRemaining,
   } = usePendingFiles();
+  const { progress: uploadProgress, uploadAll, reset: resetUploadProgress } = useUploadQueue();
 
   const stageCommentImages = useCallback((incoming: File[]) => {
     const pictures = incoming.filter(isImageOrVideoFile);
@@ -254,11 +257,26 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       // Uploaded in the order they were staged, then split by kind: the post
       // and the comment keep pictures and clips in separate lists because they
       // are laid out differently, not because they were added separately.
+      // Progress lands on the staged tiles, which stay up until this is done.
+      const outcomes = await uploadAll(commentImages, async (file, onProgress) => {
+        const { url } = await apiUploadFile(file, onProgress);
+        return url;
+      });
+      const failed = outcomes.filter((o) => o.url === null);
+      if (failed.length > 0) {
+        // Posting the rest would quietly drop the others; everything is still
+        // staged, so the comment can go again as it stands.
+        toast.error(
+          failed.length === 1
+            ? `${failed[0].file.file.name} could not be uploaded`
+            : `${failed.length} files could not be uploaded`,
+        );
+        return;
+      }
       const imageUrls: string[] = [];
       const videoUrls: string[] = [];
-      for (const pending of commentImages) {
-        const uploaded = await apiUploadFile(pending.file);
-        (pending.file.type.startsWith("video/") ? videoUrls : imageUrls).push(uploaded.url);
+      for (const outcome of outcomes) {
+        (outcome.file.file.type.startsWith("video/") ? videoUrls : imageUrls).push(outcome.url!);
       }
       // The server wants a body; a comment that is only media says so.
       const count = imageUrls.length + videoUrls.length;
@@ -275,6 +293,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       );
       setCommentBody("");
       clearCommentImages();
+      resetUploadProgress();
       setReplyingTo(null);
       // A reply lands wherever its parent is, which is rarely the bottom.
       setLandingCommentId(comment_id);
@@ -740,7 +759,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
           {commentImages.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {commentImages.map((pending, i) => (
-                <div key={i} className="relative">
+                <div key={pending.id} className="relative">
                   {pending.file.type.startsWith("video/") ? (
                     <video
                       src={pending.previewUrl ?? ""}
@@ -756,13 +775,16 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                       className="h-16 w-16 rounded-md border border-border object-cover"
                     />
                   )}
-                  <button
-                    onClick={() => removeCommentImage(i)}
-                    className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
-                    title={`Remove ${pending.file.name}`}
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
+                  <UploadProgressOverlay progress={uploadProgress[pending.id]} />
+                  {!submitting && (
+                    <button
+                      onClick={() => removeCommentImage(i)}
+                      className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
+                      title={`Remove ${pending.file.name}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

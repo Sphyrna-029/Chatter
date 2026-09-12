@@ -3,6 +3,7 @@ import { useAppContext } from "@/lib/store";
 import { apiSendMessage, apiUploadFile, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { PendingAttachments } from "./PendingAttachments";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { MessageItem } from "./MessageItem";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
@@ -74,9 +75,6 @@ function ShowcaseChatPane({
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadProcessing, setUploadProcessing] = useState(false);
-  const [uploadFileName, setUploadFileName] = useState("");
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -159,31 +157,33 @@ function ShowcaseChatPane({
     files: pendingFiles,
     addMany: addStagedFiles,
     remove: removePendingFile,
-    clear: clearPendingFiles,
+    removeIds: removePendingIds,
     remaining: attachmentsRemaining,
   } = usePendingFiles();
+  const { progress: uploadProgressByFile, uploadAll, reset: resetUploadProgress } = useUploadQueue();
 
-  const uploadFile = async (file: File): Promise<string | null> => {
-    if (uploadLimitBytes > 0 && file.size > uploadLimitBytes) {
-      toast.error(`File too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
-      return null;
-    }
+  /** Send the staged row, each tile carrying its own progress. */
+  const uploadStagedFiles = async (): Promise<string[]> => {
+    if (pendingFiles.length === 0) return [];
     setUploading(true);
-    setUploadProgress(0);
-    setUploadProcessing(false);
-    setUploadFileName(file.name);
     try {
-      const { url } = await apiUploadFile(file, (pct) => {
-        setUploadProgress(pct);
-        if (pct >= 100) setUploadProcessing(true);
+      const outcomes = await uploadAll(pendingFiles, async (file, onProgress) => {
+        const { url } = await apiUploadFile(file, onProgress);
+        return url;
       });
-      return url;
-    } catch (err: any) {
-      toast.error(err.message || "Upload failed");
-      return null;
+      const failed = outcomes.filter((o) => o.url === null);
+      if (failed.length > 0) {
+        toast.error(
+          failed.length === 1
+            ? `${failed[0].file.file.name} could not be uploaded`
+            : `${failed.length} files could not be uploaded`,
+        );
+      }
+      // Only what landed leaves the row; a file that failed stays staged.
+      removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
+      return outcomes.map((o) => o.url).filter((url): url is string => url !== null);
     } finally {
       setUploading(false);
-      setUploadProcessing(false);
     }
   };
 
@@ -197,18 +197,15 @@ function ShowcaseChatPane({
 
   const handleSend = async () => {
     const body = getDivContent().trim();
-    const toUpload = pendingFiles.map((pf) => pf.file);
-    if (!body && toUpload.length === 0) return;
+    if (!body && pendingFiles.length === 0) return;
     if (body.length > MAX_MESSAGE_LENGTH) return;
     if (inputRef.current) inputRef.current.innerHTML = "";
     setInput("");
-    clearPendingFiles();
 
-    const uploadedUrls: string[] = [];
-    for (const file of toUpload) {
-      const url = await uploadFile(file);
-      if (url) uploadedUrls.push(url);
-    }
+    // The row stays until the files are actually up: it is what the progress
+    // bars are drawn on, and a failed send still has them.
+    const uploadedUrls = await uploadStagedFiles();
+    resetUploadProgress();
 
     // Text and attachments go out as one message, matching the main composer.
     const parts = [body ? resolveShortcodes(body) : "", ...uploadedUrls].filter(Boolean);
@@ -449,18 +446,6 @@ function ShowcaseChatPane({
         )}
       </div>
 
-      {/* Upload progress */}
-      {uploading && (
-        <div className="px-3 py-1.5 border-t bg-muted/30 shrink-0">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="truncate">{uploadProcessing ? `Processing ${uploadFileName}…` : `Uploading ${uploadFileName}… ${uploadProgress}%`}</span>
-          </div>
-          <div className="mt-1 h-1 w-full rounded-full bg-border overflow-hidden">
-            <div className="h-full bg-primary transition-all" style={{ width: `${uploadProgress}%` }} />
-          </div>
-        </div>
-      )}
-
       {/* Input area */}
       {canPost ? (
         <div
@@ -469,7 +454,11 @@ function ShowcaseChatPane({
             fileDragging && "outline-2 outline-dashed outline-primary -outline-offset-2 bg-primary/5",
           )}
         >
-          <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
+          <PendingAttachments
+            files={pendingFiles}
+            onRemove={removePendingFile}
+            progress={uploadProgressByFile}
+          />
           <div className="flex gap-1.5 items-end">
             {/* File upload */}
             <input

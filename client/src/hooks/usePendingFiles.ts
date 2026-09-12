@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface PendingFile {
+  /** Stable for as long as the file is staged. Upload progress is reported
+   *  against it, so a bar cannot end up over the wrong tile when the row is
+   *  edited around it. */
+  id: string;
   file: File;
   /** Object URL for image and video previews; null for everything else. */
   previewUrl: string | null;
 }
+
+let nextPendingId = 0;
 
 /** Whether a staged file is something a preview can be drawn from. */
 export function isPreviewable(file: File): boolean {
@@ -71,6 +77,7 @@ export function usePendingFiles(max: number = MAX_ATTACHMENTS) {
         commit([
           ...filesRef.current,
           ...accepted.map((file) => ({
+            id: `staged-${nextPendingId++}`,
             file,
             // Created here rather than inside a state updater: React can invoke
             // an updater twice, which would strand a second object URL with
@@ -97,6 +104,26 @@ export function usePendingFiles(max: number = MAX_ATTACHMENTS) {
     [commit],
   );
 
+  /**
+   * Drop the named files, keeping the rest.
+   *
+   * A send clears the ones that actually uploaded and leaves the ones that did
+   * not, so a failure halfway through a batch costs the user the upload and not
+   * the files.
+   */
+  const removeIds = useCallback(
+    (ids: string[]) => {
+      const drop = new Set(ids);
+      const next = filesRef.current.filter((pf) => {
+        if (!drop.has(pf.id)) return true;
+        if (pf.previewUrl) URL.revokeObjectURL(pf.previewUrl);
+        return false;
+      });
+      commit(next);
+    },
+    [commit],
+  );
+
   /** Empty the row, revoking every preview URL it held. */
   const clear = useCallback(() => {
     filesRef.current.forEach((pf) => pf.previewUrl && URL.revokeObjectURL(pf.previewUrl));
@@ -116,6 +143,7 @@ export function usePendingFiles(max: number = MAX_ATTACHMENTS) {
     add,
     addMany,
     remove,
+    removeIds,
     clear,
     isFull: files.length >= max,
     /** Slots left on this message. */

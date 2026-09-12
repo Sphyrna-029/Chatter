@@ -32,6 +32,8 @@ import {
 import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
+import { UploadProgressOverlay } from "./UploadProgressOverlay";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -415,10 +417,8 @@ function CreatePostDialog({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  // Which of the images is being uploaded, so a post with ten of them is not a
-  // spinner that looks stuck.
-  const [uploadedCount, setUploadedCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { progress: uploadProgress, uploadAll, reset: resetUploadProgress } = useUploadQueue();
 
   const {
     files: images,
@@ -459,27 +459,40 @@ function CreatePostDialog({
   const handleSubmit = async () => {
     if (!title.trim()) return;
     setSubmitting(true);
-    setUploadedCount(0);
     try {
       // Uploaded in order so the post shows them in the order they were added,
-      // then split by kind: pictures and clips are laid out differently.
+      // then split by kind: pictures and clips are laid out differently. Each
+      // tile in the grid above carries its own progress while this runs.
+      const outcomes = await uploadAll(images, async (file, onProgress) => {
+        const { url } = await apiUploadFile(file, onProgress);
+        return url;
+      });
+      const failed = outcomes.filter((o) => o.url === null);
+      if (failed.length > 0) {
+        // Posting the rest would quietly drop what they picked, so stop and
+        // leave the dialog as it was — everything is still staged.
+        toast.error(
+          failed.length === 1
+            ? `${failed[0].file.file.name} could not be uploaded`
+            : `${failed.length} files could not be uploaded`,
+        );
+        return;
+      }
       const imageUrls: string[] = [];
       const videoUrls: string[] = [];
-      for (const pending of images) {
-        const uploaded = await apiUploadFile(pending.file);
-        (pending.file.type.startsWith("video/") ? videoUrls : imageUrls).push(uploaded.url);
-        setUploadedCount(imageUrls.length + videoUrls.length);
+      for (const outcome of outcomes) {
+        (outcome.file.file.type.startsWith("video/") ? videoUrls : imageUrls).push(outcome.url!);
       }
       await apiCreateForumPost(roomId, title.trim(), body, imageUrls, videoUrls);
       setTitle("");
       setBody("");
       clearImages();
+      resetUploadProgress();
       onOpenChange(false);
     } catch (e: any) {
       toast.error(e.message || "Failed to create post");
     } finally {
       setSubmitting(false);
-      setUploadedCount(0);
     }
   };
 
@@ -577,7 +590,7 @@ function CreatePostDialog({
             {images.length > 0 && (
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                 {images.map((pending, i) => (
-                  <div key={i} className="group relative">
+                  <div key={pending.id} className="group relative">
                     {pending.file.type.startsWith("video/") ? (
                       <video
                         src={pending.previewUrl ?? ""}
@@ -593,13 +606,16 @@ function CreatePostDialog({
                         className="aspect-square w-full rounded-md border border-border object-cover"
                       />
                     )}
-                    <button
-                      onClick={() => removeImage(i)}
-                      className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
-                      title={`Remove ${pending.file.name}`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+                    <UploadProgressOverlay progress={uploadProgress[pending.id]} />
+                    {!submitting && (
+                      <button
+                        onClick={() => removeImage(i)}
+                        className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
+                        title={`Remove ${pending.file.name}`}
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -626,11 +642,7 @@ function CreatePostDialog({
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={!title.trim() || submitting}>
-            {!submitting
-              ? "Create Post"
-              : images.length > 1
-                ? `Uploading ${Math.min(uploadedCount + 1, images.length)} of ${images.length}…`
-                : "Creating..."}
+            {submitting ? "Creating..." : "Create Post"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -11,6 +11,7 @@ import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
 import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
@@ -143,9 +144,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadFileName, setUploadFileName] = useState("");
-  const [uploadProcessing, setUploadProcessing] = useState(false);
   const [cliMode, setCliMode] = useState(false);
   const [exifDialogOpen, setExifDialogOpen] = useState(false);
   const exifPendingFilesRef = useRef<File[]>([]);
@@ -282,9 +280,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     files: pendingFiles,
     addMany: addStagedFiles,
     remove: removePendingFile,
+    removeIds: removePendingIds,
     clear: clearPendingFiles,
     remaining: attachmentsRemaining,
   } = usePendingFiles();
+  const { progress: uploadProgressByFile, uploadAll, reset: resetUploadProgress } = useUploadQueue();
   const [isSpoiler, setIsSpoiler] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
@@ -679,9 +679,10 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     void saveDraft(state.currentRoomId, state.currentChannelId ?? "", "");
     dispatch({ type: "SET_REPLYING_TO", payload: null });
 
-    // Grab and clear staged files before any async work
-    const toUpload = pendingFiles.map((pf) => pf.file);
-    clearPendingFiles();
+    // The staged row is deliberately *not* cleared here: it stays on screen as
+    // the thing the progress bars are drawn on, and is only let go once the
+    // files are actually up. A failed send then still has them.
+    const hasStagedFiles = pendingFiles.length > 0;
 
     // Auto-resolve :shortcode: patterns to emoji in body text
     const resolveShortcodes = (raw: string) =>
@@ -704,23 +705,19 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     };
 
     try {
-      if (toUpload.length > 0 && body) {
-        // Files + text: upload all files first, then send as one combined message
-        // so text and images aren't split into separate spoiler/reply messages.
-        const uploadedUrls: string[] = [];
-        for (const file of toUpload) {
-          const url = await uploadFile(file);
-          if (url) uploadedUrls.push(url);
-        }
+      const uploadedUrls = hasStagedFiles ? await uploadStagedFiles() : [];
+
+      if (hasStagedFiles && body) {
+        // Files + text: one combined message, so text and images aren't split
+        // into separate spoiler/reply messages.
         const parts = [resolveShortcodes(body), ...uploadedUrls].filter(Boolean);
         if (parts.length > 0) {
           await sendMessage(parts.join("\n"), replyEventId, spoiler);
         }
       } else {
         // Files only: send each as its own message
-        for (const file of toUpload) {
-          const url = await uploadFile(file);
-          if (url) await sendMessage(url, undefined, spoiler);
+        for (const url of uploadedUrls) {
+          await sendMessage(url, undefined, spoiler);
         }
         // Text only: send as one message
         if (body) {
@@ -729,6 +726,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send message");
+      resetUploadProgress();
       if (body) restoreComposer();
     }
   };
@@ -1019,31 +1017,38 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     div.focus();
   };
 
-  // Uploads a file and returns its URL; does NOT send a message.
-  const uploadFile = async (file: File): Promise<string | null> => {
-    if (!state.currentRoomId) return null;
-    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
-      toast.error(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
-      return null;
-    }
+  /**
+   * Send the staged row, reporting each file's progress onto its own tile.
+   *
+   * The row used to be cleared the moment Send was pressed and a modal put up
+   * with one bar in it, which for ten files meant a bar that filled and
+   * restarted nine times under names going past too fast to read — and if the
+   * send then failed, the files were already gone. Now the tiles stay until
+   * they have actually landed.
+   */
+  const uploadStagedFiles = async (): Promise<string[]> => {
+    if (!state.currentRoomId || pendingFiles.length === 0) return [];
     setUploading(true);
-    setUploadProgress(0);
-    setUploadProcessing(false);
-    setUploadFileName(file.name);
     try {
-      const { url } = await apiUploadFile(file, (pct) => {
-        setUploadProgress(pct);
-        // When upload data reaches 100%, the server processes the file
-        // (ffmpeg conversion/faststart). Show processing state.
-        if (pct >= 100) setUploadProcessing(true);
+      const outcomes = await uploadAll(pendingFiles, async (file, onProgress) => {
+        const { url } = await apiUploadFile(file, onProgress);
+        return url;
       });
-      return url;
-    } catch (err: any) {
-      toast.error(err.message || "Upload failed");
-      return null;
+      const failed = outcomes.filter((o) => o.url === null);
+      if (failed.length > 0) {
+        toast.error(
+          failed.length === 1
+            ? `${failed[0].file.file.name} could not be uploaded`
+            : `${failed.length} files could not be uploaded`,
+        );
+      }
+      // Only what landed leaves the row. What did not is still staged, so a
+      // failure halfway through a batch costs the upload and not the file.
+      removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
+      resetUploadProgress();
+      return outcomes.map((o) => o.url).filter((url): url is string => url !== null);
     } finally {
       setUploading(false);
-      setUploadProcessing(false);
     }
   };
 
@@ -1779,7 +1784,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
             </div>
           )}
           {/* Staged file previews */}
-          <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
+          <PendingAttachments
+            files={pendingFiles}
+            onRemove={removePendingFile}
+            progress={uploadProgressByFile}
+          />
           {mediaUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {mediaUrls.map((m, i) => (
@@ -2066,43 +2075,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               Scrub EXIF
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={uploading}>
-        <DialogContent
-          className="sm:max-w-[300px]"
-          onPointerDownOutside={(e) => e.preventDefault()}
-          onEscapeKeyDown={(e) => e.preventDefault()}
-          showCloseButton={false}
-        >
-          <DialogHeader>
-            <DialogTitle className="text-sm">
-              {uploadProcessing ? "Processing file" : "Uploading file"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 min-w-0 overflow-hidden">
-            <p className="text-xs text-muted-foreground truncate">{uploadFileName}</p>
-            {uploadProcessing ? (
-              <div className="flex flex-col items-center gap-2 py-1">
-                <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-primary rounded-full animate-pulse w-full" />
-                </div>
-                <p className="text-xs text-muted-foreground text-center">
-                  Server is processing your video, please wait...
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="bg-muted rounded-full h-2">
-                  <div
-                    className="bg-primary rounded-full h-2 transition-all"
-                    style={{ width: `${uploadProgress}%` }}
-                  />
-                </div>
-                <p className="text-xs text-muted-foreground text-center">{uploadProgress}%</p>
-              </>
-            )}
-          </div>
         </DialogContent>
       </Dialog>
     </div>

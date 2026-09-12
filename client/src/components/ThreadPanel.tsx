@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { PendingAttachments } from "./PendingAttachments";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { scrollBehavior } from "@/lib/theme/display";
 
 export function ThreadPanel() {
@@ -31,9 +32,9 @@ export function ThreadPanel() {
     files: pendingFiles,
     add: addStagedFile,
     remove: removePendingFile,
-    clear: clearPendingFiles,
+    removeIds: removePendingIds,
   } = usePendingFiles();
-  const [uploadProgress, setUploadProgress] = useState(0);
+  const { progress: uploadProgressByFile, uploadAll, reset: resetUploadProgress } = useUploadQueue();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -50,30 +51,38 @@ export function ThreadPanel() {
 
   const handleSend = useCallback(async () => {
     const trimmed = body.trim();
-    const toUpload = pendingFiles.map((pf) => pf.file);
-    if (!trimmed && toUpload.length === 0) return;
+    if (!trimmed && pendingFiles.length === 0) return;
     setBody("");
-    clearPendingFiles();
 
     // Nothing is uploaded until here, so the draft stays editable while files
-    // are staged.
+    // are staged — and the row stays up through the upload, since it is what
+    // the per-file bars are drawn on.
     const uploadedUrls: string[] = [];
-    if (toUpload.length > 0) {
+    if (pendingFiles.length > 0) {
       setUploading(true);
       try {
-        for (const file of toUpload) {
-          setUploadFileName(file.name);
-          setUploadProgress(0);
-          const { url } = await apiUploadFile(file, (pct) => setUploadProgress(pct));
-          uploadedUrls.push(url);
+        const outcomes = await uploadAll(pendingFiles, async (file, onProgress) => {
+          const { url } = await apiUploadFile(file, onProgress);
+          return url;
+        });
+        const failed = outcomes.filter((o) => o.url === null);
+        if (failed.length > 0) {
+          toast.error(
+            failed.length === 1
+              ? `${failed[0].file.file.name} could not be uploaded`
+              : `${failed.length} files could not be uploaded`,
+          );
         }
-      } catch (err: any) {
-        toast.error(err.message || "Upload failed");
+        for (const outcome of outcomes) {
+          if (outcome.url) uploadedUrls.push(outcome.url);
+        }
+        // Only what landed leaves the row; a file that failed stays staged.
+        removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
       } finally {
         setUploading(false);
-        setUploadFileName("");
       }
     }
+    resetUploadProgress();
 
     // Text and attachments go out as one message, matching the main composer.
     const parts = [trimmed, ...uploadedUrls].filter(Boolean);
@@ -81,7 +90,7 @@ export function ThreadPanel() {
     try {
       await sendThreadMessage(parts.join("\n"));
     } catch {}
-  }, [body, pendingFiles, clearPendingFiles, sendThreadMessage]);
+  }, [body, pendingFiles, removePendingIds, sendThreadMessage, uploadAll, resetUploadProgress]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -96,7 +105,6 @@ export function ThreadPanel() {
     inputRef.current?.focus();
   }, []);
 
-  const [uploadFileName, setUploadFileName] = useState("");
 
   /** Stage files on the composer; nothing is uploaded or sent until Send. */
   const stageFiles = useCallback((files: File[]) => {
@@ -379,23 +387,14 @@ export function ThreadPanel() {
 
       {/* Input area */}
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-border">
-        {uploading && (
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex-1 min-w-0">
-              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-200"
-                  style={{ width: `${uploadProgress}%` }}
-                />
-              </div>
-              {uploadFileName && (
-                <p className="text-3xs text-muted-foreground truncate mt-0.5">{uploadFileName}</p>
-              )}
-            </div>
-            <span className="text-3xs text-muted-foreground shrink-0">{uploadProgress}%</span>
-          </div>
-        )}
-        <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
+        {/* The single bar that stood here said which file it was under; with
+            several going up it named them one after another too fast to read.
+            Each tile carries its own now. */}
+        <PendingAttachments
+          files={pendingFiles}
+          onRemove={removePendingFile}
+          progress={uploadProgressByFile}
+        />
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
           <input
             ref={fileInputRef}
