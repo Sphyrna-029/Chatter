@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
-import { displayUserId } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
 import { scrollBehavior } from "@/lib/theme/display";
 
@@ -280,9 +280,10 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // Pending file attachments — staged until the user presses Send/Enter
   const {
     files: pendingFiles,
-    add: addStagedFile,
+    addMany: addStagedFiles,
     remove: removePendingFile,
     clear: clearPendingFiles,
+    remaining: attachmentsRemaining,
   } = usePendingFiles();
   const [isSpoiler, setIsSpoiler] = useState(false);
 
@@ -1046,22 +1047,43 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     }
   };
 
-  const addPendingFile = (file: File) => {
-    if (state.uploadLimitBytes > 0 && file.size > state.uploadLimitBytes) {
-      toast.error(`File too large (max ${Math.round(state.uploadLimitBytes / 1024 / 1024)} MB)`);
-      return;
+  /**
+   * Drop everything over the server's size limit, and say so once however many
+   * there were — a batch of ten oversize files used to raise ten toasts.
+   */
+  const withinSizeLimit = (files: File[]): File[] => {
+    const limit = state.uploadLimitBytes;
+    if (limit <= 0) return files;
+    const ok = files.filter((f) => f.size <= limit);
+    const tooBig = files.length - ok.length;
+    if (tooBig > 0) {
+      const mb = Math.round(limit / 1024 / 1024);
+      toast.error(
+        tooBig === 1
+          ? `That file is over the ${mb} MB limit`
+          : `${tooBig} files are over the ${mb} MB limit`,
+      );
     }
-    if (pendingFiles.length >= MAX_ATTACHMENTS) {
-      toast.error(`You can attach at most ${MAX_ATTACHMENTS} files per message`);
-      return;
-    }
-    addStagedFile(file);
+    return ok;
   };
 
-  const processFiles = (files: File[]) => {
+  /** Stage a batch, and account for whatever the row had no room for. */
+  const stageFiles = (files: File[]) => {
+    if (files.length === 0) return;
+    const { rejected } = addStagedFiles(files);
+    if (rejected > 0) {
+      toast.error(
+        `A message holds ${MAX_ATTACHMENTS} attachments — ${rejected} ${rejected === 1 ? "file was" : "files were"} left off`,
+      );
+    }
+  };
+
+  const processFiles = (incoming: File[]) => {
+    const files = withinSizeLimit(incoming);
+    if (files.length === 0) return;
     const imageFiles = files.filter((f) => f.type.startsWith("image/"));
     const otherFiles = files.filter((f) => !f.type.startsWith("image/"));
-    otherFiles.forEach(addPendingFile);
+    stageFiles(otherFiles);
     if (imageFiles.length === 0) return;
     exifPendingFilesRef.current = imageFiles;
     setExifDialogOpen(true);
@@ -1071,10 +1093,13 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     setExifDialogOpen(false);
     const files = exifPendingFilesRef.current;
     exifPendingFilesRef.current = [];
+    // Sequential: stripping rewrites the whole file in memory, and ten at once
+    // is a spike worth not taking for the sake of a few milliseconds.
+    const processed: File[] = [];
     for (const file of files) {
-      const processed = scrub ? await stripExifData(file) : file;
-      addPendingFile(processed);
+      processed.push(scrub ? await stripExifData(file) : file);
     }
+    stageFiles(processed);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1360,11 +1385,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {dragging && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/80 border-2 border-dashed border-primary rounded-lg pointer-events-none">
-          <p className="text-sm font-medium text-primary">Drop file to attach</p>
-        </div>
-      )}
       {/* Header — compact on mobile since MobileHeader shows room name */}
       <div className={`flex items-center justify-between border-b ${isMobile ? "px-1 py-0.5" : "px-4 py-3"}`}>
         <div className={isMobile ? "w-0" : "w-8"} />
@@ -1568,6 +1588,19 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
 
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative">
+        {/* A drop anywhere in the room attaches, so the whole message area is
+            the target — but it stops short of the composer, which says the
+            same thing in its own border rather than being covered by this. */}
+        {dragging && (
+          <div className="absolute inset-2 z-50 flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-primary bg-background/80 pointer-events-none">
+            <p className="text-sm font-medium text-primary">Drop to attach</p>
+            <p className="text-xs text-muted-foreground">
+              {attachmentsRemaining > 0
+                ? `Images or files — room for ${attachmentsRemaining} more`
+                : `This message already has ${MAX_ATTACHMENTS} attachments`}
+            </p>
+          </div>
+        )}
         <ScrollArea className={`h-full py-2 ${isMobile ? "px-1" : "px-2"}`}>
           <div style={{ overflowAnchor: "none" }}>
             {state.loadingOlderMessages && (
@@ -1728,7 +1761,15 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
           );
         }
         return (
-        <div className={`border-t ${isMobile ? "p-2" : "p-3"}`}>
+        <div
+          className={cn(
+            "border-t transition-colors",
+            isMobile ? "p-2" : "p-3",
+            // A dashed outline rather than a ring: rings are solid only, and
+            // dashes are what a drop target has always looked like.
+            dragging && "outline-2 outline-dashed outline-primary -outline-offset-2 bg-primary/5",
+          )}
+        >
           {/* Spoiler mode banner */}
           {isSpoiler && (
             <div className="flex items-center gap-1.5 mb-2 px-2 py-1 rounded bg-amber-500/10 text-amber-500 text-xs font-medium">
@@ -1867,7 +1908,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
                 <label
                   htmlFor={uploading ? undefined : "chat-file-input"}
                   className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
-                  title="Attach files (max 4)"
+                  title={
+                    attachmentsRemaining > 0
+                      ? `Attach images or files (${attachmentsRemaining} of ${MAX_ATTACHMENTS} left)`
+                      : `This message already has ${MAX_ATTACHMENTS} attachments`
+                  }
                 >
                   {uploading ? "…" : "+"}
                 </label>
@@ -1900,6 +1945,13 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
                 onInput={handleInput}
                 onKeyDown={handleKeyPress}
                 onPaste={handlePaste}
+                // Handled here as well as on the room: a file dropped on a
+                // contentEditable is the browser's to insert unless something
+                // takes it first, and relying on the bubble to the room's
+                // handler leaves that to timing. `handleDrop` stops
+                // propagation, so the room does not see it twice.
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
                 suppressContentEditableWarning
                 className={`w-full rounded-lg border border-input bg-transparent px-3 py-2 pr-16 text-sm md:text-sm shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring min-h-[36px] md:min-h-[36px] max-h-40 overflow-y-auto break-words ${isMobile ? "min-h-[44px] text-base" : ""} ${displayLength > MAX_MESSAGE_LENGTH ? "ring-2 ring-destructive focus-visible:ring-destructive" : ""}`}
                 style={{ wordBreak: "break-word", whiteSpace: "pre-wrap", lineHeight: isMobile ? "24px" : "20px" }}
