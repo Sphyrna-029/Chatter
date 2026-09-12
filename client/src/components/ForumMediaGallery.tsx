@@ -59,12 +59,16 @@ export function ForumMediaGallery({
   return (
     <div className={cn("space-y-2", className)}>
       {images.length === 0 ? null : single ? (
+        // One picture is drawn at its own size within bounds rather than
+        // stretched to the column: forced to full width it was a tall band of
+        // background with the image floating in the middle of it, which only
+        // got wider when the post did.
         <AuthImage
           src={images[0]}
           alt=""
           className={cn(
-            "w-full object-contain rounded-lg bg-muted cursor-pointer",
-            compact ? "max-w-xs max-h-48" : "max-h-96",
+            "max-w-full w-auto object-contain rounded-lg cursor-pointer",
+            compact ? "max-h-48" : "max-h-[28rem]",
           )}
           onClick={() => setLightboxAt(0)}
         />
@@ -75,7 +79,9 @@ export function ForumMediaGallery({
             // Two side by side; three or more in threes, so a row is never one
             // lonely image wide on a desktop and never cramped on a phone.
             images.length === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-3",
-            compact && "max-w-xs",
+            // Bounded even though the post around it is not: across a wide
+            // window these cells would each be the size of a small poster.
+            compact ? "max-w-xs" : "max-w-3xl",
           )}
         >
           {images.map((url, i) => (
@@ -158,7 +164,7 @@ function ForumVideo({ url, compact }: { url: string; compact?: boolean }) {
       playsInline
       className={cn(
         "w-full rounded-md bg-black",
-        compact ? "max-w-xs max-h-48" : "max-h-96",
+        compact ? "max-w-xs max-h-48" : "max-w-3xl max-h-[28rem]",
       )}
     />
   );

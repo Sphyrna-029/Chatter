@@ -348,9 +348,11 @@ export function ForumArea() {
         </div>
       </div>
 
-      {/* Posts list */}
+      {/* Posts list. Full width, like every other list in the app: a row is a
+          thumbnail, a title and two lines of excerpt, and capping it at 768px
+          left most of a wide window empty either side of it. */}
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="max-w-3xl mx-auto space-y-2">
+        <div className="space-y-2">
           {posts.length === 0 && !loading && (
             <div className="text-center py-12 text-muted-foreground">
               {isSearching ? (
