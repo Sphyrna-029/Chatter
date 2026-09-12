@@ -74,9 +74,10 @@ async fn validate_forum_member(
     Ok(user_id)
 }
 
-/// How many images one post or comment may carry. Matches the composer's
-/// attachment limit, so the two surfaces say the same thing.
-const MAX_FORUM_IMAGES: usize = 10;
+/// How many images and videos one post or comment may carry between them.
+/// Matches the composer's attachment limit, so the two surfaces say the same
+/// thing.
+const MAX_FORUM_MEDIA: usize = 10;
 
 /// Every image on a post or comment.
 ///
@@ -93,6 +94,13 @@ fn images_of(single: &str, many: &[String]) -> Vec<String> {
     }
 }
 
+/// The urls a create request is asking for, with the blanks dropped.
+fn requested_media(many: &Option<Vec<String>>) -> Vec<String> {
+    let mut urls = many.clone().unwrap_or_default();
+    urls.retain(|url| !url.trim().is_empty());
+    urls
+}
+
 /// The images a create request is asking for, from either shape of client.
 fn requested_images(single: &Option<String>, many: &Option<Vec<String>>) -> Vec<String> {
     let mut urls = many.clone().unwrap_or_default();
@@ -107,6 +115,7 @@ fn requested_images(single: &Option<String>, many: &Option<Vec<String>>) -> Vec<
 
 fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>) -> Value {
     let images = images_of(&post.image_url, &post.image_urls);
+    let videos = post.video_urls.clone();
     json!({
         "post_id": post.post_id,
         "room_id": post.room_id,
@@ -117,6 +126,7 @@ fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>
         // lead image rather than an empty post.
         "image_url": images.first().cloned().unwrap_or_default(),
         "image_urls": images,
+        "video_urls": videos,
         "created_at": post.created_at,
         "comment_count": post.comment_count,
         "last_activity": if post.last_activity > 0 { post.last_activity } else { post.created_at },
@@ -127,19 +137,66 @@ fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>
 }
 
 fn comment_to_json(comment: &ForumCommentRecord) -> Value {
+    // A deleted comment is still sent when replies hang off it, so the thread
+    // below does not lose its shape — but nothing it said goes with it.
+    if comment.deleted {
+        return json!({
+            "comment_id": comment.comment_id,
+            "post_id": comment.post_id,
+            "room_id": comment.room_id,
+            "parent_id": comment.parent_id,
+            "author": "",
+            "body": "",
+            "image_url": "",
+            "image_urls": [],
+            "video_urls": [],
+            "created_at": comment.created_at,
+            "deleted": true,
+        });
+    }
     let images = images_of(&comment.image_url, &comment.image_urls);
     json!({
         "comment_id": comment.comment_id,
         "post_id": comment.post_id,
         "room_id": comment.room_id,
+        "parent_id": comment.parent_id,
         "author": comment.author,
         "body": comment.body,
         "image_url": images.first().cloned().unwrap_or_default(),
         "image_urls": images,
+        "video_urls": comment.video_urls.clone(),
         "created_at": comment.created_at,
+        "deleted": false,
         "edited": comment.edited,
         "edited_at": comment.edited_at,
     })
+}
+
+/// Which of a post's comments are worth sending.
+///
+/// A deleted comment normally goes, but one with a living reply under it has to
+/// stay as a tombstone or everything below it is orphaned out of the thread.
+/// Comments arrive oldest first and a parent always predates its children, so
+/// walking backwards means a kept child has always marked its parent by the
+/// time that parent is reached.
+fn comments_worth_sending(comments: &[ForumCommentRecord]) -> Vec<bool> {
+    let index_of: HashMap<&str, usize> = comments
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.comment_id.as_str(), i))
+        .collect();
+    let mut keep = vec![false; comments.len()];
+    for i in (0..comments.len()).rev() {
+        if !comments[i].deleted {
+            keep[i] = true;
+        }
+        if keep[i] {
+            if let Some(&parent) = index_of.get(comments[i].parent_id.as_str()) {
+                keep[parent] = true;
+            }
+        }
+    }
+    keep
 }
 
 async fn get_reactions_for_event(state: &AppState, event_id: &str) -> HashMap<String, Vec<String>> {
@@ -184,10 +241,11 @@ pub(crate) async fn create_post(
     }
 
     let images = requested_images(&req.image_url, &req.image_urls);
-    if images.len() > MAX_FORUM_IMAGES {
+    let videos = requested_media(&req.video_urls);
+    if images.len() + videos.len() > MAX_FORUM_MEDIA {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            &format!("A post may have at most {MAX_FORUM_IMAGES} images"),
+            &format!("A post may have at most {MAX_FORUM_MEDIA} images and videos"),
         ));
     }
 
@@ -201,6 +259,7 @@ pub(crate) async fn create_post(
         body: req.body.clone(),
         image_url: images.first().cloned().unwrap_or_default(),
         image_urls: images,
+        video_urls: videos,
         created_at: now,
         comment_count: 0,
         last_activity: now,
@@ -294,18 +353,26 @@ pub(crate) async fn get_post(
 
     let reactions = get_reactions_for_event(&state, &post_id).await;
 
-    // Also fetch comments
+    // Deleted comments are fetched too, then filtered below: one with a living
+    // reply under it has to stay, or the replies lose their place in the thread.
     let comments_coll = state.db.collection::<ForumCommentRecord>("forum_comments");
-    let mut comments: Vec<Value> = Vec::new();
+    let mut records: Vec<ForumCommentRecord> = Vec::new();
     if let Ok(mut cursor) = comments_coll
-        .find(doc! { "post_id": &post_id, "deleted": false })
+        .find(doc! { "post_id": &post_id })
         .sort(doc! { "created_at": 1 })
         .await
     {
         while let Ok(Some(comment)) = cursor.try_next().await {
-            comments.push(comment_to_json(&comment));
+            records.push(comment);
         }
     }
+    let keep = comments_worth_sending(&records);
+    let comments: Vec<Value> = records
+        .iter()
+        .zip(keep)
+        .filter(|(_, keep)| *keep)
+        .map(|(comment, _)| comment_to_json(comment))
+        .collect();
 
     Ok(Json(json!({
         "post": post_to_json(&post, &reactions),
@@ -382,11 +449,33 @@ pub(crate) async fn create_comment(
     }
 
     let images = requested_images(&req.image_url, &req.image_urls);
-    if images.len() > MAX_FORUM_IMAGES {
+    let videos = requested_media(&req.video_urls);
+    if images.len() + videos.len() > MAX_FORUM_MEDIA {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            &format!("A comment may have at most {MAX_FORUM_IMAGES} images"),
+            &format!("A comment may have at most {MAX_FORUM_MEDIA} images and videos"),
         ));
+    }
+
+    // Checked rather than trusted: a reply pointing at something that is not a
+    // live comment on this post would hang off nothing, and the thread would
+    // simply lose it. Requiring the parent to exist first also makes a cycle
+    // impossible to build.
+    let parent_id = req.parent_id.clone().unwrap_or_default();
+    if !parent_id.is_empty() {
+        let comments_coll = state.db.collection::<ForumCommentRecord>("forum_comments");
+        let parent_exists = comments_coll
+            .find_one(doc! { "_id": &parent_id, "post_id": &post_id, "deleted": false })
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if !parent_exists {
+            return Err(error_response(
+                StatusCode::NOT_FOUND,
+                "The comment being replied to is no longer there",
+            ));
+        }
     }
 
     let comment_id = generate_id("cmt_");
@@ -399,6 +488,8 @@ pub(crate) async fn create_comment(
         body: req.body.clone(),
         image_url: images.first().cloned().unwrap_or_default(),
         image_urls: images,
+        video_urls: videos,
+        parent_id,
         created_at: now,
         deleted: false,
         edited: false,
@@ -710,5 +801,96 @@ mod tests {
     #[test]
     fn nothing_asked_for_is_nothing_stored() {
         assert!(requested_images(&None, &None).is_empty());
+    }
+
+    #[test]
+    fn a_video_only_request_is_taken_whole() {
+        assert_eq!(
+            requested_media(&Some(urls(&["/external/a.mp4", " ", "/external/b.webm"]))),
+            urls(&["/external/a.mp4", "/external/b.webm"]),
+        );
+        assert!(requested_media(&None).is_empty());
+    }
+
+    /// `id` replying to `parent`, deleted or not. Ordered oldest first by the
+    /// caller, which is the order `get_post` reads them in.
+    fn comment(id: &str, parent: &str, deleted: bool) -> ForumCommentRecord {
+        ForumCommentRecord {
+            comment_id: id.to_string(),
+            post_id: "post_1".to_string(),
+            room_id: "room_1".to_string(),
+            author: "@a:localhost".to_string(),
+            body: "hi".to_string(),
+            image_url: String::new(),
+            image_urls: Vec::new(),
+            video_urls: Vec::new(),
+            parent_id: parent.to_string(),
+            created_at: 0,
+            deleted,
+            edited: false,
+            edited_at: 0,
+        }
+    }
+
+    fn kept(comments: &[ForumCommentRecord]) -> Vec<&str> {
+        comments_worth_sending(comments)
+            .into_iter()
+            .zip(comments)
+            .filter(|(keep, _)| *keep)
+            .map(|(_, c)| c.comment_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_deleted_comment_with_nothing_under_it_just_goes() {
+        let comments = vec![comment("a", "", false), comment("b", "", true)];
+        assert_eq!(kept(&comments), vec!["a"]);
+    }
+
+    #[test]
+    fn a_deleted_comment_holding_up_a_reply_stays_as_a_tombstone() {
+        let comments = vec![comment("a", "", true), comment("b", "a", false)];
+        assert_eq!(kept(&comments), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn a_whole_deleted_branch_goes_together() {
+        let comments = vec![
+            comment("a", "", true),
+            comment("b", "a", true),
+            comment("c", "b", true),
+        ];
+        assert!(kept(&comments).is_empty());
+    }
+
+    #[test]
+    fn one_living_leaf_keeps_every_tombstone_above_it() {
+        // The survivor is three deep; without the chain it would be orphaned
+        // out of the thread entirely.
+        let comments = vec![
+            comment("a", "", true),
+            comment("b", "a", true),
+            comment("c", "b", true),
+            comment("d", "c", false),
+        ];
+        assert_eq!(kept(&comments), vec!["a", "b", "c", "d"]);
+    }
+
+    #[test]
+    fn a_dead_branch_beside_a_living_one_still_goes() {
+        let comments = vec![
+            comment("root", "", false),
+            comment("dead", "root", true),
+            comment("dead_child", "dead", true),
+            comment("alive", "root", false),
+        ];
+        assert_eq!(kept(&comments), vec!["root", "alive"]);
+    }
+
+    #[test]
+    fn a_reply_whose_parent_was_never_fetched_is_still_its_own_business() {
+        // Nothing to propagate to; it must not be dropped for want of a parent.
+        let comments = vec![comment("orphan", "gone", false)];
+        assert_eq!(kept(&comments), vec!["orphan"]);
     }
 }

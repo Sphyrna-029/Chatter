@@ -1,6 +1,6 @@
 import { useAppContext } from "@/lib/store";
-import { forumImages, type ForumPost } from "@/lib/api";
-import { MessageSquare, Trash2 } from "lucide-react";
+import { forumImages, forumVideos, type ForumPost } from "@/lib/api";
+import { MessageSquare, Trash2, Play } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -34,6 +34,11 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
   const authorDisplay = displayUserId(post.author);
   const reactionEntries = Object.entries(post.reactions || {});
   const images = forumImages(post);
+  const videos = forumVideos(post);
+  // The row shows one thing: a picture if there is one, otherwise a clip's
+  // poster, which the server writes beside every upload.
+  const thumbnail = images[0] ?? (videos[0] ? `${videos[0]}.thumb.jpg` : null);
+  const extras = images.length + videos.length - 1;
 
   return (
     <div
@@ -42,16 +47,23 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
     >
       {/* Thumbnail — the lead image, with a count when the post holds more,
           so the row says there is a set to open without showing all of it. */}
-      {images.length > 0 && (
+      {thumbnail && (
         <div className="relative shrink-0">
           <AuthImage
-            src={images[0]}
+            src={thumbnail}
             alt=""
-            className="w-24 h-24 object-cover rounded-md"
+            className="w-24 h-24 object-cover rounded-md bg-muted"
           />
-          {images.length > 1 && (
+          {images.length === 0 && videos.length > 0 && (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/60">
+                <Play className="w-3.5 h-3.5 text-white ml-0.5" />
+              </span>
+            </span>
+          )}
+          {extras > 0 && (
             <span className="absolute bottom-1 right-1 rounded bg-black/65 px-1.5 py-0.5 text-3xs font-medium tabular-nums text-white">
-              +{images.length - 1}
+              +{extras}
             </span>
           )}
         </div>

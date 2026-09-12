@@ -6,19 +6,27 @@ import { cn } from "@/lib/utils";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 /**
- * The images on a forum post or comment, laid out by how many there are.
+ * The pictures and clips on a forum post or comment, laid out by how many there
+ * are.
  *
  * One image is the post's picture and gets the width to be looked at; several
  * are a set, and read better as an even grid than as a column of full-bleed
  * images the reader has to scroll past to reach the comments. Either way a tap
  * opens the full-resolution original, where the set can be paged through.
+ *
+ * Videos sit below the pictures with their own controls rather than joining the
+ * grid: a thumbnail that plays when you tap it is a different thing from one
+ * that opens a lightbox, and putting both behind the same square makes neither
+ * obvious.
  */
-export function ForumImageGallery({
+export function ForumMediaGallery({
   images,
+  videos = [],
   className,
   compact,
 }: {
   images: string[];
+  videos?: string[];
   className?: string;
   /** Sized for a comment rather than the body of a post. */
   compact?: boolean;
@@ -44,13 +52,13 @@ export function ForumImageGallery({
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxAt, step]);
 
-  if (images.length === 0) return null;
+  if (images.length === 0 && videos.length === 0) return null;
 
   const single = images.length === 1;
 
   return (
-    <div className={className}>
-      {single ? (
+    <div className={cn("space-y-2", className)}>
+      {images.length === 0 ? null : single ? (
         <AuthImage
           src={images[0]}
           alt=""
@@ -84,6 +92,10 @@ export function ForumImageGallery({
           ))}
         </div>
       )}
+
+      {videos.map((url) => (
+        <ForumVideo key={url} url={url} compact={compact} />
+      ))}
 
       <Dialog
         open={lightboxAt !== null}
@@ -125,5 +137,29 @@ export function ForumImageGallery({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * One clip.
+ *
+ * `preload="metadata"` so a comment with three videos in it does not pull three
+ * files down on sight; the poster the server writes beside the upload gives it
+ * something to show in the meantime, and a video whose poster never arrives
+ * falls back to its own first frame.
+ */
+function ForumVideo({ url, compact }: { url: string; compact?: boolean }) {
+  return (
+    <video
+      src={url}
+      poster={`${url}.thumb.jpg`}
+      controls
+      preload="metadata"
+      playsInline
+      className={cn(
+        "w-full rounded-md bg-black",
+        compact ? "max-w-xs max-h-48" : "max-h-96",
+      )}
+    />
   );
 }

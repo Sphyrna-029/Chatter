@@ -17,6 +17,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn, displayUserId } from "@/lib/utils";
+import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "@/lib/mediaTypes";
 import { reservedBox, thumbnailBox, type MediaDimensions } from "@/lib/mediaBox";
 import { can, canManageMessages } from "@/lib/permissions";
 import { toast } from "sonner";
@@ -42,9 +43,9 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { scrollBehavior } from "@/lib/theme/display";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
-const imageExtensions = /\.(jpg|jpeg|png|gif|webp|bmp|svg)(\?.*)?$/i;
-const videoExtensions = /\.(mp4|webm|ogg|mov|mkv)(\?.*)?$/i;
-const audioExtensions = /\.(mp3|wav|flac|aac|m4a)(\?.*)?$/i;
+const imageExtensions = IMAGE_EXTENSIONS;
+const videoExtensions = VIDEO_EXTENSIONS;
+const audioExtensions = AUDIO_EXTENSIONS;
 
 // Reverse map: Unicode emoji → first matching shortcode name
 const standardEmojiToName: Record<string, string> = {};

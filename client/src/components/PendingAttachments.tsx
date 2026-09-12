@@ -24,7 +24,17 @@ export function PendingAttachments({ files, onRemove, className }: PendingAttach
     <div className={cn("flex flex-wrap gap-2 mb-2", className)}>
       {files.map((pf, i) => (
         <div key={i} className="relative group">
-          {pf.previewUrl ? (
+          {pf.previewUrl && pf.file.type.startsWith("video/") ? (
+            // A frame of the clip says more than a document icon and its name,
+            // and the object URL is already there to draw it from.
+            <video
+              src={pf.previewUrl}
+              muted
+              playsInline
+              preload="metadata"
+              className="h-16 w-16 object-cover rounded-md border border-border bg-black"
+            />
+          ) : pf.previewUrl ? (
             <img
               src={pf.previewUrl}
               alt={pf.file.name}

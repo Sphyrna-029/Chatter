@@ -9,6 +9,7 @@ import {
   apiUploadFile,
   apiAddReaction,
   forumImages,
+  forumVideos,
   type ForumPost,
   type ForumComment,
 } from "@/lib/api";
@@ -17,11 +18,16 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { cn, displayUserId } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check } from "lucide-react";
+import {
+  ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check,
+  CornerUpLeft, ChevronDown, ChevronRight, MessageSquare,
+} from "lucide-react";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
-import { ForumImageGallery } from "@/components/ForumImageGallery";
+import { ForumMediaGallery } from "@/components/ForumMediaGallery";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { buildCommentThread, countReplies, MAX_THREAD_INDENT, type ForumCommentNode } from "@/lib/forumThread";
+import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { scrollBehavior } from "@/lib/theme/display";
@@ -49,8 +55,19 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const [commentBody, setCommentBody] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const commentsEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
+
+  /** The comment being answered, or null to answer the post itself. */
+  const [replyingTo, setReplyingTo] = useState<ForumComment | null>(null);
+  /** Comment ids whose replies are folded away. */
+  const [folded, setFolded] = useState<Set<string>>(new Set());
+  // The discussion is meant to sit behind the post, not compete with it, so it
+  // is one fold away — open by default, because hidden is not the same as
+  // secondary.
+  const [discussionOpen, setDiscussionOpen] = useState(true);
+  /** A comment just posted from here, to be scrolled to once it lands. */
+  const [landingCommentId, setLandingCommentId] = useState<string | null>(null);
 
   // Edit state for post
   const [editingPost, setEditingPost] = useState(false);
@@ -72,9 +89,9 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   } = usePendingFiles();
 
   const stageCommentImages = useCallback((incoming: File[]) => {
-    const pictures = incoming.filter((f) => f.type.startsWith("image/"));
+    const pictures = incoming.filter(isImageOrVideoFile);
     if (pictures.length < incoming.length) {
-      toast.error("A comment takes images only");
+      toast.error("A comment takes images and videos only");
     }
     // Checked here rather than on submit: uploads run one after another, so an
     // image the server will refuse would otherwise be found out only after the
@@ -94,7 +111,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     const { rejected } = addCommentImages(small);
     if (rejected > 0) {
       toast.error(
-        `A comment holds ${MAX_ATTACHMENTS} images — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
+        `A comment holds ${MAX_ATTACHMENTS} files — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
       );
     }
   }, [addCommentImages, state.uploadLimitBytes]);
@@ -133,9 +150,22 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     const onCommentDeleted = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail.post_id === postId) {
-        setComments((prev) =>
-          prev.filter((c) => c.comment_id !== detail.comment_id)
-        );
+        setComments((prev) => {
+          // The same rule the server applies on the next load: a comment with
+          // replies under it leaves a tombstone, because dropping it outright
+          // would cut its replies out of the thread in front of the reader.
+          // Whether the tombstone should then go too, once its last living
+          // reply is deleted, is left to that next load.
+          const holdsReplies = prev.some((c) => c.parent_id === detail.comment_id);
+          if (!holdsReplies) {
+            return prev.filter((c) => c.comment_id !== detail.comment_id);
+          }
+          return prev.map((c) =>
+            c.comment_id === detail.comment_id
+              ? { ...c, deleted: true, author: "", body: "", image_url: "", image_urls: [], video_urls: [] }
+              : c,
+          );
+        });
         setPost((prev) =>
           prev ? { ...prev, comment_count: Math.max(0, prev.comment_count - 1) } : prev
         );
@@ -190,27 +220,64 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     };
   }, [postId, onBack]);
 
-  // Scroll to bottom on new comment
+  // Take the writer to what they just wrote. Scrolling to the end of the list
+  // was right while every comment was appended there; a reply is threaded in
+  // beside its parent instead, and may be nowhere near the bottom.
   useEffect(() => {
-    commentsEndRef.current?.scrollIntoView({ behavior: scrollBehavior() });
-  }, [comments.length]);
+    if (!landingCommentId) return;
+    if (!comments.some((c) => c.comment_id === landingCommentId)) return;
+    const el = document.getElementById(`forum-comment-${landingCommentId}`);
+    el?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+    setLandingCommentId(null);
+  }, [landingCommentId, comments]);
+
+  const startReply = useCallback((comment: ForumComment) => {
+    setReplyingTo(comment);
+    setDiscussionOpen(true);
+    // Focused rather than merely shown: the composer is at the far end of the
+    // page from a reply button deep in a thread.
+    requestAnimationFrame(() => commentInputRef.current?.focus());
+  }, []);
+
+  const toggleFold = useCallback((commentId: string) => {
+    setFolded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(commentId)) next.add(commentId);
+      return next;
+    });
+  }, []);
 
   const handleSubmitComment = async () => {
     if (!commentBody.trim() && commentImages.length === 0) return;
     setSubmitting(true);
     try {
-      const urls: string[] = [];
+      // Uploaded in the order they were staged, then split by kind: the post
+      // and the comment keep pictures and clips in separate lists because they
+      // are laid out differently, not because they were added separately.
+      const imageUrls: string[] = [];
+      const videoUrls: string[] = [];
       for (const pending of commentImages) {
         const uploaded = await apiUploadFile(pending.file);
-        urls.push(uploaded.url);
+        (pending.file.type.startsWith("video/") ? videoUrls : imageUrls).push(uploaded.url);
       }
-      // The server wants a body; a comment that is only pictures says so.
+      // The server wants a body; a comment that is only media says so.
+      const count = imageUrls.length + videoUrls.length;
       const body =
         commentBody.trim() ||
-        (urls.length > 1 ? `(${urls.length} images)` : urls.length === 1 ? "(image)" : "");
-      await apiCreateForumComment(roomId, postId, body, urls);
+        (count > 1 ? `(${count} attachments)` : count === 1 ? "(attachment)" : "");
+      const { comment_id } = await apiCreateForumComment(
+        roomId,
+        postId,
+        body,
+        imageUrls,
+        videoUrls,
+        replyingTo?.comment_id,
+      );
       setCommentBody("");
       clearCommentImages();
+      setReplyingTo(null);
+      // A reply lands wherever its parent is, which is rarely the bottom.
+      setLandingCommentId(comment_id);
     } catch (e: any) {
       toast.error(e.message || "Failed to post comment");
     } finally {
@@ -339,6 +406,157 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     ? (state.roomInfoMap[state.currentRoomId]?.emoji_aliases ?? {})
     : {};
 
+  const thread = buildCommentThread(comments);
+
+  /**
+   * One comment and everything hanging off it.
+   *
+   * A plain recursive function rather than a component: every branch needs the
+   * edit, fold and reply state this closure already has, and threading a dozen
+   * callbacks down an arbitrarily deep tree buys nothing.
+   */
+  function renderComment(node: ForumCommentNode) {
+    const comment = node.comment;
+    const replyCount = countReplies(node);
+    const isFolded = folded.has(comment.comment_id);
+    const isEditing = editingCommentId === comment.comment_id;
+    const isReplyTarget = replyingTo?.comment_id === comment.comment_id;
+    const canDeleteComment = comment.author === state.userId || isOwnerOrMod();
+    const isCommentAuthor = comment.author === state.userId;
+    // The post's author, answering in their own thread, is worth marking.
+    const isThreadAuthor = comment.author === post!.author;
+
+    return (
+      <div key={comment.comment_id}>
+        <div
+          id={`forum-comment-${comment.comment_id}`}
+          className={cn(
+            "group rounded-md border p-2.5 transition-colors",
+            isReplyTarget && "border-primary/60 bg-primary/5",
+            comment.deleted && "border-dashed",
+          )}
+        >
+          {comment.deleted ? (
+            // Kept only because replies hang off it; saying so beats a gap in
+            // the thread where an answer's question used to be.
+            <p className="ui-hint italic">Comment deleted</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">{displayUserId(comment.author)}</span>
+                {isThreadAuthor && (
+                  <span className="rounded bg-secondary px-1 py-px text-3xs font-medium text-muted-foreground">
+                    author
+                  </span>
+                )}
+                <span className="ui-meta">
+                  {formatTime(comment.created_at)}
+                  {comment.edited && (
+                    <span className="ml-1" title={comment.edited_at ? `Edited ${formatTime(comment.edited_at)}` : "Edited"}>
+                      (edited)
+                    </span>
+                  )}
+                </span>
+                <div className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity ml-auto flex items-center gap-1">
+                  {isCommentAuthor && !isEditing && (
+                    <button
+                      onClick={() => startEditingComment(comment)}
+                      className="text-muted-foreground hover:text-foreground cursor-pointer"
+                      title="Edit comment"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                  )}
+                  {canDeleteComment && (
+                    <button
+                      onClick={() => handleDeleteComment(comment.comment_id)}
+                      className="text-muted-foreground hover:text-destructive cursor-pointer"
+                      title="Delete comment"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isEditing ? (
+                <div className="mt-1 space-y-2">
+                  <Textarea
+                    value={editCommentBody}
+                    onChange={(e) => setEditCommentBody(e.target.value)}
+                    maxLength={2000}
+                    rows={2}
+                    className="min-h-[40px] max-h-[120px] resize-none text-sm"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        saveEditComment(comment.comment_id);
+                      }
+                      if (e.key === "Escape") cancelEditingComment();
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => saveEditComment(comment.comment_id)} disabled={savingComment || !editCommentBody.trim()} className="h-7 text-xs gap-1">
+                      <Check className="w-3 h-3" />
+                      {savingComment ? "Saving..." : "Save"}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={cancelEditingComment} className="h-7 text-xs">
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ForumMarkdown content={comment.body} className="text-sm mt-1" />
+              )}
+
+              <ForumMediaGallery
+                images={forumImages(comment)}
+                videos={forumVideos(comment)}
+                className="mt-2"
+                compact
+              />
+            </>
+          )}
+
+          <div className="mt-1.5 flex items-center gap-3">
+            {!comment.deleted && (
+              <button
+                onClick={() => startReply(comment)}
+                className="flex items-center gap-1 text-3xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                <CornerUpLeft className="w-3 h-3" />
+                Reply
+              </button>
+            )}
+            {replyCount > 0 && (
+              <button
+                onClick={() => toggleFold(comment.comment_id)}
+                className="flex items-center gap-1 text-3xs font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+              >
+                {isFolded ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                {replyCount} {replyCount === 1 ? "reply" : "replies"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {node.replies.length > 0 && !isFolded && (
+          <div
+            className={cn(
+              "mt-2 space-y-2",
+              // The rail stops stepping in after a few levels: a long
+              // back-and-forth would otherwise walk off the right of a phone,
+              // and by then the rail says less than the reply button did.
+              node.depth < MAX_THREAD_INDENT ? "ml-3 border-l pl-3" : "border-l pl-3",
+            )}
+          >
+            {node.replies.map(renderComment)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Header */}
@@ -352,9 +570,6 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto p-4 space-y-4">
-          {/* Post images */}
-          <ForumImageGallery images={forumImages(post)} />
-
           {/* Post title & meta */}
           {editingPost ? (
             <div className="space-y-3">
@@ -384,7 +599,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
           ) : (
             <div>
               <div className="flex items-start gap-2">
-                <h1 className="text-xl font-bold flex-1">{post.title}</h1>
+                <h1 className="text-2xl font-bold leading-tight flex-1">{post.title}</h1>
                 {isPostAuthor && (
                   <button
                     onClick={startEditingPost}
@@ -406,9 +621,13 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             </div>
           )}
 
-          {/* Post body */}
+          {/* Post body, then its pictures — the post is what the page is for,
+              so it gets the room and reads in the order an article does. */}
           {!editingPost && post.body && (
-            <ForumMarkdown content={post.body} className="text-sm" />
+            <ForumMarkdown content={post.body} className="text-base leading-relaxed" />
+          )}
+          {!editingPost && (
+            <ForumMediaGallery images={forumImages(post)} videos={forumVideos(post)} />
           )}
 
           {/* Reactions */}
@@ -461,97 +680,29 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             </div>
           </div>
 
-          {/* Comments separator */}
-          <div className="border-t pt-4">
-            <h2 className="text-sm font-semibold mb-3">
-              Comments ({comments.length})
-            </h2>
+          {/* Discussion — behind the post, not beside it: a rule, a quieter
+              heading, and a fold, so the page is the post first. */}
+          <div className="border-t pt-3">
+            <button
+              onClick={() => setDiscussionOpen((open) => !open)}
+              className="flex w-full items-center gap-1.5 text-left text-sm font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+            >
+              {discussionOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+              <MessageSquare className="w-3.5 h-3.5" />
+              Discussion
+              <span className="tabular-nums">{comments.length}</span>
+            </button>
 
-            {/* Comment list */}
-            <div className="space-y-3">
-              {comments.map((comment) => {
-                const cAuthor = displayUserId(comment.author);
-                const canDeleteComment = comment.author === state.userId || isOwnerOrMod();
-                const isCommentAuthor = comment.author === state.userId;
-                const isEditing = editingCommentId === comment.comment_id;
-                return (
-                  <div
-                    key={comment.comment_id}
-                    className="group flex gap-2 rounded-md border p-2.5"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium">{cAuthor}</span>
-                        <span className="ui-meta">
-                          {formatTime(comment.created_at)}
-                          {comment.edited && (
-                            <span className="ml-1" title={comment.edited_at ? `Edited ${formatTime(comment.edited_at)}` : "Edited"}>
-                              (edited)
-                            </span>
-                          )}
-                        </span>
-                        <div className="can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity ml-auto flex items-center gap-1">
-                          {isCommentAuthor && !isEditing && (
-                            <button
-                              onClick={() => startEditingComment(comment)}
-                              className="text-muted-foreground hover:text-foreground cursor-pointer"
-                              title="Edit comment"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                          )}
-                          {canDeleteComment && (
-                            <button
-                              onClick={() => handleDeleteComment(comment.comment_id)}
-                              className="text-muted-foreground hover:text-destructive cursor-pointer"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {isEditing ? (
-                        <div className="mt-1 space-y-2">
-                          <Textarea
-                            value={editCommentBody}
-                            onChange={(e) => setEditCommentBody(e.target.value)}
-                            maxLength={2000}
-                            rows={2}
-                            className="min-h-[40px] max-h-[120px] resize-none text-sm"
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && !e.shiftKey) {
-                                e.preventDefault();
-                                saveEditComment(comment.comment_id);
-                              }
-                              if (e.key === "Escape") {
-                                cancelEditingComment();
-                              }
-                            }}
-                          />
-                          <div className="flex gap-2">
-                            <Button size="sm" onClick={() => saveEditComment(comment.comment_id)} disabled={savingComment || !editCommentBody.trim()} className="h-7 text-xs gap-1">
-                              <Check className="w-3 h-3" />
-                              {savingComment ? "Saving..." : "Save"}
-                            </Button>
-                            <Button size="sm" variant="ghost" onClick={cancelEditingComment} className="h-7 text-xs">
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      ) : (
-                        <ForumMarkdown content={comment.body} className="text-sm mt-1" />
-                      )}
-                      <ForumImageGallery
-                        images={forumImages(comment)}
-                        className="mt-2"
-                        compact
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={commentsEndRef} />
-            </div>
+            {discussionOpen && (
+              <div className="mt-3 space-y-2">
+                {thread.length === 0 && (
+                  <p className="ui-hint py-2">
+                    Nothing here yet. Say the first thing.
+                  </p>
+                )}
+                {thread.map(renderComment)}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -568,15 +719,43 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
         onDrop={onDrop}
       >
         <div className="max-w-3xl mx-auto">
+          {replyingTo && (
+            <div className="mb-2 flex items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1 text-xs">
+              <CornerUpLeft className="w-3 h-3 shrink-0 text-primary" />
+              <span className="shrink-0">
+                Replying to <span className="font-medium">{displayUserId(replyingTo.author)}</span>
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {replyingTo.body}
+              </span>
+              <button
+                onClick={() => setReplyingTo(null)}
+                className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                title="Reply to the post instead"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
           {commentImages.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {commentImages.map((pending, i) => (
                 <div key={i} className="relative">
-                  <img
-                    src={pending.previewUrl ?? ""}
-                    alt={pending.file.name}
-                    className="h-16 w-16 rounded-md border border-border object-cover"
-                  />
+                  {pending.file.type.startsWith("video/") ? (
+                    <video
+                      src={pending.previewUrl ?? ""}
+                      muted
+                      playsInline
+                      preload="metadata"
+                      className="h-16 w-16 rounded-md border border-border bg-black object-cover"
+                    />
+                  ) : (
+                    <img
+                      src={pending.previewUrl ?? ""}
+                      alt={pending.file.name}
+                      className="h-16 w-16 rounded-md border border-border object-cover"
+                    />
+                  )}
                   <button
                     onClick={() => removeCommentImage(i)}
                     className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
@@ -592,7 +771,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={IMAGE_AND_VIDEO_ACCEPT}
               multiple
               className="hidden"
               onChange={handleCommentImageSelect}
@@ -605,14 +784,15 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               onClick={() => fileInputRef.current?.click()}
               title={
                 commentImagesRemaining > 0
-                  ? `Add images (${commentImagesRemaining} of ${MAX_ATTACHMENTS} left)`
-                  : `${MAX_ATTACHMENTS} images is the limit`
+                  ? `Add images or videos (${commentImagesRemaining} of ${MAX_ATTACHMENTS} left)`
+                  : `${MAX_ATTACHMENTS} files is the limit`
               }
             >
               <ImagePlus className="w-4 h-4" />
             </Button>
             <Textarea
-              placeholder="Write a comment..."
+              ref={commentInputRef}
+              placeholder={replyingTo ? `Reply to ${displayUserId(replyingTo.author)}…` : "Write a comment..."}
               value={commentBody}
               onChange={(e) => setCommentBody(e.target.value)}
               onKeyDown={(e) => {

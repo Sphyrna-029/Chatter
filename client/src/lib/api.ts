@@ -1671,6 +1671,7 @@ export interface ForumPost {
   image_url: string;
   /** Absent on posts written before one could carry more than a single image. */
   image_urls?: string[];
+  video_urls?: string[];
   created_at: number;
   comment_count: number;
   last_activity: number;
@@ -1688,6 +1689,12 @@ export interface ForumComment {
   /** The first of `image_urls`. Read comments through `forumImages`. */
   image_url: string;
   image_urls?: string[];
+  video_urls?: string[];
+  /** The comment this replies to; empty or absent means it answers the post. */
+  parent_id?: string;
+  /** A comment that was deleted but still holds replies under it. Its author
+   *  and everything it said are gone; only its place in the thread is left. */
+  deleted?: boolean;
   created_at: number;
   edited?: boolean;
   edited_at?: number;
@@ -1704,17 +1711,29 @@ export function forumImages(item: { image_url?: string; image_urls?: string[] })
   return item.image_url ? [item.image_url] : [];
 }
 
+/** The videos on a post or comment. Empty for anything written before they. */
+export function forumVideos(item: { video_urls?: string[] }): string[] {
+  return item.video_urls ?? [];
+}
+
 export async function apiCreateForumPost(
   roomId: string,
   title: string,
   body: string,
   imageUrls: string[] = [],
+  videoUrls: string[] = [],
 ) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts`, {
     method: "POST",
-    // Both fields: a server that predates multi-image posts reads the first
-    // one and ignores the rest, rather than storing nothing at all.
-    body: JSON.stringify({ title, body, image_url: imageUrls[0], image_urls: imageUrls }),
+    // image_url as well as image_urls: a server that predates multi-image posts
+    // reads the first one and ignores the rest, rather than storing nothing.
+    body: JSON.stringify({
+      title,
+      body,
+      image_url: imageUrls[0],
+      image_urls: imageUrls,
+      video_urls: videoUrls,
+    }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
@@ -1754,10 +1773,18 @@ export async function apiCreateForumComment(
   postId: string,
   body: string,
   imageUrls: string[] = [],
+  videoUrls: string[] = [],
+  parentId?: string,
 ) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments`, {
     method: "POST",
-    body: JSON.stringify({ body, image_url: imageUrls[0], image_urls: imageUrls }),
+    body: JSON.stringify({
+      body,
+      image_url: imageUrls[0],
+      image_urls: imageUrls,
+      video_urls: videoUrls,
+      parent_id: parentId,
+    }),
   });
   if (!res.ok) {
     const data = await res.json().catch(() => null);

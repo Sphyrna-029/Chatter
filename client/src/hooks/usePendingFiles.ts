@@ -2,8 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface PendingFile {
   file: File;
-  /** Object URL for image previews; null for everything else. */
+  /** Object URL for image and video previews; null for everything else. */
   previewUrl: string | null;
+}
+
+/** Whether a staged file is something a preview can be drawn from. */
+export function isPreviewable(file: File): boolean {
+  return file.type.startsWith("image/") || file.type.startsWith("video/");
 }
 
 /** Attachments per message, matching the composer's staged-preview row. */
@@ -70,7 +75,7 @@ export function usePendingFiles(max: number = MAX_ATTACHMENTS) {
             // Created here rather than inside a state updater: React can invoke
             // an updater twice, which would strand a second object URL with
             // nothing tracking it.
-            previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+            previewUrl: isPreviewable(file) ? URL.createObjectURL(file) : null,
           })),
         ]);
       }

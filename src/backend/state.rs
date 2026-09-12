@@ -265,6 +265,8 @@ pub(crate) struct ForumPostRecord {
     /// carry one, which is why `image_url` is still the fallback on read.
     #[serde(default)]
     pub(crate) image_urls: Vec<String>,
+    #[serde(default)]
+    pub(crate) video_urls: Vec<String>,
     pub(crate) created_at: i64,
     #[serde(default)]
     pub(crate) comment_count: i64,
@@ -291,6 +293,13 @@ pub(crate) struct ForumCommentRecord {
     pub(crate) image_url: String,
     #[serde(default)]
     pub(crate) image_urls: Vec<String>,
+    #[serde(default)]
+    pub(crate) video_urls: Vec<String>,
+    /// The comment this one answers, or empty when it answers the post itself.
+    /// Empty on every row written before replies could nest, which is exactly
+    /// right: those are all top-level.
+    #[serde(default)]
+    pub(crate) parent_id: String,
     pub(crate) created_at: i64,
     #[serde(default)]
     pub(crate) deleted: bool,

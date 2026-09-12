@@ -202,6 +202,7 @@ pub(crate) struct CreateForumPostRequest {
     /// multi-image posts keeps working.
     pub(crate) image_url: Option<String>,
     pub(crate) image_urls: Option<Vec<String>>,
+    pub(crate) video_urls: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -209,6 +210,9 @@ pub(crate) struct CreateForumCommentRequest {
     pub(crate) body: String,
     pub(crate) image_url: Option<String>,
     pub(crate) image_urls: Option<Vec<String>>,
+    pub(crate) video_urls: Option<Vec<String>>,
+    /// The comment being replied to. Absent or empty answers the post itself.
+    pub(crate) parent_id: Option<String>,
 }
 
 #[derive(Deserialize)]

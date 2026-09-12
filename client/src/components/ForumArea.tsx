@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
+import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -428,9 +429,9 @@ function CreatePostDialog({
   } = usePendingFiles();
 
   const stageImages = useCallback((incoming: File[]) => {
-    const pictures = incoming.filter((f) => f.type.startsWith("image/"));
+    const pictures = incoming.filter(isImageOrVideoFile);
     if (pictures.length < incoming.length) {
-      toast.error("A post takes images only");
+      toast.error("A post takes images and videos only");
     }
     // Checked here rather than on submit: uploads run one after another, so an
     // image the server will refuse would otherwise be found out only after the
@@ -442,15 +443,15 @@ function CreatePostDialog({
       const mb = Math.round(limit / 1024 / 1024);
       toast.error(
         tooBig === 1
-          ? `That image is over the ${mb} MB limit`
-          : `${tooBig} images are over the ${mb} MB limit`,
+          ? `That file is over the ${mb} MB limit`
+          : `${tooBig} files are over the ${mb} MB limit`,
       );
     }
     if (small.length === 0) return;
     const { rejected } = addImages(small);
     if (rejected > 0) {
       toast.error(
-        `A post holds ${MAX_ATTACHMENTS} images — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
+        `A post holds ${MAX_ATTACHMENTS} files — ${rejected} ${rejected === 1 ? "was" : "were"} left off`,
       );
     }
   }, [addImages, state.uploadLimitBytes]);
@@ -460,14 +461,16 @@ function CreatePostDialog({
     setSubmitting(true);
     setUploadedCount(0);
     try {
-      // Uploaded in order so the post shows them in the order they were added.
-      const urls: string[] = [];
+      // Uploaded in order so the post shows them in the order they were added,
+      // then split by kind: pictures and clips are laid out differently.
+      const imageUrls: string[] = [];
+      const videoUrls: string[] = [];
       for (const pending of images) {
         const uploaded = await apiUploadFile(pending.file);
-        urls.push(uploaded.url);
-        setUploadedCount(urls.length);
+        (pending.file.type.startsWith("video/") ? videoUrls : imageUrls).push(uploaded.url);
+        setUploadedCount(imageUrls.length + videoUrls.length);
       }
-      await apiCreateForumPost(roomId, title.trim(), body, urls);
+      await apiCreateForumPost(roomId, title.trim(), body, imageUrls, videoUrls);
       setTitle("");
       setBody("");
       clearImages();
@@ -556,7 +559,7 @@ function CreatePostDialog({
           </div>
           <div className="space-y-2">
             <Label>
-              Images (Optional)
+              Images and videos (Optional)
               {images.length > 0 && (
                 <span className="ml-1.5 font-normal text-muted-foreground">
                   {images.length} of {MAX_ATTACHMENTS}
@@ -566,7 +569,7 @@ function CreatePostDialog({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={IMAGE_AND_VIDEO_ACCEPT}
               multiple
               className="hidden"
               onChange={handleImageSelect}
@@ -575,11 +578,21 @@ function CreatePostDialog({
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                 {images.map((pending, i) => (
                   <div key={i} className="group relative">
-                    <img
-                      src={pending.previewUrl ?? ""}
-                      alt={pending.file.name}
-                      className="aspect-square w-full rounded-md border border-border object-cover"
-                    />
+                    {pending.file.type.startsWith("video/") ? (
+                      <video
+                        src={pending.previewUrl ?? ""}
+                        muted
+                        playsInline
+                        preload="metadata"
+                        className="aspect-square w-full rounded-md border border-border bg-black object-cover"
+                      />
+                    ) : (
+                      <img
+                        src={pending.previewUrl ?? ""}
+                        alt={pending.file.name}
+                        className="aspect-square w-full rounded-md border border-border object-cover"
+                      />
+                    )}
                     <button
                       onClick={() => removeImage(i)}
                       className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-destructive-foreground cursor-pointer"
@@ -600,12 +613,12 @@ function CreatePostDialog({
             >
               <ImagePlus className="w-4 h-4" />
               {images.length === 0
-                ? "Add Images"
+                ? "Add Images or Videos"
                 : imagesRemaining === 0
-                  ? `${MAX_ATTACHMENTS} images is the limit`
+                  ? `${MAX_ATTACHMENTS} files is the limit`
                   : `Add more (${imagesRemaining} left)`}
             </Button>
-            <p className="ui-hint">Or drop images anywhere on this dialog.</p>
+            <p className="ui-hint">Or drop them anywhere on this dialog.</p>
           </div>
         </div>
         <DialogFooter>
