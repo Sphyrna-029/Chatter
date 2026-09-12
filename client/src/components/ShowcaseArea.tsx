@@ -16,7 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Lock, Smile, Image as ImageIcon, Settings, X, UserPlus } from "lucide-react";
-import { displayUserId } from "@/lib/utils";
+import { cn, displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
 import { scrollBehavior } from "@/lib/theme/display";
 
@@ -157,9 +157,10 @@ function ShowcaseChatPane({
 
   const {
     files: pendingFiles,
-    add: addStagedFile,
+    addMany: addStagedFiles,
     remove: removePendingFile,
     clear: clearPendingFiles,
+    remaining: attachmentsRemaining,
   } = usePendingFiles();
 
   const uploadFile = async (file: File): Promise<string | null> => {
@@ -261,31 +262,108 @@ function ShowcaseChatPane({
     }
   };
 
-  /** Stage files on the composer; the upload happens on Send. */
+  /**
+   * Stage files on the composer; the upload happens on Send.
+   *
+   * Counted as a batch rather than a file at a time: staging is asynchronous
+   * here (EXIF is stripped on the way in), so a running total read from render
+   * state would be stale by the second image of a drop.
+   */
+  const stageFiles = useCallback(async (incoming: File[]) => {
+    const withinLimit = uploadLimitBytes > 0
+      ? incoming.filter((f) => f.size <= uploadLimitBytes)
+      : incoming;
+    const tooBig = incoming.length - withinLimit.length;
+    if (tooBig > 0) {
+      const mb = Math.round(uploadLimitBytes / 1024 / 1024);
+      toast.error(
+        tooBig === 1
+          ? `That file is over the ${mb} MB limit`
+          : `${tooBig} files are over the ${mb} MB limit`,
+      );
+    }
+    if (withinLimit.length === 0) return;
+
+    // Strip EXIF while staging so the preview matches what will be sent.
+    const processed: File[] = [];
+    for (const file of withinLimit) {
+      processed.push(file.type.startsWith("image/") ? await stripExifData(file) : file);
+    }
+    const { rejected } = addStagedFiles(processed);
+    if (rejected > 0) {
+      toast.error(
+        `A message holds ${MAX_ATTACHMENTS} attachments — ${rejected} ${rejected === 1 ? "file was" : "files were"} left off`,
+      );
+    }
+  }, [addStagedFiles, uploadLimitBytes]);
+
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Snapshot before resetting the input: some browsers clear the FileList
+    // when the value is.
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    let staged = pendingFiles.length;
-    for (const file of files) {
-      if (uploadLimitBytes > 0 && file.size > uploadLimitBytes) {
-        toast.error(`File "${file.name}" too large (max ${Math.round(uploadLimitBytes / 1024 / 1024)} MB)`);
-        continue;
-      }
-      if (staged >= MAX_ATTACHMENTS) {
-        toast.error(`You can attach at most ${MAX_ATTACHMENTS} files per message`);
-        break;
-      }
-      // Strip EXIF while staging so the preview matches what will be sent.
-      const processed = file.type.startsWith("image/") ? await stripExifData(file) : file;
-      addStagedFile(processed);
-      staged++;
-    }
+    await stageFiles(files);
+  };
+
+  // ─── Drag and drop ────────────────────────────────────────────────────────
+  // A pane is its own drop target, so a drag over the community side never
+  // lights up the featured one. `dragCounter` survives the enter/leave pairs
+  // that fire as the pointer crosses children on the way in.
+  const [fileDragging, setFileDragging] = useState(false);
+  const dragCounter = useRef(0);
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    if (!canPost) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) setFileDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    if (!canPost) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setFileDragging(false);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    if (!canPost) return;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // A pane you cannot post in is not a drop target: without the guard a drop
+  // would stage files onto a composer that is not even rendered.
+  const handleDrop = (e: React.DragEvent) => {
+    if (!canPost) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setFileDragging(false);
+    dragCounter.current = 0;
+    const files = Array.from(e.dataTransfer.files ?? []);
+    if (files.length > 0) void stageFiles(files);
+  };
+
+  /** Files only — anything else is left to the browser to paste as it likes. */
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length === 0) return;
+    e.preventDefault();
+    void stageFiles(files);
   };
 
   const fileInputId = `showcase-file-${pane}`;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+    <div
+      className="flex flex-col flex-1 min-h-0 overflow-hidden"
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       {/* Pane header */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b shrink-0">
         {pane === "featured" && <Lock className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
@@ -298,6 +376,19 @@ function ShowcaseChatPane({
 
       {/* Messages */}
       <div ref={scrollWrapperRef} className="flex-1 overflow-hidden relative" onScroll={handleScroll}>
+        {/* Stops short of the composer, which takes its own outline below —
+            the input is what the drop is aimed at, so covering it would hide
+            the answer to "where does this go?". */}
+        {fileDragging && (
+          <div className="absolute inset-2 z-50 flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-primary bg-background/80 pointer-events-none">
+            <p className="text-sm font-medium text-primary">Drop to attach</p>
+            <p className="text-xs text-muted-foreground">
+              {attachmentsRemaining > 0
+                ? `Images or files — room for ${attachmentsRemaining} more`
+                : `This message already has ${MAX_ATTACHMENTS} attachments`}
+            </p>
+          </div>
+        )}
         <ScrollArea className="h-full py-2 px-2" onScroll={handleScroll}>
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-32">
@@ -372,7 +463,12 @@ function ShowcaseChatPane({
 
       {/* Input area */}
       {canPost ? (
-        <div className="border-t p-2 shrink-0">
+        <div
+          className={cn(
+            "border-t p-2 shrink-0 transition-colors",
+            fileDragging && "outline-2 outline-dashed outline-primary -outline-offset-2 bg-primary/5",
+          )}
+        >
           <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
           <div className="flex gap-1.5 items-end">
             {/* File upload */}
@@ -385,7 +481,15 @@ function ShowcaseChatPane({
               onChange={handleFileSelect}
             />
             <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" disabled={uploading} asChild>
-              <label htmlFor={uploading ? undefined : fileInputId} className={uploading ? "cursor-not-allowed" : "cursor-pointer"} title="Attach file">
+              <label
+                htmlFor={uploading ? undefined : fileInputId}
+                className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
+                title={
+                  attachmentsRemaining > 0
+                    ? `Attach images or files (${attachmentsRemaining} of ${MAX_ATTACHMENTS} left)`
+                    : `This message already has ${MAX_ATTACHMENTS} attachments`
+                }
+              >
                 <ImageIcon className="h-4 w-4" />
               </label>
             </Button>
@@ -427,6 +531,13 @@ function ShowcaseChatPane({
                 suppressContentEditableWarning
                 onInput={() => setInput(getDivContent())}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                // Taken here as well as on the pane: a file dropped on a
+                // contentEditable is the browser's to insert unless something
+                // claims it first. `handleDrop` stops propagation, so the pane
+                // does not then see it twice.
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
                 className="min-h-[36px] max-h-40 overflow-y-auto w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
               />
             </div>

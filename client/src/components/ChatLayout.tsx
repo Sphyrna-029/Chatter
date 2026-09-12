@@ -190,6 +190,26 @@ export function ChatLayout() {
     loadContinuity();
   }, [loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity]);
 
+  // A file dropped anywhere that is not a drop zone — the sidebar, a pane you
+  // cannot post in, the gap beside the composer — is otherwise the browser's
+  // to open, which navigates away from the app and takes the session with it.
+  // Now that dropping attachments is a main path, a near miss must cost
+  // nothing. Real drop zones stop propagation, so this never sees theirs, and
+  // the check for Files leaves the app's own drags (reordering a channel, say)
+  // alone.
+  useEffect(() => {
+    const swallow = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes("Files")) return;
+      e.preventDefault();
+    };
+    window.addEventListener("dragover", swallow);
+    window.addEventListener("drop", swallow);
+    return () => {
+      window.removeEventListener("dragover", swallow);
+      window.removeEventListener("drop", swallow);
+    };
+  }, []);
+
   // Refetch what should follow the user between devices when this tab comes
   // back to the foreground: a draft written on a phone should be here when
   // they turn back to the desktop, without needing a reload. Only an empty
