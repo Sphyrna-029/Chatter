@@ -541,7 +541,6 @@ export function UserProfileDialog({
           {presence?.displayName && (
             <p className="ui-hint">{username}</p>
           )}
-          <p className="text-sm text-muted-foreground">{userId}</p>
         </div>
 
       {isSelf ? (
