@@ -38,6 +38,11 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
   // While dragging, the avatar follows the pointer rather than the echo — a
   // round trip is imperceptible in the ears and very visible under the thumb.
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // Which pointer owns the gesture, so a second finger landing mid-drag does
+  // not fight the first for the position. A ref as well as the flag above,
+  // because the move handler has to read it in the same task as the press.
+  const dragPointerRef = useRef<number | null>(null);
   const [speaking, setSpeaking] = useState<Set<string>>(new Set());
 
   const channelId = state.currentChannelId;
@@ -56,18 +61,29 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
   // effect would be a render caused by leaving.
   const speakingNow = inThisChannel ? speaking : EMPTY_SPEAKING;
 
-  // Leaving the floor ends the drag; otherwise a pointer released outside the
-  // window leaves the avatar stuck to the cursor on return.
+  // The gesture ends; the position it put us at does not. See `myPoint`.
+  const endDrag = useCallback(() => {
+    dragPointerRef.current = null;
+    setDragging(false);
+  }, []);
+
+  // A safety net for the release the floor does not get: capture normally
+  // delivers it there even off-element, but capture is allowed to fail, and a
+  // pointer released outside the window would otherwise leave the avatar stuck
+  // to the cursor on return.
+  //
+  // Keyed on whether a gesture is running rather than on the position — the
+  // position changes every frame, and that rebound the listeners every frame
+  // with it.
   useEffect(() => {
-    if (!drag) return;
-    const end = () => setDrag(null);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
+    if (!dragging) return;
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
     return () => {
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
+      window.removeEventListener("pointerup", endDrag);
+      window.removeEventListener("pointercancel", endDrag);
     };
-  }, [drag]);
+  }, [dragging, endDrag]);
 
   useEffect(() => () => {
     if (flushTimerRef.current) window.clearTimeout(flushTimerRef.current);
@@ -135,7 +151,19 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
     queueMove(point.x, point.y);
   };
 
-  const myPoint = drag ?? (me?.x !== undefined && me?.y !== undefined ? { x: me.x, y: me.y } : { x: 0.5, y: 0.5 });
+  const stored =
+    me?.x !== undefined && me?.y !== undefined ? { x: me.x, y: me.y } : null;
+  // Where we have put ourselves, which outlives the gesture: it used to be
+  // dropped the instant the pointer lifted, which put the avatar back where
+  // the drag started until the echo came round — every move ended in a visible
+  // snap backwards, and a `voice_position` that never arrived left it there.
+  //
+  // Only this connection can move this session (the server checks it), so
+  // there is no correction to wait for. It stops meaning anything once the
+  // call is not ours, though: the next join gets a spawn point, not wherever
+  // we last dragged to.
+  const myPoint =
+    (inThisChannel ? drag : null) ?? stored ?? { x: 0.5, y: 0.5 };
 
   if (!channel) return <div className="flex-1" />;
 
@@ -163,11 +191,36 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
       <div className="flex-1 min-h-0 p-4 flex items-center justify-center overflow-auto">
         <div
           ref={floorRef}
-          onPointerMove={(e) => { if (drag) moveTo(e.clientX, e.clientY); }}
           onPointerDown={(e) => {
-            // Clicking anywhere on the floor walks you there, which is quicker
-            // than dragging across it and is what a person tries first.
-            if (inThisChannel && e.target === floorRef.current) moveTo(e.clientX, e.clientY);
+            // Pressing anywhere on the floor walks you there and starts a
+            // drag. The floor owns the whole gesture: it used to be split
+            // between the floor and your own avatar, and the floor's half
+            // only ran when the press landed on the floor *itself* — so every
+            // pixel an avatar or a name label covered was dead to a click,
+            // and nobody else's tile had a handler at all.
+            if (!inThisChannel) return;
+            // A right- or middle-click is not a walk.
+            if (e.pointerType === "mouse" && e.button !== 0) return;
+            dragPointerRef.current = e.pointerId;
+            setDragging(true);
+            // Capture, so the drag keeps arriving once the pointer leaves the
+            // floor and `pointToRoom` can clamp it to the edge. Without it a
+            // drag froze at the boundary and the corners were unreachable.
+            // Allowed to fail: it is what makes the edges work, not what makes
+            // the drag work, and a throw here would lose the gesture outright.
+            try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* not fatal */ }
+            moveTo(e.clientX, e.clientY);
+          }}
+          onPointerMove={(e) => {
+            if (dragPointerRef.current !== e.pointerId) return;
+            moveTo(e.clientX, e.clientY);
+          }}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          style={{
+            // Or a finger drag scrolls the pane instead of walking, and the
+            // browser cancels the pointer out from under the gesture.
+            touchAction: inThisChannel ? "none" : undefined,
           }}
           className={cn(
             "relative w-full max-w-[46rem] aspect-[4/3] rounded-xl border border-border/60 overflow-hidden",
@@ -222,15 +275,11 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
                   // Never all the way out: someone across the room is faint,
                   // not gone, and a dot you cannot see is one you will walk into.
                   opacity: 0.35 + 0.65 * heard,
-                  touchAction: isSelf ? "none" : undefined,
-                  cursor: isSelf && inThisChannel ? "grab" : undefined,
+                  // Every tile is a picture of where somebody is standing, and
+                  // none of them is a control. Letting them take a press is
+                  // what made the floor unclickable wherever anyone stood.
+                  pointerEvents: "none",
                 }}
-                onPointerDown={(e) => {
-                  if (!isSelf || !inThisChannel) return;
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                  setDrag({ x: at.x, y: at.y });
-                }}
-                onPointerMove={(e) => { if (isSelf && drag) moveTo(e.clientX, e.clientY); }}
               >
                 {isSelf && inThisChannel && (
                   // What you can hear, drawn where the falloff actually bites.
@@ -279,7 +328,7 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
         <div className="flex items-center justify-center gap-2 px-4 pb-4 shrink-0 ui-hint">
           {state.isMuted ? <MicOff className="h-3.5 w-3.5 text-destructive" /> : <Mic className="h-3.5 w-3.5" />}
           {state.isDeafened ? <VolumeX className="h-3.5 w-3.5 text-destructive" /> : <Volume2 className="h-3.5 w-3.5" />}
-          <span>Drag yourself, or click the floor. People fade as you walk away.</span>
+          <span>Click or drag anywhere on the floor to walk. People fade as you walk away.</span>
         </div>
       )}
     </div>

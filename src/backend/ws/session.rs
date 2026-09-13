@@ -278,7 +278,7 @@ async fn may_act_in_room(state: &AppState, room_id: &str, user_id: &str) -> bool
 /// The claimed id stands in only when there is no membership to read — a
 /// toggle arriving for a call that has already ended, where the event reaches
 /// nobody either way.
-fn voice_room_of<'a>(recorded: &'a Option<String>, claimed: &'a str) -> &'a str {
+fn voice_room_of<'a>(recorded: Option<&'a str>, claimed: &'a str) -> &'a str {
     match recorded {
         Some(room) if !room.is_empty() => room,
         _ => claimed,
@@ -953,23 +953,22 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 return;
             }
 
-            let moved = {
+            let member_room = {
                 let mut vc = state.voice_channels.write().await;
-                match vc.get_mut(channel_id) {
-                    Some(chan) => match chan.get_mut(user_id) {
-                        Some(member) if member.conn_id == conn_id => {
-                            member.x = x;
-                            member.y = y;
-                            true
-                        }
-                        _ => false,
-                    },
-                    None => false,
+                match vc.get_mut(channel_id).and_then(|chan| chan.get_mut(user_id)) {
+                    Some(member) if member.conn_id == conn_id => {
+                        member.x = x;
+                        member.y = y;
+                        Some(member.room_id.clone())
+                    }
+                    _ => None,
                 }
             };
-            if !moved {
+            // Nobody moved, so there is nothing to say.
+            let Some(member_room) = member_room else {
                 return;
-            }
+            };
+            let room_id = voice_room_of(Some(member_room.as_str()), room_id);
 
             // One person's move, not the whole channel: the full record still
             // rides on every join, leave and mute, so a dropped one costs a
@@ -1094,7 +1093,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     None => (muted, None),
                 }
             };
-            let room_id = voice_room_of(&member_room, room_id);
+            let room_id = voice_room_of(member_room.as_deref(), room_id);
             let event = json!({
                 "type": "voice_user_muted",
                 "room_id": room_id,
@@ -1413,7 +1412,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     None => None,
                 }
             };
-            let room_id = voice_room_of(&member_room, room_id);
+            let room_id = voice_room_of(member_room.as_deref(), room_id);
             let event = json!({
                 "type": "voice_user_deafened",
                 "room_id": room_id,
