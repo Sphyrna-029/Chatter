@@ -281,21 +281,37 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
                   pointerEvents: "none",
                 }}
               >
-                {isSelf && inThisChannel && (
-                  // What you can hear, drawn where the falloff actually bites.
-                  <span
-                    className="absolute rounded-full pointer-events-none"
-                    style={{
-                      width: "13rem",
-                      height: "13rem",
-                      background: `radial-gradient(circle, ${accent ?? "var(--primary)"}22 0%, transparent 70%)`,
-                    }}
-                  />
-                )}
                 <span
-                  className={cn("relative rounded-full transition-shadow", micOff && "opacity-70")}
+                  className={cn(
+                    "relative inline-flex rounded-full transition-shadow",
+                    micOff && "opacity-70",
+                  )}
                   style={isSpeaking ? { boxShadow: `0 0 0 3px ${accent ?? "var(--success)"}` } : undefined}
                 >
+                  {isSelf && inThisChannel && (
+                    // What you can hear, drawn where the falloff actually bites.
+                    //
+                    // Centred on the avatar, which took moving it in here to
+                    // do: as a sibling of this span it was `absolute` with no
+                    // offsets, so it fell back to its static position and hung
+                    // below and to the right of the person it belongs to.
+                    //
+                    // Before the avatar in document order rather than behind it
+                    // by z-index — Radix already positions the avatar, so the
+                    // later of two positioned siblings paints on top, and a
+                    // negative z-index here would sink the glow through the
+                    // floor's own background instead.
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute left-1/2 top-1/2 rounded-full"
+                      style={{
+                        width: "13rem",
+                        height: "13rem",
+                        transform: "translate(-50%, -50%)",
+                        background: `radial-gradient(circle, ${accent ?? "var(--primary)"}22 0%, transparent 70%)`,
+                      }}
+                    />
+                  )}
                   <Avatar className="h-11 w-11 border-2 border-background">
                     <AuthAvatarImage src={presence?.avatarUrl} />
                     <AvatarFallback className="text-xs bg-secondary">
