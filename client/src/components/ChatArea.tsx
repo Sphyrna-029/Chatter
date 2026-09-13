@@ -33,6 +33,7 @@ import {
 import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
 import { GifPicker } from "./GifPicker";
 import { cn, displayUserId } from "@/lib/utils";
+import { readProfileAccent } from "@/lib/profileTheme";
 import { toast } from "sonner";
 import { scrollBehavior } from "@/lib/theme/display";
 
@@ -1727,12 +1728,28 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
           } else {
             text = "Multiple users are yapping....";
           }
+          // Three dots, and up to three of them belong to somebody: the
+          // first dot is the first person typing, in their own colour. Past
+          // three typists the names are gone anyway, so the dots go back to
+          // meaning "someone".
           return (
             <>
               <span className="flex gap-0.5">
-                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:0ms]" />
-                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:150ms]" />
-                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:300ms]" />
+                {[0, 150, 300].map((delay, i) => {
+                  const accent = names.length <= 3
+                    ? readProfileAccent(state.userPresence[state.typingUsers[i]])
+                    : undefined;
+                  return (
+                    <span
+                      key={delay}
+                      className={cn(
+                        "w-1 h-1 rounded-full animate-bounce",
+                        !accent && "bg-muted-foreground",
+                      )}
+                      style={{ animationDelay: `${delay}ms`, ...(accent ? { backgroundColor: accent } : {}) }}
+                    />
+                  );
+                })}
               </span>
               <span className="text-xs text-muted-foreground italic">{text}</span>
             </>

@@ -8,6 +8,7 @@ import {
   Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff, MessagesSquare,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
+import { readProfileAccent, speakingStyle } from "@/lib/profileTheme";
 import { AuthImage, AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -606,10 +607,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
               const isLocalMuted = localVol === 0;
               const isExpanded = expandedUser === m.userId;
               const isSpeaking = speakingUsers.has(m.userId) && !m.muted && !isLocalMuted;
+              const speakingLook = isSpeaking
+                ? speakingStyle(readProfileAccent(state.userPresence[m.userId]), "0 0 6px 1px")
+                : undefined;
               return (
                 <div key={m.userId}>
                   <div
-                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm rounded transition-colors ${isSpeaking ? "text-success bg-success/10 shadow-[0_0_6px_1px_var(--success)]" : "text-muted-foreground"} ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
+                    className={`flex items-center gap-1.5 px-1 py-0.5 text-sm rounded transition-colors ${isSpeaking ? (speakingLook ? "" : "text-success bg-success/10 shadow-[0_0_6px_1px_var(--success)]") : "text-muted-foreground"} ${!isMe ? "cursor-pointer hover:bg-accent/50" : ""}`}
+                    style={speakingLook}
                     onClick={() => !isMe && setExpandedUser(isExpanded ? null : m.userId)}
                   >
                     {isLocalMuted && !isMe

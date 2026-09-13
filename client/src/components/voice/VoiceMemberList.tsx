@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { cn, displayUserId } from "@/lib/utils";
+import { readProfileAccent, speakingStyle } from "@/lib/profileTheme";
 import type { PeerStats } from "@/lib/webrtc";
 
 interface VoiceMemberListProps {
@@ -21,7 +22,7 @@ interface VoiceMemberListProps {
   volumes: Record<string, number>;
   userPresence: Record<
     string,
-    { displayName?: string; avatarUrl?: string; [key: string]: unknown }
+    { displayName?: string; avatarUrl?: string; profileTheme?: unknown; [key: string]: unknown }
   >;
   onSetUserVolume: (userId: string, vol: number) => void;
   onWatchUser: (sharerId: string) => void;
@@ -59,13 +60,21 @@ export function VoiceMemberList({
           const isWebcamStreaming = activeWebcamStreamers.includes(memberId);
           const vol = volumes[memberId] ?? 1;
           const isSpeaking = speakingUsers.has(memberId) && !isMutedMember;
+          // Their own colour where the uniform green used to be.
+          const speaking = isSpeaking
+            ? speakingStyle(readProfileAccent(userPresence[memberId]), "0 0 8px 2px")
+            : undefined;
           const isWatching = selectedScreenSharer === memberId && screenViewerOpen;
 
           return (
-            <div key={memberId} className={cn(
-              "flex flex-col rounded-md px-2 py-1.5 transition-shadow duration-150 min-w-0 overflow-hidden",
-              isSpeaking && "shadow-[0_0_8px_2px_var(--success)]"
-            )}>
+            <div
+              key={memberId}
+              className={cn(
+                "flex flex-col rounded-md px-2 py-1.5 transition-shadow duration-150 min-w-0 overflow-hidden",
+                isSpeaking && !speaking && "shadow-[0_0_8px_2px_var(--success)]"
+              )}
+              style={speaking && { boxShadow: speaking.boxShadow }}
+            >
               {/* Name row: mute icon, latency dot, name */}
               <div className="flex items-center gap-1 text-sm min-w-0">
                 <span className={cn("text-xs flex-shrink-0", isMutedMember ? "text-destructive" : isSpeaking ? "text-success" : "")}>
@@ -101,7 +110,10 @@ export function VoiceMemberList({
                     {name[0]?.toUpperCase() || "?"}
                   </AvatarFallback>
                 </Avatar>
-                <span className={cn("truncate", isSpeaking && "text-success font-semibold")}>
+                <span
+                  className={cn("truncate", isSpeaking && "font-semibold", isSpeaking && !speaking && "text-success")}
+                  style={speaking && { color: speaking.color }}
+                >
                   {name}{isSelf && " (You)"}
                 </span>
                 {isWebcamStreaming && (

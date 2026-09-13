@@ -740,7 +740,9 @@ export function UserProfileDialog({
             <label className="text-xs font-medium text-muted-foreground">Profile Colours</label>
             <p className="text-3xs text-muted-foreground">
               Everyone who looks at your profile sees these. This card and your
-              tab in the member list are set separately.
+              tab in the member list are set separately, and your member list
+              colour is also your accent — the ring while you speak, your dot
+              in the typing indicator, the tint under your messages.
             </p>
             <ToggleGroup
               type="single"

@@ -115,6 +115,45 @@ export function profileWash(theme: ProfileSurfaceTheme, alpha: number): string |
   return `linear-gradient(${GRADIENT_TO[theme.direction]}, ${from} 0%, ${from} ${hold}%, ${to} 100%)`;
 }
 
+/**
+ * The one colour that stands for this person elsewhere in the app — the ring
+ * while they speak, their dot in the typing indicator, the tint under their
+ * messages on hover.
+ *
+ * Derived rather than set: a fourth control for "and your colour everywhere"
+ * would be a fourth thing to keep in step with the other three. The member
+ * list tab wins because that is already the person's marker in a list beside
+ * everyone else; the card is the fallback for someone who only painted that.
+ */
+export function profileAccent(theme: ProfileTheme): string | undefined {
+  return theme.tab.color || theme.modal.color || undefined;
+}
+
+/** The accent straight from a presence record, for callers that hold one. */
+export function readProfileAccent(presence: { profileTheme?: unknown } | undefined): string | undefined {
+  return profileAccent(readProfileTheme(presence));
+}
+
+/**
+ * What "this person is speaking" looks like when the person has a colour.
+ *
+ * The glow's *presence* is the signal, not its hue, so swapping the uniform
+ * green for the speaker's own colour costs nothing to read and says who is
+ * talking before you get to the name. `geometry` is the box-shadow spread the
+ * call site already used; only the colour comes from here.
+ */
+export function speakingStyle(
+  accent: string | undefined,
+  geometry: string,
+): { boxShadow: string; color: string; backgroundColor?: string } | undefined {
+  if (!isProfileColor(accent)) return undefined;
+  return {
+    boxShadow: `${geometry} ${accent}`,
+    color: accent,
+    backgroundColor: rgba(accent, 0.1),
+  };
+}
+
 /** The wash for a surface, ready to spread into a `style` prop. */
 export function profileWashStyle(
   theme: ProfileTheme,

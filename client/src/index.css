@@ -140,6 +140,17 @@ html {
     }
   }
 
+  /* A row whose sender has an accent colour of their own, hovered. The colour
+     arrives as --sender-accent on the row; a sender without one never gets
+     the class and keeps the plain `hover:bg-accent/50`. Kept lighter than the
+     mention tint, which has to stay the louder of the two — being named is
+     news, and who wrote it is already on the row. */
+  @media (hover: hover) and (pointer: fine) {
+    .msg-sender-accent:hover {
+      background-color: color-mix(in oklab, var(--sender-accent) 12%, transparent);
+    }
+  }
+
   /* Timestamps, counts, and the byline under a row. */
   .ui-meta {
     font-size: var(--text-xs);

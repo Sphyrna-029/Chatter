@@ -12,6 +12,7 @@ import { Slider } from "@/components/ui/slider";
 import { useAppContext } from "@/lib/store";
 import { canShareScreen } from "@/lib/webrtc";
 import { cn, displayUserId } from "@/lib/utils";
+import { readProfileAccent, speakingStyle } from "@/lib/profileTheme";
 import type { ConnQualityData } from "@/components/VoiceControls";
 import {
   Mic,
@@ -369,6 +370,9 @@ function MobileCallSheet({
             const sharingCamera = state.activeWebcamStreamers.includes(memberId);
             const vol = volumes[memberId] ?? 1;
             const isSpeaking = speaking.has(memberId) && !isMuted;
+            const speakingLook = isSpeaking
+              ? speakingStyle(readProfileAccent(state.userPresence[memberId]), "0 0 0 2px")
+              : undefined;
             const volumeOpen = volumeOpenFor === memberId;
 
             return (
@@ -377,8 +381,9 @@ function MobileCallSheet({
                   <span
                     className={cn(
                       "shrink-0 rounded-full transition-shadow",
-                      isSpeaking && "shadow-[0_0_0_2px_var(--success)]",
+                      isSpeaking && !speakingLook && "shadow-[0_0_0_2px_var(--success)]",
                     )}
+                    style={speakingLook && { boxShadow: speakingLook.boxShadow }}
                   >
                     <Avatar className="h-9 w-9">
                       <AuthAvatarImage src={state.userPresence[memberId]?.avatarUrl} />
@@ -389,7 +394,10 @@ function MobileCallSheet({
                   </span>
 
                   <div className="min-w-0 flex-1">
-                    <p className={cn("truncate text-sm", isSpeaking && "font-semibold text-success")}>
+                    <p
+                      className={cn("truncate text-sm", isSpeaking && "font-semibold", isSpeaking && !speakingLook && "text-success")}
+                      style={speakingLook && { color: speakingLook.color }}
+                    >
                       {name(memberId)}
                       {isSelf && <span className="text-muted-foreground"> (You)</span>}
                     </p>
