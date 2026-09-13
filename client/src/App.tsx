@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { Suspense } from "react";
 import { WifiOff } from "lucide-react";
 import { useAppContext, AppProvider } from "@/lib/store";
 import { hadSession } from "@/lib/api";
@@ -9,10 +9,12 @@ import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeSync } from "@/components/ThemeSync";
 import { ThemeInvite } from "@/components/ThemeInvite";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { lazyRetry } from "@/lib/lazyRetry";
 
 // Only ever reached by following an invite link, which is a fresh navigation
 // anyway — no reason for every other load to carry it.
-const InvitePage = lazy(() =>
+const InvitePage = lazyRetry(() =>
   import("@/components/InvitePage").then((m) => ({ default: m.InvitePage })),
 );
 
@@ -69,17 +71,25 @@ function AppContent() {
 
 function App() {
   return (
-    <ThemeProvider>
-      <AppProvider>
-        <TooltipProvider>
-          <ConfirmProvider>
-            <ThemeSync />
-            <ThemeInvite />
-            <AppContent />
-          </ConfirmProvider>
-        </TooltipProvider>
-      </AppProvider>
-    </ThemeProvider>
+    // The backstop. `ChatLayout` catches a broken view close to where it
+    // happened and keeps the rest of the app up; this one exists so that
+    // anything thrown outside that slot — a provider, the login screen, the
+    // layout itself — still lands somewhere that can explain it. Nothing
+    // caught a render error before, and React unmounts the root when nothing
+    // does, which is what turned any one of these into a grey page.
+    <ErrorBoundary label="app">
+      <ThemeProvider>
+        <AppProvider>
+          <TooltipProvider>
+            <ConfirmProvider>
+              <ThemeSync />
+              <ThemeInvite />
+              <AppContent />
+            </ConfirmProvider>
+          </TooltipProvider>
+        </AppProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
 

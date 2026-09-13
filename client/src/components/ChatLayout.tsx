@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { WifiOff, ChevronRight, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -31,26 +31,28 @@ import { Toaster } from "@/components/ui/sonner";
 // Full-screen views the user reaches deliberately, and never more than one
 // at a time. Splitting them out keeps the whiteboard, the watch party and
 // the admin dashboard off the critical path of simply opening a channel.
-const AdminDashboard = lazy(() =>
+const AdminDashboard = lazyRetry(() =>
   import("./AdminDashboard").then((m) => ({ default: m.AdminDashboard })),
 );
-const ForumArea = lazy(() => import("./ForumArea").then((m) => ({ default: m.ForumArea })));
-const ShowcaseArea = lazy(() =>
+const ForumArea = lazyRetry(() => import("./ForumArea").then((m) => ({ default: m.ForumArea })));
+const ShowcaseArea = lazyRetry(() =>
   import("./ShowcaseArea").then((m) => ({ default: m.ShowcaseArea })),
 );
-const WatchPartyArea = lazy(() =>
+const WatchPartyArea = lazyRetry(() =>
   import("./WatchPartyArea").then((m) => ({ default: m.WatchPartyArea })),
 );
-const WhiteboardArea = lazy(() =>
+const WhiteboardArea = lazyRetry(() =>
   import("./WhiteboardArea").then((m) => ({ default: m.WhiteboardArea })),
 );
-const SpatialVoiceArea = lazy(() =>
+const SpatialVoiceArea = lazyRetry(() =>
   import("./SpatialVoiceArea").then((m) => ({ default: m.SpatialVoiceArea })),
 );
-const ActivityPage = lazy(() =>
+const ActivityPage = lazyRetry(() =>
   import("./ActivityPage").then((m) => ({ default: m.ActivityPage })),
 );
 import { displayUserId } from "@/lib/utils";
+import { lazyRetry } from "@/lib/lazyRetry";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { syncPushSubscription } from "@/lib/push";
 import { decideVoiceRejoin, parseStoredVoiceSession } from "@/lib/voiceRejoin";
 import type { VoiceRestoreState } from "@/lib/voiceRejoin";
@@ -714,7 +716,17 @@ export function ChatLayout() {
               </div>
               {/* One boundary for the whole slot: the branches below are
                   mutually exclusive, so only ever one lazy view suspends,
-                  and the eager ones never reach the fallback. */}
+                  and the eager ones never reach the fallback.
+
+                  The error boundary sits outside the Suspense because a view
+                  that fails to *load* rejects rather than suspends, and the
+                  rethrow has to be caught above the boundary that was waiting
+                  for it. Keyed on the channel so walking away from a broken
+                  view clears it rather than stranding the reader on it. */}
+              <ErrorBoundary
+                label="channel-view"
+                resetKey={`${state.currentRoomId ?? ""}:${state.currentChannelId ?? ""}`}
+              >
               <Suspense fallback={<div className="flex-1" />}>
               {state.adminDashboardOpen ? (
                 <AdminDashboard />
@@ -808,6 +820,7 @@ export function ChatLayout() {
               </>
               )}
               </Suspense>
+              </ErrorBoundary>
             </div>
             {/* Voice bar: shown when in voice while viewing a different room, and
                 always on mobile — there the channel column is a drawer, so this
