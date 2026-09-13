@@ -417,35 +417,20 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 )
             };
             // Get avatar/about/banner/display_name from MongoDB
-            let (avatar_url, about, banner_url, display_name, name_font_url) = {
-                let users_coll = state.db.collection::<UserRecord>("users");
-                match users_coll.find_one(doc! { "_id": &user_id }).await {
-                    Ok(Some(u)) => (
-                        u.avatar_url,
-                        u.about,
-                        u.banner_url,
-                        u.display_name,
-                        u.name_font_url,
-                    ),
-                    _ => (
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ),
-                }
-            };
+            let profile = get_user_profile(&state, &user_id).await;
             let event = json!({
                 "type": "presence_update",
                 "user_id": user_id,
                 "status": "active",
                 "custom_status": custom_status,
-                "avatar_url": avatar_url,
-                "about": about,
-                "banner_url": banner_url,
-                "display_name": display_name,
-                "name_font_url": name_font_url,
+                "avatar_url": profile.avatar_url,
+                "about": profile.about,
+                "banner_url": profile.banner_url,
+                "display_name": profile.display_name,
+                "name_font_url": profile.name_font_url,
+                "profile_color": profile.profile_color,
+                "profile_fade": profile.profile_fade,
+                "profile_fade_direction": profile.profile_fade_direction,
                 "is_mobile": presence_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1569,8 +1554,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     )
                 }
             };
-            let (avatar_url, about, banner_url, display_name, name_font_url) =
-                get_user_profile(&state, user_id).await;
+            let profile = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -1583,11 +1567,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "user_id": user_id,
                 "status": effective_status,
                 "custom_status": custom_status,
-                "avatar_url": avatar_url,
-                "about": about,
-                "banner_url": banner_url,
-                "display_name": display_name,
-                "name_font_url": name_font_url,
+                "avatar_url": profile.avatar_url,
+                "about": profile.about,
+                "banner_url": profile.banner_url,
+                "display_name": profile.display_name,
+                "name_font_url": profile.name_font_url,
+                "profile_color": profile.profile_color,
+                "profile_fade": profile.profile_fade,
+                "profile_fade_direction": profile.profile_fade_direction,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1669,8 +1656,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     )
                 }
             };
-            let (avatar_url, about, banner_url, display_name, name_font_url) =
-                get_user_profile(&state, user_id).await;
+            let profile = get_user_profile(&state, user_id).await;
             let rm = state.room_members.read().await;
             let user_rooms: Vec<String> = rm
                 .iter()
@@ -1683,11 +1669,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "user_id": user_id,
                 "status": effective_status,
                 "custom_status": custom_status,
-                "avatar_url": avatar_url,
-                "about": about,
-                "banner_url": banner_url,
-                "display_name": display_name,
-                "name_font_url": name_font_url,
+                "avatar_url": profile.avatar_url,
+                "about": profile.about,
+                "banner_url": profile.banner_url,
+                "display_name": profile.display_name,
+                "name_font_url": profile.name_font_url,
+                "profile_color": profile.profile_color,
+                "profile_fade": profile.profile_fade,
+                "profile_fade_direction": profile.profile_fade_direction,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1733,6 +1722,38 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         }),
                     )
                     .await;
+                }
+            }
+            // The profile theme: a colour, how far it travels, and which way.
+            // Each is checked on its own so clearing one does not disturb the
+            // others, and the colour is pinned to a hex triple because it is
+            // written into a gradient on every client that draws this person.
+            if let Some(color) = msg.get("profile_color").and_then(|v| v.as_str()) {
+                if crate::backend::helpers::valid_profile_color(color) {
+                    update_doc.insert("profile_color", color);
+                } else {
+                    send_to_conn(
+                        &state,
+                        user_id,
+                        conn_id,
+                        &json!({
+                            "type": "error",
+                            "error": "invalid_profile_color",
+                            "message": "That profile colour must be a #rrggbb value"
+                        }),
+                    )
+                    .await;
+                }
+            }
+            if let Some(fade) = msg.get("profile_fade").and_then(|v| v.as_i64()) {
+                update_doc.insert(
+                    "profile_fade",
+                    crate::backend::helpers::clamp_profile_fade(fade),
+                );
+            }
+            if let Some(dir) = msg.get("profile_fade_direction").and_then(|v| v.as_str()) {
+                if crate::backend::helpers::valid_profile_fade_direction(dir) {
+                    update_doc.insert("profile_fade_direction", dir);
                 }
             }
             if let Some(sting) = msg.get("entrance_sound_url").and_then(|v| v.as_str()) {
@@ -1783,8 +1804,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             }
 
             // Read current values for broadcast
-            let (avatar_url, about, banner_url, display_name, name_font_url) =
-                get_user_profile(&state, user_id).await;
+            let profile = get_user_profile(&state, user_id).await;
             let (
                 custom_status,
                 effective_status,
@@ -1840,11 +1860,14 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "user_id": user_id,
                 "status": effective_status,
                 "custom_status": custom_status,
-                "avatar_url": avatar_url,
-                "about": about,
-                "banner_url": banner_url,
-                "display_name": display_name,
-                "name_font_url": name_font_url,
+                "avatar_url": profile.avatar_url,
+                "about": profile.about,
+                "banner_url": profile.banner_url,
+                "display_name": profile.display_name,
+                "name_font_url": profile.name_font_url,
+                "profile_color": profile.profile_color,
+                "profile_fade": profile.profile_fade,
+                "profile_fade_direction": profile.profile_fade_direction,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -2387,26 +2410,52 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
 }
 
 /// Helper to get user avatar_url, about, banner_url, and display_name from MongoDB.
-async fn get_user_profile(
-    state: &AppState,
-    user_id: &str,
-) -> (String, String, String, String, String) {
+/// The stored half of a presence event — everything a `presence_update`
+/// carries that lives on the user record rather than in the presence map.
+///
+/// A struct rather than a tuple because every broadcast site reads all of it
+/// and there are now enough fields that position stops meaning anything.
+struct ProfileFields {
+    avatar_url: String,
+    about: String,
+    banner_url: String,
+    display_name: String,
+    name_font_url: String,
+    profile_color: String,
+    profile_fade: i32,
+    profile_fade_direction: String,
+}
+
+impl Default for ProfileFields {
+    fn default() -> Self {
+        Self {
+            avatar_url: String::new(),
+            about: String::new(),
+            banner_url: String::new(),
+            display_name: String::new(),
+            name_font_url: String::new(),
+            profile_color: String::new(),
+            profile_fade: crate::backend::constants::PROFILE_FADE_DEFAULT,
+            profile_fade_direction: crate::backend::constants::PROFILE_FADE_DIRECTION_DEFAULT
+                .to_string(),
+        }
+    }
+}
+
+async fn get_user_profile(state: &AppState, user_id: &str) -> ProfileFields {
     let users_coll = state.db.collection::<UserRecord>("users");
     match users_coll.find_one(doc! { "_id": user_id }).await {
-        Ok(Some(u)) => (
-            u.avatar_url,
-            u.about,
-            u.banner_url,
-            u.display_name,
-            u.name_font_url,
-        ),
-        _ => (
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-            String::new(),
-        ),
+        Ok(Some(u)) => ProfileFields {
+            avatar_url: u.avatar_url,
+            about: u.about,
+            banner_url: u.banner_url,
+            display_name: u.display_name,
+            name_font_url: u.name_font_url,
+            profile_color: u.profile_color,
+            profile_fade: u.profile_fade,
+            profile_fade_direction: u.profile_fade_direction,
+        },
+        _ => ProfileFields::default(),
     }
 }
 

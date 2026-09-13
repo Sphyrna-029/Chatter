@@ -399,6 +399,10 @@ pub(crate) async fn totp_verify(
             is_admin: pending_reg.is_admin,
             disabled: false,
             name_font_url: String::new(),
+            profile_color: String::new(),
+            profile_fade: crate::backend::constants::PROFILE_FADE_DEFAULT,
+            profile_fade_direction: crate::backend::constants::PROFILE_FADE_DIRECTION_DEFAULT
+                .to_string(),
             must_reset_password: false,
             steam_id: None,
             hide_steam_game: false,

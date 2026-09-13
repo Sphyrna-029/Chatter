@@ -50,7 +50,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
-  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }>;
   // Channels
   channels: Channel[];
   channelCategories: ChannelCategory[];
@@ -207,7 +207,7 @@ export type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string; newEmbeds?: Embed[] } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "isWebcamActive" | "voiceChannelId" | "voiceChannelName" | "voicePublisherState">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
@@ -434,7 +434,7 @@ export interface AppContextValue {
   updateRoomSettings: (roomId: string, settings: { name?: string; icon_url?: string; tags?: string[]; custom_emojis?: string[]; emoji_aliases?: Record<string, string>; unlisted?: boolean; password?: string; remove_password?: boolean; sounds?: Record<string, string>; entrance_sounds_enabled?: boolean; suggested_theme?: string }) => Promise<void>;
   setCustomStatus: (status: string) => void;
   setManualStatus: (status: string) => void;
-  updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; entranceSoundUrl?: string }) => void;
+  updateProfile: (profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; entranceSoundUrl?: string }) => void;
   kickMember: (roomId: string, userId: string) => Promise<void>;
   banMember: (roomId: string, userId: string) => Promise<void>;
   unbanMember: (roomId: string, userId: string) => Promise<void>;

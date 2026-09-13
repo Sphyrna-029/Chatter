@@ -23,6 +23,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn, displayUserId } from "@/lib/utils";
+import { Slider } from "@/components/ui/slider";
+import {
+  PROFILE_FADE_DIRECTIONS,
+  PROFILE_WASH_ALPHA,
+  profileWash,
+  readProfileTheme,
+} from "@/lib/profileTheme";
+import type { ProfileFadeDirection, ProfileTheme } from "@/lib/profileTheme";
 import { ensureFontFace } from "@/lib/fontFace";
 import {
   MAX_SOUND_SECS,
@@ -73,6 +81,19 @@ function formatFileSize(bytes: number): string {
 function isImageFile(filename: string): boolean {
   return /\.(jpe?g|png|gif|webp|svg|bmp|ico|avif)$/i.test(filename);
 }
+
+/** The banner gives out before its bottom edge so it meets what is behind it. */
+const BANNER_FADE = {
+  maskImage: "linear-gradient(to bottom, #000 62%, transparent 100%)",
+  WebkitMaskImage: "linear-gradient(to bottom, #000 62%, transparent 100%)",
+} as const;
+
+const FADE_DIRECTION_LABELS: Record<ProfileFadeDirection, string> = {
+  down: "Down",
+  up: "Up",
+  right: "Right",
+  left: "Left",
+};
 
 const FILE_PAGE_SIZE = 21;
 
@@ -195,6 +216,10 @@ export function UserProfileDialog({
   const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   const [bannerPreview, setBannerPreview] = useState(bannerUrl);
   const [pendingBannerFile, setPendingBannerFile] = useState<File | null>(null);
+  const savedTheme = useMemo(() => readProfileTheme(presence), [presence]);
+  // Edited live so the modal you are looking at is the preview.
+  const [themeDraft, setThemeDraft] = useState<ProfileTheme>(savedTheme);
+  const theme = isSelf ? themeDraft : savedTheme;
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
@@ -280,6 +305,7 @@ export function UserProfileDialog({
       setPendingAvatarFile(null);
       setBannerPreview(bannerUrl);
       setPendingBannerFile(null);
+      setThemeDraft(savedTheme);
       setPendingFontFile(null);
       setActiveTab("profile");
       setNewPassword("");
@@ -300,6 +326,10 @@ export function UserProfileDialog({
       setTotpSetupRecoveryCodes(null);
       setTotpSetupLoading(false);
     }
+    // `savedTheme` is deliberately not a dependency: it is derived from the
+    // presence record, whose identity changes on every presence event — a
+    // stranger typing would otherwise reset the form mid-edit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, customStatus, about, avatarUrl, bannerUrl, nicknameFromPresence]);
 
   const fetchUploads = useCallback(async () => {
@@ -457,6 +487,9 @@ export function UserProfileDialog({
         about: aboutInput.trim(),
         customStatus: statusInput.trim(),
         displayName: nicknameInput.trim(),
+        profileColor: themeDraft.color,
+        profileFade: themeDraft.fade,
+        profileFadeDirection: themeDraft.direction,
         ...(newFontUrl !== undefined ? { nameFontUrl: newFontUrl } : {}),
       });
       onOpenChange(false);
@@ -471,22 +504,33 @@ export function UserProfileDialog({
     aboutInput.trim() !== about ||
     pendingAvatarFile !== null ||
     pendingBannerFile !== null ||
-    pendingFontFile !== null;
+    pendingFontFile !== null ||
+    themeDraft.color !== savedTheme.color ||
+    themeDraft.fade !== savedTheme.fade ||
+    themeDraft.direction !== savedTheme.direction;
+
+  const wash = profileWash(theme, PROFILE_WASH_ALPHA.modal);
 
   const profileContent = (
-    <div className="flex flex-col">
+    <div
+      className="flex flex-col"
+      style={wash ? { backgroundImage: wash } : undefined}
+    >
       {/* Banner */}
       <div
-        className={cn("relative h-32 w-full overflow-hidden bg-secondary shrink-0", isSelf && "cursor-pointer group")}
+        className={cn("relative h-[9.2rem] w-full overflow-hidden shrink-0", isSelf && "cursor-pointer group")}
         onClick={handleBannerClick}
       >
-        {bannerPreview ? (
-          <AuthImage src={bannerPreview} alt="Banner" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full bg-gradient-to-br from-muted to-secondary" />
-        )}
-        {/* Fade to dialog background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background pointer-events-none" />
+        {/* Masked rather than covered by a fade-to-background overlay: an
+            opaque overlay would paint over the colour wash behind it and
+            leave a seam where the banner ends. */}
+        <div className="absolute inset-0" style={BANNER_FADE}>
+          {bannerPreview ? (
+            <AuthImage src={bannerPreview} alt="Banner" className="w-full h-full object-cover bg-secondary" />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-muted to-secondary" />
+          )}
+        </div>
         {isSelf && (
           <div className="absolute inset-0 bg-black/40 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex items-center justify-center">
             <span className="text-white text-xs font-medium">Change Banner</span>
@@ -675,6 +719,78 @@ export function UserProfileDialog({
               rows={3}
             />
             <p className="text-3xs text-muted-foreground text-right">{aboutInput.length}/200</p>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Profile Colour</label>
+            <p className="text-3xs text-muted-foreground">
+              Washes over this card and your row in the member list. Everyone
+              who looks at your profile sees it.
+            </p>
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={themeDraft.color || "#7c3aed"}
+                onChange={(e) => setThemeDraft((t) => ({ ...t, color: e.target.value }))}
+                className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
+              />
+              <span className="text-sm font-mono flex-1 truncate">
+                {themeDraft.color || "None"}
+              </span>
+              {themeDraft.color && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 text-destructive"
+                  onClick={() => setThemeDraft((t) => ({ ...t, color: "" }))}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            {themeDraft.color && (
+              <div className="space-y-3 pt-1">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-muted-foreground">Fade</label>
+                    <span className="text-3xs text-muted-foreground tabular-nums">
+                      {themeDraft.fade}%
+                    </span>
+                  </div>
+                  <Slider
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={[themeDraft.fade]}
+                    onValueChange={([fade]) => setThemeDraft((t) => ({ ...t, fade }))}
+                  />
+                  <p className="text-3xs text-muted-foreground">
+                    How far the colour travels before it is gone. At 0 it is an
+                    even wash; at 100 it fades across the whole card.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Fade Direction</label>
+                  <ToggleGroup
+                    type="single"
+                    value={themeDraft.direction}
+                    onValueChange={(val) => {
+                      if (val) setThemeDraft((t) => ({ ...t, direction: val as ProfileFadeDirection }));
+                    }}
+                    className="w-full rounded-md border border-border p-0.5 bg-muted"
+                  >
+                    {PROFILE_FADE_DIRECTIONS.map((dir) => (
+                      <ToggleGroupItem
+                        key={dir}
+                        value={dir}
+                        className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                      >
+                        {FADE_DIRECTION_LABELS[dir]}
+                      </ToggleGroupItem>
+                    ))}
+                  </ToggleGroup>
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name Font</label>

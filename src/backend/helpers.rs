@@ -260,6 +260,34 @@ pub(crate) fn valid_name_font_url(url: &str) -> bool {
     path.starts_with("/external/") && !path.contains("..")
 }
 
+/// Whether a string is safe to use as someone's profile colour.
+///
+/// Same reasoning as a theme colour: the value is handed to every client that
+/// draws this person's profile and ends up inside a CSS gradient, so it is
+/// pinned to the one shape a colour picker produces rather than passed
+/// through. Empty means "no colour", which is how the wash is turned off.
+pub(crate) fn valid_profile_color(color: &str) -> bool {
+    color.is_empty()
+        || (color.len() == 7
+            && color.starts_with('#')
+            && color[1..].chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Whether a string names one of the directions a profile fade can run in.
+pub(crate) fn valid_profile_fade_direction(direction: &str) -> bool {
+    super::constants::PROFILE_FADE_DIRECTIONS.contains(&direction)
+}
+
+/// A profile fade held inside its bounds. Out-of-range values are clamped
+/// rather than refused: the slider cannot produce one, so a stray number is a
+/// mistake to absorb, not something to reject a whole profile save over.
+pub(crate) fn clamp_profile_fade(fade: i64) -> i32 {
+    fade.clamp(
+        super::constants::PROFILE_FADE_MIN as i64,
+        super::constants::PROFILE_FADE_MAX as i64,
+    ) as i32
+}
+
 pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1633,6 +1661,37 @@ mod tests {
             "/external/a/{}.ttf",
             "x".repeat(600)
         )));
+    }
+
+    #[test]
+    fn a_profile_colour_is_the_one_shape_a_picker_makes() {
+        assert!(valid_profile_color("")); // clearing the colour
+        assert!(valid_profile_color("#7c3aed"));
+        assert!(valid_profile_color("#FFFFFF"));
+        assert!(!valid_profile_color("#fff"));
+        assert!(!valid_profile_color("red"));
+        // The sink is a CSS gradient, so anything that could close it out.
+        assert!(!valid_profile_color("#000000; }"));
+        assert!(!valid_profile_color("var(--foreground)"));
+    }
+
+    #[test]
+    fn a_profile_fade_runs_one_of_four_ways() {
+        for d in ["down", "up", "left", "right"] {
+            assert!(valid_profile_fade_direction(d));
+        }
+        assert!(!valid_profile_fade_direction(""));
+        assert!(!valid_profile_fade_direction("diagonal"));
+        assert!(!valid_profile_fade_direction("to bottom, red"));
+    }
+
+    #[test]
+    fn a_profile_fade_is_pulled_back_into_range_rather_than_refused() {
+        assert_eq!(clamp_profile_fade(70), 70);
+        assert_eq!(clamp_profile_fade(0), 0);
+        assert_eq!(clamp_profile_fade(100), 100);
+        assert_eq!(clamp_profile_fade(-40), 0);
+        assert_eq!(clamp_profile_fade(9_000), 100);
     }
 
     #[test]

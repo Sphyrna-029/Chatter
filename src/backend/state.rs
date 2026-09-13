@@ -156,6 +156,19 @@ pub(crate) struct UserRecord {
     pub(crate) disabled: bool,
     #[serde(default)]
     pub(crate) name_font_url: String,
+    /// How this person's profile is painted, wherever it is shown: the modal
+    /// and their row in the member list. Separate from the app theme, which
+    /// is the viewer's choice about their own client — this one travels with
+    /// the person and every viewer sees it.
+    #[serde(default)]
+    pub(crate) profile_color: String,
+    /// How far the colour travels before it is gone: 0 is a flat wash,
+    /// 100 fades out across the whole surface.
+    #[serde(default = "default_profile_fade")]
+    pub(crate) profile_fade: i32,
+    /// Which way that fade runs — `down`, `up`, `left` or `right`.
+    #[serde(default = "default_profile_fade_direction")]
+    pub(crate) profile_fade_direction: String,
     #[serde(default)]
     pub(crate) must_reset_password: bool,
     #[serde(default)]
@@ -570,6 +583,14 @@ pub(crate) struct ChannelRecord {
 
 fn default_voice_bitrate() -> i32 {
     super::constants::VOICE_BITRATE_DEFAULT
+}
+
+fn default_profile_fade() -> i32 {
+    super::constants::PROFILE_FADE_DEFAULT
+}
+
+fn default_profile_fade_direction() -> String {
+    super::constants::PROFILE_FADE_DIRECTION_DEFAULT.to_string()
 }
 
 // ─── Custom Roles ────────────────────────────────────────────────────────────

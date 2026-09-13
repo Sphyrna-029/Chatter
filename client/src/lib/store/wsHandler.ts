@@ -396,10 +396,10 @@ export function createWsMessageHandler(
               });
             }
             const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
+            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
             for (const [uid, p] of Object.entries(presData.presence)) {
               const pAny = p as any;
-              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
+              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileColor: pAny.profile_color || undefined, profileFade: typeof pAny.profile_fade === "number" ? pAny.profile_fade : undefined, profileFadeDirection: pAny.profile_fade_direction || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
             }
             dispatch({ type: "SET_PRESENCE", payload: mapped });
           } catch {}
@@ -542,7 +542,11 @@ export function createWsMessageHandler(
           type: "SET_PRESENCE",
           payload: {
             ...stateRef.current.userPresence,
-            [msg.user_id]: { status: "active", customStatus: existing?.customStatus, avatarUrl: existing?.avatarUrl, about: existing?.about, displayName: existing?.displayName, nameFontUrl: existing?.nameFontUrl, steamGame: existing?.steamGame, spotifyTrack: existing?.spotifyTrack, spotifyArtist: existing?.spotifyArtist, spotifyAlbumArt: existing?.spotifyAlbumArt },
+            // A spread rather than a field list: typing says nothing about
+            // the rest of the record, and naming the fields to keep meant
+            // every new one had to be added here or be dropped by someone
+            // typing — which is how `bannerUrl` was already being lost.
+            [msg.user_id]: { ...existing, status: "active" },
           },
         });
       }
@@ -684,6 +688,9 @@ export function createWsMessageHandler(
               bannerUrl: msg.banner_url !== undefined ? (msg.banner_url || undefined) : existing?.bannerUrl,
               displayName: msg.display_name !== undefined ? (msg.display_name || undefined) : existing?.displayName,
               nameFontUrl: msg.name_font_url !== undefined ? (msg.name_font_url || undefined) : existing?.nameFontUrl,
+              profileColor: msg.profile_color !== undefined ? (msg.profile_color || undefined) : existing?.profileColor,
+              profileFade: msg.profile_fade !== undefined ? msg.profile_fade : existing?.profileFade,
+              profileFadeDirection: msg.profile_fade_direction !== undefined ? (msg.profile_fade_direction || undefined) : existing?.profileFadeDirection,
               isMobile: msg.is_mobile !== undefined ? msg.is_mobile : existing?.isMobile,
               steamGame: msg.steam_game !== undefined ? (msg.steam_game || undefined) : existing?.steamGame,
               steamAppId: msg.steam_appid !== undefined ? (msg.steam_appid || undefined) : existing?.steamAppId,

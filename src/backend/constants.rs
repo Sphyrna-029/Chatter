@@ -11,6 +11,20 @@ pub(crate) const VOICE_BITRATE_MIN: i32 = 8_000;
 pub(crate) const VOICE_BITRATE_MAX: i32 = 256_000;
 pub(crate) const VOICE_BITRATE_DEFAULT: i32 = 32_000;
 
+// ─── Profile theming ────────────────────────────────────────────────────────
+// A person's own colour, shown to everyone who looks at their profile. Bounds
+// live here because both the validator and the record's defaults need them.
+
+/// How far the colour travels before it is gone, as a percentage of the
+/// surface: 0 is a flat wash, 100 fades across the whole thing.
+pub(crate) const PROFILE_FADE_DEFAULT: i32 = 70;
+pub(crate) const PROFILE_FADE_MIN: i32 = 0;
+pub(crate) const PROFILE_FADE_MAX: i32 = 100;
+
+/// Which way the fade runs. A closed set because it reaches a CSS gradient.
+pub(crate) const PROFILE_FADE_DIRECTIONS: [&str; 4] = ["down", "up", "left", "right"];
+pub(crate) const PROFILE_FADE_DIRECTION_DEFAULT: &str = "down";
+
 // ─── Voice speaker slots ────────────────────────────────────────────────────
 // The SFU forwards only the loudest few speakers into a fixed set of slots on
 // each listener's single connection. That is what stops a call's cost growing
