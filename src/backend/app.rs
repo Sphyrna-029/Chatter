@@ -631,6 +631,10 @@ pub async fn run() {
     // event — so this runs for the life of the process.
     tokio::spawn(presence_sweeper(Arc::clone(&state)));
 
+    // An upload abandoned halfway leaves its chunks staged on disk, and no
+    // request ever arrives to say so. Same reasoning as the sweep above.
+    tokio::spawn(media::sweep_abandoned_chunks());
+
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {
         let state_for_poller = Arc::clone(&state);

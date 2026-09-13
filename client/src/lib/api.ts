@@ -1289,15 +1289,40 @@ function uploadSingleFile(
 const CHUNK_UPLOAD_TIMEOUT_MS = 120_000; // 2 minutes per chunk
 const CHUNK_MAX_RETRIES = 3;
 
+/**
+ * Hex SHA-256 of one chunk, or null where the browser cannot produce one.
+ *
+ * SubtleCrypto is exposed only in a secure context, so an instance served over
+ * plain http on a LAN has none. The server treats the checksum as optional for
+ * exactly that reason: a hash nobody can compute must not be the thing that
+ * refuses the upload. Where it can be computed it is verified before the chunk
+ * is written, so a chunk that arrived wrong fails as itself rather than
+ * becoming a corrupt stretch of the assembled file.
+ */
+async function chunkChecksum(blob: Blob): Promise<string | null> {
+  if (typeof crypto === "undefined" || !crypto.subtle) return null;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", await blob.arrayBuffer());
+    return Array.from(new Uint8Array(digest))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+  } catch {
+    // Not worth failing an upload over; the length check still stands.
+    return null;
+  }
+}
+
 function uploadChunkXhrOnce(
   uploadId: string,
   chunkIndex: number,
   blob: Blob,
+  checksum: string | null,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
     fd.append("uploadId", uploadId);
     fd.append("chunkIndex", String(chunkIndex));
+    if (checksum) fd.append("checksum", checksum);
     fd.append("file", blob);
 
     const xhr = new XMLHttpRequest();
@@ -1335,10 +1360,11 @@ async function uploadChunkXhr(
   uploadId: string,
   chunkIndex: number,
   blob: Blob,
+  checksum: string | null,
 ): Promise<void> {
   for (let attempt = 1; attempt <= CHUNK_MAX_RETRIES; attempt++) {
     try {
-      return await uploadChunkXhrOnce(uploadId, chunkIndex, blob);
+      return await uploadChunkXhrOnce(uploadId, chunkIndex, blob, checksum);
     } catch (err) {
       if (attempt === CHUNK_MAX_RETRIES) throw err;
       // Brief backoff before retry
@@ -1361,15 +1387,23 @@ async function uploadChunkedFile(
     const err = await initRes.json().catch(() => ({}));
     throw new Error(err.error || "Failed to init chunked upload");
   }
-  const { uploadId } = await initRes.json();
+  const { uploadId, chunkSize } = await initRes.json();
 
   // 2. Upload chunks
-  const totalChunks = Math.ceil(file.size / CLIENT_CHUNK_SIZE);
+  //
+  // Sliced to the size the *server* reports, not to this file's own constant.
+  // Both ends hardcoded 10MB independently and this response was ignored, so
+  // the day the two differed the server would have assembled a different
+  // number of chunks than the client sent — every chunk present, every one the
+  // wrong length, and nothing on either side looking.
+  const chunkBytes =
+    typeof chunkSize === "number" && chunkSize > 0 ? chunkSize : CLIENT_CHUNK_SIZE;
+  const totalChunks = Math.ceil(file.size / chunkBytes);
   for (let i = 0; i < totalChunks; i++) {
-    const start = i * CLIENT_CHUNK_SIZE;
-    const end = Math.min(start + CLIENT_CHUNK_SIZE, file.size);
+    const start = i * chunkBytes;
+    const end = Math.min(start + chunkBytes, file.size);
     const blob = file.slice(start, end);
-    await uploadChunkXhr(uploadId, i, blob);
+    await uploadChunkXhr(uploadId, i, blob, await chunkChecksum(blob));
     if (onProgress) {
       onProgress(Math.round(((i + 1) / totalChunks) * 100));
     }

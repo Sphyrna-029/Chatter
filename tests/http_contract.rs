@@ -1821,3 +1821,127 @@ async fn room_suggested_theme_contract() {
         .unwrap();
     assert_eq!(theme_event["content"]["suggested_theme"], "");
 }
+
+#[tokio::test]
+async fn chunked_upload_verifies_each_chunk_before_assembling() {
+    // Nothing used to look at a chunk's contents at all: `upload_chunk` wrote
+    // whatever arrived, and `upload_complete` asked only whether each chunk
+    // file *existed* before concatenating them. A short chunk — a proxy cutting
+    // a request, or a client slicing to a different chunk size than this server
+    // assembles with — became a corrupt stretch of the finished file and was
+    // reported as a successful upload.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+
+    // Small enough to be a single chunk, so the whole file is the remainder
+    // case: `min(CHUNK_SIZE, file_size - offset)`.
+    let payload = vec![b'z'; 100];
+    let init = client
+        .post(format!("{}/api/upload/init", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({"filename": "parts.bin", "fileSize": payload.len()}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_body: Value = init.json().await.unwrap();
+    let upload_id = init_body["uploadId"].as_str().unwrap().to_string();
+    assert!(init_body["chunkSize"].as_u64().unwrap() > 0);
+
+    let chunk_url = format!("{}/api/upload/chunk", server.base_url);
+    let checksum = {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(&payload))
+    };
+
+    // A chunk that is not the length this index must be is refused.
+    let truncated = multipart::Form::new()
+        .text("uploadId", upload_id.clone())
+        .text("chunkIndex", "0")
+        .part(
+            "file",
+            multipart::Part::bytes(payload[..50].to_vec()).file_name("parts.bin"),
+        );
+    let short_chunk = client
+        .post(&chunk_url)
+        .header("authorization", bearer(&alice_token))
+        .multipart(truncated)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short_chunk.status(), StatusCode::BAD_REQUEST);
+    let short_body: Value = short_chunk.json().await.unwrap();
+    assert_eq!(short_body["error"], "Chunk 0 is 50 bytes, expected 100");
+
+    // The right length carrying the wrong bytes is refused too, when the
+    // client was able to hash it.
+    let corrupted = multipart::Form::new()
+        .text("uploadId", upload_id.clone())
+        .text("chunkIndex", "0")
+        .text("checksum", "0".repeat(64))
+        .part(
+            "file",
+            multipart::Part::bytes(payload.clone()).file_name("parts.bin"),
+        );
+    let bad_checksum = client
+        .post(&chunk_url)
+        .header("authorization", bearer(&alice_token))
+        .multipart(corrupted)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad_checksum.status(), StatusCode::BAD_REQUEST);
+    let bad_body: Value = bad_checksum.json().await.unwrap();
+    assert_eq!(bad_body["error"], "Chunk 0 failed its checksum");
+
+    // And the real thing goes through.
+    let good = multipart::Form::new()
+        .text("uploadId", upload_id.clone())
+        .text("chunkIndex", "0")
+        .text("checksum", checksum)
+        .part(
+            "file",
+            multipart::Part::bytes(payload.clone()).file_name("parts.bin"),
+        );
+    let accepted = client
+        .post(&chunk_url)
+        .header("authorization", bearer(&alice_token))
+        .multipart(good)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let complete = client
+        .post(format!("{}/api/upload/complete", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({"uploadId": upload_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(complete.status(), StatusCode::OK);
+    let complete_body: Value = complete.json().await.unwrap();
+    let url = complete_body["url"].as_str().unwrap().to_string();
+
+    // The assembled file is the size that was declared at init — the check
+    // that makes a lost or duplicated whole chunk a failure rather than a 200.
+    // The URL is absolute, so the disk path is what follows `/external/`.
+    let rel = url
+        .split("/external/")
+        .nth(1)
+        .expect("an upload url points into /external/");
+    let local_path = format!("external/{rel}");
+    let assembled = std::fs::read(&local_path).expect("the assembled file should be on disk");
+    assert_eq!(assembled, payload);
+
+    // The staging dir goes away with a successful assembly.
+    assert!(!std::path::Path::new(&format!("external/.chunks/{upload_id}")).exists());
+
+    // Leave nothing behind: `external/` is a tracked directory.
+    if let Some(dir) = std::path::Path::new(&local_path).parent() {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

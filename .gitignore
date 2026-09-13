@@ -20,6 +20,13 @@ CLAUDE.md
 client/node_modules/
 client/dist/
 
+# Uploads. Every upload lands in external/<random>/, and a chunked one stages
+# in external/.chunks/<id>/ on the way, so a dev instance fills this directory
+# with other people's files. The sound effects at the top level are the only
+# tracked contents.
+external/*
+!external/*.wav
+
 .git
 
 .DS_Store

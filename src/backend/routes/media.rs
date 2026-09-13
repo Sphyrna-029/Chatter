@@ -1095,6 +1095,7 @@ pub(crate) async fn upload_chunk(
     let mut upload_id = String::new();
     let mut chunk_index: Option<u64> = None;
     let mut chunk_data = None;
+    let mut checksum: Option<String> = None;
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap_or("").to_string();
@@ -1107,6 +1108,15 @@ pub(crate) async fn upload_chunk(
             "chunkIndex" => {
                 if let Ok(text) = field.text().await {
                     chunk_index = text.parse().ok();
+                }
+            }
+            // Optional: a client without SubtleCrypto — which is absent on a
+            // plain-http origin — cannot produce one, and an upload is not
+            // worth refusing over a hash it has no way to compute. Verified
+            // whenever it is sent.
+            "checksum" => {
+                if let Ok(text) = field.text().await {
+                    checksum = Some(text.trim().to_ascii_lowercase());
                 }
             }
             "file" => match field.bytes().await {
@@ -1148,6 +1158,36 @@ pub(crate) async fn upload_chunk(
     }
     if chunk_index >= meta.chunk_count {
         return error_response(StatusCode::BAD_REQUEST, "chunkIndex out of range");
+    }
+
+    // A chunk has exactly one correct length: a full one, or the remainder for
+    // the last. Nothing downstream checks this — `upload_complete` asks only
+    // whether each chunk file *exists* — so a request cut short by a proxy, or
+    // a client slicing to a different chunk size than this server assembles
+    // with, used to be written as-is and concatenated into a corrupt file that
+    // was reported as a successful upload.
+    let offset = chunk_index.saturating_mul(CHUNK_SIZE as u64);
+    let expected_len = std::cmp::min(CHUNK_SIZE as u64, meta.file_size.saturating_sub(offset));
+    let received_len = chunk_data.len() as u64;
+    if received_len != expected_len {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!("Chunk {chunk_index} is {received_len} bytes, expected {expected_len}"),
+        );
+    }
+
+    // The length catches a truncation; only a hash catches the bytes arriving
+    // wrong. Checked here rather than at assembly so a bad chunk fails as
+    // itself and can be retried on its own.
+    if let Some(expected) = &checksum {
+        use sha2::{Digest, Sha256};
+        let actual = hex::encode(Sha256::digest(&chunk_data));
+        if &actual != expected {
+            return error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("Chunk {chunk_index} failed its checksum"),
+            );
+        }
     }
 
     let chunk_path = format!("{}/{}", chunk_dir, chunk_index);
@@ -1249,6 +1289,26 @@ pub(crate) async fn upload_complete(
             let _ = tokio::fs::remove_file(&path).await;
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
         }
+    }
+
+    // The one end-to-end check available: the client said how big this file
+    // would be at init, and the pieces have to add up to it. It was summed here
+    // already and used only to report a size, so an upload that lost or
+    // duplicated a whole chunk still completed with a 200.
+    //
+    // Unrecoverable by a second `complete`, unlike the I/O failures above, so
+    // the staging dir goes with the partial file rather than being left to be
+    // retried.
+    let declared_size = meta.file_size;
+    if total_size != declared_size {
+        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            &format!(
+                "Assembled {total_size} bytes, expected {declared_size} — upload the file again"
+            ),
+        );
     }
 
     // Clean up chunk dir
@@ -1358,6 +1418,83 @@ pub(crate) async fn upload_complete(
 // ---------------------------------------------------------------------------
 // Link preview
 // ---------------------------------------------------------------------------
+
+/// Collect staging dirs for chunked uploads nobody is going to finish.
+///
+/// `upload_init` creates `external/.chunks/<id>/` and only a successful
+/// `upload_complete` removes it. A client that closed its tab, lost its
+/// connection, or gave up after its retries left the chunks it had already
+/// sent behind for good — 10MB apiece, with nothing anywhere in the tree
+/// collecting them. Runs for the life of the process, like the presence sweep,
+/// because an abandoned upload is the absence of a request and nothing else
+/// can notice it.
+pub(crate) async fn sweep_abandoned_chunks() {
+    use crate::backend::constants::{CHUNK_ABANDONED_SECS, CHUNK_SWEEP_SECS};
+
+    let mut interval =
+        tokio::time::interval(std::time::Duration::from_secs(CHUNK_SWEEP_SECS));
+    interval.tick().await; // skip the immediate first tick
+
+    let abandoned_after = std::time::Duration::from_secs(CHUNK_ABANDONED_SECS);
+
+    loop {
+        interval.tick().await;
+
+        // Created lazily by the first chunked upload, so its absence is the
+        // normal state of a server nobody has uploaded to in pieces.
+        let Ok(mut entries) = tokio::fs::read_dir("external/.chunks").await else {
+            continue;
+        };
+
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if !entry
+                .file_type()
+                .await
+                .map(|t| t.is_dir())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let path = entry.path();
+            // An unreadable dir is left alone rather than guessed about: the
+                // cost of waiting another hour is nothing, and the cost of being
+            // wrong is deleting an upload in flight.
+            let Some(idle) = idle_since_last_write(&path).await else {
+                continue;
+            };
+            if idle >= abandoned_after && tokio::fs::remove_dir_all(&path).await.is_ok() {
+                eprintln!("[chunks] swept abandoned upload {}", path.display());
+            }
+        }
+    }
+}
+
+/// How long ago anything in `dir` was last written.
+///
+/// The most recent write anywhere inside it, not the dir's own creation: an
+/// upload that is merely slow is still arriving, and dating it from `init`
+/// would reap it out from under a client that is still sending.
+async fn idle_since_last_write(dir: &std::path::Path) -> Option<std::time::Duration> {
+    let mut newest: Option<std::time::SystemTime> = None;
+    let mut entries = tokio::fs::read_dir(dir).await.ok()?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Ok(modified) = entry.metadata().await.and_then(|m| m.modified()) else {
+            continue;
+        };
+        if newest.is_none_or(|n| modified > n) {
+            newest = Some(modified);
+        }
+    }
+    // `meta.json` is written at init, so an empty dir means a failure between
+    // creating it and writing that — date it from the dir itself.
+    let newest = match newest {
+        Some(t) => t,
+        None => tokio::fs::metadata(dir).await.ok()?.modified().ok()?,
+    };
+    // A modification time in the future says the clock moved, not that the
+    // upload is fresh; treated as untellable rather than as newly touched.
+    std::time::SystemTime::now().duration_since(newest).ok()
+}
 
 /// Returns true if the IP address is private, loopback, link-local, or otherwise
 /// reserved — i.e. should NOT be reachable from a server-side fetch.
@@ -2420,6 +2557,95 @@ pub(crate) async fn upload_guard(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── Chunk staging sweep ────────────────────────────────────────────────
+
+    fn staging_dir(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "chatter_chunks_{}_{}_{}",
+            std::process::id(),
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Backdate a file, so a staging dir can be made to look abandoned without
+    /// a test having to wait a day for it.
+    fn backdate(path: &std::path::Path, secs: u64) {
+        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+        let file = std::fs::File::options().write(true).open(path).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(when))
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_staging_dir_still_being_written_to_is_not_idle() {
+        let dir = staging_dir("fresh");
+        std::fs::write(dir.join("meta.json"), "{}").unwrap();
+
+        let idle = idle_since_last_write(&dir).await.expect("a readable dir");
+        assert!(
+            idle < std::time::Duration::from_secs(60),
+            "a dir just written to should not look idle, got {idle:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_slow_upload_is_dated_from_its_newest_chunk() {
+        // The case that makes dating from `init` wrong: a big upload whose
+        // first chunks are hours old but which is still arriving. Reaping it
+        // would delete an upload out from under the client sending it.
+        let dir = staging_dir("slow");
+        std::fs::write(dir.join("meta.json"), "{}").unwrap();
+        std::fs::write(dir.join("0"), "old").unwrap();
+        std::fs::write(dir.join("1"), "new").unwrap();
+        backdate(&dir.join("meta.json"), 48 * 60 * 60);
+        backdate(&dir.join("0"), 48 * 60 * 60);
+
+        let idle = idle_since_last_write(&dir).await.expect("a readable dir");
+        assert!(
+            idle < std::time::Duration::from_secs(60),
+            "the newest chunk should date the dir, got {idle:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_upload_nobody_finished_reads_as_abandoned() {
+        use crate::backend::constants::CHUNK_ABANDONED_SECS;
+
+        let dir = staging_dir("abandoned");
+        std::fs::write(dir.join("meta.json"), "{}").unwrap();
+        std::fs::write(dir.join("0"), "chunk").unwrap();
+        backdate(&dir.join("meta.json"), CHUNK_ABANDONED_SECS * 2);
+        backdate(&dir.join("0"), CHUNK_ABANDONED_SECS * 2);
+
+        let idle = idle_since_last_write(&dir).await.expect("a readable dir");
+        assert!(
+            idle >= std::time::Duration::from_secs(CHUNK_ABANDONED_SECS),
+            "an untouched dir should pass the threshold, got {idle:?}"
+        );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_dir_that_cannot_be_read_is_left_alone() {
+        // Untellable rather than old: the sweep deletes, so not knowing has to
+        // mean doing nothing.
+        let missing = std::env::temp_dir().join("chatter_chunks_definitely_not_here");
+        let _ = std::fs::remove_dir_all(&missing);
+        assert!(idle_since_last_write(&missing).await.is_none());
+    }
+
 
     /// Build a test video (video + audio) with a mov_text subtitle track so
     /// that the subtitle stream has a GLOBAL index of 2, the case that broke

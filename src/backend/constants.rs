@@ -6,6 +6,24 @@ pub(crate) const MIN_USERNAME_LENGTH: usize = 3;
 pub(crate) const MAX_USERNAME_LENGTH: usize = 42;
 pub(crate) const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
+// ─── Chunked upload staging ─────────────────────────────────────────────────
+// `upload_init` creates a staging dir per upload and only `upload_complete`
+// removes it, so an upload whose client walked away — a closed tab, a dead
+// connection, a failure it gave up on — left its chunks on disk for good. At
+// 10MB a chunk that is a large leak from a small number of abandoned uploads.
+
+/// How often the staging area is swept for uploads nobody is going to finish.
+pub(crate) const CHUNK_SWEEP_SECS: u64 = 60 * 60;
+
+/// How long a staging dir may go untouched before it counts as abandoned.
+///
+/// Measured from the most recently written chunk, not from the init, so a
+/// genuinely slow upload is never reaped out from under itself. Generous
+/// against the client's own limits — two minutes per chunk and three tries —
+/// because the cost of waiting is disk and the cost of being wrong is somebody
+/// losing an upload in progress.
+pub(crate) const CHUNK_ABANDONED_SECS: u64 = 24 * 60 * 60;
+
 // Voice channel Opus bitrate bounds, in bits per second.
 pub(crate) const VOICE_BITRATE_MIN: i32 = 8_000;
 pub(crate) const VOICE_BITRATE_MAX: i32 = 256_000;
