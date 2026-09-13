@@ -5,7 +5,7 @@ import { useAppContext } from "@/lib/store";
 import {
   Hash, Volume2, Volume1, VolumeX, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
   Mic, MicOff, PhoneOff, Monitor, HeadphoneOff, Camera, FolderPlus, GripVertical, PanelLeftClose, PanelLeftOpen, Lock, Shield, ImagePlus, X, Scissors,
-  Film, LayoutList, PenTool, Sparkles, Bot, ShieldOff, MessagesSquare,
+  Film, LayoutList, Move3d, PenTool, Sparkles, Bot, ShieldOff, MessagesSquare,
 } from "lucide-react";
 import { displayUserId } from "@/lib/utils";
 import { readProfileAccent, speakingStyle } from "@/lib/profileTheme";
@@ -185,7 +185,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   // Voice channel bitrate, held in kbps for the slider
   const [editVoiceBitrateKbps, setEditVoiceBitrateKbps] = useState(VOICE_BITRATE_DEFAULT_BPS / 1000);
   const [name, setName] = useState("");
-  const [channelType, setChannelType] = useState<"text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase">("text");
+  const [channelType, setChannelType] = useState<"text" | "voice" | "spatial" | "theater" | "forum" | "whiteboard" | "showcase">("text");
   const [topic, setTopic] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("");
 
@@ -305,7 +305,7 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
 
   const handleEdit = async () => {
     if (!editChannelId || !roomId) return;
-    const isVoiceChannel = editChannelType === "voice";
+    const isVoiceChannel = editChannelType === "voice" || editChannelType === "spatial";
     try {
       await apiUpdateChannel(roomId, editChannelId, {
         name: name.trim() || undefined,
@@ -515,8 +515,13 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   // ─── Render helpers ────────────────────────────────────────────────────
   const renderChannel = (ch: Channel) => {
     const isVoice = ch.channel_type === "voice";
-    const members = isVoice ? (state.voiceChannelMembers[ch.channel_id] || []) : [];
-    const occupiedSince = isVoice && members.length > 0 ? state.voiceChannelOccupiedSince[ch.channel_id] : undefined;
+    // A spatial channel is a voice channel with a floor: it holds a call and
+    // shows its occupants like any other, but selecting it opens the floor
+    // rather than joining — you can look at a room before walking into it.
+    const isSpatial = ch.channel_type === "spatial";
+    const holdsCall = isVoice || isSpatial;
+    const members = holdsCall ? (state.voiceChannelMembers[ch.channel_id] || []) : [];
+    const occupiedSince = holdsCall && members.length > 0 ? state.voiceChannelOccupiedSince[ch.channel_id] : undefined;
 
     return (
       <div key={ch.channel_id} onDragEnd={handleDragEnd} className="mt-1">
@@ -536,11 +541,11 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             channel={ch}
             isSelected={isVoice ? state.voiceChannelId === ch.channel_id : state.currentChannelId === ch.channel_id}
             canManage={canManage}
-            notifyRoomId={!isVoice && roomId ? roomId : undefined}
+            notifyRoomId={!holdsCall && roomId ? roomId : undefined}
             notifyLevel={roomId ? resolveNotificationLevel(state.notificationSettings, roomId, ch.channel_id) : undefined}
-            hasUnread={!isVoice && ((state.channelUnreadCounts[ch.channel_id] || 0) > 0 || (state.channelMentions[ch.channel_id] || 0) > 0)}
-            unreadCount={!isVoice ? (state.channelUnreadCounts[ch.channel_id] || 0) : 0}
-            mentionCount={!isVoice ? (state.channelMentions[ch.channel_id] || 0) : 0}
+            hasUnread={!holdsCall && ((state.channelUnreadCounts[ch.channel_id] || 0) > 0 || (state.channelMentions[ch.channel_id] || 0) > 0)}
+            unreadCount={!holdsCall ? (state.channelUnreadCounts[ch.channel_id] || 0) : 0}
+            mentionCount={!holdsCall ? (state.channelMentions[ch.channel_id] || 0) : 0}
             onSelect={() => {
               if (isVoice) {
                 if (state.voiceChannelId === ch.channel_id) return;
@@ -554,7 +559,9 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
             onDelete={() => handleDelete(ch.channel_id)}
             icon={(ch.view_roles?.length ?? 0) > 0
               ? <Lock className="h-4 w-4 shrink-0 text-warning" />
-              : ch.channel_type === "voice"
+              : ch.channel_type === "spatial"
+                ? <Move3d className="h-4 w-4 shrink-0 text-muted-foreground" />
+                : ch.channel_type === "voice"
                 ? <Volume2 className="h-4 w-4 shrink-0 text-muted-foreground" />
                 : ch.channel_type === "theater"
                   ? <Film className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -1155,6 +1162,13 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   onClick={() => setChannelType("voice")}
                 >
                   <Volume2 className="h-3.5 w-3.5 mr-1" /> Voice
+                </Button>
+                <Button
+                  variant={channelType === "spatial" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setChannelType("spatial")}
+                >
+                  <Move3d className="h-3.5 w-3.5 mr-1" /> Spatial
                 </Button>
                 <Button
                   variant={channelType === "theater" ? "default" : "outline"}

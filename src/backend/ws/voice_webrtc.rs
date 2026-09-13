@@ -798,6 +798,8 @@ mod tests {
                     clipping: false,
                     room_id: room_id.to_string(),
                     conn_id: 1,
+                    x: 0.5,
+                    y: 0.5,
                 },
             );
     }

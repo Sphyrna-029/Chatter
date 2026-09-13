@@ -44,6 +44,9 @@ const WatchPartyArea = lazy(() =>
 const WhiteboardArea = lazy(() =>
   import("./WhiteboardArea").then((m) => ({ default: m.WhiteboardArea })),
 );
+const SpatialVoiceArea = lazy(() =>
+  import("./SpatialVoiceArea").then((m) => ({ default: m.SpatialVoiceArea })),
+);
 const ActivityPage = lazy(() =>
   import("./ActivityPage").then((m) => ({ default: m.ActivityPage })),
 );
@@ -385,6 +388,7 @@ export function ChatLayout() {
     ? state.roomInfoMap[state.currentRoomId]?.room_type === "watchparty"
     : false) || currentChannelType === "theater";
   const isShowcaseChannel = currentChannelType === "showcase";
+  const isSpatialChannel = currentChannelType === "spatial";
   const isOnVoiceRoom = state.voiceRoomId != null && state.currentRoomId === state.voiceRoomId;
   const hasActiveScreenShare =
     state.screenViewerOpen &&
@@ -692,7 +696,7 @@ export function ChatLayout() {
             {/* Main content: admin dashboard, activity page, or voice column + chat/forum + members */}
             {/* VoiceControls is always mounted here (sr-only when not visible) so WebRTC/stats stay alive across page navigations */}
             <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
-              <div className={isMobile || !state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel ? "sr-only" : "shrink-0"}>
+              <div className={isMobile || !state.currentRoomId || state.adminDashboardOpen || isDmRoom || hasChannels || isWatchPartyRoom || isForumRoom || isWhiteboardRoom || isShowcaseChannel || isSpatialChannel ? "sr-only" : "shrink-0"}>
                 <VoiceControls
                   joinVoiceRef={joinVoiceRef}
                   leaveVoiceRef={leaveVoiceRef}
@@ -721,6 +725,12 @@ export function ChatLayout() {
                 {showChannelColumn && !isMobile && renderChannelList(false)}
                 {isWatchPartyRoom ? (
                   <WatchPartyArea onJoinVoice={() => joinVoiceRef.current?.()} />
+                ) : isSpatialChannel ? (
+                  <SpatialVoiceArea
+                    onJoinVoice={(channelId) => joinVoiceRef.current?.(channelId)}
+                    onLeaveVoice={() => leaveVoiceRef.current?.()}
+                    speakingUsersRef={speakingUsersRef}
+                  />
                 ) : isShowcaseChannel ? (
                   <ShowcaseArea />
                 ) : isWhiteboardRoom ? (

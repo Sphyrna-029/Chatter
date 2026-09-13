@@ -975,7 +975,7 @@ export interface Channel {
   channel_id: string;
   room_id?: string;
   name: string;
-  channel_type: "text" | "voice" | "theater" | "forum" | "whiteboard" | "showcase" | "bot";
+  channel_type: "text" | "voice" | "spatial" | "theater" | "forum" | "whiteboard" | "showcase" | "bot";
   topic: string;
   position: number;
   category_id?: string;

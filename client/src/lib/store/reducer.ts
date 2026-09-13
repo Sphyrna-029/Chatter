@@ -756,6 +756,21 @@ export function reducer(state: AppState, action: Action): AppState {
         }),
       );
     }
+    case "SET_VOICE_POSITION": {
+      // One person moved. A position event is a delta by design — the full
+      // record still rides on every join, leave and mute — so a channel this
+      // client has never seen is left alone rather than invented from it.
+      const { channelId, userId, x, y } = action.payload;
+      const members = state.voiceChannelMembers[channelId];
+      if (!members?.some((m) => m.userId === userId)) return state;
+      return {
+        ...state,
+        voiceChannelMembers: {
+          ...state.voiceChannelMembers,
+          [channelId]: members.map((m) => (m.userId === userId ? { ...m, x, y } : m)),
+        },
+      };
+    }
     case "SYNC_VOICE_STATE": {
       const { roomId: scope, channels } = action.payload;
       // A snapshot is authoritative for everything it covers, so channels it

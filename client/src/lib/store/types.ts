@@ -17,6 +17,9 @@ export interface VoiceChannelMember {
   screen_sharing: boolean;
   force_muted?: boolean;
   clipping?: boolean;
+  /** Where they are standing in a spatial channel, both axes 0..1. */
+  x?: number;
+  y?: number;
 }
 
 export interface SearchState {
@@ -286,6 +289,7 @@ export type Action =
   | { type: "UPDATE_CHANNEL"; payload: Partial<Channel> & { channel_id: string } }
   | { type: "REMOVE_CHANNEL"; payload: string }
   | { type: "SET_VOICE_CHANNEL"; payload: { channelId: string; roomId?: string; members: VoiceChannelMember[] } }
+  | { type: "SET_VOICE_POSITION"; payload: { channelId: string; userId: string; x: number; y: number } }
   /** Replace what this client believes about voice.
    *
    *  `roomId` says how far the snapshot reaches: `null` for the server's

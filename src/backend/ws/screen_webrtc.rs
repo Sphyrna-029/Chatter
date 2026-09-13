@@ -1034,6 +1034,8 @@ mod tests {
                     clipping: false,
                     room_id: "!room:localhost".to_string(),
                     conn_id: 1,
+                    x: 0.5,
+                    y: 0.5,
                 },
             )]),
         );

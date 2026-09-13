@@ -32,6 +32,8 @@ function voiceMemberRecords(states: unknown): VoiceChannelMember[] {
     screen_sharing: !!m.screen_sharing,
     force_muted: !!m.force_muted,
     clipping: !!m.clipping,
+    x: typeof m.x === "number" ? m.x : undefined,
+    y: typeof m.y === "number" ? m.y : undefined,
   }));
 }
 
@@ -557,6 +559,16 @@ export function createWsMessageHandler(
       dispatch({
         type: "SYNC_VOICE_STATE",
         payload: { roomId: null, channels: voiceChannelsFromSync(msg.channels) },
+      });
+    } else if (msg.type === "voice_position") {
+      dispatch({
+        type: "SET_VOICE_POSITION",
+        payload: {
+          channelId: msg.channel_id,
+          userId: msg.user_id,
+          x: Number(msg.x) || 0,
+          y: Number(msg.y) || 0,
+        },
       });
     } else if (msg.type === "voice_user_joined") {
       // Deliberately not filtered by the room on screen: the channel map covers

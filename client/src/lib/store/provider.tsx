@@ -1340,6 +1340,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             screen_sharing: !!m.screen_sharing,
             force_muted: m.force_muted ?? false,
             clipping: m.clipping ?? false,
+            x: typeof m.x === "number" ? m.x : undefined,
+            y: typeof m.y === "number" ? m.y : undefined,
           })),
         };
       }

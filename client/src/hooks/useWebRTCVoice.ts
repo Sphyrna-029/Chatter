@@ -10,6 +10,7 @@ import {
 import { fetchIceServers, getWebRTCConfig, VOICE_SUBSCRIBE_RETRY_MS, VOICE_SUBSCRIBE_MAX_RETRIES, VOICE_SUBSCRIBE_MAX_BACKOFF_MS, VOICE_PUBLISH_INITIAL_RETRY_MS, VOICE_PUBLISH_MAX_BACKOFF_MS, VOICE_SLOT_COUNT, VOICE_BITRATE_DEFAULT_BPS, canSignal, clampVoiceBitrate, mungeVoiceAudioSdp, applyVoiceSenderBitrate } from "@/lib/webrtc";
 import { toast } from "sonner";
 import type { VoiceRestoreState } from "@/lib/voiceRejoin";
+import { DISTANCE_MODEL, glide, toWorld } from "@/lib/spatialAudio";
 
 const VOICE_PUBLISH_MAX_RETRIES = 5;
 const VOICE_PUBLISH_ANSWER_TIMEOUT_MS = 10_000;
@@ -33,6 +34,18 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const voiceSlotAudioRef = useRef<Map<number, HTMLAudioElement>>(new Map());
   const voiceSlotGainRef = useRef<Map<number, GainNode>>(new Map());
   const voiceSlotUsersRef = useRef<Map<number, string>>(new Map());
+  // One panner per slot, between the slot's gain and the destination. A slot
+  // outlives its speakers, so the panner is re-aimed when the slot changes
+  // hands rather than rebuilt — rebuilding would drop the audio mid-word.
+  const voiceSlotPannerRef = useRef<Map<number, PannerNode>>(new Map());
+  // Where everyone in the call is standing, and whether this channel has a
+  // floor at all. Refs because the audio graph is updated from callbacks that
+  // must not re-run on every render.
+  const spatialRef = useRef<{ on: boolean; me: { x: number; y: number }; others: Record<string, { x: number; y: number }> }>({
+    on: false,
+    me: { x: 0.5, y: 0.5 },
+    others: {},
+  });
   // One AudioContext for the whole call, with a gain node per slot hanging off
   // it. A context per speaker capped call size far below anything else here —
   // browsers limit how many a single document may hold.
@@ -93,6 +106,8 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   const closeVoiceAudioGraph = () => {
     voiceSlotGainRef.current.forEach((gain) => { try { gain.disconnect(); } catch {} });
     voiceSlotGainRef.current.clear();
+    voiceSlotPannerRef.current.forEach((panner) => { try { panner.disconnect(); } catch { /* already gone with the context */ } });
+    voiceSlotPannerRef.current.clear();
     voiceSlotAudioRef.current.forEach((el) => { el.pause(); el.srcObject = null; });
     voiceSlotAudioRef.current.clear();
     voiceSlotUsersRef.current.clear();
@@ -112,6 +127,79 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     gain.gain.value =
       isDeafenedRef.current || !userId ? 0 : (voiceUserVolumesRef.current[userId] ?? 1.0);
   };
+
+  // Point a slot's panner at whoever is in it. An ordinary voice channel puts
+  // every speaker on top of the listener, which is a distance of zero and a
+  // centred pan — the graph is the same shape either way, so nothing has to be
+  // rewired when the person walks into a spatial channel.
+  const applySlotPosition = useCallback((slot: number) => {
+    const panner = voiceSlotPannerRef.current.get(slot);
+    const ctx = voiceAudioCtxRef.current;
+    if (!panner || !ctx) return;
+    const spatial = spatialRef.current;
+    const userId = voiceSlotUsersRef.current.get(slot);
+    const at = spatial.on && userId ? spatial.others[userId] : undefined;
+    const world = at ? toWorld(at.x, at.y) : { x: 0, y: 0, z: 0 };
+    const now = ctx.currentTime;
+    // An unoccupied slot is silenced by its gain, so it is left where it was
+    // rather than swung to the middle — the swing would be audible on the next
+    // speaker to land in it.
+    if (spatial.on && !at && userId) return;
+    glide(panner.positionX, world.x, now);
+    glide(panner.positionY, world.y, now);
+    glide(panner.positionZ, world.z, now);
+  }, []);
+
+  // The listener is the person at the keyboard. Moving them rather than
+  // offsetting every source keeps one definition of where anybody is.
+  const applyListenerPosition = useCallback(() => {
+    const ctx = voiceAudioCtxRef.current;
+    if (!ctx) return;
+    const spatial = spatialRef.current;
+    const world = spatial.on ? toWorld(spatial.me.x, spatial.me.y) : { x: 0, y: 0, z: 0 };
+    const now = ctx.currentTime;
+    const listener = ctx.listener as AudioListener & {
+      positionX?: AudioParam;
+      setPosition?: (x: number, y: number, z: number) => void;
+    };
+    if (listener.positionX) {
+      glide(listener.positionX, world.x, now);
+      glide(listener.positionY, world.y, now);
+      glide(listener.positionZ, world.z, now);
+    } else {
+      // Safari until recently: no AudioParams on the listener, only the
+      // deprecated setter. It jumps rather than glides, which is the cost.
+      listener.setPosition?.(world.x, world.y, world.z);
+    }
+  }, []);
+
+  const applyAllSlotPositions = useCallback(() => {
+    applyListenerPosition();
+    voiceSlotPannerRef.current.forEach((_, slot) => applySlotPosition(slot));
+  }, [applyListenerPosition, applySlotPosition]);
+
+  // Where everyone in the call is standing, kept in a ref for the audio graph
+  // and re-applied whenever it changes. A position event is one small message,
+  // so this runs on every drag frame of every person in the room — which is
+  // why it only touches AudioParams and never rebuilds anything.
+  const voiceChannel = state.voiceChannelId
+    ? state.channels.find((c) => c.channel_id === state.voiceChannelId)
+    : undefined;
+  const isSpatialCall = voiceChannel?.channel_type === "spatial";
+  const voiceChannelMembers = state.voiceChannelId
+    ? state.voiceChannelMembers[state.voiceChannelId]
+    : undefined;
+  useEffect(() => {
+    const others: Record<string, { x: number; y: number }> = {};
+    let me = spatialRef.current.me;
+    for (const member of voiceChannelMembers ?? []) {
+      if (member.x === undefined || member.y === undefined) continue;
+      if (member.userId === state.userId) me = { x: member.x, y: member.y };
+      else others[member.userId] = { x: member.x, y: member.y };
+    }
+    spatialRef.current = { on: !!isSpatialCall, me, others };
+    applyAllSlotPositions();
+  }, [isSpatialCall, voiceChannelMembers, state.userId, applyAllSlotPositions]);
 
   // Write down enough to put the call back after a refresh. Mute and deafen
   // are included and kept current, because a refresh discards the state they
@@ -263,19 +351,32 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       const stream = ev.streams[0] || new MediaStream([ev.track]);
       audioEl.srcObject = stream;
 
-      // Route through a GainNode so per-user volume can exceed 100%
+      // Route through a GainNode so per-user volume can exceed 100%, then a
+      // PannerNode so a spatial channel can place the speaker. The panner is
+      // built for every call, spatial or not: it is inert at the listener's
+      // own position, and adding one mid-call would mean rebuilding the graph
+      // under a live stream.
       if (!voiceSlotGainRef.current.has(slot)) {
         const ctx = getVoiceAudioCtx();
         const source = ctx.createMediaStreamSource(stream);
         const gain = ctx.createGain();
         gain.gain.value = 0;
+        const panner = ctx.createPanner();
+        panner.panningModel = "equalpower";
+        panner.distanceModel = "inverse";
+        panner.refDistance = DISTANCE_MODEL.refDistance;
+        panner.rolloffFactor = DISTANCE_MODEL.rolloffFactor;
+        panner.maxDistance = DISTANCE_MODEL.maxDistance;
         source.connect(gain);
-        gain.connect(ctx.destination);
+        gain.connect(panner);
+        panner.connect(ctx.destination);
         voiceSlotGainRef.current.set(slot, gain);
+        voiceSlotPannerRef.current.set(slot, panner);
         // Mute the HTML element since GainNode handles playback
         audioEl.volume = 0;
       }
       applySlotGain(slot);
+      applySlotPosition(slot);
       audioEl.play().catch(() => {});
     };
 
@@ -337,6 +438,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       if (user_id) voiceSlotUsersRef.current.set(slot, user_id);
       else voiceSlotUsersRef.current.delete(slot);
       applySlotGain(slot);
+      applySlotPosition(slot);
     }
     // Anything the server did not mention is empty.
     for (const slot of [...voiceSlotUsersRef.current.keys()]) {

@@ -69,6 +69,8 @@ pub(crate) async fn get_voice_channel_status(
                     "screen_sharing": vs.screen_sharing,
                     "clipping": vs.clipping,
                     "force_muted": vs.force_muted,
+                    "x": vs.x,
+                    "y": vs.y,
                     "channel_id": key
                 });
                 voice_members.push(entry.clone());

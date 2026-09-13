@@ -55,6 +55,12 @@ pub(crate) const REGISTER_GLOBAL: Quota = Quota::per(30.0, 3600.0);
 pub(crate) const FRIEND_REQUEST: Quota = Quota::per(20.0, 3600.0);
 /// Reactions: cheap individually, and a loop can write thousands.
 pub(crate) const REACTION: Quota = Quota::per(30.0, 10.0);
+/// Moving in a spatial voice channel. A drag is a stream of small updates, so
+/// this sits well above what one produces (the client throttles to ~15/s) and
+/// still meters a loop. Refusals here are *dropped rather than reported*: the
+/// next position supersedes the last, so a lost one heals itself, and an error
+/// per frame would be worse than the flood.
+pub(crate) const VOICE_MOVE: Quota = Quota::per(60.0, 2.0);
 /// Invite creation, which mints credentials to the room.
 pub(crate) const CREATE_INVITE: Quota = Quota::per(10.0, 600.0);
 

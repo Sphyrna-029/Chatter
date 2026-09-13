@@ -909,6 +909,15 @@ pub(crate) struct VoiceMemberState {
     /// evicted the call running on another device, and a `voice_leave` from
     /// one device ended another's.
     pub(crate) conn_id: u64,
+    /// Where this person is standing, in a spatial voice channel: both axes
+    /// normalized to 0..1 so the room has no pixel size anyone has to agree
+    /// on. Meaningless in an ordinary voice channel, and carried by every
+    /// member for the same reason the flags above are — the position belongs
+    /// to the membership, so every path that ends a membership already
+    /// forgets it, and every event that carries `voice_states` already
+    /// carries this.
+    pub(crate) x: f64,
+    pub(crate) y: f64,
 }
 
 #[derive(Clone)]

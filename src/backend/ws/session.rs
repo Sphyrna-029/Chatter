@@ -85,6 +85,25 @@ fn holds_voice_session(
 /// client that had never seen a member had to invent the rest — and invented
 /// them unmuted and undeafened. Sending the state alongside the list means a
 /// client never guesses.
+/// Where someone starts standing when they join a spatial channel.
+///
+/// A ring around the middle rather than the middle itself: everyone arriving
+/// at one point means everyone arrives inaudibly loud and has to move before
+/// the channel is usable. The angle comes from the user id rather than a
+/// counter or a random number, so the same person reappears where they were
+/// last time and two people never race for the same slot on the ring.
+fn spawn_position(user_id: &str) -> (f64, f64) {
+    let hash = user_id
+        .bytes()
+        .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64));
+    let angle = (hash % 3600) as f64 / 3600.0 * std::f64::consts::TAU;
+    const RADIUS: f64 = 0.22;
+    (
+        (0.5 + RADIUS * angle.cos()).clamp(0.0, 1.0),
+        (0.5 + RADIUS * angle.sin()).clamp(0.0, 1.0),
+    )
+}
+
 fn voice_member_states(members: &HashMap<String, VoiceMemberState>) -> Vec<Value> {
     let mut states: Vec<Value> = members
         .iter()
@@ -96,6 +115,8 @@ fn voice_member_states(members: &HashMap<String, VoiceMemberState>) -> Vec<Value
                 "screen_sharing": member.screen_sharing,
                 "force_muted": member.force_muted,
                 "clipping": member.clipping,
+                "x": member.x,
+                "y": member.y,
             })
         })
         .collect();
@@ -668,6 +689,17 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .map(|users| users.iter().any(|u| u == user_id))
                 .unwrap_or(false);
 
+            // A rejoin keeps where the person was standing; a first arrival is
+            // placed on the ring. Read before the lock so the write below stays
+            // a single uninterrupted hold.
+            let previous = {
+                let vc = state.voice_channels.read().await;
+                vc.get(channel_id)
+                    .and_then(|c| c.get(user_id))
+                    .map(|m| (m.x, m.y))
+            };
+            let spawn = previous.unwrap_or_else(|| spawn_position(user_id));
+
             // Atomically: remove user from every other channel AND insert into the target
             // channel in one write-lock hold. This prevents a second voice_join from racing
             // in between the removal and the insert, which caused users to appear in two
@@ -702,6 +734,8 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         clipping: false,
                         room_id: room_id.to_string(),
                         conn_id,
+                        x: spawn.0,
+                        y: spawn.1,
                     },
                 );
                 let voice_members = chan_vc.keys().cloned().collect::<Vec<_>>();
@@ -867,6 +901,67 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
             // No publisher list is sent: a joiner opens one subscription and the
             // server decides which speakers occupy its slots, so who is audible
             // is never the client's to work out.
+        }
+        "voice_move" => {
+            // Where the person dragged themselves to in a spatial channel.
+            // Only somebody actually in the channel has a position, and only
+            // the connection holding the session may move it — a stale tab
+            // must not walk a call running on another device across the room.
+            let channel_id = msg
+                .get("channel_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or(room_id);
+            let (x, y) = match (
+                msg.get("x").and_then(|v| v.as_f64()),
+                msg.get("y").and_then(|v| v.as_f64()),
+            ) {
+                (Some(x), Some(y)) if x.is_finite() && y.is_finite() => {
+                    (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0))
+                }
+                _ => return,
+            };
+            if crate::backend::ratelimit::check(
+                &state,
+                &format!("voicemove:{user_id}"),
+                crate::backend::ratelimit::VOICE_MOVE,
+            )
+            .await
+            .is_err()
+            {
+                return;
+            }
+
+            let moved = {
+                let mut vc = state.voice_channels.write().await;
+                match vc.get_mut(channel_id) {
+                    Some(chan) => match chan.get_mut(user_id) {
+                        Some(member) if member.conn_id == conn_id => {
+                            member.x = x;
+                            member.y = y;
+                            true
+                        }
+                        _ => false,
+                    },
+                    None => false,
+                }
+            };
+            if !moved {
+                return;
+            }
+
+            // One person's move, not the whole channel: the full record still
+            // rides on every join, leave and mute, so a dropped one costs a
+            // stale dot until the next of either — and at drag rate the whole
+            // record every frame is what would actually hurt.
+            let event = json!({
+                "type": "voice_position",
+                "room_id": room_id,
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "x": x,
+                "y": y,
+            });
+            broadcast_to_room(&state, room_id, &event).await;
         }
         "voice_leave" => {
             let channel_id = msg
@@ -2751,6 +2846,7 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 mod tests {
     use super::{
         displaced_voice_conn, holds_voice_session, marks_user_active, parse_profile_theme,
+        spawn_position,
     };
     use crate::backend::state::VoiceMemberState;
     use serde_json::json;
@@ -2769,6 +2865,8 @@ mod tests {
             clipping: false,
             room_id: "!room:localhost".to_string(),
             conn_id,
+            x: 0.5,
+            y: 0.5,
         }
     }
 
@@ -2925,5 +3023,38 @@ mod tests {
         .expect("neither field can be produced out of range by the editor");
         assert_eq!(parsed.modal.fade, 100);
         assert_eq!(parsed.modal.direction, "down");
+    }
+
+    #[test]
+    fn nobody_spawns_on_the_spot_everyone_else_did() {
+        // Arriving at one point means arriving inaudibly loud on top of each
+        // other, which is the one thing a floor exists to avoid.
+        let a = spawn_position("@ada:localhost");
+        let b = spawn_position("@grace:localhost");
+        let c = spawn_position("@alan:localhost");
+        assert_ne!(a, b);
+        assert_ne!(b, c);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn a_spawn_is_the_same_place_every_time() {
+        // The angle comes from the id, so leaving and coming back puts you
+        // back where the room last saw you rather than somewhere new.
+        assert_eq!(spawn_position(USER), spawn_position(USER));
+    }
+
+    #[test]
+    fn a_spawn_is_on_the_floor() {
+        for id in [
+            "@a:x",
+            "@ada:localhost",
+            "",
+            "@zzzzzzzzzzzzzzzzzzzz:localhost",
+        ] {
+            let (x, y) = spawn_position(id);
+            assert!((0.0..=1.0).contains(&x), "x out of the room: {x}");
+            assert!((0.0..=1.0).contains(&y), "y out of the room: {y}");
+        }
     }
 }

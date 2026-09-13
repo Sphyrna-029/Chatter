@@ -210,6 +210,10 @@ pub(crate) async fn create_channel(
     let valid_channel_types = [
         "text",
         "voice",
+        // A voice channel with a floor. Everything voice does applies to it —
+        // the same join, the same SFU, the same permissions — and the only
+        // thing added is where in the room each person is standing.
+        "spatial",
         "theater",
         "forum",
         "whiteboard",
@@ -445,7 +449,7 @@ pub(crate) async fn update_channel(
         content.insert("showcase_posters".to_string(), json!(showcase_posters));
     }
     if let Some(voice_bitrate) = req.voice_bitrate {
-        if _channel.channel_type != "voice" {
+        if !matches!(_channel.channel_type.as_str(), "voice" | "spatial") {
             return Err(error_response(
                 StatusCode::BAD_REQUEST,
                 "Bitrate can only be set on voice channels",
