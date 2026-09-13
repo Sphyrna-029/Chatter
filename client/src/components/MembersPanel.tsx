@@ -5,7 +5,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import { PROFILE_WASH_ALPHA, profileWash, readProfileTheme } from "@/lib/profileTheme";
+import { profileWashStyle, readProfileTheme } from "@/lib/profileTheme";
 import { memberCanViewChannel } from "@/lib/permissions";
 import { ensureFontFace } from "@/lib/fontFace";
 import { UserProfileDialog } from "./UserProfileDialog";
@@ -94,9 +94,9 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
       ensureFontFace(member.userId, nameFontUrl);
     }
 
-    // The same wash as the profile modal, at a lower strength: a row sits
-    // beside dozens of others and has to stay a list before it is a colour.
-    const wash = profileWash(readProfileTheme(presence), PROFILE_WASH_ALPHA.row);
+    // The tab's own colours, set separately from the modal's — a strip beside
+    // dozens of others wants something quieter than a card usually does.
+    const wash = profileWashStyle(readProfileTheme(presence), "tab");
 
     return (
       <div
@@ -109,7 +109,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer hover:bg-accent/50",
           status === "offline" && "opacity-50"
         )}
-        style={wash ? { backgroundImage: wash } : undefined}
+        style={wash}
       >
         <div className="relative flex-shrink-0">
           <Avatar className="h-9 w-9">

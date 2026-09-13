@@ -25,12 +25,18 @@ import {
 import { cn, displayUserId } from "@/lib/utils";
 import { Slider } from "@/components/ui/slider";
 import {
+  DEFAULT_SURFACE_THEME,
   PROFILE_FADE_DIRECTIONS,
-  PROFILE_WASH_ALPHA,
-  profileWash,
+  PROFILE_SURFACES,
+  profileWashStyle,
   readProfileTheme,
 } from "@/lib/profileTheme";
-import type { ProfileFadeDirection, ProfileTheme } from "@/lib/profileTheme";
+import type {
+  ProfileFadeDirection,
+  ProfileSurface,
+  ProfileSurfaceTheme,
+  ProfileTheme,
+} from "@/lib/profileTheme";
 import { ensureFontFace } from "@/lib/fontFace";
 import {
   MAX_SOUND_SECS,
@@ -93,6 +99,11 @@ const FADE_DIRECTION_LABELS: Record<ProfileFadeDirection, string> = {
   up: "Up",
   right: "Right",
   left: "Left",
+};
+
+const SURFACE_LABELS: Record<ProfileSurface, string> = {
+  modal: "This Card",
+  tab: "Member List",
 };
 
 const FILE_PAGE_SIZE = 21;
@@ -217,9 +228,18 @@ export function UserProfileDialog({
   const [bannerPreview, setBannerPreview] = useState(bannerUrl);
   const [pendingBannerFile, setPendingBannerFile] = useState<File | null>(null);
   const savedTheme = useMemo(() => readProfileTheme(presence), [presence]);
-  // Edited live so the modal you are looking at is the preview.
+  // Edited live so the card you are looking at is the preview.
   const [themeDraft, setThemeDraft] = useState<ProfileTheme>(savedTheme);
   const theme = isSelf ? themeDraft : savedTheme;
+  // Which surface the colour controls are pointed at. The two are set
+  // separately, so the editor shows one at a time rather than both at once.
+  const [themeSurface, setThemeSurface] = useState<ProfileSurface>("modal");
+  const editSurface = useCallback(
+    (patch: Partial<ProfileSurfaceTheme>) =>
+      setThemeDraft((t) => ({ ...t, [themeSurface]: { ...t[themeSurface], ...patch } })),
+    [themeSurface],
+  );
+  const surfaceWash = profileWashStyle(themeDraft, themeSurface);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bannerInputRef = useRef<HTMLInputElement>(null);
@@ -306,6 +326,7 @@ export function UserProfileDialog({
       setBannerPreview(bannerUrl);
       setPendingBannerFile(null);
       setThemeDraft(savedTheme);
+      setThemeSurface("modal");
       setPendingFontFile(null);
       setActiveTab("profile");
       setNewPassword("");
@@ -487,9 +508,7 @@ export function UserProfileDialog({
         about: aboutInput.trim(),
         customStatus: statusInput.trim(),
         displayName: nicknameInput.trim(),
-        profileColor: themeDraft.color,
-        profileFade: themeDraft.fade,
-        profileFadeDirection: themeDraft.direction,
+        profileTheme: themeDraft,
         ...(newFontUrl !== undefined ? { nameFontUrl: newFontUrl } : {}),
       });
       onOpenChange(false);
@@ -505,17 +524,14 @@ export function UserProfileDialog({
     pendingAvatarFile !== null ||
     pendingBannerFile !== null ||
     pendingFontFile !== null ||
-    themeDraft.color !== savedTheme.color ||
-    themeDraft.fade !== savedTheme.fade ||
-    themeDraft.direction !== savedTheme.direction;
-
-  const wash = profileWash(theme, PROFILE_WASH_ALPHA.modal);
+    PROFILE_SURFACES.some((surface) =>
+      (Object.keys(DEFAULT_SURFACE_THEME) as (keyof ProfileSurfaceTheme)[]).some(
+        (key) => themeDraft[surface][key] !== savedTheme[surface][key],
+      ),
+    );
 
   const profileContent = (
-    <div
-      className="flex flex-col"
-      style={wash ? { backgroundImage: wash } : undefined}
-    >
+    <div className="flex flex-col" style={profileWashStyle(theme, "modal")}>
       {/* Banner */}
       <div
         className={cn("relative h-[9.2rem] w-full overflow-hidden shrink-0", isSelf && "cursor-pointer group")}
@@ -721,60 +737,118 @@ export function UserProfileDialog({
             <p className="text-3xs text-muted-foreground text-right">{aboutInput.length}/200</p>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Profile Colour</label>
+            <label className="text-xs font-medium text-muted-foreground">Profile Colours</label>
             <p className="text-3xs text-muted-foreground">
-              Washes over this card and your row in the member list. Everyone
-              who looks at your profile sees it.
+              Everyone who looks at your profile sees these. This card and your
+              tab in the member list are set separately.
             </p>
+            <ToggleGroup
+              type="single"
+              value={themeSurface}
+              onValueChange={(val) => {
+                if (val) setThemeSurface(val as ProfileSurface);
+              }}
+              className="w-full rounded-md border border-border p-0.5 bg-muted"
+            >
+              {PROFILE_SURFACES.map((surface) => (
+                <ToggleGroupItem
+                  key={surface}
+                  value={surface}
+                  className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                >
+                  {SURFACE_LABELS[surface]}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            {/* The card previews itself; the member-list tab cannot, so it
+                gets a strip painted with exactly what a row would show. */}
+            <div
+              className="h-10 rounded-md border border-border/40 flex items-center px-3"
+              style={surfaceWash}
+            >
+              <span className="text-3xs text-muted-foreground">
+                {themeDraft[themeSurface].color
+                  ? `Preview — ${SURFACE_LABELS[themeSurface]}`
+                  : "No colour set"}
+              </span>
+            </div>
             <div className="flex items-center gap-2">
               <input
                 type="color"
-                value={themeDraft.color || "#7c3aed"}
-                onChange={(e) => setThemeDraft((t) => ({ ...t, color: e.target.value }))}
+                value={themeDraft[themeSurface].color || "#7c3aed"}
+                onChange={(e) => editSurface({ color: e.target.value })}
                 className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
               />
               <span className="text-sm font-mono flex-1 truncate">
-                {themeDraft.color || "None"}
+                {themeDraft[themeSurface].color || "None"}
               </span>
-              {themeDraft.color && (
+              {themeDraft[themeSurface].color && (
                 <Button
                   variant="outline"
                   size="sm"
                   className="shrink-0 text-destructive"
-                  onClick={() => setThemeDraft((t) => ({ ...t, color: "" }))}
+                  onClick={() => editSurface({ color: "", color2: "" })}
                 >
                   Remove
                 </Button>
               )}
             </div>
-            {themeDraft.color && (
+            {themeDraft[themeSurface].color && (
               <div className="space-y-3 pt-1">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Second Colour</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={themeDraft[themeSurface].color2 || "#ec4899"}
+                      onChange={(e) => editSurface({ color2: e.target.value })}
+                      className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
+                    />
+                    <span className="text-sm font-mono flex-1 truncate">
+                      {themeDraft[themeSurface].color2 || "None"}
+                    </span>
+                    {themeDraft[themeSurface].color2 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0 text-destructive"
+                        onClick={() => editSurface({ color2: "" })}
+                      >
+                        Remove
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-3xs text-muted-foreground">
+                    With a second colour the first fades into it. With none it
+                    fades away into the card instead.
+                  </p>
+                </div>
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-medium text-muted-foreground">Fade</label>
                     <span className="text-3xs text-muted-foreground tabular-nums">
-                      {themeDraft.fade}%
+                      {themeDraft[themeSurface].fade}%
                     </span>
                   </div>
                   <Slider
                     min={0}
                     max={100}
                     step={5}
-                    value={[themeDraft.fade]}
-                    onValueChange={([fade]) => setThemeDraft((t) => ({ ...t, fade }))}
+                    value={[themeDraft[themeSurface].fade]}
+                    onValueChange={([fade]) => editSurface({ fade })}
                   />
                   <p className="text-3xs text-muted-foreground">
-                    How far the colour travels before it is gone. At 0 it is an
-                    even wash; at 100 it fades across the whole card.
+                    How far the first colour travels before it starts to give
+                    way. At 0 it is a solid, even wash.
                   </p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-medium text-muted-foreground">Fade Direction</label>
                   <ToggleGroup
                     type="single"
-                    value={themeDraft.direction}
+                    value={themeDraft[themeSurface].direction}
                     onValueChange={(val) => {
-                      if (val) setThemeDraft((t) => ({ ...t, direction: val as ProfileFadeDirection }));
+                      if (val) editSurface({ direction: val as ProfileFadeDirection });
                     }}
                     className="w-full rounded-md border border-border p-0.5 bg-muted"
                   >

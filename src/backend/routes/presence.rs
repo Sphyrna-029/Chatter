@@ -130,18 +130,10 @@ pub(crate) async fn build_presence_entry(
         .as_ref()
         .map(|u| u.name_font_url.as_str())
         .unwrap_or("");
-    let profile_color = user_record
+    let profile_theme = user_record
         .as_ref()
-        .map(|u| u.profile_color.as_str())
-        .unwrap_or("");
-    let profile_fade = user_record
-        .as_ref()
-        .map(|u| u.profile_fade)
-        .unwrap_or(crate::backend::constants::PROFILE_FADE_DEFAULT);
-    let profile_fade_direction = user_record
-        .as_ref()
-        .map(|u| u.profile_fade_direction.as_str())
-        .unwrap_or(crate::backend::constants::PROFILE_FADE_DIRECTION_DEFAULT);
+        .map(|u| u.profile_theme.clone())
+        .unwrap_or_default();
 
     match up.get(user_id) {
         Some(presence) => {
@@ -157,9 +149,7 @@ pub(crate) async fn build_presence_entry(
                 "banner_url": banner_url,
                 "display_name": display_name,
                 "name_font_url": name_font_url,
-                "profile_color": profile_color,
-                "profile_fade": profile_fade,
-                "profile_fade_direction": profile_fade_direction,
+                "profile_theme": profile_theme,
                 "is_mobile": presence.is_mobile,
                 "steam_game": presence.steam_game,
                 "steam_appid": presence.steam_appid,
@@ -178,9 +168,7 @@ pub(crate) async fn build_presence_entry(
             "banner_url": banner_url,
             "display_name": display_name,
             "name_font_url": name_font_url,
-            "profile_color": profile_color,
-            "profile_fade": profile_fade,
-            "profile_fade_direction": profile_fade_direction,
+            "profile_theme": profile_theme,
             "is_mobile": false,
             "steam_game": null,
             "steam_appid": null,

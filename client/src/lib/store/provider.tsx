@@ -105,6 +105,7 @@ import {
   type ThreadPreview,
   type VoiceChannelMember,
 } from "./types";
+import type { ProfileTheme } from "../profileTheme";
 import { reducer } from "./reducer";
 import { createWsMessageHandler } from "./wsHandler";
 
@@ -1358,10 +1359,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!roomId) return;
     try {
       const data = await apiGetPresence(roomId);
-      const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
+      const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
       for (const [uid, p] of Object.entries(data.presence)) {
         const pAny = p as any;
-        mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileColor: pAny.profile_color || undefined, profileFade: typeof pAny.profile_fade === "number" ? pAny.profile_fade : undefined, profileFadeDirection: pAny.profile_fade_direction || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
+        mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
       }
       dispatch({ type: "SET_PRESENCE", payload: mapped });
     } catch {}
@@ -1626,7 +1627,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "REMOVE_BLOCKED_USER", payload: userId });
   }, []);
 
-  const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; profileColor?: string; profileFade?: number; profileFadeDirection?: string; entranceSoundUrl?: string }) => {
+  const updateProfile = useCallback((profile: { avatarUrl?: string; bannerUrl?: string; about?: string; customStatus?: string; displayName?: string; nameFontUrl?: string; profileTheme?: ProfileTheme; entranceSoundUrl?: string }) => {
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       const payload: any = { type: "set_profile" };
@@ -1636,9 +1637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (profile.customStatus !== undefined) payload.custom_status = profile.customStatus;
       if (profile.displayName !== undefined) payload.display_name = profile.displayName;
       if (profile.nameFontUrl !== undefined) payload.name_font_url = profile.nameFontUrl;
-      if (profile.profileColor !== undefined) payload.profile_color = profile.profileColor;
-      if (profile.profileFade !== undefined) payload.profile_fade = profile.profileFade;
-      if (profile.profileFadeDirection !== undefined) payload.profile_fade_direction = profile.profileFadeDirection;
+      if (profile.profileTheme !== undefined) payload.profile_theme = profile.profileTheme;
       if (profile.entranceSoundUrl !== undefined) payload.entrance_sound_url = profile.entranceSoundUrl;
       ws.send(JSON.stringify(payload));
     }

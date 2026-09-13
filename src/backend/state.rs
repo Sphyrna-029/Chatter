@@ -156,19 +156,11 @@ pub(crate) struct UserRecord {
     pub(crate) disabled: bool,
     #[serde(default)]
     pub(crate) name_font_url: String,
-    /// How this person's profile is painted, wherever it is shown: the modal
-    /// and their row in the member list. Separate from the app theme, which
-    /// is the viewer's choice about their own client — this one travels with
-    /// the person and every viewer sees it.
+    /// How this person's profile is painted. Separate from the app theme,
+    /// which is the viewer's choice about their own client — this one travels
+    /// with the person and every viewer sees it.
     #[serde(default)]
-    pub(crate) profile_color: String,
-    /// How far the colour travels before it is gone: 0 is a flat wash,
-    /// 100 fades out across the whole surface.
-    #[serde(default = "default_profile_fade")]
-    pub(crate) profile_fade: i32,
-    /// Which way that fade runs — `down`, `up`, `left` or `right`.
-    #[serde(default = "default_profile_fade_direction")]
-    pub(crate) profile_fade_direction: String,
+    pub(crate) profile_theme: ProfileThemeRecord,
     #[serde(default)]
     pub(crate) must_reset_password: bool,
     #[serde(default)]
@@ -591,6 +583,50 @@ fn default_profile_fade() -> i32 {
 
 fn default_profile_fade_direction() -> String {
     super::constants::PROFILE_FADE_DIRECTION_DEFAULT.to_string()
+}
+
+/// One painted surface of a profile.
+///
+/// `color` empty means the surface is left alone. `color2` empty means the
+/// colour gives out into nothing rather than turning into a second one, which
+/// is a different look from a two-colour gradient and worth keeping: it lets
+/// the wash blend into whatever the card is sitting on.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct ProfileSurfaceTheme {
+    #[serde(default)]
+    pub(crate) color: String,
+    #[serde(default)]
+    pub(crate) color2: String,
+    /// How far the first colour travels before it starts turning into the
+    /// second: 0 is a flat wash, 100 spreads the change over the whole
+    /// surface.
+    #[serde(default = "default_profile_fade")]
+    pub(crate) fade: i32,
+    /// Which way that fade runs — `down`, `up`, `left` or `right`.
+    #[serde(default = "default_profile_fade_direction")]
+    pub(crate) direction: String,
+}
+
+impl Default for ProfileSurfaceTheme {
+    fn default() -> Self {
+        Self {
+            color: String::new(),
+            color2: String::new(),
+            fade: super::constants::PROFILE_FADE_DEFAULT,
+            direction: super::constants::PROFILE_FADE_DIRECTION_DEFAULT.to_string(),
+        }
+    }
+}
+
+/// The two surfaces a profile theme reaches, each set on its own: the modal
+/// is a card with room for a gradient, the member-list tab is a strip beside
+/// dozens of others, and what looks right on one rarely looks right on both.
+#[derive(Clone, Serialize, Deserialize, Default)]
+pub(crate) struct ProfileThemeRecord {
+    #[serde(default)]
+    pub(crate) modal: ProfileSurfaceTheme,
+    #[serde(default)]
+    pub(crate) tab: ProfileSurfaceTheme,
 }
 
 // ─── Custom Roles ────────────────────────────────────────────────────────────

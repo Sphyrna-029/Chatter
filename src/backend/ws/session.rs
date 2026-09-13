@@ -23,7 +23,8 @@ use crate::backend::{
         is_mobile_only, now_millis, now_secs, presence_status, send_to_conn, send_to_user,
     },
     state::{
-        AppState, PresenceRecord, RoomRecord, UserRecord, VoiceMemberState, WhiteboardStrokeRecord,
+        AppState, PresenceRecord, ProfileSurfaceTheme, ProfileThemeRecord, RoomRecord, UserRecord,
+        VoiceMemberState, WhiteboardStrokeRecord,
     },
 };
 use axum::{
@@ -428,9 +429,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 "banner_url": profile.banner_url,
                 "display_name": profile.display_name,
                 "name_font_url": profile.name_font_url,
-                "profile_color": profile.profile_color,
-                "profile_fade": profile.profile_fade,
-                "profile_fade_direction": profile.profile_fade_direction,
+                "profile_theme": profile.profile_theme,
                 "is_mobile": presence_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1572,9 +1571,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "banner_url": profile.banner_url,
                 "display_name": profile.display_name,
                 "name_font_url": profile.name_font_url,
-                "profile_color": profile.profile_color,
-                "profile_fade": profile.profile_fade,
-                "profile_fade_direction": profile.profile_fade_direction,
+                "profile_theme": profile.profile_theme,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1674,9 +1671,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "banner_url": profile.banner_url,
                 "display_name": profile.display_name,
                 "name_font_url": profile.name_font_url,
-                "profile_color": profile.profile_color,
-                "profile_fade": profile.profile_fade,
-                "profile_fade_direction": profile.profile_fade_direction,
+                "profile_theme": profile.profile_theme,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -1724,36 +1719,32 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     .await;
                 }
             }
-            // The profile theme: a colour, how far it travels, and which way.
-            // Each is checked on its own so clearing one does not disturb the
-            // others, and the colour is pinned to a hex triple because it is
-            // written into a gradient on every client that draws this person.
-            if let Some(color) = msg.get("profile_color").and_then(|v| v.as_str()) {
-                if crate::backend::helpers::valid_profile_color(color) {
-                    update_doc.insert("profile_color", color);
-                } else {
-                    send_to_conn(
-                        &state,
-                        user_id,
-                        conn_id,
-                        &json!({
-                            "type": "error",
-                            "error": "invalid_profile_color",
-                            "message": "That profile colour must be a #rrggbb value"
-                        }),
-                    )
-                    .await;
-                }
-            }
-            if let Some(fade) = msg.get("profile_fade").and_then(|v| v.as_i64()) {
-                update_doc.insert(
-                    "profile_fade",
-                    crate::backend::helpers::clamp_profile_fade(fade),
-                );
-            }
-            if let Some(dir) = msg.get("profile_fade_direction").and_then(|v| v.as_str()) {
-                if crate::backend::helpers::valid_profile_fade_direction(dir) {
-                    update_doc.insert("profile_fade_direction", dir);
+            // The profile theme arrives whole — both surfaces, every field —
+            // because the editor holds a draft of all of it and saves the
+            // draft. Anything malformed sinks the theme rather than being
+            // quietly dropped: the colours reach a CSS gradient on every
+            // client that draws this person, so a half-applied one would
+            // leave them looking at something they did not choose.
+            if let Some(theme) = msg.get("profile_theme") {
+                match parse_profile_theme(theme) {
+                    Some(parsed) => {
+                        if let Ok(bson) = mongodb::bson::to_bson(&parsed) {
+                            update_doc.insert("profile_theme", bson);
+                        }
+                    }
+                    None => {
+                        send_to_conn(
+                            &state,
+                            user_id,
+                            conn_id,
+                            &json!({
+                                "type": "error",
+                                "error": "invalid_profile_theme",
+                                "message": "Profile colours must be #rrggbb values"
+                            }),
+                        )
+                        .await;
+                    }
                 }
             }
             if let Some(sting) = msg.get("entrance_sound_url").and_then(|v| v.as_str()) {
@@ -1865,9 +1856,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "banner_url": profile.banner_url,
                 "display_name": profile.display_name,
                 "name_font_url": profile.name_font_url,
-                "profile_color": profile.profile_color,
-                "profile_fade": profile.profile_fade,
-                "profile_fade_direction": profile.profile_fade_direction,
+                "profile_theme": profile.profile_theme,
                 "is_mobile": p_is_mobile,
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
@@ -2410,6 +2399,51 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
 }
 
 /// Helper to get user avatar_url, about, banner_url, and display_name from MongoDB.
+/// One surface of a profile theme as it arrived from a client, or `None` if a
+/// colour on it is not the one shape a colour picker produces.
+///
+/// The fade is clamped rather than refused — the slider cannot produce an
+/// out-of-range one, so a stray number is a mistake to absorb — and an
+/// unknown direction falls back to the default for the same reason. A bad
+/// *colour* is the one thing worth refusing over, because it is the only
+/// field that reaches a stylesheet.
+fn parse_surface_theme(value: Option<&Value>) -> Option<ProfileSurfaceTheme> {
+    let obj = match value {
+        Some(v) => v,
+        None => return Some(ProfileSurfaceTheme::default()),
+    };
+    let color = obj.get("color").and_then(|v| v.as_str()).unwrap_or("");
+    let color2 = obj.get("color2").and_then(|v| v.as_str()).unwrap_or("");
+    if !crate::backend::helpers::valid_profile_color(color)
+        || !crate::backend::helpers::valid_profile_color(color2)
+    {
+        return None;
+    }
+    let direction = obj
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .filter(|d| crate::backend::helpers::valid_profile_fade_direction(d))
+        .unwrap_or(crate::backend::constants::PROFILE_FADE_DIRECTION_DEFAULT);
+    let fade = obj
+        .get("fade")
+        .and_then(|v| v.as_i64())
+        .map(crate::backend::helpers::clamp_profile_fade)
+        .unwrap_or(crate::backend::constants::PROFILE_FADE_DEFAULT);
+    Some(ProfileSurfaceTheme {
+        color: color.to_string(),
+        color2: color2.to_string(),
+        fade,
+        direction: direction.to_string(),
+    })
+}
+
+fn parse_profile_theme(value: &Value) -> Option<ProfileThemeRecord> {
+    Some(ProfileThemeRecord {
+        modal: parse_surface_theme(value.get("modal"))?,
+        tab: parse_surface_theme(value.get("tab"))?,
+    })
+}
+
 /// The stored half of a presence event — everything a `presence_update`
 /// carries that lives on the user record rather than in the presence map.
 ///
@@ -2421,9 +2455,7 @@ struct ProfileFields {
     banner_url: String,
     display_name: String,
     name_font_url: String,
-    profile_color: String,
-    profile_fade: i32,
-    profile_fade_direction: String,
+    profile_theme: ProfileThemeRecord,
 }
 
 impl Default for ProfileFields {
@@ -2434,10 +2466,7 @@ impl Default for ProfileFields {
             banner_url: String::new(),
             display_name: String::new(),
             name_font_url: String::new(),
-            profile_color: String::new(),
-            profile_fade: crate::backend::constants::PROFILE_FADE_DEFAULT,
-            profile_fade_direction: crate::backend::constants::PROFILE_FADE_DIRECTION_DEFAULT
-                .to_string(),
+            profile_theme: ProfileThemeRecord::default(),
         }
     }
 }
@@ -2451,9 +2480,7 @@ async fn get_user_profile(state: &AppState, user_id: &str) -> ProfileFields {
             banner_url: u.banner_url,
             display_name: u.display_name,
             name_font_url: u.name_font_url,
-            profile_color: u.profile_color,
-            profile_fade: u.profile_fade,
-            profile_fade_direction: u.profile_fade_direction,
+            profile_theme: u.profile_theme,
         },
         _ => ProfileFields::default(),
     }
@@ -2722,8 +2749,11 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
 
 #[cfg(test)]
 mod tests {
-    use super::{displaced_voice_conn, holds_voice_session, marks_user_active};
+    use super::{
+        displaced_voice_conn, holds_voice_session, marks_user_active, parse_profile_theme,
+    };
     use crate::backend::state::VoiceMemberState;
+    use serde_json::json;
     use std::collections::HashMap;
 
     const DESKTOP: u64 = 11;
@@ -2842,5 +2872,58 @@ mod tests {
         assert!(holds_voice_session(&members, USER, PHONE));
         assert!(!holds_voice_session(&members, USER, DESKTOP));
         assert!(!holds_voice_session(&members, "@grace:localhost", PHONE));
+    }
+
+    #[test]
+    fn a_profile_theme_paints_its_two_surfaces_separately() {
+        let parsed = parse_profile_theme(&json!({
+            "modal": { "color": "#7c3aed", "color2": "#ec4899", "fade": 40, "direction": "right" },
+            "tab": { "color": "#0ea5e9", "color2": "", "fade": 0, "direction": "up" },
+        }))
+        .expect("both surfaces are well formed");
+        assert_eq!(parsed.modal.color2, "#ec4899");
+        assert_eq!(parsed.modal.direction, "right");
+        // The tab keeps its own settings rather than inheriting the modal's.
+        assert_eq!(parsed.tab.color, "#0ea5e9");
+        assert_eq!(parsed.tab.color2, "");
+        assert_eq!(parsed.tab.fade, 0);
+    }
+
+    #[test]
+    fn a_surface_left_out_falls_back_rather_than_failing() {
+        let parsed = parse_profile_theme(&json!({ "modal": { "color": "#7c3aed" } }))
+            .expect("an absent surface is not a malformed one");
+        assert_eq!(parsed.tab.color, "");
+        assert_eq!(
+            parsed.modal.fade,
+            crate::backend::constants::PROFILE_FADE_DEFAULT
+        );
+        assert_eq!(parsed.modal.direction, "down");
+    }
+
+    #[test]
+    fn one_bad_colour_sinks_the_whole_theme() {
+        // The colours are the only fields that reach a stylesheet, so a
+        // half-applied theme is worse than a refused one.
+        assert!(parse_profile_theme(&json!({
+            "modal": { "color": "#7c3aed", "color2": "red; }" },
+            "tab": { "color": "#0ea5e9" },
+        }))
+        .is_none());
+        assert!(parse_profile_theme(&json!({
+            "modal": { "color": "#7c3aed" },
+            "tab": { "color": "var(--foreground)" },
+        }))
+        .is_none());
+    }
+
+    #[test]
+    fn a_stray_fade_or_direction_is_absorbed_not_refused() {
+        let parsed = parse_profile_theme(&json!({
+            "modal": { "color": "#7c3aed", "fade": 9_000, "direction": "diagonal" },
+        }))
+        .expect("neither field can be produced out of range by the editor");
+        assert_eq!(parsed.modal.fade, 100);
+        assert_eq!(parsed.modal.direction, "down");
     }
 }
