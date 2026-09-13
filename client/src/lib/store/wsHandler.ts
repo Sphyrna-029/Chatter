@@ -126,7 +126,15 @@ function patchVoiceMember(
   );
   dispatch({
     type: "SET_VOICE_CHANNEL",
-    payload: { channelId: msg.channel_id, roomId: msg.room_id, members },
+    payload: {
+      channelId: msg.channel_id,
+      // A flag event says nothing about where the channel lives, so the room
+      // already known for it wins. Taking the event's word for it let one
+      // mis-addressed frame reparent the channel, and the room head-counts
+      // derived from that map moved with it.
+      roomId: stateRef.current.voiceChannelRooms[msg.channel_id] ?? msg.room_id,
+      members,
+    },
   });
 }
 

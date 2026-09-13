@@ -364,7 +364,11 @@ function MobileCallSheet({
           {state.voiceMembers.map((memberId) => {
             const isSelf = memberId === state.userId;
             const memberState = state.voiceMemberStates[memberId];
-            const isMuted = memberState?.muted || (isSelf && state.isMuted);
+            const isDeafened = memberState?.deafened || (isSelf && state.isDeafened);
+            // Deafening disables the outgoing track, so a deafened person is
+            // never an open mic — drawing them as one is the same mistake as
+            // showing a stale mute.
+            const isMuted = isDeafened || memberState?.muted || (isSelf && state.isMuted);
             const sharingScreen =
               memberState?.screen_sharing || state.activeScreenSharers.includes(memberId);
             const sharingCamera = state.activeWebcamStreamers.includes(memberId);
@@ -402,7 +406,9 @@ function MobileCallSheet({
                       {isSelf && <span className="text-muted-foreground"> (You)</span>}
                     </p>
                     <div className="flex items-center gap-1.5 text-3xs text-muted-foreground">
-                      {isMuted ? (
+                      {isDeafened ? (
+                        <><HeadphoneOff className="h-3 w-3 text-destructive" /> Deafened</>
+                      ) : isMuted ? (
                         <><MicOff className="h-3 w-3 text-destructive" /> Muted</>
                       ) : (
                         <><Mic className="h-3 w-3 text-success" /> Open</>

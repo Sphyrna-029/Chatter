@@ -23,7 +23,10 @@ function focusVoiceRoomId(state: AppState): string | null {
 function deriveRoomVoice(state: AppState): AppState {
   const roomId = focusVoiceRoomId(state);
   const members: string[] = [];
-  const states: Record<string, { muted: boolean; screen_sharing: boolean }> = {};
+  const states: Record<
+    string,
+    { muted: boolean; deafened: boolean; screen_sharing: boolean }
+  > = {};
   const sharers: string[] = [];
   if (roomId) {
     for (const [channelId, channelMembers] of Object.entries(state.voiceChannelMembers)) {
@@ -32,6 +35,10 @@ function deriveRoomVoice(state: AppState): AppState {
         if (!members.includes(member.userId)) members.push(member.userId);
         states[member.userId] = {
           muted: member.muted,
+          // Carried, not dropped: this flat view is what the phone's call sheet
+          // reads, and without it a deafened peer could only ever be drawn
+          // with an open mic there.
+          deafened: member.deafened,
           screen_sharing: member.screen_sharing,
         };
         if (member.screen_sharing && !sharers.includes(member.userId)) {
@@ -252,6 +259,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.voiceMemberStates,
           [action.payload]: state.voiceMemberStates[action.payload] || {
             muted: false,
+            deafened: false,
             screen_sharing: false,
           },
         },
@@ -276,6 +284,7 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload.userId]: {
             ...(state.voiceMemberStates[action.payload.userId] || {
               muted: false,
+              deafened: false,
               screen_sharing: false,
             }),
             muted: action.payload.muted,
@@ -293,6 +302,7 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload]: {
             ...(state.voiceMemberStates[action.payload] || {
               muted: false,
+              deafened: false,
               screen_sharing: false,
             }),
             screen_sharing: true,
@@ -311,6 +321,7 @@ export function reducer(state: AppState, action: Action): AppState {
           [action.payload]: {
             ...(state.voiceMemberStates[action.payload] || {
               muted: false,
+              deafened: false,
               screen_sharing: false,
             }),
             screen_sharing: false,

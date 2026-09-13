@@ -263,6 +263,28 @@ async fn may_act_in_room(state: &AppState, room_id: &str, user_id: &str) -> bool
         .unwrap_or(false)
 }
 
+/// The room a voice event belongs to: the one the membership records, not the
+/// one the frame claims.
+///
+/// `room_id` on a websocket frame is whatever the client put there, and a
+/// client that is in a call while looking at another room has every reason to
+/// put the wrong one — it is reading its own screen. That is exactly what
+/// happened to `voice_mute`: the broadcast went to the room being browsed, so
+/// the people in the call never saw the mic icon move, and the flag only
+/// caught up at the next snapshot. `VoiceMemberState.room_id` is recorded at
+/// join and is the one place that cannot be wrong, so every voice event that
+/// acts on an existing membership is addressed from there.
+///
+/// The claimed id stands in only when there is no membership to read — a
+/// toggle arriving for a call that has already ended, where the event reaches
+/// nobody either way.
+fn voice_room_of<'a>(recorded: &'a Option<String>, claimed: &'a str) -> &'a str {
+    match recorded {
+        Some(room) if !room.is_empty() => room,
+        _ => claimed,
+    }
+}
+
 /// A voice channel a closing connection was holding a session in: what the room
 /// has to be told, and who is left behind.
 struct DepartedVoiceChannel {
@@ -1061,17 +1083,18 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
             // A moderator's mute wins: self-unmute is ignored while it is set.
-            let muted = {
+            let (muted, member_room) = {
                 let mut vc = state.voice_channels.write().await;
                 match vc.get_mut(channel_id).and_then(|c| c.get_mut(user_id)) {
-                    Some(member) if member.force_muted => true,
+                    Some(member) if member.force_muted => (true, Some(member.room_id.clone())),
                     Some(member) => {
                         member.muted = muted;
-                        muted
+                        (muted, Some(member.room_id.clone()))
                     }
-                    None => muted,
+                    None => (muted, None),
                 }
             };
+            let room_id = voice_room_of(&member_room, room_id);
             let event = json!({
                 "type": "voice_user_muted",
                 "room_id": room_id,
@@ -1380,14 +1403,17 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .get("channel_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
-            {
+            let member_room = {
                 let mut vc = state.voice_channels.write().await;
-                if let Some(chan_vc) = vc.get_mut(channel_id) {
-                    if let Some(member) = chan_vc.get_mut(user_id) {
+                match vc.get_mut(channel_id).and_then(|c| c.get_mut(user_id)) {
+                    Some(member) => {
                         member.deafened = deafened;
+                        Some(member.room_id.clone())
                     }
+                    None => None,
                 }
-            }
+            };
+            let room_id = voice_room_of(&member_room, room_id);
             let event = json!({
                 "type": "voice_user_deafened",
                 "room_id": room_id,

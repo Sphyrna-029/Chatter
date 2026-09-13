@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, Music, Gamepad2, MessageCircle } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, HeadphoneOff, Music, Gamepad2, MessageCircle } from "lucide-react";
 import { ActivityStats } from "./activity/ActivityStats";
 import { StorageManager } from "./activity/StorageManager";
 import { RecentDiscussions } from "./activity/RecentDiscussions";
@@ -652,9 +652,11 @@ export function ActivityPage() {
                                       {label[0]?.toUpperCase() || "?"}
                                     </AvatarFallback>
                                   </Avatar>
-                                  {member.muted && (
+                                  {member.deafened ? (
+                                    <HeadphoneOff className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-background p-[1px] text-destructive" />
+                                  ) : member.muted ? (
                                     <MicOff className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full bg-background p-[1px] text-destructive" />
-                                  )}
+                                  ) : null}
                                 </span>
                               );
                             })}

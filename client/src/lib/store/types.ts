@@ -86,7 +86,7 @@ export interface AppState {
   voiceMembers: string[];
   voiceMemberStates: Record<
     string,
-    { muted: boolean; screen_sharing: boolean }
+    { muted: boolean; deafened: boolean; screen_sharing: boolean }
   >;
   // Screen share
   isScreenSharing: boolean;
@@ -213,7 +213,7 @@ export type Action =
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
   | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "isWebcamActive" | "voiceChannelId" | "voiceChannelName" | "voicePublisherState">> }
-  | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; screen_sharing: boolean }> } }
+  | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; deafened: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }
   | { type: "VOICE_USER_LEFT"; payload: string }
   | { type: "VOICE_USER_MUTED"; payload: { userId: string; muted: boolean } }

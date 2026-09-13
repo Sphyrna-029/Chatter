@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn, displayUserId } from "@/lib/utils";
 import { readProfileAccent } from "@/lib/profileTheme";
 import { distanceGain, worldDistance } from "@/lib/spatialAudio";
-import { Mic, MicOff, Volume2, VolumeX } from "lucide-react";
+import { HeadphoneOff, Mic, MicOff, Volume2, VolumeX } from "lucide-react";
 
 /**
  * A voice channel with a floor.
@@ -201,7 +201,11 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
             const presence = state.userPresence[member.userId];
             const name = presence?.displayName || displayUserId(member.userId);
             const accent = readProfileAccent(presence);
-            const isSpeaking = speakingNow.has(member.userId) && !member.muted;
+            // Deafened counts as mic-off here as everywhere else: the track is
+            // disabled, so a ring drawn round a deafened tile is announcing
+            // speech that nobody is sending.
+            const micOff = member.muted || member.deafened;
+            const isSpeaking = speakingNow.has(member.userId) && !micOff;
             // How loud they are from where you are standing, used to fade the
             // ones you cannot really hear. Your own tile never fades.
             const heard = isSelf || !inThisChannel ? 1 : distanceGain(worldDistance(myPoint, at));
@@ -240,7 +244,7 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
                   />
                 )}
                 <span
-                  className={cn("relative rounded-full transition-shadow", member.muted && "opacity-70")}
+                  className={cn("relative rounded-full transition-shadow", micOff && "opacity-70")}
                   style={isSpeaking ? { boxShadow: `0 0 0 3px ${accent ?? "var(--success)"}` } : undefined}
                 >
                   <Avatar className="h-11 w-11 border-2 border-background">
@@ -249,9 +253,13 @@ export function SpatialVoiceArea({ onJoinVoice, onLeaveVoice, speakingUsersRef }
                       {name[0]?.toUpperCase() || "?"}
                     </AvatarFallback>
                   </Avatar>
-                  {member.muted && (
+                  {micOff && (
                     <span className="absolute -bottom-0.5 -right-0.5 rounded-full bg-background p-0.5">
-                      <MicOff className="h-3 w-3 text-destructive" />
+                      {member.deafened ? (
+                        <HeadphoneOff className="h-3 w-3 text-destructive" aria-label="Deafened" />
+                      ) : (
+                        <MicOff className="h-3 w-3 text-destructive" aria-label="Muted" />
+                      )}
                     </span>
                   )}
                 </span>

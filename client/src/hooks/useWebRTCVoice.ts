@@ -689,15 +689,21 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   }, [dispatch, cleanupScreenRef]);
 
   const leaveVoice = useCallback(async () => {
+    // Read before the teardown, which clears the voice state: afterwards there
+    // is no call left to name the room it was in. The room on screen is not a
+    // stand-in — leaving from another room announced the departure there, and
+    // the people actually in the call went on seeing someone who had gone.
+    const roomId = voiceRoomIdRef.current || currentRoomRef.current;
+    const channelId = voiceChannelIdRef.current;
     await teardownLocalVoice();
 
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const leaveMsg: any = { type: "voice_leave", room_id: state.currentRoomId };
-      if (state.voiceChannelId) leaveMsg.channel_id = state.voiceChannelId;
+      const leaveMsg: any = { type: "voice_leave", room_id: roomId };
+      if (channelId) leaveMsg.channel_id = channelId;
       wsRef.current.send(JSON.stringify(leaveMsg));
     }
     await loadVoiceMembers();
-  }, [teardownLocalVoice, state.currentRoomId, state.voiceChannelId, loadVoiceMembers]);
+  }, [teardownLocalVoice, loadVoiceMembers]);
 
   // ─── Mute ─────────────────────────────────────────────────────────────────
   // The pack of the room this call belongs to, so the effects match the server
@@ -711,6 +717,11 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
   roomSoundsRef.current = state.roomInfoMap[state.voiceRoomId ?? state.currentRoomId ?? ""]
     ?.sounds as SoundPack | undefined;
 
+  // Every `voice_mute` below names the room the *call* is in, not the one on
+  // screen. They are not the same the moment someone browses elsewhere while
+  // still in a call, and the room is what the broadcast is addressed to — so
+  // naming the visible one sent the mute to a room the other end was not in,
+  // and the mic icon beside their name never moved.
   const toggleMute = useCallback(() => {
     if (!localStreamRef.current) return;
     const newMuted = !state.isMuted;
@@ -720,9 +731,9 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
     persistVoiceSession({ muted: newMuted });
     playSound(newMuted ? "mute" : "unmute", roomSoundsRef.current);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: newMuted }));
+      wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: voiceRoomIdRef.current || currentRoomRef.current, channel_id: voiceChannelIdRef.current || undefined, muted: newMuted }));
     }
-  }, [state.isMuted, state.currentRoomId, dispatch]);
+  }, [state.isMuted, dispatch]);
 
   // ─── PTT ──────────────────────────────────────────────────────────────────
   const toggleInputMode = useCallback(() => {
@@ -731,7 +742,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       localStreamRef.current.getAudioTracks().forEach((t) => { t.enabled = false; });
       dispatch({ type: "SET_VOICE_STATE", payload: { voiceInputMode: "ptt", isMuted: true } });
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
+        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: voiceRoomIdRef.current || currentRoomRef.current, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
       }
     } else {
       if (localStreamRef.current) {
@@ -739,10 +750,10 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
       }
       dispatch({ type: "SET_VOICE_STATE", payload: { voiceInputMode: "open", isMuted: false } });
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
+        wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: voiceRoomIdRef.current || currentRoomRef.current, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
       }
     }
-  }, [state.voiceInputMode, state.currentRoomId, dispatch]);
+  }, [state.voiceInputMode, dispatch]);
 
   // PTT key handling
   useEffect(() => {
@@ -753,7 +764,7 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: false } });
         playSound("unmute", roomSoundsRef.current);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
+          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: voiceRoomIdRef.current || currentRoomRef.current, channel_id: voiceChannelIdRef.current || undefined, muted: false }));
         }
       }
     };
@@ -763,14 +774,14 @@ export function useWebRTCVoice({ cleanupScreenRef }: UseWebRTCVoiceOptions) {
         dispatch({ type: "SET_VOICE_STATE", payload: { isMuted: true } });
         playSound("mute", roomSoundsRef.current);
         if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: state.currentRoomId, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
+          wsRef.current.send(JSON.stringify({ type: "voice_mute", room_id: voiceRoomIdRef.current || currentRoomRef.current, channel_id: voiceChannelIdRef.current || undefined, muted: true }));
         }
       }
     };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
-  }, [state.inVoiceChannel, state.voiceInputMode, state.currentRoomId, dispatch]);
+  }, [state.inVoiceChannel, state.voiceInputMode, dispatch]);
 
   // ─── Volume control ───────────────────────────────────────────────────────
   const setUserVolume = useCallback((userId: string, vol: number) => {

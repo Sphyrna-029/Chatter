@@ -94,6 +94,28 @@ describe("the voice state snapshot", () => {
     expect(next.activeScreenSharers).toEqual(["@bob:localhost"]);
   });
 
+  it("carries deafen into the flat view", () => {
+    // The flat view dropped the flag entirely, so the phone's call sheet —
+    // which reads nothing else — could not draw a deafened peer as anything
+    // but an open mic.
+    const next = reducer(watchingTwoCalls(), {
+      type: "SYNC_VOICE_STATE",
+      payload: {
+        roomId: null,
+        channels: {
+          [GENERAL]: {
+            roomId: ROOM,
+            occupiedSince: null,
+            members: [member("@ada:localhost", { deafened: true })],
+          },
+        },
+      },
+    });
+
+    expect(next.voiceMemberStates["@ada:localhost"].deafened).toBe(true);
+    expect(next.voiceMemberStates["@ada:localhost"].muted).toBe(false);
+  });
+
   it("follows the call this client is in, not the room it is reading", () => {
     const inACallElsewhere: AppState = {
       ...watchingTwoCalls(),

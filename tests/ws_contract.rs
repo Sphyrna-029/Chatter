@@ -350,3 +350,95 @@ async fn voice_events_carry_every_members_state() {
     assert_eq!(remaining.len(), 1);
     assert_eq!(remaining[0]["user_id"], "@bob:localhost");
 }
+
+#[tokio::test]
+async fn voice_flags_reach_the_call_not_the_room_on_screen() {
+    // A client that is in a call while looking at another room put the room it
+    // was *looking at* on the frame, and the broadcast followed it: the people
+    // in the call were never told, so the mic and headphone icons beside the
+    // name sat on whatever they last said until the next snapshot repaired
+    // them. The room is taken from the membership now, not from the frame.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+
+    let call_room = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "General",
+        Some(vec![bob_user_id]),
+        false,
+    )
+    .await;
+    // Somewhere else Alice belongs and Bob does not — so an event addressed
+    // there reaches nobody in the call at all.
+    let other_room = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Elsewhere",
+        None,
+        false,
+    )
+    .await;
+
+    let mut alice_ws = ws_connect_authenticated(&server.ws_url, &alice_token).await;
+    let _ = recv_event_type(&mut alice_ws, "connected").await;
+    let mut bob_ws = ws_connect_authenticated(&server.ws_url, &bob_token).await;
+    let _ = recv_event_type(&mut bob_ws, "connected").await;
+
+    for ws in [&mut alice_ws, &mut bob_ws] {
+        ws.send(Message::Text(
+            json!({"type": "voice_join", "room_id": call_room}).to_string(),
+        ))
+        .await
+        .unwrap();
+    }
+    let _ = recv_matching(&mut bob_ws, |event| {
+        event.get("type").and_then(Value::as_str) == Some("voice_user_joined")
+            && event.get("user_id").and_then(Value::as_str) == Some("@bob:localhost")
+    })
+    .await;
+
+    // Alice mutes while her screen is on the other room.
+    alice_ws
+        .send(Message::Text(
+            json!({
+                "type": "voice_mute",
+                "room_id": other_room,
+                "channel_id": call_room,
+                "muted": true,
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let muted = recv_event_type(&mut bob_ws, "voice_user_muted").await;
+    assert_eq!(muted["user_id"], "@alice:localhost");
+    assert_eq!(muted["muted"], true);
+    // Addressed to the call, so a client filing it by room files it correctly.
+    assert_eq!(muted["room_id"], call_room);
+
+    alice_ws
+        .send(Message::Text(
+            json!({
+                "type": "voice_deafen",
+                "room_id": other_room,
+                "channel_id": call_room,
+                "deafened": true,
+            })
+            .to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let deafened = recv_event_type(&mut bob_ws, "voice_user_deafened").await;
+    assert_eq!(deafened["user_id"], "@alice:localhost");
+    assert_eq!(deafened["deafened"], true);
+    assert_eq!(deafened["room_id"], call_room);
+}
