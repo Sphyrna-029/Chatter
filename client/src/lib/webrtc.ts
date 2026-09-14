@@ -201,7 +201,12 @@ export interface ScreenSharePublishProfile {
 // ceiling is theirs to set, alongside the frame rate.
 
 export const SCREEN_BITRATE_MIN_BPS = 1_000_000;
-export const SCREEN_BITRATE_MAX_BPS = 20_000_000;
+// The top of the range is set by the one case that actually needs it: 1080p60
+// of full motion — a game, a film — on VP8 or H.264, which is what the browser
+// and the SFU usually settle on. Static text and code are transparent at a
+// fifth of it; the headroom is there so the hard case is not the one that
+// looks soft. Above this the encoder is no longer the limit.
+export const SCREEN_BITRATE_MAX_BPS = 25_000_000;
 export const SCREEN_BITRATE_STEP_BPS = 500_000;
 
 /**
