@@ -22,7 +22,7 @@ const NOTIFICATION_LEVELS: { value: NotificationLevel; label: string }[] = [
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, MessageCircle, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -52,7 +52,7 @@ interface AppSidebarProps {
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const confirm = useConfirm();
   const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms, setNotificationLevel } = useAppContext();
-  const { isMobile, setOpenMobile, state: sidebarState, toggleSidebar } = useSidebar();
+  const { isMobile, setOpenMobile, setOpen, state: sidebarState, toggleSidebar } = useSidebar();
   // Only the desktop sidebar collapses to the rail; on mobile it is a sheet
   // that is either open or gone.
   const railed = !isMobile && sidebarState === "collapsed";
@@ -439,7 +439,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   /** One room as Discord draws it: a 48px squircle that rounds off on hover,
    *  the name in a tooltip because there is no room for it, and the left-edge
    *  pill carrying the unread state the expanded row spells out in badges. */
-  function renderRailIcon(roomId: string, isDm: boolean) {
+  function renderRailIcon(roomId: string) {
     const info = state.roomInfoMap[roomId];
     const isActive = roomId === state.currentRoomId && !state.adminDashboardOpen;
     const mentions = (!isActive && state.roomMentions[roomId]) || 0;
@@ -447,25 +447,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const live = state.wsConnected
       ? (liveVoice[roomId] ?? { count: 0, sharing: false })
       : undefined;
-    const voiceCount =
-      live?.count ?? (isDm ? (info?.dm_voice_count ?? 0) : (roomSummaries[roomId]?.voice_count ?? 0));
+    const voiceCount = live?.count ?? (roomSummaries[roomId]?.voice_count ?? 0);
 
-    const roomName = isDm && info?.name
-      ? info.name.replace(/^DM with /, "")
-      : (info?.name || "Unnamed");
+    const roomName = info?.name || "Unnamed";
     const roomInitial = roomName.substring(0, 1).toUpperCase();
-
-    const dmUserIds = isDm
-      ? (info?.dm_user_ids ?? []).filter((id) => id !== state.userId)
-      : [];
-    const dmPeerId = dmUserIds.length === 1 ? dmUserIds[0] : null;
-    const dmPeerAvatar = dmPeerId
-      ? (state.userPresence[dmPeerId]?.avatarUrl || info?.dm_avatars?.[dmPeerId] || "")
-      : "";
-
-    // A face for a one-to-one DM, the room's own icon otherwise, and the
-    // initial when there is neither.
-    const iconUrl = info?.icon_url || dmPeerAvatar;
+    const iconUrl = info?.icon_url || "";
 
     return (
       <Tooltip key={roomId}>
@@ -532,12 +518,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   function renderRailAction({
     label,
     active,
+    unread,
     onClick,
     badge,
     children,
   }: {
     label: string;
     active?: boolean;
+    unread?: boolean;
     onClick: () => void;
     badge?: number;
     children: React.ReactNode;
@@ -554,7 +542,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               aria-hidden
               className={cn(
                 "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
-                active ? "h-10" : "h-0 group-hover/rail:h-5",
+                active ? "h-10" : unread ? "h-2 group-hover/rail:h-5" : "h-0 group-hover/rail:h-5",
               )}
             />
             <span
@@ -579,6 +567,18 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       </Tooltip>
     );
   }
+
+  // What the rail's one DM button has to say for the whole list. The DM you
+  // are already reading is excluded, matching how a room row drops its own
+  // badge once you are in it.
+  const currentIsDm = !!state.currentRoomId && dmRoomIds.includes(state.currentRoomId);
+  const dmMentions = dmRoomIds.reduce(
+    (sum, id) => (id === state.currentRoomId ? sum : sum + (state.roomMentions[id] || 0)),
+    0,
+  );
+  const dmUnread = dmRoomIds.some(
+    (id) => id !== state.currentRoomId && (state.roomUnreadCounts[id] || 0) > 0,
+  );
 
   /** The rail shows every room, in the order the expanded list shows them —
    *  including the rooms of a collapsed group, which would otherwise be
@@ -618,15 +618,29 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             },
             children: <LayoutDashboard className="h-5 w-5" />,
           })}
+          {/* Discord keeps conversations behind the home button rather than
+              mixing faces into the server rail, and the same holds here: a
+              DM is a destination, not one more room to scroll past. The
+              button carries the whole list's unread state and opens the
+              sidebar on it, since a rail this narrow cannot show the list. */}
+          {renderRailAction({
+            label: dmMentions > 0
+              ? `Direct messages — ${dmMentions} unread mention${dmMentions === 1 ? "" : "s"}`
+              : "Direct messages",
+            active: currentIsDm,
+            unread: dmUnread,
+            badge: dmMentions,
+            onClick: () => {
+              setActiveTab("dms");
+              setOpen(true);
+            },
+            children: <MessageCircle className="h-5 w-5" />,
+          })}
           <Separator className="w-8" />
 
           <ScrollArea className="w-full flex-1 min-h-0">
             <div className="flex flex-col items-center gap-2 pb-1">
-              {railRoomIds().map((roomId) => renderRailIcon(roomId, false))}
-              {regularRoomIds.length > 0 && dmRoomIds.length > 0 && (
-                <Separator className="my-1 w-8" />
-              )}
-              {dmRoomIds.map((roomId) => renderRailIcon(roomId, true))}
+              {railRoomIds().map((roomId) => renderRailIcon(roomId))}
             </div>
           </ScrollArea>
 
