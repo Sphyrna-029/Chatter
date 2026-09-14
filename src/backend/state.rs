@@ -891,6 +891,11 @@ pub(crate) struct VoiceMemberState {
     pub(crate) muted: bool,
     pub(crate) deafened: bool,
     pub(crate) screen_sharing: bool,
+    /// Publishing a webcam. Kept beside `screen_sharing` rather than only in
+    /// `webcam_publishers` so it rides the voice snapshot: a client learns who
+    /// is on camera in rooms it is not currently looking at, and learns it
+    /// again after a reconnect, neither of which a one-shot event can do.
+    pub(crate) webcam_sharing: bool,
     /// Muted by a moderator. Unlike `muted` the user cannot clear it, and the
     /// publish path refuses their audio while it is set, so a patched client
     /// cannot talk around it.

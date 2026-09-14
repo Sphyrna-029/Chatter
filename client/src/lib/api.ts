@@ -470,6 +470,7 @@ export interface RoomSummary {
   member_count: number;
   voice_count: number;
   screen_share_active?: boolean;
+  webcam_active?: boolean;
   tags?: string[];
   icon_url?: string;
   banner_url?: string;

@@ -1338,6 +1338,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             muted: !!m.muted,
             deafened: m.deafened ?? false,
             screen_sharing: !!m.screen_sharing,
+            webcam_sharing: !!m.webcam_sharing,
             force_muted: m.force_muted ?? false,
             clipping: m.clipping ?? false,
             x: typeof m.x === "number" ? m.x : undefined,

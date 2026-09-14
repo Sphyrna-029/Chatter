@@ -864,8 +864,8 @@ pub(crate) async fn delete_room(
 }
 
 /// One occupied voice channel: its id, how many are in it, and whether anyone
-/// in it is sharing a screen.
-type ChannelActivity = (String, usize, bool);
+/// in it is sharing a screen or on camera.
+type ChannelActivity = (String, usize, bool, bool);
 
 /// Group occupied voice channels by the room they belong to.
 ///
@@ -885,10 +885,13 @@ fn voice_activity_by_room(
             continue;
         };
         let sharing = members.values().any(|m| m.screen_sharing);
-        by_room
-            .entry(room_id)
-            .or_default()
-            .push((channel_id.clone(), members.len(), sharing));
+        let on_camera = members.values().any(|m| m.webcam_sharing);
+        by_room.entry(room_id).or_default().push((
+            channel_id.clone(),
+            members.len(),
+            sharing,
+            on_camera,
+        ));
     }
     by_room
 }
@@ -939,21 +942,26 @@ pub(crate) async fn list_all_rooms(
             // see": a moderator can open a private channel, but a call in one
             // still must not light a room's badge, or the badge would mean
             // something different depending on who is looking at it.
-            let (voice_count, screen_share_active) = match voice_by_room.get(&room.room_id) {
-                None => (0usize, false),
-                Some(channels) => {
-                    let public = public_channel_ids(&state, &room.room_id).await;
-                    channels
-                        .iter()
-                        .filter(|(cid, _, _)| public.contains(cid))
-                        .fold(
-                            (0usize, false),
-                            |(count, sharing), (_, members, ch_sharing)| {
-                                (count + members, sharing || *ch_sharing)
-                            },
-                        )
-                }
-            };
+            let (voice_count, screen_share_active, webcam_active) =
+                match voice_by_room.get(&room.room_id) {
+                    None => (0usize, false, false),
+                    Some(channels) => {
+                        let public = public_channel_ids(&state, &room.room_id).await;
+                        channels
+                            .iter()
+                            .filter(|(cid, _, _, _)| public.contains(cid))
+                            .fold(
+                                (0usize, false, false),
+                                |(count, sharing, camera), (_, members, ch_sharing, ch_camera)| {
+                                    (
+                                        count + members,
+                                        sharing || *ch_sharing,
+                                        camera || *ch_camera,
+                                    )
+                                },
+                            )
+                    }
+                };
             room_list.push(json!({
                 "room_id": room.room_id,
                 "name": room.name,
@@ -961,6 +969,7 @@ pub(crate) async fn list_all_rooms(
                 "member_count": member_counts.get(&room.room_id).copied().unwrap_or(0),
                 "voice_count": voice_count,
                 "screen_share_active": screen_share_active,
+                "webcam_active": webcam_active,
                 "tags": room.tags,
                 "icon_url": room.icon_url,
                 "banner_url": room.banner_url,
@@ -1943,11 +1952,12 @@ pub(crate) async fn add_to_dm(
 mod tests {
     use super::*;
 
-    fn member(room_id: &str, screen_sharing: bool) -> VoiceMemberState {
+    fn member(room_id: &str, screen_sharing: bool, webcam_sharing: bool) -> VoiceMemberState {
         VoiceMemberState {
             muted: false,
             deafened: false,
             screen_sharing,
+            webcam_sharing,
             force_muted: false,
             clipping: false,
             room_id: room_id.to_string(),
@@ -1960,7 +1970,15 @@ mod tests {
     fn channel(room_id: &str, users: &[(&str, bool)]) -> HashMap<String, VoiceMemberState> {
         users
             .iter()
-            .map(|(uid, sharing)| (uid.to_string(), member(room_id, *sharing)))
+            .map(|(uid, sharing)| (uid.to_string(), member(room_id, *sharing, false)))
+            .collect()
+    }
+
+    /// Same, but every user is on camera rather than sharing a screen.
+    fn camera_channel(room_id: &str, users: &[&str]) -> HashMap<String, VoiceMemberState> {
+        users
+            .iter()
+            .map(|uid| (uid.to_string(), member(room_id, false, true)))
             .collect()
     }
 
@@ -1973,7 +1991,10 @@ mod tests {
 
         let by_room = voice_activity_by_room(&vc);
         assert!(!by_room.contains_key("chan-1"));
-        assert_eq!(by_room["room-a"], vec![("chan-1".to_string(), 1, false)]);
+        assert_eq!(
+            by_room["room-a"],
+            vec![("chan-1".to_string(), 1, false, false)]
+        );
     }
 
     #[test]
@@ -1994,10 +2015,31 @@ mod tests {
         // whom is sharing.
         let (count, sharing) = by_room["room-a"].iter().fold(
             (0usize, false),
-            |(count, sharing), (_, members, ch_sharing)| (count + members, sharing || *ch_sharing),
+            |(count, sharing), (_, members, ch_sharing, _)| {
+                (count + members, sharing || *ch_sharing)
+            },
         );
         assert_eq!(count, 3);
         assert!(sharing);
+    }
+
+    #[test]
+    fn a_camera_is_reported_apart_from_a_screen_share() {
+        // The rail draws a different glyph for each, so a room where someone
+        // is on camera must not report itself as sharing a screen.
+        let mut vc = HashMap::new();
+        vc.insert("chan-1".to_string(), camera_channel("room-a", &["u1"]));
+        vc.insert("chan-2".to_string(), channel("room-b", &[("u2", true)]));
+
+        let by_room = voice_activity_by_room(&vc);
+        assert_eq!(
+            by_room["room-a"],
+            vec![("chan-1".to_string(), 1, false, true)]
+        );
+        assert_eq!(
+            by_room["room-b"],
+            vec![("chan-2".to_string(), 1, true, false)]
+        );
     }
 
     #[test]

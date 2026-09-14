@@ -30,6 +30,7 @@ function voiceMemberRecords(states: unknown): VoiceChannelMember[] {
     muted: !!m.muted,
     deafened: !!m.deafened,
     screen_sharing: !!m.screen_sharing,
+    webcam_sharing: !!m.webcam_sharing,
     force_muted: !!m.force_muted,
     clipping: !!m.clipping,
     x: typeof m.x === "number" ? m.x : undefined,
@@ -58,6 +59,7 @@ function voiceMembersFromEvent(
         muted: false,
         deafened: false,
         screen_sharing: false,
+        webcam_sharing: false,
       },
   );
 }
@@ -656,12 +658,17 @@ export function createWsMessageHandler(
         payload: { sharerId: msg.sharer_user_id, viewers: msg.viewers || [] },
       });
     } else if (msg.type === "webcam_share_started") {
+      // The member flag is patched for every room, the way a screen share is:
+      // the sidebar draws a camera on rooms you are not looking at, and it
+      // cannot do that from state kept only for the room you are in.
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ webcam_sharing: true }));
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         // Opt-in, the same as a screen share above.
         dispatch({ type: "WEBCAM_SHARE_STARTED", payload: msg.user_id });
       }
     } else if (msg.type === "webcam_share_stopped") {
+      patchVoiceMember(msg, stateRef, dispatch, () => ({ webcam_sharing: false }));
       const isVoiceRoom = msg.room_id === stateRef.current.currentRoomId || msg.room_id === stateRef.current.voiceRoomId;
       if (isVoiceRoom) {
         dispatch({ type: "WEBCAM_SHARE_STOPPED", payload: msg.user_id });

@@ -15,6 +15,9 @@ export interface VoiceChannelMember {
   muted: boolean;
   deafened: boolean;
   screen_sharing: boolean;
+  /** Publishing a webcam. Rides the voice snapshot alongside `screen_sharing`,
+   *  so a room you are not looking at can still say someone is on camera. */
+  webcam_sharing: boolean;
   force_muted?: boolean;
   clipping?: boolean;
   /** Where they are standing in a spatial channel, both axes 0..1. */

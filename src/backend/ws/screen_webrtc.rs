@@ -1030,6 +1030,7 @@ mod tests {
                     muted: false,
                     deafened: false,
                     screen_sharing: true,
+                    webcam_sharing: false,
                     force_muted: false,
                     clipping: false,
                     room_id: "!room:localhost".to_string(),

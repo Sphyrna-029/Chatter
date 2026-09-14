@@ -16,6 +16,7 @@ const member = (
   muted: false,
   deafened: false,
   screen_sharing: false,
+  webcam_sharing: false,
   ...overrides,
 });
 

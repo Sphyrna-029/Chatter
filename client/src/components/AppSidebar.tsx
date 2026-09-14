@@ -22,7 +22,7 @@ const NOTIFICATION_LEVELS: { value: NotificationLevel; label: string }[] = [
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, MessageCircle, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, MessageCircle, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check, Video, Volume2 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -109,13 +109,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   // made a call look like it was still running after everyone had left. It
   // stays as the answer before the socket has said anything.
   const liveVoice = useMemo(() => {
-    const counts: Record<string, { count: number; sharing: boolean }> = {};
+    const counts: Record<string, { count: number; sharing: boolean; camera: boolean }> = {};
     for (const [channelId, members] of Object.entries(state.voiceChannelMembers)) {
       const roomId = state.voiceChannelRooms[channelId];
       if (!roomId) continue;
-      const entry = counts[roomId] ?? { count: 0, sharing: false };
+      const entry = counts[roomId] ?? { count: 0, sharing: false, camera: false };
       entry.count += members.length;
       entry.sharing = entry.sharing || members.some((m) => m.screen_sharing);
+      entry.camera = entry.camera || members.some((m) => m.webcam_sharing);
       counts[roomId] = entry;
     }
     return counts;
@@ -444,10 +445,12 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const isActive = roomId === state.currentRoomId && !state.adminDashboardOpen;
     const mentions = (!isActive && state.roomMentions[roomId]) || 0;
     const unreadCount = (!isActive && state.roomUnreadCounts[roomId]) || 0;
+    const summary = roomSummaries[roomId];
     const live = state.wsConnected
-      ? (liveVoice[roomId] ?? { count: 0, sharing: false })
+      ? (liveVoice[roomId] ?? { count: 0, sharing: false, camera: false })
       : undefined;
-    const voiceCount = live?.count ?? (roomSummaries[roomId]?.voice_count ?? 0);
+    const voiceCount = live?.count ?? (summary?.voice_count ?? 0);
+    const onCamera = live?.camera ?? (summary?.webcam_active ?? false);
 
     const roomName = info?.name || "Unnamed";
     const roomInitial = roomName.substring(0, 1).toUpperCase();
@@ -484,8 +487,6 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                 isActive
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
                   : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
-                // A call in progress is the one live signal worth the space.
-                voiceCount > 0 && "ring-2 ring-success",
               )}
             >
               {iconUrl ? (
@@ -499,6 +500,25 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                 roomInitial
               )}
             </span>
+            {/* Top right, so it never collides with the mention count below
+                it. A camera outranks a speaker: being on camera is the more
+                specific fact, and nobody is on camera without being in the
+                call anyway. */}
+            {(onCamera || voiceCount > 0) && (
+              <span
+                className={cn(
+                  "absolute -top-0.5 -right-0.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border-2 border-sidebar",
+                  onCamera ? "bg-info text-white" : "bg-success text-white",
+                )}
+                aria-hidden
+              >
+                {onCamera ? (
+                  <Video className="h-2.5 w-2.5" />
+                ) : (
+                  <Volume2 className="h-2.5 w-2.5" />
+                )}
+              </span>
+            )}
             {mentions > 0 && (
               <span className="absolute -bottom-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-sidebar bg-destructive px-1 text-3xs font-bold leading-none text-white">
                 {mentions > 99 ? "99+" : mentions}
@@ -509,6 +529,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
         <TooltipContent side="right" sideOffset={8}>
           {roomName}
           {voiceCount > 0 && ` — ${voiceCount} in voice`}
+          {onCamera && ", on camera"}
         </TooltipContent>
       </Tooltip>
     );

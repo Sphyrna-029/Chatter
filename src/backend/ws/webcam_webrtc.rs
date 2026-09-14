@@ -41,6 +41,25 @@ pub(crate) async fn user_is_webcam_active(state: &AppState, _room_id: &str, user
     publishers.contains_key(user_id)
 }
 
+/// Set a member's webcam flag wherever they are in voice, returning the channel
+/// it changed in. Mirrors `set_user_screen_sharing`, and for the same reason:
+/// the channel a user is in is found by looking for them, not by assuming the
+/// channel id matches the room's.
+pub(crate) async fn set_user_webcam_sharing(
+    state: &AppState,
+    user_id: &str,
+    sharing: bool,
+) -> Option<String> {
+    let mut vc = state.voice_channels.write().await;
+    for (channel_id, members) in vc.iter_mut() {
+        if let Some(member) = members.get_mut(user_id) {
+            member.webcam_sharing = sharing;
+            return Some(channel_id.clone());
+        }
+    }
+    None
+}
+
 pub(crate) async fn teardown_webcam_subscriber_pair(
     state: &AppState,
     viewer_user_id: &str,

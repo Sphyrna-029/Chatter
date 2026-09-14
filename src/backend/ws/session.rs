@@ -13,7 +13,7 @@ use super::{
     webcam_webrtc::{
         handle_webcam_webrtc_publish_candidate, handle_webcam_webrtc_publish_offer,
         handle_webcam_webrtc_subscribe_candidate, handle_webcam_webrtc_subscribe_offer,
-        teardown_webcam_publisher, teardown_webcam_subscriber_pair,
+        set_user_webcam_sharing, teardown_webcam_publisher, teardown_webcam_subscriber_pair,
         teardown_webcam_subscriptions_for_viewer,
     },
 };
@@ -113,6 +113,7 @@ fn voice_member_states(members: &HashMap<String, VoiceMemberState>) -> Vec<Value
                 "muted": member.muted,
                 "deafened": member.deafened,
                 "screen_sharing": member.screen_sharing,
+                "webcam_sharing": member.webcam_sharing,
                 "force_muted": member.force_muted,
                 "clipping": member.clipping,
                 "x": member.x,
@@ -752,6 +753,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         muted: force_muted || joined_muted,
                         deafened: joined_deafened,
                         screen_sharing: false,
+                        webcam_sharing: false,
                         force_muted,
                         clipping: false,
                         room_id: room_id.to_string(),
@@ -955,7 +957,10 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
 
             let member_room = {
                 let mut vc = state.voice_channels.write().await;
-                match vc.get_mut(channel_id).and_then(|chan| chan.get_mut(user_id)) {
+                match vc
+                    .get_mut(channel_id)
+                    .and_then(|chan| chan.get_mut(user_id))
+                {
                     Some(member) if member.conn_id == conn_id => {
                         member.x = x;
                         member.y = y;
@@ -1522,6 +1527,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .get("channel_id")
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
+            set_user_webcam_sharing(&state, user_id, true).await;
             let event = json!({
                 "type": "webcam_share_started",
                 "room_id": room_id,
@@ -1536,6 +1542,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 .and_then(|v| v.as_str())
                 .unwrap_or(room_id);
             let _ = teardown_webcam_publisher(&state, user_id).await;
+            set_user_webcam_sharing(&state, user_id, false).await;
             let event = json!({
                 "type": "webcam_share_stopped",
                 "room_id": room_id,
@@ -2886,6 +2893,7 @@ mod tests {
             muted: false,
             deafened: false,
             screen_sharing: false,
+            webcam_sharing: false,
             force_muted: false,
             clipping: false,
             room_id: "!room:localhost".to_string(),
