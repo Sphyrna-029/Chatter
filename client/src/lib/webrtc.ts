@@ -195,24 +195,47 @@ export interface ScreenSharePublishProfile {
   audioMaxAverageBitrate: number;
 }
 
-const SCREEN_PROFILE_30FPS: ScreenSharePublishProfile = {
-  targetFps: 30,
-  contentHint: "motion",
-  maxBitrateBps: 8_000_000,
-  audioMaxAverageBitrate: 128_000,
-};
+// ─── Screen share bitrate ───────────────────────────────────────────────────
+// What a share costs in upload is the sharer's problem, not the channel's: the
+// same room holds someone on fibre and someone on a phone tether. So the
+// ceiling is theirs to set, alongside the frame rate.
 
-const SCREEN_PROFILE_60FPS: ScreenSharePublishProfile = {
-  targetFps: 60,
-  contentHint: "motion",
-  maxBitrateBps: 12_000_000,
-  audioMaxAverageBitrate: 128_000,
-};
+export const SCREEN_BITRATE_MIN_BPS = 1_000_000;
+export const SCREEN_BITRATE_MAX_BPS = 20_000_000;
+export const SCREEN_BITRATE_STEP_BPS = 500_000;
+
+/**
+ * What a share costs before anybody touches the slider.
+ *
+ * Frame rate implied the bitrate outright before this was adjustable, and these
+ * are the two values it implied. Kept as the untouched defaults so nobody's
+ * share quietly drops on the release that made it adjustable — a 60fps sharer
+ * who never opens the control keeps the 12 Mbps they had.
+ */
+export function defaultScreenShareBitrate(fps: 30 | 60): number {
+  return fps === 60 ? 12_000_000 : 8_000_000;
+}
+
+/** Into the supported range, with anything unreadable falling back to `fallback`. */
+export function clampScreenShareBitrate(value: unknown, fallback: number): number {
+  const bps = typeof value === "string" ? Number(value) : value;
+  if (typeof bps !== "number" || !Number.isFinite(bps)) return fallback;
+  return Math.min(SCREEN_BITRATE_MAX_BPS, Math.max(SCREEN_BITRATE_MIN_BPS, Math.round(bps)));
+}
 
 export function getScreenSharePublishProfile(
   fps: 30 | 60,
+  bitrateBps?: number,
 ): ScreenSharePublishProfile {
-  return fps === 60 ? SCREEN_PROFILE_60FPS : SCREEN_PROFILE_30FPS;
+  return {
+    targetFps: fps,
+    contentHint: "motion",
+    maxBitrateBps:
+      bitrateBps === undefined
+        ? defaultScreenShareBitrate(fps)
+        : clampScreenShareBitrate(bitrateBps, defaultScreenShareBitrate(fps)),
+    audioMaxAverageBitrate: 128_000,
+  };
 }
 
 // The chosen frame rate is a per-device preference, so it outlives the tab that
@@ -236,6 +259,43 @@ export function storeScreenShareFps(fps: 30 | 60): void {
     localStorage.setItem(SCREEN_FPS_STORAGE_KEY, String(fps));
   } catch {
     // The preference just will not survive the reload.
+  }
+}
+
+export const SCREEN_BITRATE_STORAGE_KEY = "chatter_screen_share_bitrate";
+export const SCREEN_BITRATE_CHANGE_EVENT = "screen-share-bitrate-change";
+
+/**
+ * The chosen ceiling, or the frame rate's own default where none has been
+ * chosen.
+ *
+ * `fps` is only consulted for that fallback: once somebody sets a value it is
+ * theirs, and changing frame rate afterwards does not move it. Before they do,
+ * the slider tracks whatever the frame rate used to imply, which is what makes
+ * this change invisible to anyone who does not want it.
+ */
+export function loadScreenShareBitrate(fps: 30 | 60): number {
+  const fallback = defaultScreenShareBitrate(fps);
+  try {
+    const stored = localStorage.getItem(SCREEN_BITRATE_STORAGE_KEY);
+    if (stored === null) return fallback;
+    return clampScreenShareBitrate(stored, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+/** Mbps to one decimal, without a trailing `.0` on the round numbers. */
+export function formatScreenBitrate(bps: number): string {
+  const mbps = bps / 1_000_000;
+  return `${Number.isInteger(mbps) ? mbps : mbps.toFixed(1)} Mbps`;
+}
+
+export function storeScreenShareBitrate(bps: number): void {
+  try {
+    localStorage.setItem(SCREEN_BITRATE_STORAGE_KEY, String(Math.round(bps)));
+  } catch {
+    // As above: the preference just will not survive the reload.
   }
 }
 

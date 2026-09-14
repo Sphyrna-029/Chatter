@@ -7,10 +7,12 @@ import {
   VOICE_SUB_STUCK_CONNECTING_MS,
   canSignal,
   getScreenSharePublishProfile,
+  formatScreenBitrate,
   mungeScreenAudioSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
 import { useScreenShareFps } from "./useScreenShareFps";
+import { useScreenShareBitrate } from "./useScreenShareBitrate";
 import { toast } from "sonner";
 
 function buildDisplayVideoConstraints(
@@ -64,6 +66,7 @@ export function useWebRTCScreen() {
   const screenRetryTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
   const { screenFps } = useScreenShareFps();
+  const { screenBitrate } = useScreenShareBitrate();
   const screenShareStartingRef = useRef(false);
 
   // Ref for frozen detection external stats
@@ -242,7 +245,7 @@ export function useWebRTCScreen() {
         try {
           await screenPubPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
           // Re-apply sender parameters — some browsers reset encodings when the answer is applied.
-          const profile = getScreenSharePublishProfile(screenFps);
+          const profile = getScreenSharePublishProfile(screenFps, screenBitrate);
           const videoSender = screenPubPcRef.current.getSenders().find(
             (s) => s.track?.kind === "video",
           );
@@ -304,7 +307,7 @@ export function useWebRTCScreen() {
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps, screenBitrate]);
 
   // Subscribe to screen shares from other users — but only once this user has
   // opened the viewer. A share nobody asked to watch costs nothing: no peer
@@ -435,42 +438,59 @@ export function useWebRTCScreen() {
     connStatsRef.current = stats;
   }, []);
 
-  // A frame rate change while sharing used to only take effect on the next
-  // share. Both halves of the change apply live, so no renegotiation is needed:
-  // applyConstraints retimes the capture, and setParameters retimes the encoder.
-  const applyScreenFpsToActiveShare = useCallback(async (fps: 30 | 60) => {
-    const stream = screenStreamRef.current;
-    const pc = screenPubPcRef.current;
-    // Not sharing — the new value is picked up by the next startScreenShare.
-    if (!stream || !pc) return;
+  // A quality change while sharing used to only take effect on the next share.
+  // Both halves apply live, so no renegotiation is needed: applyConstraints
+  // retimes the capture, and setParameters retimes the encoder.
+  const applyScreenProfileToActiveShare = useCallback(
+    async (fps: 30 | 60, bitrateBps: number, retimeCapture: boolean, announce: string) => {
+      const stream = screenStreamRef.current;
+      const pc = screenPubPcRef.current;
+      // Not sharing — the new value is picked up by the next startScreenShare.
+      if (!stream || !pc) return;
 
-    const profile = getScreenSharePublishProfile(fps);
-    const track = stream.getVideoTracks()[0];
-    if (track) {
-      try {
-        // `max` as well as `ideal`: without an upper bound a capture already
-        // running at 60 has no reason to come back down to 30.
-        await track.applyConstraints({
-          frameRate: { ideal: profile.targetFps, max: profile.targetFps },
-        });
-      } catch {
-        // Some capture sources refuse a live frame rate change. The sender
-        // cap below still bounds what we actually encode and send.
+      const profile = getScreenSharePublishProfile(fps, bitrateBps);
+      // Only when the frame rate itself moved. A bitrate change has nothing to
+      // say to the capture, and re-asserting a constraint it is already meeting
+      // can cost a visible hitch on some sources.
+      const track = retimeCapture ? stream.getVideoTracks()[0] : undefined;
+      if (track) {
+        try {
+          // `max` as well as `ideal`: without an upper bound a capture already
+          // running at 60 has no reason to come back down to 30.
+          await track.applyConstraints({
+            frameRate: { ideal: profile.targetFps, max: profile.targetFps },
+          });
+        } catch {
+          // Some capture sources refuse a live frame rate change. The sender
+          // cap below still bounds what we actually encode and send.
+        }
       }
-    }
-    const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
-    if (videoSender) await tuneScreenVideoSender(videoSender, profile);
-    toast.success(`Screen share set to ${profile.targetFps} FPS`);
-  }, []);
+      const videoSender = pc.getSenders().find((s) => s.track?.kind === "video");
+      if (videoSender) await tuneScreenVideoSender(videoSender, profile);
+      toast.success(announce);
+    },
+    [],
+  );
 
-  // Skip the first run: mounting is not a frame rate change, and re-applying on
-  // every share would fight startScreenShare, which already set the profile.
-  const lastAppliedFpsRef = useRef(screenFps);
+  // Skip the first run: mounting is not a change, and re-applying on every
+  // share would fight startScreenShare, which already set the profile.
+  const lastAppliedRef = useRef({ fps: screenFps, bitrate: screenBitrate });
   useEffect(() => {
-    if (lastAppliedFpsRef.current === screenFps) return;
-    lastAppliedFpsRef.current = screenFps;
-    void applyScreenFpsToActiveShare(screenFps);
-  }, [screenFps, applyScreenFpsToActiveShare]);
+    const last = lastAppliedRef.current;
+    if (last.fps === screenFps && last.bitrate === screenBitrate) return;
+    // Changing the frame rate moves the bitrate too while none has been chosen,
+    // so both can land at once. The frame rate is the one that was asked for.
+    const fpsChanged = last.fps !== screenFps;
+    lastAppliedRef.current = { fps: screenFps, bitrate: screenBitrate };
+    void applyScreenProfileToActiveShare(
+      screenFps,
+      screenBitrate,
+      fpsChanged,
+      fpsChanged
+        ? `Screen share set to ${screenFps} FPS`
+        : `Screen share bitrate set to ${formatScreenBitrate(screenBitrate)}`,
+    );
+  }, [screenFps, screenBitrate, applyScreenProfileToActiveShare]);
 
   // ─── Screen share publish/stop ─────────────────────────────────────────────
   const startScreenShare = useCallback(async () => {
@@ -478,7 +498,7 @@ export function useWebRTCScreen() {
     // Prevent concurrent starts
     if (screenShareStartingRef.current) return;
     screenShareStartingRef.current = true;
-    const profile = getScreenSharePublishProfile(screenFps);
+    const profile = getScreenSharePublishProfile(screenFps, screenBitrate);
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
       const audioConstraints = buildDisplayAudioConstraints();
@@ -564,7 +584,7 @@ export function useWebRTCScreen() {
     } finally {
       screenShareStartingRef.current = false;
     }
-  }, [state.inVoiceChannel, state.currentRoomId, screenFps, state.userId, dispatch, stopScreenShare, wsRef]);
+  }, [state.inVoiceChannel, state.currentRoomId, screenFps, screenBitrate, state.userId, dispatch, stopScreenShare, wsRef]);
 
   const watchUser = useCallback(async (sharerId: string, joinVoice: () => Promise<void>) => {
     if (state.selectedScreenSharer === sharerId && state.screenViewerOpen) {
