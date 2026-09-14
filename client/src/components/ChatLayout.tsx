@@ -1,5 +1,6 @@
+import type { CSSProperties } from "react";
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
-import { WifiOff, ChevronRight, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
+import { WifiOff, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, MonitorUp, PhoneOff, Camera } from "lucide-react";
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -75,21 +76,6 @@ function pipExit(): Promise<void> {
     if (!pipActive()) return Promise.resolve();
     return document.exitPictureInPicture();
   } catch { return Promise.reject(); }
-}
-
-/** Floating tab that appears on the left edge when the sidebar is collapsed */
-function LeftPanelRestoreButton() {
-  const { state, toggleSidebar } = useSidebar();
-  if (state === "expanded") return null;
-  return (
-    <button
-      onClick={toggleSidebar}
-      title="Open sidebar (Ctrl+B)"
-      className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex h-10 w-5 items-center justify-center rounded-r-md border border-l-0 border-border bg-sidebar text-muted-foreground shadow-sm transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground"
-    >
-      <ChevronRight className="h-3 w-3" />
-    </button>
-  );
 }
 
 /** Mobile top bar with sidebar toggle + room name + members */
@@ -589,7 +575,11 @@ export function ChatLayout() {
         style={{ position: "fixed", top: -9999, left: -9999, width: 1, height: 1 }}
       />
 
-      <SidebarProvider>
+      {/* The collapsed sidebar is a rail of room icons rather than nothing,
+          so it needs Discord's width — a 48px icon with 12px either side —
+          not shadcn's 3rem default. Set here so the layout gap and the
+          sidebar itself agree on it. */}
+      <SidebarProvider style={{ "--sidebar-width-icon": "4.5rem" } as CSSProperties}>
         <div className={`flex h-dvh w-full bg-muted ${isMobile ? "" : "gap-2 p-2"}`}>
           <AppSidebar
             onCreateRoom={() => setCreateOpen(true)}
@@ -597,9 +587,6 @@ export function ChatLayout() {
           />
 
           <SidebarInset className={`flex flex-1 flex-col min-w-0 overflow-hidden ${isMobile ? "" : "rounded-lg border border-border"}`}>
-            {/* Floating restore button — only visible when left sidebar is collapsed (desktop only) */}
-            {!isMobile && <LeftPanelRestoreButton />}
-
             {/* Mobile top bar */}
             {isMobile && (
               <MobileHeader

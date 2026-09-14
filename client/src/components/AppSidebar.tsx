@@ -22,7 +22,7 @@ const NOTIFICATION_LEVELS: { value: NotificationLevel; label: string }[] = [
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Palette, Pencil, Trash2, Settings2, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
+import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +39,7 @@ import { AuthAvatarImage } from "@/components/AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -51,7 +52,10 @@ interface AppSidebarProps {
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const confirm = useConfirm();
   const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms, setNotificationLevel } = useAppContext();
-  const { isMobile, setOpenMobile } = useSidebar();
+  const { isMobile, setOpenMobile, state: sidebarState, toggleSidebar } = useSidebar();
+  // Only the desktop sidebar collapses to the rail; on mobile it is a sheet
+  // that is either open or gone.
+  const railed = !isMobile && sidebarState === "collapsed";
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -432,8 +436,240 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     );
   }
 
+  /** One room as Discord draws it: a 48px squircle that rounds off on hover,
+   *  the name in a tooltip because there is no room for it, and the left-edge
+   *  pill carrying the unread state the expanded row spells out in badges. */
+  function renderRailIcon(roomId: string, isDm: boolean) {
+    const info = state.roomInfoMap[roomId];
+    const isActive = roomId === state.currentRoomId && !state.adminDashboardOpen;
+    const mentions = (!isActive && state.roomMentions[roomId]) || 0;
+    const unreadCount = (!isActive && state.roomUnreadCounts[roomId]) || 0;
+    const live = state.wsConnected
+      ? (liveVoice[roomId] ?? { count: 0, sharing: false })
+      : undefined;
+    const voiceCount =
+      live?.count ?? (isDm ? (info?.dm_voice_count ?? 0) : (roomSummaries[roomId]?.voice_count ?? 0));
+
+    const roomName = isDm && info?.name
+      ? info.name.replace(/^DM with /, "")
+      : (info?.name || "Unnamed");
+    const roomInitial = roomName.substring(0, 1).toUpperCase();
+
+    const dmUserIds = isDm
+      ? (info?.dm_user_ids ?? []).filter((id) => id !== state.userId)
+      : [];
+    const dmPeerId = dmUserIds.length === 1 ? dmUserIds[0] : null;
+    const dmPeerAvatar = dmPeerId
+      ? (state.userPresence[dmPeerId]?.avatarUrl || info?.dm_avatars?.[dmPeerId] || "")
+      : "";
+
+    // A face for a one-to-one DM, the room's own icon otherwise, and the
+    // initial when there is neither.
+    const iconUrl = info?.icon_url || dmPeerAvatar;
+
+    return (
+      <Tooltip key={roomId}>
+        <TooltipTrigger asChild>
+          <button
+            onClick={() => selectRoom(roomId)}
+            aria-label={roomName}
+            aria-current={isActive ? "page" : undefined}
+            className="group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer"
+          >
+            {/* Discord's tell: nothing when read, a stub when unread, the full
+                bar for the room you are in. */}
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
+                isActive
+                  ? "h-10"
+                  : mentions > 0 || unreadCount > 0
+                    ? "h-2 group-hover/rail:h-5"
+                    : "h-0 group-hover/rail:h-5",
+              )}
+            />
+            <span
+              className={cn(
+                "flex h-12 w-12 items-center justify-center overflow-hidden text-base font-semibold transition-all duration-200",
+                // The squircle morph: a circle at rest, a rounded square when
+                // it is the room you are in or the one under the cursor.
+                isActive ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
+                isActive
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                  : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
+                // A call in progress is the one live signal worth the space.
+                voiceCount > 0 && "ring-2 ring-success",
+              )}
+            >
+              {iconUrl ? (
+                <Avatar className="h-12 w-12 rounded-none">
+                  <AuthAvatarImage src={iconUrl} />
+                  <AvatarFallback className="rounded-none bg-transparent text-base font-semibold">
+                    {roomInitial}
+                  </AvatarFallback>
+                </Avatar>
+              ) : (
+                roomInitial
+              )}
+            </span>
+            {mentions > 0 && (
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-sidebar bg-destructive px-1 text-3xs font-bold leading-none text-white">
+                {mentions > 99 ? "99+" : mentions}
+              </span>
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={8}>
+          {roomName}
+          {voiceCount > 0 && ` — ${voiceCount} in voice`}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  /** A rail button that is not a room: same 48px target, same hover morph. */
+  function renderRailAction({
+    label,
+    active,
+    onClick,
+    badge,
+    children,
+  }: {
+    label: string;
+    active?: boolean;
+    onClick: () => void;
+    badge?: number;
+    children: React.ReactNode;
+  }) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={onClick}
+            aria-label={label}
+            className="group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
+                active ? "h-10" : "h-0 group-hover/rail:h-5",
+              )}
+            />
+            <span
+              className={cn(
+                "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
+                active ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
+                active
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                  : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
+              )}
+            >
+              {children}
+            </span>
+            {!!badge && badge > 0 && (
+              <span className="absolute -bottom-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-sidebar bg-destructive px-1 text-3xs font-bold leading-none text-white">
+                {badge > 99 ? "99+" : badge}
+              </span>
+            )}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={8}>{label}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  /** The rail shows every room, in the order the expanded list shows them —
+   *  including the rooms of a collapsed group, which would otherwise be
+   *  unreachable while the sidebar is narrow. */
+  function railRoomIds(): string[] {
+    const sortedGroups = [...state.roomGroups].sort((a, b) => a.position - b.position);
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const group of sortedGroups) {
+      for (const id of group.room_ids) {
+        if (!seen.has(id) && regularRoomIds.includes(id)) {
+          seen.add(id);
+          ordered.push(id);
+        }
+      }
+    }
+    for (const id of regularRoomIds) {
+      if (!seen.has(id)) ordered.push(id);
+    }
+    return ordered;
+  }
+
   return (
-    <Sidebar className="rounded-lg overflow-hidden border border-border bg-sidebar !top-2 !bottom-2 left-2 !h-auto">
+    <Sidebar
+      collapsible="icon"
+      className="rounded-lg overflow-hidden border border-border bg-sidebar !top-2 !bottom-2 left-2 !h-auto"
+    >
+      {railed ? (
+        <div className="flex h-full w-full flex-col items-center gap-2 py-3">
+          {renderRailAction({
+            label: "Activity",
+            active: !state.currentRoomId && !state.adminDashboardOpen,
+            badge: state.incomingFriendRequests.length,
+            onClick: () => {
+              dispatch({ type: "SELECT_ROOM", payload: null });
+              dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: false });
+            },
+            children: <LayoutDashboard className="h-5 w-5" />,
+          })}
+          <Separator className="w-8" />
+
+          <ScrollArea className="w-full flex-1 min-h-0">
+            <div className="flex flex-col items-center gap-2 pb-1">
+              {railRoomIds().map((roomId) => renderRailIcon(roomId, false))}
+              {regularRoomIds.length > 0 && dmRoomIds.length > 0 && (
+                <Separator className="my-1 w-8" />
+              )}
+              {dmRoomIds.map((roomId) => renderRailIcon(roomId, true))}
+            </div>
+          </ScrollArea>
+
+          <Separator className="w-8" />
+          {renderRailAction({
+            label: "Create a room",
+            onClick: onCreateRoom,
+            children: <Plus className="h-5 w-5" />,
+          })}
+          {state.isAdmin && renderRailAction({
+            label: "Server dashboard",
+            active: state.adminDashboardOpen,
+            onClick: () => dispatch({ type: "SET_ADMIN_DASHBOARD_OPEN", payload: true }),
+            children: <Shield className="h-5 w-5" />,
+          })}
+          {renderRailAction({
+            label: "You",
+            onClick: () => setProfileOpen(true),
+            children: (
+              <Avatar className="h-12 w-12 rounded-none">
+                <AuthAvatarImage src={state.userId ? state.userPresence[state.userId]?.avatarUrl : undefined} />
+                <AvatarFallback className="rounded-none bg-transparent text-base font-bold">
+                  {initial}
+                </AvatarFallback>
+              </Avatar>
+            ),
+          })}
+          {/* Ctrl+B is the other way back, but nothing on screen says so. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={toggleSidebar}
+                aria-label="Expand sidebar"
+                className="flex h-6 w-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors cursor-pointer"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>Expand sidebar (Ctrl+B)</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : (
+      <>
       <SidebarHeader className="p-4">
         <div className="flex items-center gap-2">
           <div
@@ -833,35 +1069,40 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             </svg>
           </Button>
         </div>
-        <VoiceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-        <AppearanceDialog open={appearanceOpen} onOpenChange={setAppearanceOpen} />
-        {state.userId && (
-          <UserProfileDialog
-            open={profileOpen}
-            onOpenChange={setProfileOpen}
-            userId={state.userId}
-            displayName={displayName}
-          />
-        )}
-        <RoomGroupDialog
-          open={groupDialogOpen}
-          onOpenChange={setGroupDialogOpen}
-          mode={groupDialogMode}
-          groupId={groupDialogId}
-          groupName={groupDialogName}
-        />
-        <GroupDMDialog
-          open={groupDMDialogOpen}
-          onOpenChange={setGroupDMDialogOpen}
-        />
-        {settingsRoomId && (
-          <RoomSettingsDialog
-            open={!!settingsRoomId}
-            onOpenChange={(open) => { if (!open) setSettingsRoomId(null); }}
-            roomId={settingsRoomId}
-          />
-        )}
       </SidebarFooter>
+      </>
+      )}
+
+      {/* Outside the branch: the rail opens some of these too, and a dialog
+          that unmounts when the sidebar collapses cannot be opened at all. */}
+      <VoiceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <AppearanceDialog open={appearanceOpen} onOpenChange={setAppearanceOpen} />
+      {state.userId && (
+        <UserProfileDialog
+          open={profileOpen}
+          onOpenChange={setProfileOpen}
+          userId={state.userId}
+          displayName={displayName}
+        />
+      )}
+      <RoomGroupDialog
+        open={groupDialogOpen}
+        onOpenChange={setGroupDialogOpen}
+        mode={groupDialogMode}
+        groupId={groupDialogId}
+        groupName={groupDialogName}
+      />
+      <GroupDMDialog
+        open={groupDMDialogOpen}
+        onOpenChange={setGroupDMDialogOpen}
+      />
+      {settingsRoomId && (
+        <RoomSettingsDialog
+          open={!!settingsRoomId}
+          onOpenChange={(open) => { if (!open) setSettingsRoomId(null); }}
+          roomId={settingsRoomId}
+        />
+      )}
 
       <style>{`
         @keyframes pulse-border {
