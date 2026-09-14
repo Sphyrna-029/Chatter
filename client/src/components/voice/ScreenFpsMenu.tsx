@@ -10,11 +10,13 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { useScreenShareBitrate } from "@/hooks/useScreenShareBitrate";
+import { useScreenContentMode } from "@/hooks/useScreenContentMode";
 import {
   SCREEN_BITRATE_MAX_BPS,
   SCREEN_BITRATE_MIN_BPS,
   SCREEN_BITRATE_STEP_BPS,
   formatScreenBitrate,
+  type ScreenContentMode,
 } from "@/lib/webrtc";
 
 interface ScreenFpsMenuProps {
@@ -33,6 +35,7 @@ interface ScreenFpsMenuProps {
 export function ScreenFpsMenu({ children, align = "end" }: ScreenFpsMenuProps) {
   const { screenFps, setScreenFps } = useScreenShareFps();
   const { screenBitrate, setScreenBitrate } = useScreenShareBitrate();
+  const { screenContent, setScreenContent } = useScreenContentMode();
 
   return (
     <DropdownMenu>
@@ -45,6 +48,22 @@ export function ScreenFpsMenu({ children, align = "end" }: ScreenFpsMenuProps) {
         >
           <DropdownMenuRadioItem value="30">30 FPS</DropdownMenuRadioItem>
           <DropdownMenuRadioItem value="60">60 FPS</DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+
+        <DropdownMenuSeparator />
+
+        {/* What the encoder gives up when it cannot have both. Sharing an
+            editor and sharing a film want opposite answers, and there is no
+            way to tell which from the capture itself. */}
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
+          Optimise for
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={screenContent}
+          onValueChange={(v) => setScreenContent(v as ScreenContentMode)}
+        >
+          <DropdownMenuRadioItem value="detail">Text &amp; detail</DropdownMenuRadioItem>
+          <DropdownMenuRadioItem value="motion">Video &amp; motion</DropdownMenuRadioItem>
         </DropdownMenuRadioGroup>
 
         <DropdownMenuSeparator />

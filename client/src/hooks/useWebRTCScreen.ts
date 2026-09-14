@@ -8,20 +8,26 @@ import {
   canSignal,
   getScreenSharePublishProfile,
   formatScreenBitrate,
+  preferScreenVideoCodecs,
   mungeScreenAudioSdp,
 } from "@/lib/webrtc";
 import type { PeerStats, ScreenSharePublishProfile } from "@/lib/webrtc";
 import { useScreenShareFps } from "./useScreenShareFps";
 import { useScreenShareBitrate } from "./useScreenShareBitrate";
+import { useScreenContentMode } from "./useScreenContentMode";
 import { toast } from "sonner";
 
 function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
 ): MediaTrackConstraints {
   return {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-    frameRate: { ideal: profile.targetFps },
+    // `max` as well as `ideal`: `ideal` alone is a hint a screen capture is
+    // free to ignore, and a 1440p or 4K source handed back at native size
+    // spreads the chosen bitrate over several times the pixels it was picked
+    // for. The aspect ratio is preserved — the browser fits inside the box.
+    width: { ideal: profile.maxWidth, max: profile.maxWidth },
+    height: { ideal: profile.maxHeight, max: profile.maxHeight },
+    frameRate: { ideal: profile.targetFps, max: profile.targetFps },
   };
 }
 
@@ -50,7 +56,7 @@ async function tuneScreenVideoSender(
       networkPriority: "high",
     };
     params.encodings = [encoding];
-    params.degradationPreference = "maintain-resolution";
+    params.degradationPreference = profile.degradationPreference;
     await sender.setParameters(params);
   } catch {
     // Browsers differ in which sender parameters are writable.
@@ -67,6 +73,7 @@ export function useWebRTCScreen() {
   const pendingScreenSubsRef = useRef<Set<string>>(new Set());
   const { screenFps } = useScreenShareFps();
   const { screenBitrate } = useScreenShareBitrate();
+  const { screenContent } = useScreenContentMode();
   const screenShareStartingRef = useRef(false);
 
   // Ref for frozen detection external stats
@@ -245,7 +252,7 @@ export function useWebRTCScreen() {
         try {
           await screenPubPcRef.current.setRemoteDescription({ type: "answer", sdp: msg.sdp });
           // Re-apply sender parameters — some browsers reset encodings when the answer is applied.
-          const profile = getScreenSharePublishProfile(screenFps, screenBitrate);
+          const profile = getScreenSharePublishProfile(screenFps, screenBitrate, screenContent);
           const videoSender = screenPubPcRef.current.getSenders().find(
             (s) => s.track?.kind === "video",
           );
@@ -307,7 +314,7 @@ export function useWebRTCScreen() {
 
     window.addEventListener("ws-message", handler);
     return () => window.removeEventListener("ws-message", handler);
-  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps, screenBitrate]);
+  }, [state.inVoiceChannel, state.userId, state.currentRoomId, stopScreenShare, screenFps, screenBitrate, screenContent]);
 
   // Subscribe to screen shares from other users — but only once this user has
   // opened the viewer. A share nobody asked to watch costs nothing: no peer
@@ -442,22 +449,31 @@ export function useWebRTCScreen() {
   // Both halves apply live, so no renegotiation is needed: applyConstraints
   // retimes the capture, and setParameters retimes the encoder.
   const applyScreenProfileToActiveShare = useCallback(
-    async (fps: 30 | 60, bitrateBps: number, retimeCapture: boolean, announce: string) => {
+    async (
+      profile: ScreenSharePublishProfile,
+      retimeCapture: boolean,
+      announce: string,
+    ) => {
       const stream = screenStreamRef.current;
       const pc = screenPubPcRef.current;
       // Not sharing — the new value is picked up by the next startScreenShare.
       if (!stream || !pc) return;
 
-      const profile = getScreenSharePublishProfile(fps, bitrateBps);
-      // Only when the frame rate itself moved. A bitrate change has nothing to
-      // say to the capture, and re-asserting a constraint it is already meeting
-      // can cost a visible hitch on some sources.
-      const track = retimeCapture ? stream.getVideoTracks()[0] : undefined;
-      if (track) {
+      const videoTrack = stream.getVideoTracks()[0];
+      // What the encoder protects. Settable on a live track, so somebody who
+      // started sharing their editor and then opened a video does not have to
+      // stop and start to be encoded for it.
+      if (videoTrack && "contentHint" in videoTrack) {
+        videoTrack.contentHint = profile.contentHint;
+      }
+      // Only when the frame rate itself moved. A bitrate or content change has
+      // nothing to say to the capture, and re-asserting a constraint it is
+      // already meeting can cost a visible hitch on some sources.
+      if (retimeCapture && videoTrack) {
         try {
           // `max` as well as `ideal`: without an upper bound a capture already
           // running at 60 has no reason to come back down to 30.
-          await track.applyConstraints({
+          await videoTrack.applyConstraints({
             frameRate: { ideal: profile.targetFps, max: profile.targetFps },
           });
         } catch {
@@ -474,23 +490,40 @@ export function useWebRTCScreen() {
 
   // Skip the first run: mounting is not a change, and re-applying on every
   // share would fight startScreenShare, which already set the profile.
-  const lastAppliedRef = useRef({ fps: screenFps, bitrate: screenBitrate });
+  const lastAppliedRef = useRef({
+    fps: screenFps,
+    bitrate: screenBitrate,
+    content: screenContent,
+  });
   useEffect(() => {
     const last = lastAppliedRef.current;
-    if (last.fps === screenFps && last.bitrate === screenBitrate) return;
+    if (
+      last.fps === screenFps &&
+      last.bitrate === screenBitrate &&
+      last.content === screenContent
+    ) {
+      return;
+    }
     // Changing the frame rate moves the bitrate too while none has been chosen,
     // so both can land at once. The frame rate is the one that was asked for.
     const fpsChanged = last.fps !== screenFps;
-    lastAppliedRef.current = { fps: screenFps, bitrate: screenBitrate };
+    const contentChanged = last.content !== screenContent;
+    lastAppliedRef.current = {
+      fps: screenFps,
+      bitrate: screenBitrate,
+      content: screenContent,
+    };
+    const announce = fpsChanged
+      ? `Screen share set to ${screenFps} FPS`
+      : contentChanged
+        ? `Screen share tuned for ${screenContent === "motion" ? "video" : "text"}`
+        : `Screen share bitrate set to ${formatScreenBitrate(screenBitrate)}`;
     void applyScreenProfileToActiveShare(
-      screenFps,
-      screenBitrate,
+      getScreenSharePublishProfile(screenFps, screenBitrate, screenContent),
       fpsChanged,
-      fpsChanged
-        ? `Screen share set to ${screenFps} FPS`
-        : `Screen share bitrate set to ${formatScreenBitrate(screenBitrate)}`,
+      announce,
     );
-  }, [screenFps, screenBitrate, applyScreenProfileToActiveShare]);
+  }, [screenFps, screenBitrate, screenContent, applyScreenProfileToActiveShare]);
 
   // ─── Screen share publish/stop ─────────────────────────────────────────────
   const startScreenShare = useCallback(async () => {
@@ -498,7 +531,7 @@ export function useWebRTCScreen() {
     // Prevent concurrent starts
     if (screenShareStartingRef.current) return;
     screenShareStartingRef.current = true;
-    const profile = getScreenSharePublishProfile(screenFps, screenBitrate);
+    const profile = getScreenSharePublishProfile(screenFps, screenBitrate, screenContent);
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
       const audioConstraints = buildDisplayAudioConstraints();
@@ -546,6 +579,10 @@ export function useWebRTCScreen() {
       const pc = new RTCPeerConnection(getWebRTCConfig());
       screenPubPcRef.current = pc;
       const videoSender = pc.addTrack(screenTrack, stream);
+      // Before createOffer, which is the only point codec preferences are read.
+      preferScreenVideoCodecs(
+        pc.getTransceivers().find((t) => t.sender === videoSender),
+      );
       await tuneScreenVideoSender(videoSender, profile);
 
       const screenAudioTrack = stream.getAudioTracks()[0];
@@ -584,7 +621,7 @@ export function useWebRTCScreen() {
     } finally {
       screenShareStartingRef.current = false;
     }
-  }, [state.inVoiceChannel, state.currentRoomId, screenFps, screenBitrate, state.userId, dispatch, stopScreenShare, wsRef]);
+  }, [state.inVoiceChannel, state.currentRoomId, screenFps, screenBitrate, screenContent, state.userId, dispatch, stopScreenShare, wsRef]);
 
   const watchUser = useCallback(async (sharerId: string, joinVoice: () => Promise<void>) => {
     if (state.selectedScreenSharer === sharerId && state.screenViewerOpen) {

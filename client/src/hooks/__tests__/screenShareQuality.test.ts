@@ -7,6 +7,12 @@ import {
   SCREEN_BITRATE_STORAGE_KEY,
   SCREEN_BITRATE_MIN_BPS,
   SCREEN_BITRATE_MAX_BPS,
+  SCREEN_CONTENT_STORAGE_KEY,
+  SCREEN_MAX_WIDTH,
+  SCREEN_MAX_HEIGHT,
+  loadScreenContentMode,
+  storeScreenContentMode,
+  orderVideoCodecs,
   clampScreenShareBitrate,
   defaultScreenShareBitrate,
   formatScreenBitrate,
@@ -18,8 +24,10 @@ describe("Screen share quality configuration", () => {
   describe("30fps profile", () => {
     const profile = getScreenSharePublishProfile(30);
 
-    it("uses motion contentHint", () => {
-      expect(profile.contentHint).toBe("motion");
+    it("protects detail by default, which is what a screen usually holds", () => {
+      // Both profiles used to say "motion" unconditionally, so text went soft
+      // during every scroll and no bitrate could fix it.
+      expect(profile.contentHint).toBe("detail");
     });
 
     it("has 8 Mbps max bitrate", () => {
@@ -218,5 +226,126 @@ describe("the screen share bitrate ceiling", () => {
       expect(formatScreenBitrate(6_500_000)).toBe("6.5 Mbps");
       expect(formatScreenBitrate(1_500_000)).toBe("1.5 Mbps");
     });
+  });
+});
+
+describe("what the encoder is told to protect", () => {
+  it("pairs the hint with what degrades first", () => {
+    // Saying "motion" while preferring resolution asks for both and gets a
+    // muddle, which is what the fixed pair replaced.
+    const detail = getScreenSharePublishProfile(30, 8_000_000, "detail");
+    expect(detail.contentHint).toBe("detail");
+    expect(detail.degradationPreference).toBe("maintain-resolution");
+
+    const motion = getScreenSharePublishProfile(60, 8_000_000, "motion");
+    expect(motion.contentHint).toBe("motion");
+    expect(motion.degradationPreference).toBe("maintain-framerate");
+  });
+
+  it("defaults to detail when nothing says otherwise", () => {
+    expect(getScreenSharePublishProfile(60, 8_000_000).contentHint).toBe("detail");
+  });
+
+  describe("persistence", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+
+    beforeEach(() => {
+      const store = new Map<string, string>();
+      Object.defineProperty(globalThis, "localStorage", {
+        value: {
+          getItem: (k: string) => store.get(k) ?? null,
+          setItem: (k: string, v: string) => void store.set(k, v),
+          removeItem: (k: string) => void store.delete(k),
+        },
+        configurable: true,
+        writable: true,
+      });
+    });
+
+    afterEach(() => {
+      if (original) Object.defineProperty(globalThis, "localStorage", original);
+      else Reflect.deleteProperty(globalThis, "localStorage");
+    });
+
+    it("defaults to detail with nothing stored", () => {
+      expect(loadScreenContentMode()).toBe("detail");
+    });
+
+    it("round-trips a choice", () => {
+      storeScreenContentMode("motion");
+      expect(localStorage.getItem(SCREEN_CONTENT_STORAGE_KEY)).toBe("motion");
+      expect(loadScreenContentMode()).toBe("motion");
+      storeScreenContentMode("detail");
+      expect(loadScreenContentMode()).toBe("detail");
+    });
+
+    it("falls back to detail for anything unrecognised", () => {
+      localStorage.setItem(SCREEN_CONTENT_STORAGE_KEY, "sideways");
+      expect(loadScreenContentMode()).toBe("detail");
+    });
+  });
+});
+
+describe("the capture ceiling", () => {
+  it("pins a resolution rather than only asking for one", () => {
+    // `ideal` alone is a hint a screen capture may ignore, and a 4K source
+    // handed back at native size spreads the bitrate over four times the
+    // pixels it was chosen for.
+    const profile = getScreenSharePublishProfile(60, 12_000_000);
+    expect(profile.maxWidth).toBe(SCREEN_MAX_WIDTH);
+    expect(profile.maxHeight).toBe(SCREEN_MAX_HEIGHT);
+    expect(SCREEN_MAX_WIDTH).toBe(1920);
+    expect(SCREEN_MAX_HEIGHT).toBe(1080);
+  });
+});
+
+describe("codec preference", () => {
+  const codec = (mimeType: string) => ({ mimeType });
+
+  it("puts VP9 ahead of what the browser would have picked", () => {
+    const ordered = orderVideoCodecs([
+      codec("video/VP8"),
+      codec("video/H264"),
+      codec("video/VP9"),
+    ]);
+    expect(ordered.map((c) => c.mimeType)).toEqual([
+      "video/VP9",
+      "video/VP8",
+      "video/H264",
+    ]);
+  });
+
+  it("keeps every codec it was given", () => {
+    // Filtering rather than reordering would mean a peer that only has the
+    // dropped codec cannot receive the share at all.
+    const input = [codec("video/AV1"), codec("video/VP8"), codec("video/rtx")];
+    const ordered = orderVideoCodecs(input);
+    expect(ordered).toHaveLength(input.length);
+    expect(new Set(ordered.map((c) => c.mimeType))).toEqual(
+      new Set(input.map((c) => c.mimeType)),
+    );
+  });
+
+  it("leaves codecs it has no opinion about in the order they came", () => {
+    const ordered = orderVideoCodecs([
+      codec("video/AV1"),
+      codec("video/rtx"),
+      codec("video/VP9"),
+    ]);
+    expect(ordered.map((c) => c.mimeType)).toEqual([
+      "video/VP9",
+      "video/AV1",
+      "video/rtx",
+    ]);
+  });
+
+  it("matches a mime type whatever its case", () => {
+    const ordered = orderVideoCodecs([codec("video/vp8"), codec("video/vp9")]);
+    expect(ordered[0].mimeType).toBe("video/vp9");
+  });
+
+  it("copes with a list that holds none of its preferences", () => {
+    const ordered = orderVideoCodecs([codec("video/AV1"), codec("video/rtx")]);
+    expect(ordered.map((c) => c.mimeType)).toEqual(["video/AV1", "video/rtx"]);
   });
 });

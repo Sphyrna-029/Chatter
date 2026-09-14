@@ -188,10 +188,37 @@ export interface ScreenShareAudioSdpTuning {
   maxAverageBitrate: number;
 }
 
+/**
+ * What the share is of, which decides what the encoder protects when it cannot
+ * have everything.
+ *
+ * `detail` keeps the picture sharp and lets the frame rate go; `motion` does
+ * the opposite. Both profiles used to say `motion` unconditionally, which is
+ * the wrong answer for the ordinary case — somebody sharing an editor or a
+ * spreadsheet gets soft, ringing text during every scroll, and no amount of
+ * bitrate fixes it, because the encoder is doing what it was told.
+ */
+export type ScreenContentMode = "detail" | "motion";
+
 export interface ScreenSharePublishProfile {
   targetFps: 30 | 60;
-  contentHint: "detail" | "motion";
+  contentHint: ScreenContentMode;
+  /**
+   * What the encoder gives up first. The pair is the whole point: protecting
+   * detail means dropping frames, protecting motion means dropping pixels, and
+   * saying `motion` while preferring resolution — as this did — asks for both
+   * and gets a muddle.
+   */
+  degradationPreference: RTCDegradationPreference;
   maxBitrateBps: number;
+  /**
+   * The capture is pinned to this, not merely asked for it. `ideal` alone is a
+   * hint: on a 1440p or 4K monitor the browser may hand back the native size,
+   * and then the bitrate everything here is reasoned about is being spread over
+   * four times the pixels it was chosen for.
+   */
+  maxWidth: number;
+  maxHeight: number;
   audioMaxAverageBitrate: number;
 }
 
@@ -228,17 +255,25 @@ export function clampScreenShareBitrate(value: unknown, fallback: number): numbe
   return Math.min(SCREEN_BITRATE_MAX_BPS, Math.max(SCREEN_BITRATE_MIN_BPS, Math.round(bps)));
 }
 
+export const SCREEN_MAX_WIDTH = 1920;
+export const SCREEN_MAX_HEIGHT = 1080;
+
 export function getScreenSharePublishProfile(
   fps: 30 | 60,
   bitrateBps?: number,
+  content: ScreenContentMode = "detail",
 ): ScreenSharePublishProfile {
   return {
     targetFps: fps,
-    contentHint: "motion",
+    contentHint: content,
+    degradationPreference:
+      content === "motion" ? "maintain-framerate" : "maintain-resolution",
     maxBitrateBps:
       bitrateBps === undefined
         ? defaultScreenShareBitrate(fps)
         : clampScreenShareBitrate(bitrateBps, defaultScreenShareBitrate(fps)),
+    maxWidth: SCREEN_MAX_WIDTH,
+    maxHeight: SCREEN_MAX_HEIGHT,
     audioMaxAverageBitrate: 128_000,
   };
 }
@@ -264,6 +299,92 @@ export function storeScreenShareFps(fps: 30 | 60): void {
     localStorage.setItem(SCREEN_FPS_STORAGE_KEY, String(fps));
   } catch {
     // The preference just will not survive the reload.
+  }
+}
+
+// ─── Codec preference ───────────────────────────────────────────────────────
+
+/**
+ * Which video codecs a screen share would rather use, best first.
+ *
+ * Neither end expresses a preference otherwise: the browser makes the offer
+ * with its own default order and the SFU answers from `register_default_codecs`,
+ * so a share commonly lands on VP8 — the least efficient of the set. VP9 reaches
+ * the same quality at roughly half to two-thirds the bitrate, which is worth
+ * more on a 1080p60 share than doubling the ceiling would be.
+ */
+export const SCREEN_CODEC_PREFERENCE = ["video/VP9", "video/VP8", "video/H264"];
+
+/**
+ * Reorder, never filter.
+ *
+ * Dropping a codec from the offer would mean a peer that only has that one
+ * cannot receive the share at all. Everything unlisted keeps its relative
+ * order at the back, so this can only change which of two mutually supported
+ * codecs wins — never whether one exists.
+ */
+export function orderVideoCodecs<T extends { mimeType: string }>(
+  codecs: readonly T[],
+  preference: readonly string[] = SCREEN_CODEC_PREFERENCE,
+): T[] {
+  const rank = (codec: T) => {
+    const i = preference.findIndex(
+      (mime) => mime.toLowerCase() === codec.mimeType.toLowerCase(),
+    );
+    return i === -1 ? preference.length : i;
+  };
+  // A stable sort, so codecs of equal rank stay in the order the browser gave
+  // them — it knows things about its own encoders that this does not.
+  return codecs
+    .map((codec, index) => ({ codec, index, rank: rank(codec) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map((entry) => entry.codec);
+}
+
+/**
+ * Ask for {@link SCREEN_CODEC_PREFERENCE} on this transceiver, if the browser
+ * allows it. Must be called before `createOffer`.
+ *
+ * Entirely best-effort: `setCodecPreferences` is missing on older Safari and
+ * throws if it dislikes the list, and a share on VP8 is enormously better than
+ * no share at all.
+ */
+export function preferScreenVideoCodecs(transceiver: RTCRtpTransceiver | undefined): void {
+  if (!transceiver || typeof transceiver.setCodecPreferences !== "function") return;
+  try {
+    const capabilities = RTCRtpSender.getCapabilities("video");
+    if (!capabilities?.codecs?.length) return;
+    transceiver.setCodecPreferences(orderVideoCodecs(capabilities.codecs));
+  } catch {
+    // Left to negotiate however the browser would have on its own.
+  }
+}
+
+export const SCREEN_CONTENT_STORAGE_KEY = "chatter_screen_share_content";
+export const SCREEN_CONTENT_CHANGE_EVENT = "screen-share-content-change";
+
+/**
+ * What the sharer says they are sharing, defaulting to `detail`.
+ *
+ * The spec's own recommendation for a screen capture of documents or UI, and
+ * much the commoner case — somebody sharing a game or a film says so and gets
+ * `motion` back.
+ */
+export function loadScreenContentMode(): ScreenContentMode {
+  try {
+    return localStorage.getItem(SCREEN_CONTENT_STORAGE_KEY) === "motion"
+      ? "motion"
+      : "detail";
+  } catch {
+    return "detail";
+  }
+}
+
+export function storeScreenContentMode(mode: ScreenContentMode): void {
+  try {
+    localStorage.setItem(SCREEN_CONTENT_STORAGE_KEY, mode);
+  } catch {
+    // As with the others: the preference just will not survive the reload.
   }
 }
 
