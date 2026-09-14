@@ -60,7 +60,7 @@ export function CrossRoomSearch({ onSelectRoom }: CrossRoomSearchProps) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") runSearch(query); }}
-          placeholder="Search messages across every room, then press Enter"
+          placeholder="Search messages — press Enter"
           className="pr-8"
         />
         {searching && (
@@ -83,13 +83,13 @@ export function CrossRoomSearch({ onSelectRoom }: CrossRoomSearchProps) {
                 <button
                   key={msg.event_id}
                   onClick={() => onSelectRoom(msg.room_id)}
-                  className="flex flex-col gap-0.5 w-full px-4 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
+                  className="flex flex-col gap-0.5 w-full min-w-0 overflow-hidden px-4 py-2.5 text-left transition-colors hover:bg-accent/50 cursor-pointer"
                 >
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+                  <span className="flex items-center gap-2 text-xs text-muted-foreground min-w-0 max-w-full">
                     <span className="font-medium text-foreground truncate">{sender}</span>
                     <span className="truncate">in {info?.name || "unknown room"}</span>
                   </span>
-                  <span className="text-sm truncate">{msg.content.body}</span>
+                  <span className="text-sm truncate max-w-full">{msg.content.body}</span>
                 </button>
               );
             })}

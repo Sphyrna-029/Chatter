@@ -299,8 +299,11 @@ export function ActivityPage() {
     return isOnlineA - isOnlineB;
   });
 
+  // min-w-0: this page is a flex child of an overflow-hidden row, and a flex
+  // child defaults to min-width: auto — so the widest row in here was setting
+  // the page width and pushing everything else off the right edge of a phone.
   return (
-    <ScrollArea className="flex-1">
+    <ScrollArea className="flex-1 min-w-0">
       <div className="mx-auto max-w-5xl px-4 md:px-6 py-6 md:py-8 space-y-6 md:space-y-8">
         {/* Header */}
         <div>
@@ -635,9 +638,9 @@ export function ActivityPage() {
                     {room.channels.map((channel) => {
                       const sharers = channel.members.filter((m) => m.screenSharing);
                       return (
-                        <div key={channel.channelId} className="flex items-center gap-2 pl-8 min-w-0">
+                        <div key={channel.channelId} className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-2 sm:pl-8 min-w-0">
                           <Volume2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                          <span className="text-xs text-muted-foreground truncate max-w-[8rem]">
+                          <span className="text-xs text-muted-foreground truncate max-w-[8rem] min-w-0">
                             {channel.name}
                           </span>
                           <div className="flex items-center -space-x-1.5 shrink-0">
@@ -667,11 +670,13 @@ export function ActivityPage() {
                             </span>
                           )}
                           {sharers.length > 0 && (
-                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-info/20 text-info shrink-0">
-                              <Monitor className="h-3 w-3" />
-                              {sharers.length === 1
-                                ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`
-                                : `${sharers.length} streaming`}
+                            <span className="flex items-center gap-1 rounded px-1.5 py-0.5 text-3xs font-semibold bg-info/20 text-info min-w-0 max-w-full">
+                              <Monitor className="h-3 w-3 shrink-0" />
+                              <span className="truncate">
+                                {sharers.length === 1
+                                  ? `${state.userPresence[sharers[0].userId]?.displayName || displayUserId(sharers[0].userId)} is streaming`
+                                  : `${sharers.length} streaming`}
+                              </span>
                             </span>
                           )}
                         </div>
