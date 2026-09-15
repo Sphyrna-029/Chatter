@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { firstVisibleRow } from "@/lib/scrollAnchor";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
+import { apiUploadFile, apiCancelUpload, apiResumedBytes, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { composerLength, emojiImage, getComposerText, setComposerText } from "@/lib/composer";
 import { MessageItem } from "./MessageItem";
@@ -322,7 +322,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     clear: clearPendingFiles,
     remaining: attachmentsRemaining,
   } = usePendingFiles();
-  const { progress: uploadProgressByFile, uploadAll, reset: resetUploadProgress } = useUploadQueue();
+  const { progress: uploadProgressByFile, uploadAll, keepFailures: keepUploadFailures } = useUploadQueue();
   const [isSpoiler, setIsSpoiler] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
@@ -764,7 +764,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send message");
-      resetUploadProgress();
+      keepUploadFailures();
       if (body) restoreComposer();
     }
   };
@@ -1064,6 +1064,43 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
    * send then failed, the files were already gone. Now the tiles stay until
    * they have actually landed.
    */
+  // How much of each failed file is already on the server, so its retry button
+  // can say that it is resuming rather than starting again. Read only when
+  // something has actually failed — in the ordinary case this never runs.
+  const [resumedBytes, setResumedBytes] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const failed = pendingFiles.filter(
+      (pf) => uploadProgressByFile[pf.id]?.status === "failed",
+    );
+    if (failed.length === 0) {
+      setResumedBytes((prev) => (Object.keys(prev).length === 0 ? prev : {}));
+      return;
+    }
+    let live = true;
+    void Promise.all(
+      failed.map(async (pf) => [pf.id, await apiResumedBytes(pf.file)] as const),
+    ).then((pairs) => {
+      if (live) setResumedBytes(Object.fromEntries(pairs.filter(([, bytes]) => bytes > 0)));
+    });
+    return () => {
+      live = false;
+    };
+  }, [pendingFiles, uploadProgressByFile]);
+
+  /**
+   * Take a staged file off the row, and off the server with it.
+   *
+   * Removing a file that was partly uploaded used to leave its chunks in the
+   * staging directory until the 24-hour sweep, for a file the person had just
+   * said they did not want. `apiCancelUpload` does nothing when there was
+   * nothing part-sent.
+   */
+  const discardPendingFile = (index: number) => {
+    const staged = pendingFiles[index];
+    if (staged) void apiCancelUpload(staged.file);
+    removePendingFile(index);
+  };
+
   const uploadStagedFiles = async (): Promise<string[]> => {
     if (!state.currentRoomId || pendingFiles.length === 0) return [];
     setUploading(true);
@@ -1083,7 +1120,9 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       // Only what landed leaves the row. What did not is still staged, so a
       // failure halfway through a batch costs the upload and not the file.
       removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
-      resetUploadProgress();
+      // What failed keeps its tile *and* its mark, so the row says which file
+      // to press again rather than leaving an unexplained survivor behind.
+      keepUploadFailures();
       return outcomes.map((o) => o.url).filter((url): url is string => url !== null);
     } finally {
       setUploading(false);
@@ -1894,8 +1933,10 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
           {/* Staged file previews */}
           <PendingAttachments
             files={pendingFiles}
-            onRemove={removePendingFile}
+            onRemove={discardPendingFile}
             progress={uploadProgressByFile}
+            onRetry={handleSend}
+            resumedBytes={resumedBytes}
           />
           {mediaUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">

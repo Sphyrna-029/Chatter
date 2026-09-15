@@ -32,8 +32,8 @@ use super::{
         },
         invites::{accept_invite, create_invite, delete_invite, get_invite_info, list_invites},
         media::{
-            delete_upload, gif_search, link_preview, list_uploads, upload_chunk, upload_complete,
-            upload_file, upload_guard, upload_init,
+            delete_upload, gif_search, link_preview, list_uploads, upload_abort, upload_chunk,
+            upload_complete, upload_file, upload_guard, upload_init, upload_status,
         },
         messages::{
             delete_notification, delete_thread, edit_message, get_room_messages, get_room_threads,
@@ -203,6 +203,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             post(upload_chunk).layer(DefaultBodyLimit::max(CHUNK_SIZE + 2 * 1024 * 1024)),
         )
         .route("/api/upload/complete", post(upload_complete))
+        // Static segments win over the parameter, so these sit alongside
+        // init/chunk/complete rather than shadowing them.
+        .route(
+            "/api/upload/{upload_id}",
+            get(upload_status).delete(upload_abort),
+        )
         // Messages
         .route(
             "/_matrix/client/r0/rooms/{room_id}/send/m.room.message/{txn_id}",

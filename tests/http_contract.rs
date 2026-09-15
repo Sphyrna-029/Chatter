@@ -1823,6 +1823,138 @@ async fn room_suggested_theme_contract() {
 }
 
 #[tokio::test]
+async fn chunked_upload_reports_what_it_holds_and_can_be_abandoned_on_purpose() {
+    // An interrupted upload used to be unfinishable: the chunks it had already
+    // sent sat in a staging dir addressed by an id nothing could ask about, so
+    // the only way forward was to send the whole file again and leave the old
+    // dir for the sweeper. `GET` answers what is already there; `DELETE` gives
+    // a cancelled upload a way out that is not a 24-hour wait.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (_bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+
+    let payload = vec![b'q'; 100];
+    let init = client
+        .post(format!("{}/api/upload/init", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({"filename": "resume.bin", "fileSize": payload.len()}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(init.status(), StatusCode::OK);
+    let init_body: Value = init.json().await.unwrap();
+    let upload_id = init_body["uploadId"].as_str().unwrap().to_string();
+
+    let status_url = format!("{}/api/upload/{}", server.base_url, upload_id);
+    let status_of = |token: String| {
+        let client = client.clone();
+        let status_url = status_url.clone();
+        async move {
+            client
+                .get(&status_url)
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // Nothing sent yet, but the file's shape is already known.
+    let fresh = status_of(alice_token.clone()).await;
+    assert_eq!(fresh.status(), StatusCode::OK);
+    let fresh_body: Value = fresh.json().await.unwrap();
+    assert_eq!(fresh_body["fileSize"], 100);
+    assert_eq!(fresh_body["chunkCount"], 1);
+    assert_eq!(fresh_body["filename"], "resume.bin");
+    assert_eq!(fresh_body["received"].as_array().unwrap().len(), 0);
+    assert_eq!(fresh_body["receivedBytes"], 0);
+    assert!(fresh_body["chunkSize"].as_u64().unwrap() > 0);
+
+    // A chunk file that is the wrong length is a torn write, not an arrival.
+    // Reported as received it would be skipped on resume and concatenated into
+    // a corrupt file — the one thing this endpoint must not get wrong.
+    let chunk_path = format!("external/.chunks/{upload_id}/0");
+    std::fs::write(&chunk_path, &payload[..50]).unwrap();
+    let torn = status_of(alice_token.clone()).await;
+    let torn_body: Value = torn.json().await.unwrap();
+    assert_eq!(torn_body["received"].as_array().unwrap().len(), 0);
+    std::fs::remove_file(&chunk_path).unwrap();
+
+    // The real chunk, through the API, is.
+    let form = multipart::Form::new()
+        .text("uploadId", upload_id.clone())
+        .text("chunkIndex", "0")
+        .part(
+            "file",
+            multipart::Part::bytes(payload.clone()).file_name("resume.bin"),
+        );
+    let accepted = client
+        .post(format!("{}/api/upload/chunk", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .multipart(form)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(accepted.status(), StatusCode::OK);
+
+    let landed = status_of(alice_token.clone()).await;
+    let landed_body: Value = landed.json().await.unwrap();
+    assert_eq!(landed_body["received"], json!([0]));
+    assert_eq!(landed_body["receivedBytes"], 100);
+
+    // Someone else's upload is not readable, abortable, or even confirmable.
+    assert_eq!(status_of(bob_token.clone()).await.status(), StatusCode::FORBIDDEN);
+    let bob_abort = client
+        .delete(&status_url)
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bob_abort.status(), StatusCode::FORBIDDEN);
+    assert!(std::path::Path::new(&format!("external/.chunks/{upload_id}")).exists());
+
+    let unknown = client
+        .get(format!("{}/api/upload/{}", server.base_url, "f".repeat(32)))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    // An id that could never have been minted is refused before it reaches a
+    // path — 32 hex characters cannot hold a separator or a `..`.
+    let malformed = client
+        .get(format!("{}/api/upload/not-an-id", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
+
+    // Cancelling takes the staging dir now rather than in 24 hours, and says
+    // the same thing the second time so a client can retry it blind.
+    for _ in 0..2 {
+        let aborted = client
+            .delete(&status_url)
+            .header("authorization", bearer(&alice_token))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(aborted.status(), StatusCode::OK);
+        let aborted_body: Value = aborted.json().await.unwrap();
+        assert_eq!(aborted_body["aborted"], true);
+    }
+    assert!(!std::path::Path::new(&format!("external/.chunks/{upload_id}")).exists());
+
+    // An upload that is gone reads as one that never was: a resuming client
+    // starts over in both cases.
+    assert_eq!(status_of(alice_token).await.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn chunked_upload_verifies_each_chunk_before_assembling() {
     // Nothing used to look at a chunk's contents at all: `upload_chunk` wrote
     // whatever arrived, and `upload_complete` asked only whether each chunk

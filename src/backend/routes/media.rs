@@ -7,7 +7,7 @@ use super::super::{
 };
 use axum::{
     body::Body,
-    extract::{Multipart, Query, State},
+    extract::{Multipart, Path as AxumPath, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Json, Response},
 };
@@ -1000,6 +1000,79 @@ struct ChunkMeta {
     file_size: u64,
     user_id: String,
     chunk_count: u64,
+    /// The size these chunks were sliced to — `CHUNK_SIZE` as it stood when
+    /// the upload started, recorded rather than read back from the constant.
+    /// Changing the constant would otherwise reslice an upload already in
+    /// flight, and a resuming client has to be told the boundaries its
+    /// existing chunks were cut on, not the ones a new upload would use.
+    #[serde(default = "default_chunk_size")]
+    chunk_size: u64,
+}
+
+fn default_chunk_size() -> u64 {
+    CHUNK_SIZE as u64
+}
+
+/// The staging directory for `upload_id`, or `None` if that is not an id this
+/// server ever minted.
+///
+/// The check is what keeps the id out of the path: 32 hex characters cannot
+/// contain a separator or a `..`, so the formatted path is always a direct
+/// child of `external/.chunks`.
+fn staging_dir(upload_id: &str) -> Option<String> {
+    if upload_id.len() != 32 || !upload_id.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(format!("external/.chunks/{}", upload_id))
+}
+
+async fn read_chunk_meta(chunk_dir: &str) -> Option<ChunkMeta> {
+    let raw = tokio::fs::read_to_string(format!("{chunk_dir}/meta.json"))
+        .await
+        .ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// How long chunk `index` has to be: a full chunk, or the remainder for the
+/// last one.
+fn expected_chunk_len(meta: &ChunkMeta, index: u64) -> u64 {
+    let offset = index.saturating_mul(meta.chunk_size);
+    std::cmp::min(meta.chunk_size, meta.file_size.saturating_sub(offset))
+}
+
+/// Which chunks are on disk *and* the right length, in index order.
+///
+/// Length rather than mere presence, because a chunk is written with a single
+/// `write` that a killed process can leave half-finished, and nothing else
+/// looks: `upload_complete` asks only whether each file exists. A resuming
+/// client told such a chunk had landed would skip it and assemble a corrupt
+/// file — the one failure this whole endpoint exists to prevent.
+async fn received_chunks(chunk_dir: &str, meta: &ChunkMeta) -> Vec<u64> {
+    let mut received: Vec<u64> = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(chunk_dir).await else {
+        return received;
+    };
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        // Chunks are named by index, so `meta.json` falls out here.
+        let Some(index) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+        else {
+            continue;
+        };
+        if index >= meta.chunk_count {
+            continue;
+        }
+        let Ok(len) = entry.metadata().await.map(|m| m.len()) else {
+            continue;
+        };
+        if len == expected_chunk_len(meta, index) {
+            received.push(index);
+        }
+    }
+    received.sort_unstable();
+    received
 }
 
 pub(crate) async fn upload_init(
@@ -1057,6 +1130,7 @@ pub(crate) async fn upload_init(
         file_size: body.file_size,
         user_id,
         chunk_count,
+        chunk_size: CHUNK_SIZE as u64,
     };
     let meta_path = format!("{}/meta.json", chunk_dir);
     if tokio::fs::write(&meta_path, serde_json::to_string(&meta).unwrap())
@@ -1127,12 +1201,10 @@ pub(crate) async fn upload_chunk(
         }
     }
 
-    if upload_id.is_empty()
-        || upload_id.len() != 32
-        || !upload_id.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
-    }
+    let chunk_dir = match staging_dir(&upload_id) {
+        Some(dir) => dir,
+        None => return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId"),
+    };
     let chunk_index = match chunk_index {
         Some(i) => i,
         None => return error_response(StatusCode::BAD_REQUEST, "Missing chunkIndex"),
@@ -1142,15 +1214,9 @@ pub(crate) async fn upload_chunk(
         None => return error_response(StatusCode::BAD_REQUEST, "Missing file data"),
     };
 
-    let chunk_dir = format!("external/.chunks/{}", upload_id);
-    let meta_path = format!("{}/meta.json", chunk_dir);
-    let meta_str = match tokio::fs::read_to_string(&meta_path).await {
-        Ok(s) => s,
-        Err(_) => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
-    };
-    let meta: ChunkMeta = match serde_json::from_str(&meta_str) {
-        Ok(m) => m,
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Corrupt metadata"),
+    let meta = match read_chunk_meta(&chunk_dir).await {
+        Some(m) => m,
+        None => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
     };
 
     if meta.user_id != user_id {
@@ -1166,8 +1232,7 @@ pub(crate) async fn upload_chunk(
     // a client slicing to a different chunk size than this server assembles
     // with, used to be written as-is and concatenated into a corrupt file that
     // was reported as a successful upload.
-    let offset = chunk_index.saturating_mul(CHUNK_SIZE as u64);
-    let expected_len = std::cmp::min(CHUNK_SIZE as u64, meta.file_size.saturating_sub(offset));
+    let expected_len = expected_chunk_len(&meta, chunk_index);
     let received_len = chunk_data.len() as u64;
     if received_len != expected_len {
         return error_response(
@@ -1198,6 +1263,102 @@ pub(crate) async fn upload_chunk(
     (StatusCode::OK, Json(json!({ "received": chunk_index })))
 }
 
+/// What the server still holds of a chunked upload.
+///
+/// The one thing a client cannot work out for itself. Without it an upload
+/// broken halfway can only be started again from the beginning: the chunks it
+/// already sent are on disk, addressed by an id the client may still have, and
+/// nothing could ask about them. `received` is the list to skip; everything
+/// else in `0..chunkCount` is what is left to send.
+pub(crate) async fn upload_status(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(upload_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token) {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let chunk_dir = match staging_dir(&upload_id) {
+        Some(dir) => dir,
+        None => return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId"),
+    };
+    // Swept, completed, or never existed — all the same answer to a client,
+    // which starts over in every one of those cases.
+    let meta = match read_chunk_meta(&chunk_dir).await {
+        Some(m) => m,
+        None => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
+    };
+    if meta.user_id != user_id {
+        return error_response(StatusCode::FORBIDDEN, "Not your upload");
+    }
+
+    let received = received_chunks(&chunk_dir, &meta).await;
+    let received_bytes: u64 = received
+        .iter()
+        .map(|index| expected_chunk_len(&meta, *index))
+        .sum();
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "uploadId": upload_id,
+            "filename": meta.filename,
+            "fileSize": meta.file_size,
+            "chunkSize": meta.chunk_size,
+            "chunkCount": meta.chunk_count,
+            "received": received,
+            "receivedBytes": received_bytes,
+        })),
+    )
+}
+
+/// Give up on a chunked upload and take its staging directory with it.
+///
+/// `sweep_abandoned_chunks` would get there eventually, but "eventually" is up
+/// to 25 hours of 10MB blocks for an upload the person cancelled on purpose
+/// and already knows they are never finishing.
+///
+/// Idempotent: an id with nothing behind it answers the same as one that had a
+/// directory, because a client that cancels twice — or cancels something the
+/// sweeper already took — wants the same outcome either way.
+pub(crate) async fn upload_abort(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    AxumPath(upload_id): AxumPath<String>,
+) -> impl IntoResponse {
+    let token = match extract_token(&headers) {
+        Some(t) => t,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Missing token"),
+    };
+    let user_id = match get_user_from_token(&state, &token) {
+        Some(uid) => uid,
+        None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
+    };
+
+    let chunk_dir = match staging_dir(&upload_id) {
+        Some(dir) => dir,
+        None => return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId"),
+    };
+
+    // Ownership is checked against the metadata, so an upload whose metadata
+    // has already gone is nothing anyone can be refused — there is no one left
+    // to refuse them on behalf of.
+    if let Some(meta) = read_chunk_meta(&chunk_dir).await {
+        if meta.user_id != user_id {
+            return error_response(StatusCode::FORBIDDEN, "Not your upload");
+        }
+        let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+    }
+
+    (StatusCode::OK, Json(json!({ "aborted": true })))
+}
+
 #[derive(serde::Deserialize)]
 pub(crate) struct ChunkedUploadCompleteBody {
     #[serde(rename = "uploadId")]
@@ -1218,23 +1379,13 @@ pub(crate) async fn upload_complete(
         None => return error_response(StatusCode::UNAUTHORIZED, "Invalid token"),
     };
 
-    let upload_id = &body.upload_id;
-    if upload_id.is_empty()
-        || upload_id.len() != 32
-        || !upload_id.chars().all(|c| c.is_ascii_hexdigit())
-    {
-        return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId");
-    }
-
-    let chunk_dir = format!("external/.chunks/{}", upload_id);
-    let meta_path = format!("{}/meta.json", chunk_dir);
-    let meta_str = match tokio::fs::read_to_string(&meta_path).await {
-        Ok(s) => s,
-        Err(_) => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
+    let chunk_dir = match staging_dir(&body.upload_id) {
+        Some(dir) => dir,
+        None => return error_response(StatusCode::BAD_REQUEST, "Invalid uploadId"),
     };
-    let meta: ChunkMeta = match serde_json::from_str(&meta_str) {
-        Ok(m) => m,
-        Err(_) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Corrupt metadata"),
+    let meta = match read_chunk_meta(&chunk_dir).await {
+        Some(m) => m,
+        None => return error_response(StatusCode::NOT_FOUND, "Upload not found"),
     };
 
     if meta.user_id != user_id {

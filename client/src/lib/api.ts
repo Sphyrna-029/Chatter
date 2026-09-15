@@ -1,5 +1,22 @@
 // HTTP API wrapper for the Matrix-compatible backend
 
+import {
+  CHUNK_MAX_ATTEMPTS,
+  ChunkUploadError,
+  backoffDelayMs,
+  chunkRange,
+  classifyChunkFailure,
+  fingerprintFile,
+  missingChunks,
+  receivedBytes,
+  type UploadStatus,
+} from "@/lib/uploadResume";
+import {
+  forgetResumable,
+  loadResumable,
+  saveResumable,
+} from "@/lib/uploadStore";
+
 // Access token lives only in memory — never persisted to localStorage.
 // The refresh token is stored exclusively in an HttpOnly cookie managed by the
 // server, so JS cannot read or exfiltrate it even under XSS.
@@ -1289,7 +1306,9 @@ function uploadSingleFile(
 }
 
 const CHUNK_UPLOAD_TIMEOUT_MS = 120_000; // 2 minutes per chunk
-const CHUNK_MAX_RETRIES = 3;
+/** How long to sit out a known-offline stretch before spending an attempt on
+ *  it. Parking is free; an attempt made with no network is not. */
+const OFFLINE_PARK_MS = 60_000;
 
 /**
  * Hex SHA-256 of one chunk, or null where the browser cannot produce one.
@@ -1314,11 +1333,37 @@ async function chunkChecksum(blob: Blob): Promise<string | null> {
   }
 }
 
-function uploadChunkXhrOnce(
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Resolve once there is a network again, or once the wait has gone on long
+ * enough to be worth reporting.
+ *
+ * `navigator.onLine` is only trustworthy in one direction — false really does
+ * mean no network — which is the direction that matters here.
+ */
+function waitForNetwork(): Promise<void> {
+  if (typeof navigator === "undefined" || navigator.onLine !== false) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      window.removeEventListener("online", done);
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, OFFLINE_PARK_MS);
+    window.addEventListener("online", done);
+  });
+}
+
+/** One attempt at one chunk. Rejects with a classified `ChunkUploadError`. */
+function sendChunkOnce(
   uploadId: string,
   chunkIndex: number,
   blob: Blob,
   checksum: string | null,
+  onBytes?: (loaded: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const fd = new FormData();
@@ -1333,53 +1378,125 @@ function uploadChunkXhrOnce(
     if (_accessToken) {
       xhr.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
     }
+    if (onBytes) {
+      // The multipart envelope makes `loaded` run slightly past the blob, and
+      // a bar that reaches 101% of a chunk reads as a bug.
+      xhr.upload.onprogress = (e) => onBytes(Math.min(e.loaded, blob.size));
+    }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve();
-      } else if (xhr.status === 401 && _accessToken) {
-        refreshSession().then((refreshed) => {
-          if (refreshed !== "refreshed") { reject(new Error("Auth expired")); return; }
-          const retry = new XMLHttpRequest();
-          retry.open("POST", "/api/upload/chunk");
-          retry.timeout = CHUNK_UPLOAD_TIMEOUT_MS;
-          if (_accessToken) retry.setRequestHeader("Authorization", `Bearer ${_accessToken}`);
-          retry.onload = () => retry.status >= 200 && retry.status < 300 ? resolve() : reject(new Error("Chunk upload failed"));
-          retry.onerror = () => reject(new Error("Chunk upload failed"));
-          retry.ontimeout = () => reject(new Error("Chunk upload timed out"));
-          retry.send(fd);
-        });
-      } else {
-        reject(new Error("Chunk upload failed"));
+        return;
       }
+      let body: { error?: string; retry_after_secs?: number } | null = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // A proxy's error page, not ours. The status is still the answer.
+      }
+      reject(classifyChunkFailure(xhr.status, body));
     };
-    xhr.onerror = () => reject(new Error("Chunk upload failed"));
-    xhr.ontimeout = () => reject(new Error("Chunk upload timed out"));
+    // Status 0: the request never got an answer at all.
+    xhr.onerror = () => reject(classifyChunkFailure(0, null));
+    xhr.ontimeout = () =>
+      reject(new ChunkUploadError("Chunk upload timed out", "transient"));
     xhr.send(fd);
   });
 }
 
-async function uploadChunkXhr(
+/**
+ * One chunk, retried for as long as retrying could plausibly help.
+ *
+ * The attempt counter is spent only on failures that a later try might survive:
+ * a permanent refusal leaves immediately, and waiting out a known-offline
+ * stretch costs nothing. An expired token is refreshed and tried again at once
+ * rather than after a backoff — there is nothing to back off from.
+ */
+async function sendChunk(
   uploadId: string,
   chunkIndex: number,
   blob: Blob,
-  checksum: string | null,
+  onBytes: (loaded: number) => void,
 ): Promise<void> {
-  for (let attempt = 1; attempt <= CHUNK_MAX_RETRIES; attempt++) {
+  const checksum = await chunkChecksum(blob);
+
+  for (let attempt = 1; ; attempt++) {
+    await waitForNetwork();
     try {
-      return await uploadChunkXhrOnce(uploadId, chunkIndex, blob, checksum);
+      return await sendChunkOnce(uploadId, chunkIndex, blob, checksum, onBytes);
     } catch (err) {
-      if (attempt === CHUNK_MAX_RETRIES) throw err;
-      // Brief backoff before retry
-      await new Promise((r) => setTimeout(r, 1000 * attempt));
+      const failure =
+        err instanceof ChunkUploadError
+          ? err
+          : new ChunkUploadError("Chunk upload failed", "transient");
+
+      if (failure.kind === "permanent" || failure.kind === "restart") throw failure;
+
+      // A retry re-sends the whole chunk, so whatever of it was counted as in
+      // flight is not in flight any more.
+      onBytes(0);
+
+      if (failure.kind === "auth") {
+        const refreshed = await refreshSession();
+        if (refreshed !== "refreshed") {
+          throw new ChunkUploadError("Upload failed — sign in again", "permanent");
+        }
+        if (attempt >= CHUNK_MAX_ATTEMPTS) throw failure;
+        continue;
+      }
+
+      if (attempt >= CHUNK_MAX_ATTEMPTS) throw failure;
+      await sleep(backoffDelayMs(attempt, failure.retryAfterMs));
     }
   }
 }
 
-async function uploadChunkedFile(
-  file: File,
-  onProgress?: (pct: number) => void
-): Promise<{ url: string }> {
-  // 1. Init
+/** What the server still holds of `uploadId`, or null if it holds nothing. */
+async function fetchUploadStatus(uploadId: string): Promise<UploadStatus | null> {
+  try {
+    const res = await authenticatedFetch(`/api/upload/${uploadId}`);
+    if (!res.ok) return null;
+    return (await res.json()) as UploadStatus;
+  } catch {
+    return null;
+  }
+}
+
+interface UploadSession {
+  uploadId: string;
+  chunkSize: number;
+  chunkCount: number;
+  /** Indices the server already holds, verified at the right length. */
+  held: number[];
+}
+
+/**
+ * Pick up where a previous attempt at this same file left off, or null if
+ * there is nothing to pick up.
+ *
+ * The server's account is the one used, never the local one: a chunk this
+ * client believes it sent may have been torn by a killed process, and the
+ * staging dir may have been swept out from under it entirely. The stored
+ * record only says *which upload* to ask about.
+ */
+async function resumeSession(file: File, fingerprint: string): Promise<UploadSession | null> {
+  const stored = await loadResumable(fingerprint);
+  if (!stored) return null;
+
+  const status = await fetchUploadStatus(stored.uploadId);
+  if (!status || status.fileSize !== file.size) {
+    await forgetResumable(fingerprint);
+    return null;
+  }
+  return {
+    uploadId: stored.uploadId,
+    chunkSize: status.chunkSize,
+    chunkCount: status.chunkCount,
+    held: status.received,
+  };
+}
+
+async function beginSession(file: File, fingerprint: string): Promise<UploadSession> {
   const initRes = await authenticatedFetch("/api/upload/init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1391,8 +1508,6 @@ async function uploadChunkedFile(
   }
   const { uploadId, chunkSize } = await initRes.json();
 
-  // 2. Upload chunks
-  //
   // Sliced to the size the *server* reports, not to this file's own constant.
   // Both ends hardcoded 10MB independently and this response was ignored, so
   // the day the two differed the server would have assembled a different
@@ -1400,18 +1515,66 @@ async function uploadChunkedFile(
   // wrong length, and nothing on either side looking.
   const chunkBytes =
     typeof chunkSize === "number" && chunkSize > 0 ? chunkSize : CLIENT_CHUNK_SIZE;
-  const totalChunks = Math.ceil(file.size / chunkBytes);
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * chunkBytes;
-    const end = Math.min(start + chunkBytes, file.size);
+
+  const session: UploadSession = {
+    uploadId,
+    chunkSize: chunkBytes,
+    chunkCount: Math.ceil(file.size / chunkBytes),
+    held: [],
+  };
+  await saveResumable({
+    fingerprint,
+    uploadId,
+    name: file.name,
+    size: file.size,
+    sent: [],
+    chunkSize: chunkBytes,
+  });
+  return session;
+}
+
+/** Send everything `session` is still owed, then assemble. */
+async function runUploadSession(
+  file: File,
+  fingerprint: string,
+  session: UploadSession,
+  onProgress?: (pct: number) => void,
+): Promise<{ url: string }> {
+  const { uploadId, chunkSize, chunkCount } = session;
+  const sent = [...session.held];
+
+  // Progress is measured in bytes of the file rather than in chunks, so a
+  // resumed upload opens at the fraction already on the server instead of at
+  // zero, and a single 10MB chunk moves the bar as it goes rather than in one
+  // step at the end.
+  let settledBytes = receivedBytes(sent, chunkSize, file.size);
+  const report = (inFlight: number) => {
+    if (!onProgress) return;
+    onProgress(Math.min(100, Math.round(((settledBytes + inFlight) / file.size) * 100)));
+  };
+  report(0);
+
+  for (const index of missingChunks(chunkCount, sent)) {
+    const { start, end } = chunkRange(index, chunkSize, file.size);
     const blob = file.slice(start, end);
-    await uploadChunkXhr(uploadId, i, blob, await chunkChecksum(blob));
-    if (onProgress) {
-      onProgress(Math.round(((i + 1) / totalChunks) * 100));
-    }
+    await sendChunk(uploadId, index, blob, (loaded) => report(loaded));
+
+    sent.push(index);
+    settledBytes += end - start;
+    report(0);
+    // Written after every chunk, because the point of the record is to survive
+    // whatever ends the upload — and that can be the next chunk.
+    await saveResumable({
+      fingerprint,
+      uploadId,
+      name: file.name,
+      size: file.size,
+      sent,
+      chunkSize,
+    });
   }
 
-  // 3. Complete — server runs ffmpeg postprocessing so allow up to 5 minutes
+  // Assembly and any ffmpeg pass the server runs; allow up to 5 minutes.
   const completeCtrl = new AbortController();
   const completeTimeout = setTimeout(() => completeCtrl.abort(), 300_000);
   let completeRes: Response;
@@ -1431,10 +1594,75 @@ async function uploadChunkedFile(
   }
   clearTimeout(completeTimeout);
   if (!completeRes.ok) {
+    if (completeRes.status === 404) {
+      throw new ChunkUploadError("Upload not found", "restart");
+    }
     const err = await completeRes.json().catch(() => ({}));
     throw new Error(err.error || "Failed to complete chunked upload");
   }
+
+  // The chunks are gone and the file has a URL; there is nothing left to
+  // resume.
+  await forgetResumable(fingerprint);
   return completeRes.json();
+}
+
+async function uploadChunkedFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ url: string }> {
+  const fingerprint = fingerprintFile(file);
+
+  // Two passes at most. The second exists for one case: the server no longer
+  // has the upload the first pass was resuming — swept after a day idle, or
+  // finished and forgotten — which is not a failure so much as an instruction
+  // to start over, and doing that silently is better than telling someone to
+  // pick the same file again.
+  for (let pass = 1; pass <= 2; pass++) {
+    let session = pass === 1 ? await resumeSession(file, fingerprint) : null;
+    if (!session) session = await beginSession(file, fingerprint);
+
+    try {
+      return await runUploadSession(file, fingerprint, session, onProgress);
+    } catch (err) {
+      const expired = err instanceof ChunkUploadError && err.kind === "restart";
+      if (!expired || pass === 2) throw err;
+      await forgetResumable(fingerprint);
+    }
+  }
+  throw new Error("Upload failed");
+}
+
+/**
+ * Roughly how much of `file` a previous attempt already got up, in bytes.
+ *
+ * What a failed tile needs to offer "resume" as something other than a word
+ * that might mean starting over. Read locally and not confirmed with the
+ * server: this is a label, and a label is not worth a round trip per failed
+ * file — the resume itself asks, and the answer there is the one that counts.
+ */
+export async function apiResumedBytes(file: File): Promise<number> {
+  const stored = await loadResumable(fingerprintFile(file));
+  if (!stored || stored.size !== file.size) return 0;
+  return receivedBytes(stored.sent, stored.chunkSize, stored.size);
+}
+
+/**
+ * Give up on a part-sent upload, on the server as well as here.
+ *
+ * Without this the chunks wait out the 24-hour sweep for a file the person has
+ * already said they do not want.
+ */
+export async function apiCancelUpload(file: File): Promise<void> {
+  const fingerprint = fingerprintFile(file);
+  const stored = await loadResumable(fingerprint);
+  await forgetResumable(fingerprint);
+  if (!stored) return;
+  try {
+    await authenticatedFetch(`/api/upload/${stored.uploadId}`, { method: "DELETE" });
+  } catch {
+    // The sweeper is the backstop; there is nothing to tell the user here.
+  }
 }
 
 export async function apiUploadFile(
