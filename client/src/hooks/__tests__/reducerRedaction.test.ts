@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { reducer } from "@/lib/store/reducer";
 import { initialState } from "@/lib/store/types";
 import type { AppState } from "@/lib/store/types";
-import type { MatrixMessage } from "@/lib/api";
+import type { MatrixMessage, PinnedMessage } from "@/lib/api";
 
 const message = (eventId: string): MatrixMessage => ({
   event_id: eventId,
@@ -13,12 +13,18 @@ const message = (eventId: string): MatrixMessage => ({
   content: { body: "hello", msgtype: "m.text" },
 });
 
+const pinned = (eventId: string): PinnedMessage => ({
+  ...message(eventId),
+  pinned_by: "@someone:localhost",
+  pinned_at: 1,
+});
+
 /** A room with the same message pinned, in the timeline, and in an open thread. */
 const everywhereAtOnce = (): AppState => ({
   ...initialState,
   currentRoomId: "!room:localhost",
   messages: [message("$a"), message("$reply")],
-  pinnedMessages: [message("$a")],
+  pinnedMessages: [pinned("$a")],
   activeThreadEventId: "$root",
   threadRootMessage: message("$root"),
   threadMessages: [message("$reply"), message("$other")],

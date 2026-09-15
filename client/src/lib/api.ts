@@ -1623,12 +1623,36 @@ async function runUploadSession(
   return completeRes.json();
 }
 
+/**
+ * Files this tab is uploading right now.
+ *
+ * A resumable record is written after every chunk, so an upload going along
+ * perfectly well has one from its first ten megabytes onward — and the list of
+ * interrupted uploads, which reads those records, offered to resume a file
+ * that had not stopped. Kept here rather than in any one composer because
+ * every surface that uploads writes the same records: an avatar, a room icon,
+ * a forum post's images.
+ */
+const inFlightUploads = new Set<string>();
+
 async function uploadChunkedFile(
   file: File,
   onProgress?: (pct: number) => void
 ): Promise<{ url: string }> {
   const fingerprint = fingerprintFile(file);
+  inFlightUploads.add(fingerprint);
+  try {
+    return await runChunkedUpload(file, fingerprint, onProgress);
+  } finally {
+    inFlightUploads.delete(fingerprint);
+  }
+}
 
+async function runChunkedUpload(
+  file: File,
+  fingerprint: string,
+  onProgress?: (pct: number) => void
+): Promise<{ url: string }> {
   // Two passes at most. The second exists for one case: the server no longer
   // has the upload the first pass was resuming — swept after a day idle, or
   // finished and forgotten — which is not a failure so much as an instruction
@@ -1699,7 +1723,11 @@ export interface InterruptedUpload {
 export async function apiListInterruptedUploads(): Promise<InterruptedUpload[]> {
   const stored = await listResumable();
   const checked = await Promise.all(
-    stored.map(async (record) => {
+    // An upload still going is not interrupted, however much of it the server
+    // is holding.
+    stored
+      .filter((record) => !inFlightUploads.has(record.fingerprint))
+      .map(async (record) => {
       const status = await fetchUploadStatus(record.uploadId);
       if (!status || status.fileSize !== record.size || status.status === "done") {
         await forgetResumable(record.fingerprint);
