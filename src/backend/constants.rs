@@ -24,6 +24,30 @@ pub(crate) const CHUNK_SWEEP_SECS: u64 = 60 * 60;
 /// losing an upload in progress.
 pub(crate) const CHUNK_ABANDONED_SECS: u64 = 24 * 60 * 60;
 
+// ─── Reclaiming uploads nothing kept ────────────────────────────────────────
+// An upload that completes but is never posted — the send failed, the tab
+// closed, the profile save errored after the avatar went up — leaves a file on
+// disk and a record in the database for good, consuming the uploader's quota.
+// Nothing referred to it and nothing ever will, but nothing could tell.
+
+/// How often uploads nothing kept are looked for.
+pub(crate) const UPLOAD_SWEEP_SECS: u64 = 60 * 60;
+
+/// How long an upload has to be claimed by something before it is treated as
+/// abandoned.
+///
+/// Every surface uploads seconds before it references the URL, so a day is
+/// enormously generous — which is the point. This is the one number that could
+/// delete something real, and the cost of waiting another day is disk.
+pub(crate) const UPLOAD_GRACE_SECS: i64 = 24 * 60 * 60;
+
+/// How many candidates one pass will consider.
+///
+/// Bounded because the first pass after this shipped has every upload made
+/// before claims existed to work through, and one hour's sweep should not turn
+/// into a scan of the whole history. The backlog drains over days.
+pub(crate) const UPLOAD_SWEEP_BATCH: usize = 200;
+
 // Voice channel Opus bitrate bounds, in bits per second.
 pub(crate) const VOICE_BITRATE_MIN: i32 = 8_000;
 pub(crate) const VOICE_BITRATE_MAX: i32 = 256_000;

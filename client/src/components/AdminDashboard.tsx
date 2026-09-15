@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw, Activity, Radio, Cpu, Layers, Mic, Monitor, Video, AlertTriangle } from "lucide-react";
+import { Shield, X, Users, MessageSquare, HardDrive, Wifi, Home, Copy, Check, RefreshCw, Activity, Radio, Cpu, Layers, Mic, Monitor, Video, AlertTriangle, UploadCloud, FileQuestion } from "lucide-react";
 import { useAppActions } from "@/lib/store";
 import {
   apiAdminGetStats,
@@ -53,6 +53,7 @@ export function AdminDashboard() {
   const [roomCreationLimit, setRoomCreationLimit] = useState(0);
   const [requireAuthForUploads, setRequireAuthForUploads] = useState(false);
   const [roomCreationDisabled, setRoomCreationDisabled] = useState(false);
+  const [reclaimUnreferenced, setReclaimUnreferenced] = useState(false);
   const [loading, setLoading] = useState(true);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordUser, setTempPasswordUser] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export function AdminDashboard() {
         setRoomCreationLimit(s.room_creation_limit);
         setRequireAuthForUploads(s.require_auth_for_uploads);
         setRoomCreationDisabled(s.room_creation_disabled ?? false);
+        setReclaimUnreferenced(s.reclaim_unreferenced_uploads ?? false);
       }
     } catch (e: any) {
       console.error("Admin load error:", e.message);
@@ -209,6 +211,7 @@ export function AdminDashboard() {
               roomCreationLimit={roomCreationLimit}
               requireAuthForUploads={requireAuthForUploads}
               roomCreationDisabled={roomCreationDisabled}
+              reclaimUnreferenced={reclaimUnreferenced}
               onToggleInviteOnly={async (val) => {
                 try {
                   await apiAdminUpdateSettings({ invite_only: val });
@@ -270,6 +273,14 @@ export function AdminDashboard() {
                   toast.error(e.message);
                 }
               }}
+              onToggleReclaimUnreferenced={async (val) => {
+                try {
+                  await apiAdminUpdateSettings({ reclaim_unreferenced_uploads: val });
+                  setReclaimUnreferenced(val);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "Could not save that setting");
+                }
+              }}
             />
           ) : null}
         </div>
@@ -306,7 +317,12 @@ function OverviewTab({ stats }: { stats: AdminStats }) {
     { label: "Messages", value: stats.messages.toLocaleString(), icon: MessageSquare },
     { label: "Files", value: stats.uploads, icon: HardDrive },
     { label: "Storage Size", value: formatBytes(stats.total_file_size), icon: HardDrive },
+    // Storage that is not a finished, referenced upload. Orphaned disk is
+    // invisible until a volume fills.
+    { label: "Uploading Now", value: formatBytes(stats.staging_bytes ?? 0), icon: UploadCloud },
+    { label: "Unused Files", value: formatBytes(stats.unreferenced_bytes ?? 0), icon: FileQuestion },
   ];
+  const reclaim = stats.last_reclaim;
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
@@ -319,6 +335,13 @@ function OverviewTab({ stats }: { stats: AdminStats }) {
           <span className="text-2xl font-bold">{c.value}</span>
         </div>
       ))}
+      {reclaim?.ran_at_ms ? (
+        <p className="col-span-full ui-meta">
+          {reclaim.dry_run
+            ? `Last check: ${reclaim.reclaimed} unused file(s), ${formatBytes(reclaim.reclaimed_bytes)}, would have been deleted. Turn on "Delete Unused Files" in Settings to reclaim them.`
+            : `Last cleanup: deleted ${reclaim.reclaimed} unused file(s), ${formatBytes(reclaim.reclaimed_bytes)}.`}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -779,6 +802,7 @@ function SettingsTab({
   roomCreationLimit,
   requireAuthForUploads,
   roomCreationDisabled,
+  reclaimUnreferenced,
   onToggleInviteOnly,
   onRefreshInvite,
   onCopyInvite,
@@ -787,6 +811,7 @@ function SettingsTab({
   onSaveRoomCreationLimit,
   onToggleRequireAuthForUploads,
   onToggleRoomCreationDisabled,
+  onToggleReclaimUnreferenced,
 }: {
   inviteOnly: boolean;
   inviteCode: string;
@@ -796,6 +821,7 @@ function SettingsTab({
   roomCreationLimit: number;
   requireAuthForUploads: boolean;
   roomCreationDisabled: boolean;
+  reclaimUnreferenced: boolean;
   onToggleInviteOnly: (val: boolean) => void;
   onRefreshInvite: () => void;
   onCopyInvite: () => void;
@@ -804,6 +830,7 @@ function SettingsTab({
   onSaveRoomCreationLimit: (val: number) => void;
   onToggleRequireAuthForUploads: (val: boolean) => void;
   onToggleRoomCreationDisabled: (val: boolean) => void;
+  onToggleReclaimUnreferenced: (val: boolean) => void;
 }) {
   // Local: the export is a one-off action, not server settings state.
   const [exporting, setExporting] = useState(false);
@@ -968,6 +995,41 @@ function SettingsTab({
           {roomCreationDisabled
             ? "Only server owners/admins can create rooms."
             : "All users can create rooms (subject to the per-user limit below)."}
+        </p>
+      </div>
+
+      <div className="border rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">Delete Unused Files</h3>
+            <p className="text-xs text-muted-foreground">
+              A file that was uploaded but never posted — a send that failed, a tab that
+              closed — sits on disk against its uploader's storage. Once an hour, files
+              nothing has referred to for a day are looked for.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={reclaimUnreferenced}
+            onClick={() => onToggleReclaimUnreferenced(!reclaimUnreferenced)}
+            className={cn(
+              "relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0",
+              reclaimUnreferenced ? "bg-primary" : "bg-muted"
+            )}
+          >
+            <span
+              className={cn(
+                "inline-block h-4 w-4 transform rounded-full bg-background transition-transform",
+                reclaimUnreferenced ? "translate-x-6" : "translate-x-1"
+              )}
+            />
+          </button>
+        </div>
+        <p className="ui-meta">
+          {reclaimUnreferenced
+            ? "Unused files are deleted. This cannot be undone."
+            : "Unused files are only reported, in the server log and on the Overview tab. Read a week of those before turning this on."}
         </p>
       </div>
 

@@ -562,6 +562,9 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         let room_creation_limit = doc.get_i64("room_creation_limit").unwrap_or(0) as u64;
         let require_auth_for_uploads = doc.get_bool("require_auth_for_uploads").unwrap_or(false);
         let room_creation_disabled = doc.get_bool("room_creation_disabled").unwrap_or(false);
+        let reclaim_unreferenced_uploads = doc
+            .get_bool("reclaim_unreferenced_uploads")
+            .unwrap_or(false);
         return ServerSettings {
             invite_only,
             invite_code,
@@ -570,6 +573,7 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
             room_creation_limit,
             require_auth_for_uploads,
             room_creation_disabled,
+            reclaim_unreferenced_uploads,
         };
     }
 
@@ -584,6 +588,7 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         "room_creation_limit": 0_i64,
         "require_auth_for_uploads": false,
         "room_creation_disabled": false,
+        "reclaim_unreferenced_uploads": false,
     };
     let _ = coll.insert_one(default_doc).await;
     ServerSettings {
@@ -594,6 +599,7 @@ async fn load_server_settings(db: &mongodb::Database) -> ServerSettings {
         room_creation_limit: 0,
         require_auth_for_uploads: false,
         room_creation_disabled: false,
+        reclaim_unreferenced_uploads: false,
     }
 }
 
@@ -635,6 +641,8 @@ pub async fn run() {
     // An upload abandoned halfway leaves its chunks staged on disk, and no
     // request ever arrives to say so. Same reasoning as the sweep above.
     tokio::spawn(media::sweep_abandoned_chunks());
+    tokio::spawn(media::sweep_unreferenced_uploads(Arc::clone(&state)));
+    tokio::spawn(media::reconcile_upload_folders(Arc::clone(&state)));
 
     // An event starting is the absence of an action too, so nothing but a
     // clock can announce it.

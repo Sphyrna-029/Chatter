@@ -14,7 +14,7 @@ use axum::{
 use futures_util::TryStreamExt;
 use mongodb::bson::doc;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::{Arc, LazyLock};
 
@@ -37,6 +37,12 @@ async fn check_storage_quota(
     while let Ok(Some(record)) = cursor.try_next().await {
         current_total += record.size;
     }
+
+    // Plus whatever this person already has in flight. Bytes in a staging dir
+    // are not a record yet, so ten uploads started together each saw the same
+    // free space and all of them passed — a limit that only counts what has
+    // finished cannot hold while anything is arriving.
+    current_total += staging_bytes_for(Some(user_id)).await;
 
     if current_total + incoming_size > limit {
         let used = format_bytes_short(current_total);
@@ -1141,6 +1147,38 @@ async fn read_chunk_result(chunk_dir: &str) -> Option<ChunkResult> {
     serde_json::from_str(&raw).ok()
 }
 
+/// How many bytes of chunked upload are part-way through the staging area,
+/// for one user or for everyone.
+///
+/// Read from the metadata rather than by measuring the chunks: what an upload
+/// has reserved is the size it declared, not the part of it that has arrived.
+pub(crate) async fn staging_bytes_for(user_id: Option<&str>) -> u64 {
+    let Ok(mut entries) = tokio::fs::read_dir("external/.chunks").await else {
+        // Created by the first chunked upload, so its absence is the ordinary
+        // state of a server nobody has uploaded a large file to.
+        return 0;
+    };
+    let mut total = 0u64;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Some(dir) = entry.path().to_str().map(String::from) else {
+            continue;
+        };
+        // A finished upload's dir lingers holding only its result, and those
+        // bytes are a record now — counting them here would charge for them
+        // twice.
+        if read_chunk_result(&dir).await.is_some() {
+            continue;
+        }
+        let Some(meta) = read_chunk_meta(&dir).await else {
+            continue;
+        };
+        if user_id.is_none_or(|id| meta.user_id == id) {
+            total += meta.file_size;
+        }
+    }
+    total
+}
+
 async fn read_chunk_meta(chunk_dir: &str) -> Option<ChunkMeta> {
     let raw = tokio::fs::read_to_string(format!("{chunk_dir}/meta.json"))
         .await
@@ -1641,6 +1679,300 @@ pub(crate) async fn upload_complete(
 // ---------------------------------------------------------------------------
 // Link preview
 // ---------------------------------------------------------------------------
+
+/// What the last reclaim pass did, for the admin dashboard.
+///
+/// A global rather than `AppState` for the same reason `MEDIA_JOBS` is one:
+/// the sweep is a detached task that holds a state handle and nothing else,
+/// and threading a field back out would be plumbing for the sake of four
+/// numbers nobody decides anything with.
+pub(crate) static LAST_RECLAIM: LazyLock<std::sync::Mutex<ReclaimReport>> =
+    LazyLock::new(|| std::sync::Mutex::new(ReclaimReport::default()));
+
+#[derive(Default, Clone, Copy)]
+pub(crate) struct ReclaimReport {
+    pub(crate) ran_at_ms: u64,
+    pub(crate) considered: u64,
+    pub(crate) kept: u64,
+    pub(crate) reclaimed: u64,
+    pub(crate) reclaimed_bytes: u64,
+    /// True when the pass only reported what it would have taken.
+    pub(crate) dry_run: bool,
+}
+
+/// Every upload folder named anywhere in the database.
+///
+/// Walks whole documents rather than named fields: a URL can be written into a
+/// message body, a profile, a room's sound pack, a forum post's image list, an
+/// event's cover. Enumerating those fields means this quietly stops being true
+/// the next time somebody adds one — and the cost of being wrong here is
+/// deleting a file that is still in use.
+///
+/// `None` means a query failed, which is not the same as finding nothing: a
+/// pass that cannot read the references must delete nothing at all.
+async fn referenced_folders(state: &Arc<AppState>) -> Option<HashSet<String>> {
+    let mut found: HashSet<String> = HashSet::new();
+
+    // Messages carry their attachments in the body, and are the only
+    // collection here big enough to be worth projecting down.
+    let messages = state.db.collection::<mongodb::bson::Document>("messages");
+    let mut cursor = messages
+        .find(doc! { "redacted": { "$ne": true } })
+        .projection(doc! { "content.body": 1 })
+        .await
+        .ok()?;
+    while let Some(doc) = cursor.try_next().await.ok()? {
+        collect_folders(&mongodb::bson::Bson::Document(doc), &mut found);
+    }
+
+    // Everything else that can hold a URL, read whole. All small.
+    for name in [
+        "users",
+        "rooms",
+        "channels",
+        "events",
+        "forum_posts",
+        "forum_comments",
+        "webhooks",
+        "bots",
+        "drafts",
+    ] {
+        let coll = state.db.collection::<mongodb::bson::Document>(name);
+        let mut cursor = coll.find(doc! {}).await.ok()?;
+        while let Some(doc) = cursor.try_next().await.ok()? {
+            collect_folders(&mongodb::bson::Bson::Document(doc), &mut found);
+        }
+    }
+
+    Some(found)
+}
+
+/// Every upload folder named by any string anywhere inside `value`.
+fn collect_folders(value: &mongodb::bson::Bson, out: &mut HashSet<String>) {
+    match value {
+        mongodb::bson::Bson::String(text) => out.extend(attachment_folders(text)),
+        mongodb::bson::Bson::Array(items) => {
+            for item in items {
+                collect_folders(item, out);
+            }
+        }
+        mongodb::bson::Bson::Document(doc) => {
+            for (_, field) in doc {
+                collect_folders(field, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Reclaim uploads that completed and were then never referenced by anything.
+///
+/// The orphan no other sweep can see. An upload that finishes and is never
+/// posted — the send failed, the tab closed, the profile save errored after
+/// the avatar went up — leaves a file on disk and a record against the
+/// uploader's quota, indistinguishable from one still in use.
+///
+/// Two things keep this safe. A candidate has to have gone a whole day
+/// unclaimed, and every surface references a URL within seconds of uploading
+/// it. And a pass that cannot read the references deletes nothing: the
+/// question is "is this definitely unused", never "did I fail to find a use".
+///
+/// In the steady state the claims on `send_message` and the rest mean there
+/// are no candidates and the scan never runs. It is the backlog from before
+/// claiming existed that this works through, a batch at a time.
+pub(crate) async fn sweep_unreferenced_uploads(state: Arc<AppState>) {
+    use crate::backend::constants::{UPLOAD_GRACE_SECS, UPLOAD_SWEEP_BATCH, UPLOAD_SWEEP_SECS};
+
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(UPLOAD_SWEEP_SECS));
+    interval.tick().await; // skip the immediate first tick
+
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let mut last_full_pass_ms = 0u64;
+
+    loop {
+        interval.tick().await;
+
+        let dry_run = !state
+            .server_settings
+            .read()
+            .await
+            .reclaim_unreferenced_uploads;
+
+        // A pass that only reports finds the same files again next hour, since
+        // it takes none of them — so on the default setting this would scan
+        // every message on the instance once an hour, forever, to reprint a
+        // number nobody asked for twice. Once a day says the same thing.
+        if dry_run
+            && last_full_pass_ms > 0
+            && now_millis_u64().saturating_sub(last_full_pass_ms)
+                < (UPLOAD_GRACE_SECS as u64) * 1000
+        {
+            continue;
+        }
+
+        let cutoff = chrono::Utc::now().timestamp() - UPLOAD_GRACE_SECS;
+        let Ok(mut cursor) = uploads
+            .find(doc! { "referenced_at": null, "uploaded_at": { "$lt": cutoff } })
+            .limit(UPLOAD_SWEEP_BATCH as i64)
+            .await
+        else {
+            continue;
+        };
+
+        let mut candidates: Vec<UploadRecord> = Vec::new();
+        while let Ok(Some(record)) = cursor.try_next().await {
+            candidates.push(record);
+        }
+        if candidates.is_empty() {
+            continue;
+        }
+
+        // One pass over the references for the whole batch, rather than a
+        // scan per candidate — a regex over message bodies is a collection
+        // scan, and two hundred of them an hour is not a background job.
+        let Some(kept) = referenced_folders(&state).await else {
+            eprintln!("[uploads] reclaim skipped: could not read what references what");
+            continue;
+        };
+
+        last_full_pass_ms = now_millis_u64();
+
+        let mut report = ReclaimReport {
+            ran_at_ms: last_full_pass_ms,
+            considered: candidates.len() as u64,
+            dry_run,
+            ..Default::default()
+        };
+
+        let mut in_use: Vec<String> = Vec::new();
+        let mut unjudgeable: Vec<String> = Vec::new();
+
+        for record in &candidates {
+            // No folder means the startup migration could not work out where
+            // this upload lives, so there is nothing to look for and no way to
+            // tell whether it is in use.
+            if !is_upload_folder(&record.folder) {
+                unjudgeable.push(record.url.clone());
+                report.kept += 1;
+                continue;
+            }
+            if kept.contains(&record.folder) {
+                in_use.push(record.folder.clone());
+                report.kept += 1;
+                continue;
+            }
+
+            report.reclaimed += 1;
+            report.reclaimed_bytes += record.size;
+            if dry_run {
+                eprintln!(
+                    "[uploads] would reclaim {} ({} bytes, uploaded by {})",
+                    record.filename, record.size, record.user_id
+                );
+            } else {
+                remove_upload_record(&state, record).await;
+            }
+        }
+
+        // Claimed in one write rather than one apiece, and claimed at all so
+        // that these stop being candidates — an upload that keeps coming back
+        // as a candidate is what keeps the scan above running.
+        mark_referenced(&state, &in_use).await;
+        if !unjudgeable.is_empty() {
+            // Left alone is the only safe answer for these, and marking them
+            // means only that the question does not have to be asked again.
+            let _ = uploads
+                .update_many(
+                    doc! { "url": { "$in": &unjudgeable } },
+                    doc! { "$set": { "referenced_at": chrono::Utc::now().timestamp() } },
+                )
+                .await;
+        }
+
+        if report.reclaimed > 0 {
+            eprintln!(
+                "[uploads] {} {} unreferenced upload(s), {} bytes",
+                if dry_run {
+                    "would reclaim"
+                } else {
+                    "reclaimed"
+                },
+                report.reclaimed,
+                report.reclaimed_bytes,
+            );
+        }
+        if let Ok(mut last) = LAST_RECLAIM.lock() {
+            *last = report;
+        }
+    }
+}
+
+fn now_millis_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Startup reconciliation: upload folders on disk that no record names.
+///
+/// The shape a crash between writing the file and writing its record used to
+/// leave behind, before `finalize_upload` started recording first. Such a
+/// folder is invisible to the quota, to the uploads list and to every purge
+/// path, all of which work from records — so nothing but the disk knows it is
+/// there.
+///
+/// Runs once at startup rather than on a timer: it is a scan of the whole
+/// upload tree, and the condition it repairs is only created by a restart.
+pub(crate) async fn reconcile_upload_folders(state: Arc<AppState>) {
+    use crate::backend::constants::UPLOAD_GRACE_SECS;
+
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let Ok(mut cursor) = uploads.find(doc! {}).await else {
+        return;
+    };
+    let mut known: HashSet<String> = HashSet::new();
+    while let Ok(Some(record)) = cursor.try_next().await {
+        if is_upload_folder(&record.folder) {
+            known.insert(record.folder);
+        } else if let Some(dir) = upload_folder_path(&record.disk_path) {
+            if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
+                known.insert(name.to_string());
+            }
+        }
+    }
+
+    let Ok(mut entries) = tokio::fs::read_dir("external").await else {
+        return;
+    };
+    let grace = std::time::Duration::from_secs(UPLOAD_GRACE_SECS as u64);
+    let mut reclaimed = 0usize;
+
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // `.chunks` and anything else not laid out by an upload. The 32-hex
+        // shape is the whole guard here: this deletes directories.
+        if !is_upload_folder(name) || known.contains(name) {
+            continue;
+        }
+        if !entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        // An upload being written right now has no record for a moment. Dating
+        // it from the folder keeps this from racing one.
+        let Some(idle) = idle_since_last_write(&entry.path()).await else {
+            continue;
+        };
+        if idle >= grace && tokio::fs::remove_dir_all(entry.path()).await.is_ok() {
+            reclaimed += 1;
+        }
+    }
+
+    if reclaimed > 0 {
+        eprintln!("[uploads] removed {reclaimed} folder(s) no record named");
+    }
+}
 
 /// Collect staging dirs for chunked uploads nobody is going to finish.
 ///
@@ -3366,6 +3698,53 @@ mod tests {
             attachment_folders(&format!("(/external/{A}/cat.png)")),
             vec![A]
         );
+    }
+
+    #[test]
+    fn references_are_found_wherever_a_url_was_written() {
+        use mongodb::bson::{doc, Bson};
+        const A: &str = "0123456789abcdef0123456789abcdef";
+        const B: &str = "fedcba9876543210fedcba9876543210";
+        const C: &str = "11112222333344445555666677778888";
+
+        // Whole documents are walked rather than named fields, because a URL
+        // reaches a message body, a profile, a room's sound pack, a forum
+        // post's image list and an event's cover — and the next field nobody
+        // remembers to add here is a file deleted while it is still in use.
+        let record = doc! {
+            "content": { "body": format!("look /external/{A}/cat.png") },
+            "avatar_url": format!("https://chat.example/external/{B}/me.png"),
+            "sounds": { "join": format!("/external/{C}/ding.ogg") },
+            "image_urls": [
+                format!("/external/{A}/cat.png"),
+                "https://elsewhere.example/not-ours.png",
+            ],
+            "unrelated": 42,
+        };
+
+        let mut found = std::collections::HashSet::new();
+        collect_folders(&Bson::Document(record), &mut found);
+        assert_eq!(
+            found,
+            [A, B, C]
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<std::collections::HashSet<_>>(),
+        );
+    }
+
+    #[test]
+    fn a_document_with_nothing_of_ours_in_it_references_nothing() {
+        use mongodb::bson::{doc, Bson};
+        let record = doc! {
+            "content": { "body": "just some words" },
+            "avatar_url": "",
+            "count": 3,
+            "nested": { "deeper": ["https://example.com/a.png", "/external/"] },
+        };
+        let mut found = std::collections::HashSet::new();
+        collect_folders(&Bson::Document(record), &mut found);
+        assert!(found.is_empty());
     }
 
     #[test]

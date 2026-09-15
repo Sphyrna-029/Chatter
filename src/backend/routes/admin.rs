@@ -67,13 +67,45 @@ pub(crate) async fn admin_stats(
         presence.values().filter(|p| p.connected).count()
     };
 
+    // Storage that is not a finished upload. Orphaned disk is the kind of
+    // problem nobody sees until a volume fills, and these three numbers are
+    // the difference between noticing it in March and noticing it at 2am:
+    // what is part-way through arriving, what has arrived and been claimed by
+    // nothing, and what the last reclaim pass actually took.
+    let staging_bytes = super::media::staging_bytes_for(None).await;
+    let unreferenced_bytes: u64 = {
+        use futures_util::TryStreamExt;
+        let coll = state.db.collection::<UploadRecord>("uploads");
+        let mut total = 0u64;
+        if let Ok(mut cursor) = coll.find(doc! { "referenced_at": null }).await {
+            while let Ok(Some(upload)) = cursor.try_next().await {
+                total += upload.size;
+            }
+        }
+        total
+    };
+    let last_reclaim = super::media::LAST_RECLAIM
+        .lock()
+        .map(|report| *report)
+        .unwrap_or_default();
+
     Ok(Json(json!({
         "users": users_count,
         "rooms": rooms_count,
         "messages": messages_count,
         "uploads": uploads_count,
         "total_file_size": total_size,
-        "online_users": online_users
+        "online_users": online_users,
+        "staging_bytes": staging_bytes,
+        "unreferenced_bytes": unreferenced_bytes,
+        "last_reclaim": {
+            "ran_at_ms": last_reclaim.ran_at_ms,
+            "considered": last_reclaim.considered,
+            "kept": last_reclaim.kept,
+            "reclaimed": last_reclaim.reclaimed,
+            "reclaimed_bytes": last_reclaim.reclaimed_bytes,
+            "dry_run": last_reclaim.dry_run,
+        }
     })))
 }
 
@@ -491,7 +523,8 @@ pub(crate) async fn admin_get_settings(
         "upload_limit_bytes": settings.upload_limit_bytes,
         "room_creation_limit": settings.room_creation_limit,
         "require_auth_for_uploads": settings.require_auth_for_uploads,
-        "room_creation_disabled": settings.room_creation_disabled
+        "room_creation_disabled": settings.room_creation_disabled,
+        "reclaim_unreferenced_uploads": settings.reclaim_unreferenced_uploads
     })))
 }
 
@@ -517,6 +550,12 @@ pub(crate) async fn admin_update_settings(
     }
     if let Some(room_limit) = body.get("room_creation_limit").and_then(|v| v.as_u64()) {
         set_doc.insert("room_creation_limit", room_limit as i64);
+    }
+    if let Some(reclaim) = body
+        .get("reclaim_unreferenced_uploads")
+        .and_then(|v| v.as_bool())
+    {
+        set_doc.insert("reclaim_unreferenced_uploads", reclaim);
     }
     if let Some(require_auth) = body
         .get("require_auth_for_uploads")
@@ -565,6 +604,9 @@ pub(crate) async fn admin_update_settings(
         }
         if let Ok(val) = set_doc.get_bool("room_creation_disabled") {
             settings.room_creation_disabled = val;
+        }
+        if let Ok(val) = set_doc.get_bool("reclaim_unreferenced_uploads") {
+            settings.reclaim_unreferenced_uploads = val;
         }
     }
 

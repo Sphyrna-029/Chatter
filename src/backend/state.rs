@@ -37,6 +37,11 @@ pub(crate) struct ServerSettings {
     pub(crate) room_creation_limit: u64, // 0 = unlimited
     pub(crate) require_auth_for_uploads: bool,
     pub(crate) room_creation_disabled: bool,
+    /// Whether the sweep for uploads nothing ever referenced actually deletes
+    /// them. Off by default: it reports what it would take and takes nothing,
+    /// so an instance can read a week of its logs before trusting it with the
+    /// only operation here that cannot be undone.
+    pub(crate) reclaim_unreferenced_uploads: bool,
 }
 
 pub struct AppState {
