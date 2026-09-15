@@ -187,48 +187,153 @@ fn is_text_subtitle_codec(codec: &str) -> bool {
 /// Remux a video with text-based subtitle streams into an MP4 copy
 /// (video/audio copied, subtitles as mov_text). Output is written to
 /// `{src}.cc.tmp`; the caller renames into place. Returns the tmp path.
+/// Which kinds of stream a file actually has.
+async fn stream_kinds(path: &str) -> Vec<String> {
+    let Ok(output) = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path,
+        ])
+        .output()
+        .await
+    else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+async fn has_audio(path: &str) -> bool {
+    stream_kinds(path).await.iter().any(|kind| kind == "audio")
+}
+
+/// One conversion attempt. `Err` carries the tail of ffmpeg's complaint, which
+/// used to go to `/dev/null` — so a conversion that failed left no trace
+/// anywhere and the only symptom was a video that behaved oddly days later.
+async fn try_remux(src: &str, dst: &str, args: &[String]) -> Result<(), String> {
+    let _ = tokio::fs::remove_file(dst).await;
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command.args(["-y", "-i", src]);
+    command.args(args);
+    command.args([
+        "-movflags",
+        "+faststart",
+        // The destination ends in `.tmp`, which ffmpeg cannot map to a muxer,
+        // so the container has to be named explicitly.
+        "-f",
+        "mp4",
+        dst,
+    ]);
+    let output = command
+        .stdout(std::process::Stdio::null())
+        .output()
+        .await
+        .map_err(|e| format!("could not run ffmpeg: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let tail: Vec<&str> = stderr.lines().rev().take(4).collect();
+        return Err(tail.into_iter().rev().collect::<Vec<_>>().join(" / "));
+    }
+    if tokio::fs::metadata(dst).await.is_err() {
+        return Err("ffmpeg reported success but wrote nothing".to_string());
+    }
+    Ok(())
+}
+
+fn owned(args: &[&str]) -> Vec<String> {
+    args.iter().map(|a| a.to_string()).collect()
+}
+
+/// Convert a container browsers will not play into an MP4 they will.
+///
+/// A ladder rather than one command, because one command is all or nothing:
+/// anything ffmpeg refuses — a bitmap subtitle track `mov_text` cannot take, a
+/// video codec MP4 will not hold — failed the whole conversion, and the upload
+/// then kept the original. The person was handed a Matroska file, and what a
+/// browser makes of one varies by codec: often it renders the video, finds an
+/// audio codec it cannot decode, and greys the track selector out. A video
+/// that plays silently, with nothing anywhere saying why.
+///
+/// Each rung gives up something to get past whatever stopped the one above.
+/// Audio is never what is given up, and the result is checked rather than
+/// assumed: a conversion that exits cleanly having quietly dropped the audio
+/// is the same failure as one that refused outright, so it is treated as one.
 async fn remux_with_subs(src: &str) -> Option<String> {
     let _job = metrics::media_job();
     let dst = format!("{}.cc.tmp", src);
-    let _ = tokio::fs::remove_file(&dst).await;
-    let result = tokio::process::Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-i",
-            src,
-            "-map",
-            "0:v:0",
-            "-map",
-            "0:a?",
-            "-map",
-            "0:s?",
-            "-c:v",
-            "copy",
-            "-c:a",
-            "aac",
-            "-ac",
-            "2",
-            "-c:s",
-            "mov_text",
-            "-movflags",
-            "+faststart",
-            // The destination ends in `.tmp`, which ffmpeg cannot map to a
-            // muxer, so the container has to be named explicitly.
-            "-f",
-            "mp4",
-            &dst,
-        ])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .await;
-    match result {
-        Ok(s) if s.success() && tokio::fs::metadata(&dst).await.is_ok() => Some(dst),
-        _ => {
-            let _ = tokio::fs::remove_file(&dst).await;
-            None
+    let source_had_audio = has_audio(src).await;
+
+    // Only text subtitles can become `mov_text`. Mapping them by ordinal keeps
+    // the ones that can travel when a bitmap track in the same file would
+    // otherwise sink every subtitle in it.
+    // `index` is the stream's own position among the subtitle streams, not its
+    // position in this filtered list — a file whose only text track is the
+    // second of three would otherwise be mapped by the first, which is the
+    // bitmap one that stopped the rung above.
+    let text_subs: Vec<String> = probe_subtitles(src)
+        .await
+        .iter()
+        .map(|stream| format!("0:s:{}", stream.index))
+        .collect();
+    let mut text_only = owned(&["-map", "0:v:0", "-map", "0:a?"]);
+    for stream in &text_subs {
+        text_only.push("-map".to_string());
+        text_only.push(stream.clone());
+    }
+    text_only.extend(owned(&["-c:v", "copy", "-c:a", "aac", "-ac", "2"]));
+    if !text_subs.is_empty() {
+        text_only.extend(owned(&["-c:s", "mov_text"]));
+    }
+
+    let ladder: Vec<(&str, Vec<String>)> = vec![
+        (
+            "copying the video, every subtitle",
+            owned(&[
+                "-map", "0:v:0", "-map", "0:a?", "-map", "0:s?", "-c:v", "copy", "-c:a", "aac",
+                "-ac", "2", "-c:s", "mov_text",
+            ]),
+        ),
+        ("copying the video, text subtitles only", text_only),
+        (
+            "re-encoding the video, no subtitles",
+            owned(&[
+                "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf",
+                "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2",
+            ]),
+        ),
+    ];
+
+    for (rung, (what, args)) in ladder.iter().enumerate() {
+        match try_remux(src, &dst, args).await {
+            Ok(()) => {
+                if source_had_audio && !has_audio(&dst).await {
+                    eprintln!("[media] {src}: {what} lost the audio");
+                    let _ = tokio::fs::remove_file(&dst).await;
+                    continue;
+                }
+                if rung > 0 {
+                    eprintln!("[media] {src}: converted by {what}");
+                }
+                return Some(dst);
+            }
+            Err(why) => {
+                eprintln!("[media] {src}: {what} failed: {why}");
+                let _ = tokio::fs::remove_file(&dst).await;
+            }
         }
     }
+
+    eprintln!("[media] {src}: could not be converted to MP4");
+    None
 }
 
 /// Extract a representative frame of a video as a JPEG thumbnail.
@@ -1986,8 +2091,7 @@ pub(crate) async fn reconcile_upload_folders(state: Arc<AppState>) {
 pub(crate) async fn sweep_abandoned_chunks() {
     use crate::backend::constants::{CHUNK_ABANDONED_SECS, CHUNK_SWEEP_SECS};
 
-    let mut interval =
-        tokio::time::interval(std::time::Duration::from_secs(CHUNK_SWEEP_SECS));
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(CHUNK_SWEEP_SECS));
     interval.tick().await; // skip the immediate first tick
 
     let abandoned_after = std::time::Duration::from_secs(CHUNK_ABANDONED_SECS);
@@ -2002,17 +2106,12 @@ pub(crate) async fn sweep_abandoned_chunks() {
         };
 
         while let Ok(Some(entry)) = entries.next_entry().await {
-            if !entry
-                .file_type()
-                .await
-                .map(|t| t.is_dir())
-                .unwrap_or(false)
-            {
+            if !entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
                 continue;
             }
             let path = entry.path();
             // An unreadable dir is left alone rather than guessed about: the
-                // cost of waiting another hour is nothing, and the cost of being
+            // cost of waiting another hour is nothing, and the cost of being
             // wrong is deleting an upload in flight.
             let Some(idle) = idle_since_last_write(&path).await else {
                 continue;
@@ -3280,7 +3379,6 @@ mod tests {
         assert!(idle_since_last_write(&missing).await.is_none());
     }
 
-
     /// Build a test video (video + audio) with a mov_text subtitle track so
     /// that the subtitle stream has a GLOBAL index of 2, the case that broke
     /// the old `-map 0:s:{global_index}` extraction path.
@@ -3548,6 +3646,74 @@ mod tests {
             .expect("ffmpeg should be available");
         assert!(status.success(), "mkv fixture build failed");
         mkv
+    }
+
+    /// An MKV whose video codec an MP4 cannot hold, so `-c:v copy` refuses it.
+    ///
+    /// Stands in for the family of files the old single command gave up on —
+    /// a bitmap subtitle track, a codec MP4 will not take — all of which
+    /// ended the same way: the Matroska file kept, and handed to a browser.
+    async fn build_uncopyable_mkv_fixture() -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_vp8_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let mkv = dir.join("uncopyable.mkv").to_string_lossy().to_string();
+        for suffix in ["", ".cc.tmp"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", mkv, suffix)).await;
+        }
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x120:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-c:v",
+                "libvpx",
+                "-b:v",
+                "200k",
+                "-c:a",
+                "libopus",
+                "-shortest",
+                &mkv,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "vp8 fixture build failed");
+        mkv
+    }
+
+    #[tokio::test]
+    async fn a_video_the_first_attempt_refuses_still_keeps_its_audio() {
+        // The whole conversion used to be one command, so anything ffmpeg
+        // refused kept the Matroska file — and a browser handed one of those
+        // often plays the picture, finds an audio codec it cannot decode, and
+        // greys out the track selector. A video that plays silently, with
+        // nothing anywhere saying why.
+        let mkv = build_uncopyable_mkv_fixture().await;
+
+        let tmp = remux_with_subs(&mkv)
+            .await
+            .expect("the ladder should get there by re-encoding");
+
+        let format = probe_format(&tmp).await;
+        assert!(format.contains("mp4"), "not an MP4: {format:?}");
+
+        let kinds = stream_kinds(&tmp).await;
+        assert!(kinds.iter().any(|k| k == "video"), "video lost: {kinds:?}");
+        assert!(
+            kinds.iter().any(|k| k == "audio"),
+            "audio lost — the failure this exists to prevent: {kinds:?}"
+        );
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&mkv).await;
     }
 
     #[tokio::test]
