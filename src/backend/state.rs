@@ -458,6 +458,22 @@ pub(crate) struct UploadRecord {
     pub(crate) width: Option<u32>,
     #[serde(default)]
     pub(crate) height: Option<u32>,
+    /// The `external/<folder>` this upload owns. The one thing about it that
+    /// never changes: remuxing an mkv to mp4 moves `disk_path`, `filename` and
+    /// `url` all at once, so anything reconciling the records against the disk
+    /// has to match on this instead.
+    #[serde(default)]
+    pub(crate) folder: String,
+    /// True between the bytes landing on disk and the conversions finishing.
+    /// The record is written before that work rather than after it, so a
+    /// restart part-way through leaves a file that something still names.
+    #[serde(default)]
+    pub(crate) processing: bool,
+    /// When this upload was first seen referenced by something that keeps it —
+    /// a message, a profile, a room. `None` means nothing has claimed it yet,
+    /// which after a grace period is what makes it collectable.
+    #[serde(default)]
+    pub(crate) referenced_at: Option<i64>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

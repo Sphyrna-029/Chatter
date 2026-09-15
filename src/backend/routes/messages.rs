@@ -399,6 +399,11 @@ pub(crate) async fn send_message(
         let _ = msg_coll.insert_one(doc).await;
     }
 
+    // Now something keeps these files. An upload nothing ever referenced is
+    // the one kind of orphan no sweep can tell from a file still in use, so
+    // the moment a message names one is the cheapest place to record it.
+    super::media::mark_referenced(&state, &super::media::attachment_folders(&req.body)).await;
+
     // The broadcast says whether this is a DM; the stored row does not need to.
     //
     // The client used to answer that from its own room list, which it may not
@@ -944,7 +949,7 @@ pub(crate) async fn redact_message(
     // deleting a message must not break someone else's copy of the same link.
     let attachments = body_before_redaction
         .as_deref()
-        .map(super::media::attachment_urls)
+        .map(super::media::attachment_folders)
         .unwrap_or_default();
     if !attachments.is_empty() {
         super::media::purge_attachments(&state, &attachments, Some(msg_sender), Some(&event_id))
@@ -1150,6 +1155,9 @@ pub(crate) async fn edit_message(
             doc! { "$set": set_doc },
         )
         .await;
+
+    // An edit can introduce an attachment the original did not have.
+    super::media::mark_referenced(&state, &super::media::attachment_folders(&new_body)).await;
 
     let edit_event_id = generate_id("$");
     let mut edit_event = json!({
@@ -1394,6 +1402,9 @@ pub(crate) async fn send_thread_message(
     if let Ok(doc) = mongodb::bson::to_document(&event) {
         let _ = msg_coll.insert_one(doc).await;
     }
+
+    // A reply carries attachments like any other message.
+    super::media::mark_referenced(&state, &super::media::attachment_folders(&req.body)).await;
 
     // Count total thread replies for the broadcast
     let reply_count = msg_coll

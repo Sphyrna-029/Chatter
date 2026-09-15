@@ -21,6 +21,12 @@ export interface UploadStatus {
   /** Indices the server holds at the right length. Sorted. */
   received: number[];
   receivedBytes: number;
+  /** `"done"` once the server has assembled this upload — which it can have
+   *  done without the client hearing about it, since a long remux runs past
+   *  the wait on `complete`. Absent on a server from before that existed. */
+  status?: "receiving" | "done";
+  /** The URL the upload turned into, present only when `status` is `"done"`. */
+  resultUrl?: string;
 }
 
 /**

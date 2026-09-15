@@ -1900,10 +1900,22 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 }
             }
             if !update_doc.is_empty() {
+                // Whatever file fields actually made it into the write now
+                // keep those uploads. Read back out of the update rather than
+                // out of the message, so a value rejected above — a font that
+                // failed its check, a sting that was too long — claims
+                // nothing.
+                let referenced: Vec<String> = update_doc
+                    .values()
+                    .filter_map(|value| value.as_str())
+                    .flat_map(crate::backend::routes::media::attachment_folders)
+                    .collect();
+
                 let users_coll = state.db.collection::<UserRecord>("users");
                 let _ = users_coll
                     .update_one(doc! { "_id": user_id }, doc! { "$set": update_doc })
                     .await;
+                crate::backend::routes::media::mark_referenced(&state, &referenced).await;
             }
 
             // Update custom_status in PresenceRecord and MongoDB if provided

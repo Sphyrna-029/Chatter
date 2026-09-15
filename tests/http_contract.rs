@@ -1906,7 +1906,10 @@ async fn chunked_upload_reports_what_it_holds_and_can_be_abandoned_on_purpose() 
     assert_eq!(landed_body["receivedBytes"], 100);
 
     // Someone else's upload is not readable, abortable, or even confirmable.
-    assert_eq!(status_of(bob_token.clone()).await.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        status_of(bob_token.clone()).await.status(),
+        StatusCode::FORBIDDEN
+    );
     let bob_abort = client
         .delete(&status_url)
         .header("authorization", bearer(&bob_token))
@@ -2069,11 +2072,42 @@ async fn chunked_upload_verifies_each_chunk_before_assembling() {
     let assembled = std::fs::read(&local_path).expect("the assembled file should be on disk");
     assert_eq!(assembled, payload);
 
-    // The staging dir goes away with a successful assembly.
-    assert!(!std::path::Path::new(&format!("external/.chunks/{upload_id}")).exists());
+    // The chunks are gone, but the staging dir stays: it now holds the answer.
+    let staging = format!("external/.chunks/{upload_id}");
+    assert!(std::path::Path::new(&staging).exists());
+    assert!(!std::path::Path::new(&format!("{staging}/0")).exists());
+
+    // Asking again gets the same URL rather than a second assembly. A remux
+    // can run past the client's wait on `complete`, and a client that gave up
+    // used to have no way to learn the URL of a file already finished on disk
+    // — so it uploaded the whole thing again and left the first one behind
+    // with nothing referring to it.
+    let again = client
+        .post(format!("{}/api/upload/complete", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({"uploadId": upload_id}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::OK);
+    let again_body: Value = again.json().await.unwrap();
+    assert_eq!(again_body["url"], url);
+
+    // And a client resuming one of these is told to stop rather than to send
+    // every chunk again into a dir that is only waiting to be swept.
+    let status = client
+        .get(format!("{}/api/upload/{}", server.base_url, upload_id))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    let status_body: Value = status.json().await.unwrap();
+    assert_eq!(status_body["status"], "done");
+    assert_eq!(status_body["resultUrl"], url);
 
     // Leave nothing behind: `external/` is a tracked directory.
     if let Some(dir) = std::path::Path::new(&local_path).parent() {
         let _ = std::fs::remove_dir_all(dir);
     }
+    let _ = std::fs::remove_dir_all(&staging);
 }

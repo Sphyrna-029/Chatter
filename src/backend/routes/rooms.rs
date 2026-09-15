@@ -783,7 +783,7 @@ pub(crate) async fn delete_room(
                 .get_document("content")
                 .and_then(|c| c.get_str("body"))
             {
-                attachments.extend(super::media::attachment_urls(body));
+                attachments.extend(super::media::attachment_folders(body));
             }
         }
     }

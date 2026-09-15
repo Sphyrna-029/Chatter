@@ -619,6 +619,7 @@ pub async fn run() {
     // Measure images uploaded before their dimensions were recorded, so old
     // history reserves space for them the same way new messages do.
     tokio::spawn(media::backfill_image_dimensions(Arc::clone(&state)));
+    tokio::spawn(media::backfill_upload_folders(Arc::clone(&state)));
 
     // Decides who each listener hears, a few times a second. Without it every
     // voice slot would stay empty, so it runs for the life of the process

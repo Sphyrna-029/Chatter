@@ -1468,6 +1468,9 @@ interface UploadSession {
   chunkCount: number;
   /** Indices the server already holds, verified at the right length. */
   held: number[];
+  /** Set when the server has already assembled this upload and is only
+   *  waiting to be asked for the answer again. */
+  finishedUrl?: string;
 }
 
 /**
@@ -1493,6 +1496,7 @@ async function resumeSession(file: File, fingerprint: string): Promise<UploadSes
     chunkSize: status.chunkSize,
     chunkCount: status.chunkCount,
     held: status.received,
+    finishedUrl: status.status === "done" ? status.resultUrl : undefined,
   };
 }
 
@@ -1540,6 +1544,17 @@ async function runUploadSession(
   session: UploadSession,
   onProgress?: (pct: number) => void,
 ): Promise<{ url: string }> {
+  // Already assembled, and this client simply never heard so — the ordinary
+  // outcome of a long video, where the server's remux runs past the wait on
+  // `complete`. Taking the URL it recorded is the whole reason it records one:
+  // the alternative is uploading the file a second time and leaving the
+  // finished one on disk with nothing referring to it.
+  if (session.finishedUrl) {
+    await forgetResumable(fingerprint);
+    onProgress?.(100);
+    return { url: session.finishedUrl };
+  }
+
   const { uploadId, chunkSize, chunkCount } = session;
   const sent = [...session.held];
 

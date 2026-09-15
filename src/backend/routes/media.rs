@@ -540,6 +540,53 @@ async fn thumb_needs_update(video: &str) -> bool {
     width < THUMB_TARGET_WIDTH
 }
 
+/// Startup migration: give every upload the folder it has always lived in.
+///
+/// `folder` is what identifies an upload now that one file can be named by
+/// several URLs — and it is the only field the format conversions cannot move.
+/// Every record predating it still carries that folder inside its `disk_path`,
+/// so there is nothing here to guess; without it a purge would pass over every
+/// upload made before today.
+pub(crate) async fn backfill_upload_folders(state: Arc<AppState>) {
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let filter = doc! { "$or": [
+        { "folder": { "$exists": false } },
+        { "folder": "" },
+    ] };
+    let Ok(mut cursor) = uploads.find(filter).await else {
+        return;
+    };
+
+    let mut records: Vec<UploadRecord> = Vec::new();
+    while let Ok(Some(record)) = cursor.try_next().await {
+        records.push(record);
+    }
+
+    let mut recorded = 0usize;
+    for record in &records {
+        // A record whose path does not follow the layout is left alone rather
+        // than given a folder it does not have.
+        let Some(folder) = upload_folder_path(&record.disk_path)
+            .and_then(|dir| dir.file_name().and_then(|n| n.to_str()).map(String::from))
+        else {
+            continue;
+        };
+        if uploads
+            .update_one(
+                doc! { "url": &record.url },
+                doc! { "$set": { "folder": &folder } },
+            )
+            .await
+            .is_ok()
+        {
+            recorded += 1;
+        }
+    }
+    if recorded > 0 {
+        eprintln!("[uploads] recorded the folder for {recorded} older uploads");
+    }
+}
+
 /// Startup migration: measure uploads whose dimensions were never recorded.
 ///
 /// Without this the reflow only stops for media uploaded from here on, and the
@@ -775,6 +822,137 @@ pub(crate) async fn probe_video_dimensions(video_path: &str) -> Option<(u32, u32
     probe_image_dimensions(&thumb).await
 }
 
+/// The URL an upload is served at. Folder and filename both come from the
+/// server, but the filename is the one the user chose.
+fn upload_url(headers: &HeaderMap, folder: &str, filename: &str) -> String {
+    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
+    // The quote/paren/backslash group is not about URL parsing: these URLs get
+    // written into CSS (`url('…')` for a name font) and into HTML attributes,
+    // and a filename is user-chosen. Encoding them here means an upload's URL
+    // is inert in every context that later quotes it.
+    const ENCODE_SET: &AsciiSet = &CONTROLS
+        .add(b' ')
+        .add(b'"')
+        .add(b'\'')
+        .add(b'<')
+        .add(b'>')
+        .add(b'`')
+        .add(b'#')
+        .add(b'?')
+        .add(b'{')
+        .add(b'}')
+        .add(b'(')
+        .add(b')')
+        .add(b'\\');
+    let encoded = utf8_percent_encode(filename, ENCODE_SET).to_string();
+
+    let host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("localhost:8000");
+    let scheme = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
+        "http"
+    } else {
+        "https"
+    };
+    format!("{scheme}://{host}/external/{folder}/{encoded}")
+}
+
+/// Everything between bytes landing on disk and a URL going back: the record,
+/// the format conversions, the sidecars, the measurement.
+///
+/// Shared by the two upload paths, which differ only in how the bytes arrive
+/// and had drifted into ninety identical lines apiece.
+///
+/// The record is written **first**, before any of that work. It used to be the
+/// last statement, after a remux that can run for minutes — and a restart in
+/// that window left a file on disk that no record named, which made it
+/// invisible to the quota, to the uploads list, and to every purge path, all
+/// of which work from records. It is updated in place once the work is done.
+/// `folder` is what ties the two writes together, because remuxing an mkv
+/// changes the filename, the disk path and the URL all at once.
+async fn finalize_upload(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    user_id: &str,
+    folder: &str,
+    path: String,
+    filename: String,
+    landed_size: u64,
+) -> String {
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let _ = uploads
+        .insert_one(UploadRecord {
+            user_id: user_id.to_string(),
+            filename: filename.clone(),
+            url: upload_url(headers, folder, &filename),
+            disk_path: path.clone(),
+            size: landed_size,
+            uploaded_at: chrono::Utc::now().timestamp(),
+            width: None,
+            height: None,
+            folder: folder.to_string(),
+            processing: true,
+            referenced_at: None,
+        })
+        .await;
+
+    // Convert to browser-compatible format / apply faststart
+    let (path, filename) = postprocess_video(&path, &filename).await;
+
+    let ext = filename
+        .rsplit('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    // Generate first-frame thumbnail for video files
+    if is_thumbnailed_video(&ext) {
+        generate_thumbnail(&path).await;
+        extract_subtitles(&path).await;
+    }
+    // Generate a downscaled WebP preview for still images
+    if is_previewable_image(&ext) {
+        generate_image_preview(&path).await;
+    }
+
+    // Recalculate file size after potential conversion
+    let final_size = tokio::fs::metadata(&path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(landed_size);
+
+    // Measured here rather than on the way out: the answer never changes, and a
+    // reader scrolling history cannot wait on an ffprobe per image.
+    let (width, height) = if is_measurable_image(&ext) {
+        probe_image_dimensions(&path).await.unzip()
+    } else if is_thumbnailed_video(&ext) {
+        // The thumbnail was generated above, so this measures the picture the
+        // timeline will lay out rather than the video behind it.
+        probe_video_dimensions(&path).await.unzip()
+    } else {
+        (None, None)
+    };
+
+    let url = upload_url(headers, folder, &filename);
+    let _ = uploads
+        .update_one(
+            doc! { "folder": folder },
+            doc! { "$set": {
+                "filename": &filename,
+                "url": &url,
+                "disk_path": &path,
+                "size": final_size as i64,
+                "width": width.map(|w| w as i64),
+                "height": height.map(|h| h as i64),
+                "processing": false,
+            }},
+        )
+        .await;
+
+    url
+}
+
 pub(crate) async fn upload_file(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -886,99 +1064,16 @@ pub(crate) async fn upload_file(
         return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to write file");
     }
 
-    // Convert to browser-compatible format / apply faststart
-    let (path, filename) = postprocess_video(&path, &filename).await;
-
-    // Generate first-frame thumbnail for video files
-    let vid_ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if is_thumbnailed_video(&vid_ext) {
-        generate_thumbnail(&path).await;
-        extract_subtitles(&path).await;
-    }
-
-    // Generate a downscaled WebP preview for still images
-    let img_ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if is_previewable_image(&img_ext) {
-        generate_image_preview(&path).await;
-    }
-
-    // Recalculate file size after potential conversion
-    let final_size = tokio::fs::metadata(&path)
-        .await
-        .map(|m| m.len())
-        .unwrap_or(data.len() as u64);
-
-    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-    // The quote/paren/backslash group is not about URL parsing: these URLs get
-    // written into CSS (`url('…')` for a name font) and into HTML attributes,
-    // and a filename is user-chosen. Encoding them here means an upload's URL
-    // is inert in every context that later quotes it.
-    const ENCODE_SET: &AsciiSet = &CONTROLS
-        .add(b' ')
-        .add(b'"')
-        .add(b'\'')
-        .add(b'<')
-        .add(b'>')
-        .add(b'`')
-        .add(b'#')
-        .add(b'?')
-        .add(b'{')
-        .add(b'}')
-        .add(b'(')
-        .add(b')')
-        .add(b'\\');
-    let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
-
-    let host = headers
-        .get("host")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost:8000");
-    let scheme = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
-        "http"
-    } else {
-        "https"
-    };
-    let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
-
-    // Track the upload in MongoDB
-    // Measured here rather than on the way out: the answer never changes, and a
-    // reader scrolling history cannot wait on an ffprobe per image.
-    let (width, height) = {
-        let ext = filename
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if is_measurable_image(&ext) {
-            probe_image_dimensions(&path).await.unzip()
-        } else if is_thumbnailed_video(&ext) {
-            // The thumbnail was generated above, so this measures the picture
-            // the timeline will lay out rather than the video behind it.
-            probe_video_dimensions(&path).await.unzip()
-        } else {
-            (None, None)
-        }
-    };
-    let record = UploadRecord {
-        user_id: user_id.clone(),
-        filename: filename.clone(),
-        url: url.clone(),
-        disk_path: path,
-        size: final_size,
-        uploaded_at: chrono::Utc::now().timestamp(),
-        width,
-        height,
-    };
-    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
-    let _ = uploads_coll.insert_one(record).await;
+    let url = finalize_upload(
+        &state,
+        &headers,
+        &user_id,
+        &folder,
+        path,
+        filename,
+        data.len() as u64,
+    )
+    .await;
 
     (StatusCode::OK, Json(json!({ "url": url })))
 }
@@ -1024,6 +1119,26 @@ fn staging_dir(upload_id: &str) -> Option<String> {
         return None;
     }
     Some(format!("external/.chunks/{}", upload_id))
+}
+
+/// What a finished chunked upload turned into, kept in the staging dir after
+/// the chunks are deleted.
+///
+/// `complete` assembles, remuxes and probes, which for a long video runs past
+/// the client's timeout — and a client that gave up then had no way to learn
+/// the URL of a file that was sitting finished on disk. Recording the answer
+/// makes `complete` idempotent: asking twice gets the same URL rather than a
+/// second upload and a stranded first one.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ChunkResult {
+    url: String,
+}
+
+async fn read_chunk_result(chunk_dir: &str) -> Option<ChunkResult> {
+    let raw = tokio::fs::read_to_string(format!("{chunk_dir}/done.json"))
+        .await
+        .ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 async fn read_chunk_meta(chunk_dir: &str) -> Option<ChunkMeta> {
@@ -1298,6 +1413,26 @@ pub(crate) async fn upload_status(
         return error_response(StatusCode::FORBIDDEN, "Not your upload");
     }
 
+    // A finished upload holds no chunks, so answering the ordinary way would
+    // tell a resuming client to send the whole file again into a staging dir
+    // that is only waiting to be swept.
+    if let Some(done) = read_chunk_result(&chunk_dir).await {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "uploadId": upload_id,
+                "filename": meta.filename,
+                "fileSize": meta.file_size,
+                "chunkSize": meta.chunk_size,
+                "chunkCount": meta.chunk_count,
+                "received": [],
+                "receivedBytes": 0,
+                "status": "done",
+                "resultUrl": done.url,
+            })),
+        );
+    }
+
     let received = received_chunks(&chunk_dir, &meta).await;
     let received_bytes: u64 = received
         .iter()
@@ -1314,6 +1449,7 @@ pub(crate) async fn upload_status(
             "chunkCount": meta.chunk_count,
             "received": received,
             "receivedBytes": received_bytes,
+            "status": "receiving",
         })),
     )
 }
@@ -1392,6 +1528,12 @@ pub(crate) async fn upload_complete(
         return error_response(StatusCode::FORBIDDEN, "Not your upload");
     }
 
+    // Already assembled. The first call did the work and the client did not
+    // hear the answer, so give it the same answer rather than doing it again.
+    if let Some(done) = read_chunk_result(&chunk_dir).await {
+        return (StatusCode::OK, Json(json!({ "url": done.url })));
+    }
+
     // Verify all chunks are present
     for i in 0..meta.chunk_count {
         let chunk_path = format!("{}/{}", chunk_dir, i);
@@ -1462,106 +1604,36 @@ pub(crate) async fn upload_complete(
         );
     }
 
-    // Clean up chunk dir
-    let _ = tokio::fs::remove_dir_all(&chunk_dir).await;
+    // The chunks have served their purpose, but the staging dir stays: it is
+    // where the result is recorded, so that a client whose `complete` timed out
+    // — which a long remux makes ordinary — can ask again instead of leaving a
+    // finished file on disk that nobody ever referenced.
+    for i in 0..meta.chunk_count {
+        let _ = tokio::fs::remove_file(format!("{}/{}", chunk_dir, i)).await;
+    }
 
     // Flush the file handle before post-processing
     drop(file);
 
-    // Convert to browser-compatible format / apply faststart
-    let (path, filename) = postprocess_video(&path, filename).await;
+    let url = finalize_upload(
+        &state,
+        &headers,
+        &user_id,
+        &folder,
+        path,
+        filename.clone(),
+        total_size,
+    )
+    .await;
 
-    // Generate first-frame thumbnail for video files
-    let vid_ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if is_thumbnailed_video(&vid_ext) {
-        generate_thumbnail(&path).await;
-        extract_subtitles(&path).await;
-    }
-
-    // Generate a downscaled WebP preview for still images
-    let img_ext = filename
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if is_previewable_image(&img_ext) {
-        generate_image_preview(&path).await;
-    }
-
-    // Recalculate file size after potential conversion
-    let final_size = tokio::fs::metadata(&path)
-        .await
-        .map(|m| m.len())
-        .unwrap_or(total_size);
-
-    // Build URL
-    use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
-    // The quote/paren/backslash group is not about URL parsing: these URLs get
-    // written into CSS (`url('…')` for a name font) and into HTML attributes,
-    // and a filename is user-chosen. Encoding them here means an upload's URL
-    // is inert in every context that later quotes it.
-    const ENCODE_SET: &AsciiSet = &CONTROLS
-        .add(b' ')
-        .add(b'"')
-        .add(b'\'')
-        .add(b'<')
-        .add(b'>')
-        .add(b'`')
-        .add(b'#')
-        .add(b'?')
-        .add(b'{')
-        .add(b'}')
-        .add(b'(')
-        .add(b')')
-        .add(b'\\');
-    let encoded_filename = utf8_percent_encode(&filename, ENCODE_SET).to_string();
-
-    let host = headers
-        .get("host")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost:8000");
-    let scheme = if host.starts_with("localhost") || host.starts_with("127.0.0.1") {
-        "http"
-    } else {
-        "https"
-    };
-    let url = format!("{scheme}://{host}/external/{folder}/{encoded_filename}");
-
-    // Track in MongoDB
-    // Measured here rather than on the way out: the answer never changes, and a
-    // reader scrolling history cannot wait on an ffprobe per image.
-    let (width, height) = {
-        let ext = filename
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if is_measurable_image(&ext) {
-            probe_image_dimensions(&path).await.unzip()
-        } else if is_thumbnailed_video(&ext) {
-            // The thumbnail was generated above, so this measures the picture
-            // the timeline will lay out rather than the video behind it.
-            probe_video_dimensions(&path).await.unzip()
-        } else {
-            (None, None)
-        }
-    };
-    let record = UploadRecord {
-        user_id: user_id.clone(),
-        filename: filename.clone(),
-        url: url.clone(),
-        disk_path: path,
-        size: final_size,
-        uploaded_at: chrono::Utc::now().timestamp(),
-        width,
-        height,
-    };
-    let uploads_coll = state.db.collection::<UploadRecord>("uploads");
-    let _ = uploads_coll.insert_one(record).await;
+    // Written after the work rather than before it: this is the record that
+    // says the upload is finished, and a second `complete` reads it instead of
+    // starting the conversions over.
+    let _ = tokio::fs::write(
+        format!("{chunk_dir}/done.json"),
+        serde_json::to_string(&ChunkResult { url: url.clone() }).unwrap_or_default(),
+    )
+    .await;
 
     (StatusCode::OK, Json(json!({ "url": url })))
 }
@@ -2242,40 +2314,91 @@ pub(crate) struct DeleteUploadBody {
     url: String,
 }
 
-/// The `/external/...` files a message body refers to.
+/// The uploads a message body refers to, named by the folder each one owns.
 ///
 /// Attachments are posted as bare URLs in the body, which is also how
 /// `body_has_attachment` in messages.rs judges them.
-pub(crate) fn attachment_urls(body: &str) -> Vec<String> {
-    body.split_whitespace()
+///
+/// The folder rather than the whole URL, because one file has several names:
+/// the absolute URL the upload was handed back on, the same file through
+/// another hostname this instance answers to, and a bare `/external/...` path.
+/// This used to match only the last of those while uploads have always been
+/// handed back as absolute URLs — so it found nothing in a real message, and
+/// the purge on the other side of it had never once run. Every form carries
+/// the same random folder, and that folder is on the record.
+///
+/// Erring toward finding fewer is the safe direction: the worst case is a file
+/// outliving its message, where over-matching would delete one that another
+/// message still needs.
+pub(crate) fn attachment_folders(body: &str) -> Vec<String> {
+    let mut folders: Vec<String> = body
+        .split_whitespace()
         // Punctuation from the prose a link was pasted into, on both sides.
-        // Erring toward finding fewer URLs is the safe direction here: the
-        // worst case is a file outliving its message, where over-matching
-        // would delete one that another message still needs.
         .map(|token| {
             token
                 .trim_start_matches(['(', '[', '<', '"', '\''])
                 .trim_end_matches(['.', ',', ')', ']', '>', '"', '\'', '!', '?'])
         })
-        .filter(|token| token.starts_with("/external/"))
-        .filter(|token| token.len() > "/external/".len())
-        .map(String::from)
-        .collect()
+        .filter_map(|token| {
+            let rest = token.split("/external/").nth(1)?;
+            let folder = rest.split('/').next()?;
+            // Uploads live in a random 32-hex folder with the file inside it.
+            // Anything else under `/external/` is a path this server did not
+            // write, and nothing here should act on one.
+            let named_a_file = rest.len() > folder.len() + 1;
+            if named_a_file && is_upload_folder(folder) {
+                Some(folder.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+    folders.sort();
+    folders.dedup();
+    folders
+}
+
+fn is_upload_folder(folder: &str) -> bool {
+    folder.len() == 32 && folder.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// The `external/<folder>` directory an upload owns, if its `disk_path` names
+/// one.
+///
+/// Guarded rather than trusted, because this is what a recursive delete gets
+/// pointed at and the difference between `external/<folder>` and `external` is
+/// every upload on the instance.
+fn upload_folder_path(disk_path: &str) -> Option<std::path::PathBuf> {
+    let parent = std::path::Path::new(disk_path).parent()?;
+    // Exactly one level below the root, and not the root itself.
+    if parent.parent() != Some(std::path::Path::new("external")) {
+        return None;
+    }
+    let name = parent.file_name()?.to_str()?;
+    if !is_upload_folder(name) {
+        return None;
+    }
+    Some(parent.to_path_buf())
 }
 
 /// Remove an uploaded file and its record, together with the sidecars derived
 /// from it — a thumbnail, a preview, extracted subtitles.
 async fn remove_upload_record(state: &Arc<AppState>, record: &UploadRecord) {
-    let _ = tokio::fs::remove_file(&record.disk_path).await;
-    // Generated alongside the original; see generate_thumbnail,
-    // generate_image_preview and extract_subtitles.
-    for suffix in [".thumb.jpg", ".preview.webp", "@subs.json", ".faststarted"] {
-        let _ = tokio::fs::remove_file(format!("{}{suffix}", record.disk_path)).await;
-    }
-    if let Some(parent) = std::path::Path::new(&record.disk_path).parent() {
-        // Uploads live one-per-random-folder, so this only succeeds once the
-        // folder is genuinely empty.
-        let _ = tokio::fs::remove_dir(parent).await;
+    // An upload owns its whole folder — one random folder per file — so taking
+    // the folder takes the file and every sidecar with it, whatever they are
+    // named. Naming the suffixes one by one missed the `@N.vtt` subtitle
+    // tracks, and every file left behind then made the `remove_dir` that
+    // followed fail, so a deleted upload left its directory, its thumbnail and
+    // its preview on disk permanently.
+    if let Some(folder) = upload_folder_path(&record.disk_path) {
+        let _ = tokio::fs::remove_dir_all(&folder).await;
+    } else {
+        // A record from something that did not follow that layout. Take what
+        // can be named and nothing else.
+        let _ = tokio::fs::remove_file(&record.disk_path).await;
+        for suffix in [".thumb.jpg", ".preview.webp", "@subs.json", ".faststarted"] {
+            let _ = tokio::fs::remove_file(format!("{}{suffix}", record.disk_path)).await;
+        }
     }
     let _ = state
         .db
@@ -2298,7 +2421,7 @@ async fn remove_upload_record(state: &Arc<AppState>, record: &UploadRecord) {
 /// reference to itself.
 pub(crate) async fn purge_attachments(
     state: &Arc<AppState>,
-    urls: &[String],
+    folders: &[String],
     owner: Option<&str>,
     excluding_event: Option<&str>,
 ) {
@@ -2307,8 +2430,11 @@ pub(crate) async fn purge_attachments(
     let uploads = state.db.collection::<UploadRecord>("uploads");
     let messages = state.db.collection::<mongodb::bson::Document>("messages");
 
-    for url in urls {
-        let mut query = doc! { "url": url };
+    for folder in folders {
+        if !is_upload_folder(folder) {
+            continue;
+        }
+        let mut query = doc! { "folder": folder };
         if let Some(owner) = owner {
             query.insert("user_id", owner);
         }
@@ -2316,8 +2442,11 @@ pub(crate) async fn purge_attachments(
             continue;
         };
 
+        // Matched on the folder segment for the same reason it was collected
+        // that way: the same file appears in other messages under whichever
+        // hostname the person who posted it was using.
         let mut still_used = doc! {
-            "content.body": { "$regex": regex_escape(url) },
+            "content.body": { "$regex": regex_escape(&format!("/external/{folder}/")) },
             "redacted": { "$ne": true },
         };
         if let Some(event_id) = excluding_event {
@@ -2329,6 +2458,27 @@ pub(crate) async fn purge_attachments(
 
         remove_upload_record(state, &record).await;
     }
+}
+
+/// Note that something now points at these uploads, so a sweep for files
+/// nothing kept can pass over them.
+///
+/// Best effort, and deliberately not ordered against the write that referenced
+/// them: claiming an upload twice is free, and a claim that does not land only
+/// means the reachability scan has to work the reference out for itself.
+pub(crate) async fn mark_referenced(state: &Arc<AppState>, folders: &[String]) {
+    let folders: Vec<&String> = folders.iter().filter(|f| is_upload_folder(f)).collect();
+    if folders.is_empty() {
+        return;
+    }
+    let _ = state
+        .db
+        .collection::<UploadRecord>("uploads")
+        .update_many(
+            doc! { "folder": { "$in": &folders }, "referenced_at": null },
+            doc! { "$set": { "referenced_at": chrono::Utc::now().timestamp() } },
+        )
+        .await;
 }
 
 /// Delete everything a user ever uploaded.
@@ -2368,17 +2518,18 @@ pub(crate) async fn delete_upload(
 
     let uploads_coll = state.db.collection::<UploadRecord>("uploads");
     let record = uploads_coll
-        .find_one_and_delete(doc! { "user_id": &user_id, "url": &body.url })
+        .find_one(doc! { "user_id": &user_id, "url": &body.url })
         .await
         .ok()
         .flatten();
 
     match record {
         Some(rec) => {
-            let _ = tokio::fs::remove_file(&rec.disk_path).await;
-            if let Some(parent) = std::path::Path::new(&rec.disk_path).parent() {
-                let _ = tokio::fs::remove_dir(parent).await;
-            }
+            // Through the shared path rather than a partial copy of it: this
+            // used to remove the file alone, leaving the thumbnail, the
+            // preview and the subtitle tracks — which then kept the folder
+            // from being removable at all.
+            remove_upload_record(&state, &rec).await;
             (StatusCode::OK, Json(json!({ "deleted": true })))
         }
         None => error_response(StatusCode::NOT_FOUND, "File not found"),
@@ -3153,36 +3304,83 @@ mod tests {
     }
 
     #[test]
-    fn attachment_urls_finds_posted_files() {
+    fn attachment_folders_finds_posted_files() {
+        const A: &str = "0123456789abcdef0123456789abcdef";
+        const B: &str = "fedcba9876543210fedcba9876543210";
+
         // Attachments are posted as bare URLs in the body, sometimes alongside
         // text and sometimes several at once.
         assert_eq!(
-            attachment_urls("look at this /external/uploads/u1/cat.png"),
-            vec!["/external/uploads/u1/cat.png"],
+            attachment_folders(&format!("look at this /external/{A}/cat.png")),
+            vec![A],
         );
         assert_eq!(
-            attachment_urls("/external/a/one.png\n/external/b/two.mp4"),
-            vec!["/external/a/one.png", "/external/b/two.mp4"],
+            attachment_folders(&format!("/external/{A}/one.png\n/external/{B}/two.mp4")),
+            vec![A, B],
         );
-        assert!(attachment_urls("no attachments here").is_empty());
+        assert!(attachment_folders("no attachments here").is_empty());
         // A remote link is not ours to delete.
-        assert!(attachment_urls("https://elsewhere/cat.png").is_empty());
-        // Nor is the bare prefix.
-        assert!(attachment_urls("/external/").is_empty());
+        assert!(attachment_folders("https://elsewhere/cat.png").is_empty());
+        // Nor is the bare prefix, or a folder with nothing in it.
+        assert!(attachment_folders("/external/").is_empty());
+        assert!(attachment_folders(&format!("/external/{A}/")).is_empty());
+        // Nor anything under `external/` this server did not lay out.
+        assert!(attachment_folders("/external/uploads/u1/cat.png").is_empty());
     }
 
     #[test]
-    fn attachment_urls_strips_trailing_prose() {
+    fn attachment_folders_recognises_a_file_by_any_of_its_names() {
+        const A: &str = "0123456789abcdef0123456789abcdef";
+
+        // An upload is handed back as an absolute URL and posted that way, so
+        // matching only the bare path found nothing in a real message — and
+        // the purge behind it had never once run. The same file reached
+        // through a second hostname is still the same file.
+        assert_eq!(
+            attachment_folders(&format!("https://chat.example.com/external/{A}/cat.png")),
+            vec![A],
+        );
+        assert_eq!(
+            attachment_folders(&format!("http://localhost:8000/external/{A}/cat.png")),
+            vec![A],
+        );
+        // And a file named twice is one file.
+        assert_eq!(
+            attachment_folders(&format!(
+                "/external/{A}/cat.png and https://elsewhere.example/external/{A}/cat.png"
+            )),
+            vec![A],
+        );
+    }
+
+    #[test]
+    fn attachment_folders_strip_trailing_prose() {
+        const A: &str = "0123456789abcdef0123456789abcdef";
         // A link pasted mid-sentence keeps the punctuation that followed it,
         // which would otherwise never match the stored upload.
         assert_eq!(
-            attachment_urls("see /external/uploads/u1/cat.png."),
-            vec!["/external/uploads/u1/cat.png"],
+            attachment_folders(&format!("see /external/{A}/cat.png.")),
+            vec![A]
         );
         assert_eq!(
-            attachment_urls("(/external/uploads/u1/cat.png)"),
-            vec!["/external/uploads/u1/cat.png"],
+            attachment_folders(&format!("(/external/{A}/cat.png)")),
+            vec![A]
         );
+    }
+
+    #[test]
+    fn an_upload_folder_is_the_only_thing_a_delete_is_pointed_at() {
+        const A: &str = "0123456789abcdef0123456789abcdef";
+        // This path is handed to a recursive delete, and the difference
+        // between `external/<folder>` and `external` is every upload here.
+        assert_eq!(
+            upload_folder_path(&format!("external/{A}/cat.png")),
+            Some(std::path::PathBuf::from(format!("external/{A}"))),
+        );
+        assert_eq!(upload_folder_path("external/cat.png"), None);
+        assert_eq!(upload_folder_path("cat.png"), None);
+        assert_eq!(upload_folder_path("external/uploads/u1/cat.png"), None);
+        assert_eq!(upload_folder_path(&format!("external/{A}")), None);
     }
 
     #[test]
