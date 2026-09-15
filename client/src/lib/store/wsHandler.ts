@@ -434,6 +434,16 @@ export function createWsMessageHandler(
     } else if (msg.type === "m.room.redaction") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });
+        // A deleted reply is the one thing that changes a thread's count
+        // without a reply, so the redaction carries the new count rather than
+        // leaving the badge on the root message saying what the thread used to
+        // have until something else refetched it.
+        if (msg.thread_id && typeof msg.thread_reply_count === "number") {
+          dispatch({
+            type: "UPDATE_THREAD_REPLY_COUNT",
+            payload: { eventId: msg.thread_id, count: msg.thread_reply_count },
+          });
+        }
       }
     } else if (msg.type === "m.room.message_removed") {
       if (msg.room_id === stateRef.current.currentRoomId) {

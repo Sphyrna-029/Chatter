@@ -941,6 +941,38 @@ pub(crate) async fn redact_message(
         )
         .await;
 
+    // A deleted reply is no longer a reply. The thread's stored count is what
+    // the thread listing and the channel list's preview read, and nothing had
+    // ever taken anything off it — so a thread that had had ten replies and
+    // lost nine still advertised ten.
+    //
+    // Recounted rather than decremented, so a count that had already drifted
+    // is corrected instead of carried forward one lower. The message was
+    // marked redacted just above, which is what takes it out of the count.
+    let thread_id = msg.get_str("thread_id").ok().map(String::from);
+    let thread_reply_count = match &thread_id {
+        Some(thread_id) => {
+            let count = msg_coll
+                .count_documents(doc! {
+                    "room_id": &room_id,
+                    "thread_id": thread_id,
+                    "redacted": { "$ne": true },
+                })
+                .await
+                .unwrap_or(0);
+            let _ = state
+                .db
+                .collection::<ThreadRecord>("threads")
+                .update_one(
+                    doc! { "_id": thread_id },
+                    doc! { "$set": { "reply_count": count as i64 } },
+                )
+                .await;
+            Some(count)
+        }
+        None => None,
+    };
+
     // Told before the tidying up, not after it. The message is deleted the
     // moment that update lands, and everything below is housekeeping nobody is
     // waiting on — but the attachment purge scans the message collection for
@@ -948,7 +980,7 @@ pub(crate) async fn redact_message(
     // after it meant a delete that had already happened stayed on every screen
     // in the room, including the screen of the person who asked for it.
     let redaction_event_id = generate_id("$");
-    let redaction_event = json!({
+    let mut redaction_event = json!({
         "type": "m.room.redaction",
         "room_id": room_id,
         "sender": user_id,
@@ -956,6 +988,12 @@ pub(crate) async fn redact_message(
         "event_id": redaction_event_id,
         "origin_server_ts": now_millis()
     });
+    // Carried on the redaction itself, because nothing else will say it: a
+    // deletion is the one thing that changes a reply count without a reply.
+    if let (Some(thread_id), Some(count)) = (&thread_id, thread_reply_count) {
+        redaction_event["thread_id"] = json!(thread_id);
+        redaction_event["thread_reply_count"] = json!(count);
+    }
 
     broadcast_to_room(&state, &room_id, &redaction_event).await;
 
@@ -1426,9 +1464,15 @@ pub(crate) async fn send_thread_message(
     // A reply carries attachments like any other message.
     super::media::mark_referenced(&state, &super::media::attachment_folders(&req.body)).await;
 
-    // Count total thread replies for the broadcast
+    // Count total thread replies for the broadcast. Deleted ones are not
+    // replies — this and the stored `reply_count` have to mean the same thing
+    // or the badge on a root message and the row in the thread list disagree.
     let reply_count = msg_coll
-        .count_documents(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .count_documents(doc! {
+            "room_id": &room_id,
+            "thread_id": &thread_event_id,
+            "redacted": { "$ne": true },
+        })
         .await
         .unwrap_or(0);
 

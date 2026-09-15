@@ -1823,6 +1823,139 @@ async fn room_suggested_theme_contract() {
 }
 
 #[tokio::test]
+async fn a_deleted_thread_reply_stops_being_counted() {
+    // A redaction keeps the row and marks it, so everything that counted
+    // replies counted the deleted ones too — and the stored count on the
+    // thread record had never had anything taken off it at all. A thread that
+    // had had two replies and lost one went on advertising two, in the badge
+    // on its root message and in the thread list.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Threads",
+        None,
+        false,
+    )
+    .await;
+
+    let send = |body: &str| {
+        let client = client.clone();
+        let base = server.base_url.clone();
+        let token = alice_token.clone();
+        let room = room_id.clone();
+        let body = body.to_string();
+        async move {
+            let txn = format!("t{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            let res = client
+                .put(format!(
+                    "{base}/_matrix/client/r0/rooms/{room}/send/m.room.message/{txn}"
+                ))
+                .header("authorization", bearer(&token))
+                .json(&json!({"msgtype": "m.text", "body": body}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            let value: Value = res.json().await.unwrap();
+            value["event_id"].as_str().unwrap().to_string()
+        }
+    };
+
+    let root_id = send("the root").await;
+
+    let reply = |body: &str, root: String| {
+        let client = client.clone();
+        let base = server.base_url.clone();
+        let token = alice_token.clone();
+        let room = room_id.clone();
+        let body = body.to_string();
+        async move {
+            let txn = format!("r{}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0));
+            let res = client
+                .put(format!("{base}/api/rooms/{room}/threads/{root}/{txn}"))
+                .header("authorization", bearer(&token))
+                .json(&json!({"msgtype": "m.text", "body": body}))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            let value: Value = res.json().await.unwrap();
+            value["event_id"].as_str().unwrap().to_string()
+        }
+    };
+
+    let first_reply = reply("one", root_id.clone()).await;
+    let _second_reply = reply("two", root_id.clone()).await;
+
+    let listed_count = |token: String| {
+        let client = client.clone();
+        let base = server.base_url.clone();
+        let room = room_id.clone();
+        let root = root_id.clone();
+        async move {
+            let res = client
+                .get(format!("{base}/api/rooms/{room}/threads"))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            let body: Value = res.json().await.unwrap();
+            body["threads"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["event_id"] == root.as_str())
+                .expect("the thread is listed")["thread_reply_count"]
+                .as_i64()
+                .unwrap()
+        }
+    };
+
+    assert_eq!(listed_count(alice_token.clone()).await, 2);
+
+    let deleted = client
+        .delete(format!(
+            "{}/_matrix/client/r0/rooms/{}/redact/{}/d1",
+            server.base_url, room_id, first_reply
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::OK);
+
+    // The stored count the thread list reads.
+    assert_eq!(listed_count(alice_token.clone()).await, 1);
+
+    // And the live count the badge on the root message is drawn from, which is
+    // computed separately and has to agree with it.
+    let messages = client
+        .get(format!(
+            "{}/_matrix/client/r0/rooms/{}/messages",
+            server.base_url, room_id
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    let body: Value = messages.json().await.unwrap();
+    let root = body["chunk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["event_id"] == root_id.as_str())
+        .expect("the root message is in the timeline");
+    assert_eq!(root["thread_reply_count"], 1);
+}
+
+#[tokio::test]
 async fn chunked_upload_reports_what_it_holds_and_can_be_abandoned_on_purpose() {
     // An interrupted upload used to be unfinishable: the chunks it had already
     // sent sat in a staging dir addressed by an id nothing could ask about, so

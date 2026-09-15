@@ -1232,8 +1232,11 @@ pub(crate) async fn get_thread_counts_for_events(
         .map(|id| mongodb::bson::Bson::String(id.clone()))
         .collect();
 
+    // A deleted reply still has a row — redaction replaces the body and marks
+    // it rather than removing it — so counting rows counted deletions too, and
+    // the badge on a root message stayed at the number the thread used to have.
     if let Ok(mut cursor) = msg_coll
-        .find(doc! { "thread_id": { "$in": bson_ids } })
+        .find(doc! { "thread_id": { "$in": bson_ids }, "redacted": { "$ne": true } })
         .await
     {
         while let Ok(Some(doc)) = cursor.try_next().await {

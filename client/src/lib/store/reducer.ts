@@ -481,15 +481,29 @@ export function reducer(state: AppState, action: Action): AppState {
       if (state.activeThreadEventId !== action.payload.thread_id) return state;
       if (state.threadMessages.some((m) => m.event_id === action.payload.event_id)) return state;
       return { ...state, threadMessages: [...state.threadMessages, action.payload] };
-    case "UPDATE_THREAD_REPLY_COUNT":
+    case "UPDATE_THREAD_REPLY_COUNT": {
+      // The count is shown in two places — the badge on the root message and
+      // the channel list's preview row — and only the first was kept up. The
+      // preview's own action carries a timestamp and re-sorts by it, which is
+      // right for a reply and wrong for a deletion: losing a reply is not
+      // activity and must not lift the thread up the list.
+      const { eventId, count } = action.payload;
+      const previews = Object.fromEntries(
+        Object.entries(state.channelThreads).map(([channelId, threads]) => [
+          channelId,
+          threads.map((thread) =>
+            thread.threadId === eventId ? { ...thread, replyCount: count } : thread,
+          ),
+        ]),
+      );
       return {
         ...state,
         messages: state.messages.map((m) =>
-          m.event_id === action.payload.eventId
-            ? { ...m, thread_reply_count: action.payload.count }
-            : m
+          m.event_id === eventId ? { ...m, thread_reply_count: count } : m
         ),
+        channelThreads: previews,
       };
+    }
     case "ADD_THREAD_PARTICIPANTS": {
       const mergeParticipants = (existing: string[] | undefined, added: string[]) => {
         const set = new Set(existing ?? []);
