@@ -61,6 +61,9 @@ self.addEventListener("push", (event) => {
         data: {
           roomId: payload.room_id,
           channelId: payload.channel_id,
+          // An event reminder asks for the events list rather than the
+          // timeline; everything else leaves this unset.
+          panel: payload.panel,
         },
       });
     })(),
@@ -69,7 +72,7 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const { roomId, channelId } = event.notification.data || {};
+  const { roomId, channelId, panel } = event.notification.data || {};
 
   event.waitUntil(
     (async () => {
@@ -84,7 +87,7 @@ self.addEventListener("notificationclick", (event) => {
       for (const client of clients) {
         if (new URL(client.url).origin !== self.location.origin) continue;
         await client.focus();
-        client.postMessage({ type: "notification-navigate", roomId, channelId });
+        client.postMessage({ type: "notification-navigate", roomId, channelId, panel });
         return;
       }
 
@@ -92,6 +95,7 @@ self.addEventListener("notificationclick", (event) => {
       const params = new URLSearchParams();
       if (roomId) params.set("room", roomId);
       if (channelId) params.set("channel", channelId);
+      if (panel) params.set("panel", panel);
       const query = params.toString();
       await self.clients.openWindow(query ? `/?${query}` : "/");
     })(),

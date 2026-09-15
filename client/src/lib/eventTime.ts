@@ -9,6 +9,11 @@
 
 export type EventPhase = "live" | "soon" | "upcoming" | "ended";
 
+/** How far ahead the server sends its reminder. Mirrors `REMINDER_LEAD_MS` in
+ *  src/backend/routes/events.rs, and is only ever used to say so in words —
+ *  the server owns the actual schedule. */
+export const REMINDER_LEAD_MINUTES = 10;
+
 /** Within this of the start, an event is "starting soon" rather than merely
  *  upcoming — close enough that someone might want to be told. */
 export const SOON_MS = 60 * 60 * 1000;

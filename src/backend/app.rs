@@ -635,6 +635,10 @@ pub async fn run() {
     // request ever arrives to say so. Same reasoning as the sweep above.
     tokio::spawn(media::sweep_abandoned_chunks());
 
+    // An event starting is the absence of an action too, so nothing but a
+    // clock can announce it.
+    tokio::spawn(crate::backend::routes::events::run_event_reminder_scheduler(Arc::clone(&state)));
+
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {
         let state_for_poller = Arc::clone(&state);

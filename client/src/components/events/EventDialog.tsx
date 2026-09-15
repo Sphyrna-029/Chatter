@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, MapPin, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  REMINDER_LEAD_MINUTES,
   fromLocalInputValue,
   nextHalfHour,
   toLocalInputValue,
@@ -122,7 +123,9 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
         <DialogHeader>
           <DialogTitle>{editing ? "Edit event" : "Schedule an event"}</DialogTitle>
           <DialogDescription>
-            Times are in your own timezone. Everyone sees them in theirs.
+            Times are in your own timezone — everyone sees them in theirs. Anyone
+            who says they are coming is reminded {REMINDER_LEAD_MINUTES} minutes
+            before it starts.
           </DialogDescription>
         </DialogHeader>
 

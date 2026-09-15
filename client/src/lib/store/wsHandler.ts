@@ -462,6 +462,37 @@ export function createWsMessageHandler(
       if (msg.event) {
         dispatch({ type: "UPSERT_ROOM_EVENT", payload: msg.event });
       }
+    } else if (msg.type === "m.room.event_reminder") {
+      // Addressed to this user by the server — it only reaches people who said
+      // they were coming — so there is no audience check to make here.
+      const cur = stateRef.current;
+      const roomInfo = cur.roomInfoMap[msg.room_id];
+      const ownStatus = cur.userPresence[cur.userId ?? ""]?.status;
+      if (ownStatus !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
+      showDesktopNotification({
+        title: String(msg.name || "Event"),
+        body: `${msg.when} · ${roomInfo?.name || "a room"}`,
+        icon: roomInfo?.icon_url || undefined,
+        tag: `${msg.room_id}|event|${msg.event_id}`,
+        onClick: () =>
+          window.dispatchEvent(
+            new CustomEvent("notification-navigate", {
+              // The channel is only carried when the event is held in one, so
+              // a reminder for a voice event lands in the voice channel and
+              // everything else lands on the list.
+              detail: {
+                roomId: msg.room_id,
+                channelId: msg.channel_id || undefined,
+                panel: "events",
+              },
+            }),
+          ),
+      });
+      // In-app too: the desktop notification is silent when the tab is focused
+      // and permission was never granted, and this is time-critical.
+      toast(String(msg.name || "Event"), {
+        description: `${msg.when} · ${roomInfo?.name || "a room"}`,
+      });
     } else if (msg.type === "m.room.event_deleted") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REMOVE_ROOM_EVENT", payload: msg.event_id });

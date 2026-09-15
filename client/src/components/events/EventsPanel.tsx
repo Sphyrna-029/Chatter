@@ -17,6 +17,7 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  Bell,
   Download,
   HelpCircle,
   MapPin,
@@ -32,6 +33,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { toast } from "sonner";
 import {
+  REMINDER_LEAD_MINUTES,
   absoluteLabel,
   dayLabel,
   phaseOf,
@@ -356,6 +358,13 @@ function EventCard({
             );
           })}
         </div>
+      )}
+
+      {!past && !event.cancelled && (event.my_rsvp === "going" || event.my_rsvp === "maybe") && (
+        <p className="ui-hint mt-1.5 flex items-center gap-1">
+          <Bell className="h-3 w-3 shrink-0" />
+          We'll remind you {REMINDER_LEAD_MINUTES} minutes before.
+        </p>
       )}
 
       <button

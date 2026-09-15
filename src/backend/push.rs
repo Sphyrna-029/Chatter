@@ -390,6 +390,93 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
     }
 }
 
+/// One event, to the people who said they would be at it.
+pub(crate) struct EventReminderNotification {
+    pub(crate) room_id: String,
+    pub(crate) room_name: String,
+    pub(crate) event_name: String,
+    pub(crate) event_id: String,
+    pub(crate) icon: String,
+    /// Already-composed sentence — "starts in 10 minutes", "is starting now" —
+    /// so the push and the WebSocket event say exactly the same thing.
+    pub(crate) when: String,
+    /// Who answered going or maybe. Nobody else is woken: an event reminder is
+    /// for the people who said they were coming, not for the room.
+    pub(crate) audience: Vec<String>,
+}
+
+/// Queue reminder delivery without making the scheduler tick wait on it.
+pub(crate) fn spawn_event_reminder_push(state: Arc<AppState>, n: EventReminderNotification) {
+    if state.vapid.is_none() || n.audience.is_empty() {
+        return;
+    }
+    tokio::spawn(async move {
+        deliver_event_reminder(&state, &n).await;
+    });
+}
+
+async fn deliver_event_reminder(state: &Arc<AppState>, n: &EventReminderNotification) {
+    let Some(vapid) = state.vapid.as_ref() else {
+        return;
+    };
+
+    // Anyone connected is told by their own client off the WebSocket event, the
+    // same split the message path makes.
+    let candidates: Vec<String> = {
+        let ws = state.active_websockets.read().await;
+        n.audience
+            .iter()
+            .filter(|uid| ws.get(*uid).is_none_or(|conns| conns.is_empty()))
+            .cloned()
+            .collect()
+    };
+    if candidates.is_empty() {
+        return;
+    }
+
+    let subscriptions = subscriptions_for(state, &candidates).await;
+    if subscriptions.is_empty() {
+        return;
+    }
+    let recipients: Vec<String> = subscriptions.keys().cloned().collect();
+    let overrides = notification_overrides_for(state, &recipients).await;
+    let dnd = dnd_users(state, &recipients).await;
+
+    let payload = json!({
+        "title": n.event_name,
+        "body": format!("{} · {}", n.when, n.room_name),
+        "icon": n.icon,
+        // One per event: a reminder that somehow fired twice collapses rather
+        // than stacking.
+        "tag": format!("{}|event|{}", n.room_id, n.event_id),
+        "room_id": n.room_id,
+        "channel_id": "",
+        "event_id": n.event_id,
+        "panel": "events",
+    })
+    .to_string();
+
+    for (user_id, subs) in subscriptions {
+        // A reminder is something the person asked for by saying they would
+        // come, so "mentions only" does not silence it. Do-not-disturb and a
+        // room muted outright still do.
+        if dnd.contains(&user_id) {
+            continue;
+        }
+        let level = resolve_level(
+            overrides.get(&user_id).unwrap_or(&HashMap::new()),
+            &n.room_id,
+            "",
+        );
+        if level == NotificationLevel::None {
+            continue;
+        }
+        for sub in subs {
+            send_one(state, vapid, &sub, payload.as_bytes()).await;
+        }
+    }
+}
+
 /// Encrypt and POST one notification, dropping the subscription when the push
 /// service says the browser is gone for good.
 async fn send_one(

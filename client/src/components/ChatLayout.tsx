@@ -217,13 +217,18 @@ export function ChatLayout() {
   // The WS handler cannot navigate on its own, so it raises this event.
   useEffect(() => {
     const handler = async (e: Event) => {
-      const { roomId, channelId, threadId } = (e as CustomEvent).detail ?? {};
+      const { roomId, channelId, threadId, panel } = (e as CustomEvent).detail ?? {};
       if (!roomId) return;
       if (roomId !== state.currentRoomId) await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);
       // A thread notification should land in the thread, not merely the
       // channel it hangs in.
       if (threadId) await openThread(threadId);
+      // An event reminder lands on the list it is about, since the event is
+      // the thing being announced rather than anything in the timeline.
+      if (panel === "events") {
+        dispatch({ type: "SET_COMPANION_PANEL", payload: "events" });
+      }
     };
     // The same destination arrives two ways: from the in-page notification as
     // a window event, and from a push notification as a service worker
@@ -238,7 +243,7 @@ export function ChatLayout() {
       window.removeEventListener("notification-navigate", handler);
       navigator.serviceWorker?.removeEventListener("message", fromServiceWorker);
     };
-  }, [selectRoom, selectChannel, openThread, state.currentRoomId]);
+  }, [selectRoom, selectChannel, openThread, dispatch, state.currentRoomId]);
 
   // A push notification clicked with no window open reopens the app with the
   // destination in the URL. Consume it once, then strip it so a refresh does
@@ -252,14 +257,20 @@ export function ChatLayout() {
     const params = new URLSearchParams(window.location.search);
     const roomId = params.get("room");
     const channelId = params.get("channel");
+    const panel = params.get("panel");
     if (!roomId) return;
 
     window.history.replaceState({}, "", window.location.pathname);
     void (async () => {
       await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);
+      // Same destination as the in-page path: a reminder opened from a cold
+      // start should still land on the event it was about.
+      if (panel === "events") {
+        dispatch({ type: "SET_COMPANION_PANEL", payload: "events" });
+      }
     })();
-  }, [state.roomInfoMap, selectRoom, selectChannel]);
+  }, [state.roomInfoMap, selectRoom, selectChannel, dispatch]);
 
   // Repair this browser's push subscription if it was enrolled and the
   // endpoint has since rotated or been dropped.

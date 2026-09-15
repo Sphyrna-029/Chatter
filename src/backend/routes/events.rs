@@ -9,8 +9,9 @@ use super::super::{
     dto::{CreateEventRequest, EventsQuery, RsvpRequest, UpdateEventRequest},
     helpers::{
         broadcast_to_room, effective_permissions, error_response, extract_token, generate_id,
-        get_allowed_channel_ids, get_user_from_token, now_millis,
+        get_allowed_channel_ids, get_user_from_token, now_millis, send_to_user,
     },
+    push::{spawn_event_reminder_push, EventReminderNotification},
     state::{AppState, EventRecord, EventRsvpRecord, RoomRecord},
 };
 use axum::{
@@ -369,6 +370,7 @@ pub(crate) async fn create_event(
         created_at: now,
         updated_at: now,
         cancelled: false,
+        reminded_at: 0,
     };
 
     coll.insert_one(&record)
@@ -459,6 +461,11 @@ pub(crate) async fn update_event(
     set.insert("starts_at", starts_at);
     set.insert("ends_at", ends_at);
     set.insert("updated_at", now_millis());
+    // Moving an event re-arms its reminder — the one that may already have
+    // gone out was about a time that is no longer when this happens.
+    if starts_at != record.starts_at {
+        set.insert("reminded_at", 0i64);
+    }
     if let Some(cover) = req.cover_url.clone() {
         set.insert("cover_url", cover);
     }
@@ -619,6 +626,174 @@ pub(crate) async fn list_rsvps(
     ))
 }
 
+// ─── Reminders ───────────────────────────────────────────────────────────────
+
+/// How far ahead the starting-soon reminder goes out. Long enough to finish
+/// what you are doing and get there, short enough that you have not forgotten
+/// again by the time it starts.
+const REMINDER_LEAD_MS: i64 = 10 * 60 * 1000;
+/// An event whose start is further behind us than this never gets a reminder.
+/// Without it, a server that was down over the weekend would come back and
+/// announce everything it slept through.
+const REMINDER_GRACE_MS: i64 = 5 * 60 * 1000;
+/// The scheduler's heartbeat. The reminder is a ten-minute promise, so half a
+/// minute of slack in either direction is invisible.
+const REMINDER_TICK_SECS: u64 = 30;
+
+/// "starts in 10 minutes" / "is starting now" — the sentence the reminder
+/// leads with, in both the push and the socket event, so they never disagree.
+fn when_phrase(starts_at: i64, now: i64) -> String {
+    let minutes = (starts_at - now + 59_999) / 60_000;
+    if minutes <= 0 {
+        return "is starting now".to_string();
+    }
+    if minutes == 1 {
+        return "starts in a minute".to_string();
+    }
+    format!("starts in {minutes} minutes")
+}
+
+/// Everyone who said they would be at this event.
+///
+/// "Maybe" is included on purpose: someone who has not ruled it out is exactly
+/// who a nudge is for. Only an explicit "can't make it" opts out.
+async fn reminder_audience(state: &AppState, event_id: &str) -> Vec<String> {
+    let coll = state.db.collection::<EventRsvpRecord>("event_rsvps");
+    let Ok(mut cursor) = coll
+        .find(doc! { "event_id": event_id, "status": { "$in": ["going", "maybe"] } })
+        .await
+    else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    while let Ok(Some(r)) = cursor.try_next().await {
+        out.push(r.user_id);
+    }
+    out
+}
+
+/// Tell one event's audience that it is about to start.
+async fn send_reminder(state: &Arc<AppState>, record: &EventRecord, now: i64) {
+    let audience = reminder_audience(state, &record.event_id).await;
+    if audience.is_empty() {
+        return;
+    }
+
+    // Someone who has since left the room must not be reminded about its
+    // events — they can no longer open the thing being announced.
+    let audience: Vec<String> = {
+        let rm = state.room_members.read().await;
+        match rm.get(&record.room_id) {
+            Some(members) => audience
+                .into_iter()
+                .filter(|uid| members.contains(uid))
+                .collect(),
+            None => return,
+        }
+    };
+    if audience.is_empty() {
+        return;
+    }
+
+    let when = when_phrase(record.starts_at, now);
+    let room = state
+        .db
+        .collection::<RoomRecord>("rooms")
+        .find_one(doc! { "_id": &record.room_id })
+        .await
+        .ok()
+        .flatten();
+    let room_name = room
+        .as_ref()
+        .map(|r| r.name.clone())
+        .unwrap_or_else(|| "a room".to_string());
+    let icon = room
+        .as_ref()
+        .map(|r| r.icon_url.clone())
+        .unwrap_or_default();
+
+    // Addressed to each person rather than broadcast: only the people who
+    // answered should hear it, and a room broadcast reaches everyone.
+    let event = json!({
+        "type": "m.room.event_reminder",
+        "room_id": record.room_id,
+        "event_id": record.event_id,
+        "name": record.name,
+        "starts_at": record.starts_at,
+        "channel_id": record.channel_id,
+        "when": when,
+    });
+    for user_id in &audience {
+        send_to_user(state, user_id, &event).await;
+    }
+
+    spawn_event_reminder_push(
+        Arc::clone(state),
+        EventReminderNotification {
+            room_id: record.room_id.clone(),
+            room_name,
+            event_name: record.name.clone(),
+            event_id: record.event_id.clone(),
+            icon,
+            when,
+            audience,
+        },
+    );
+}
+
+/// Nudge each event once, shortly before it starts.
+///
+/// Nothing else can announce an event starting — it is the absence of an
+/// action, the same shape as the presence sweeper — so this runs for the life
+/// of the process.
+pub(crate) async fn run_event_reminder_scheduler(state: Arc<AppState>) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(REMINDER_TICK_SECS));
+    interval.tick().await; // the immediate first tick says nothing new
+
+    loop {
+        interval.tick().await;
+        let now = now_millis();
+        let coll = state.db.collection::<EventRecord>("events");
+
+        let Ok(mut cursor) = coll
+            .find(doc! {
+                "cancelled": false,
+                "reminded_at": 0i64,
+                "starts_at": {
+                    "$lte": now + REMINDER_LEAD_MS,
+                    "$gt": now - REMINDER_GRACE_MS,
+                },
+            })
+            .await
+        else {
+            continue;
+        };
+
+        let mut due: Vec<EventRecord> = Vec::new();
+        while let Ok(Some(record)) = cursor.try_next().await {
+            due.push(record);
+        }
+
+        for record in due {
+            // Claim it before sending. The filter carries `reminded_at: 0`, so
+            // if two processes are running this loop only one update matches
+            // and only one reminder goes out.
+            let claimed = coll
+                .update_one(
+                    doc! { "_id": &record.event_id, "reminded_at": 0i64 },
+                    doc! { "$set": { "reminded_at": now } },
+                )
+                .await
+                .map(|r| r.modified_count == 1)
+                .unwrap_or(false);
+            if !claimed {
+                continue;
+            }
+            send_reminder(&state, &record, now).await;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,6 +827,43 @@ mod tests {
         // in the past and therefore fine. The other direction is the tell.
         let millis_of_a_seconds_value = 4102444800i64 * 1000 * 1000;
         assert!(validate("Party", "", "", millis_of_a_seconds_value, 0).is_err());
+    }
+
+    #[test]
+    fn the_reminder_says_how_long_is_left_in_whole_minutes() {
+        let now = 1_700_000_000_000i64;
+        assert_eq!(when_phrase(now + 10 * 60_000, now), "starts in 10 minutes");
+        assert_eq!(when_phrase(now + 60_000, now), "starts in a minute");
+        // Part of a minute still rounds up to that minute rather than down to
+        // "now" — the event has not started yet and should not claim to have.
+        assert_eq!(when_phrase(now + 30_000, now), "starts in a minute");
+    }
+
+    #[test]
+    fn an_event_at_or_past_its_start_is_starting_now() {
+        let now = 1_700_000_000_000i64;
+        assert_eq!(when_phrase(now, now), "is starting now");
+        // The tick can land a few seconds late; that must not produce a
+        // reminder counting backwards.
+        assert_eq!(when_phrase(now - 20_000, now), "is starting now");
+    }
+
+    #[test]
+    fn the_reminder_window_is_the_lead_ahead_and_the_grace_behind() {
+        // The window the scheduler queries, stated as the arithmetic it uses,
+        // so a change to either constant has to be deliberate.
+        let now = 1_700_000_000_000i64;
+        let earliest = now - REMINDER_GRACE_MS;
+        let latest = now + REMINDER_LEAD_MS;
+        let due = |starts_at: i64| starts_at <= latest && starts_at > earliest;
+
+        assert!(due(now + REMINDER_LEAD_MS));
+        assert!(!due(now + REMINDER_LEAD_MS + 1));
+        assert!(due(now));
+        // Long over: a server coming back from downtime must not announce what
+        // it slept through.
+        assert!(!due(now - REMINDER_GRACE_MS));
+        assert!(!due(now - 24 * 60 * 60 * 1000));
     }
 
     #[test]

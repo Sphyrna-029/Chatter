@@ -350,6 +350,12 @@ pub(crate) struct EventRecord {
     /// already put it in their week, so it stays visible with the news on it.
     #[serde(default)]
     pub(crate) cancelled: bool,
+    /// When the starting-soon reminder went out, or 0 if it has not. Written
+    /// before the notifications are sent and cleared whenever the start time
+    /// moves, which is what stops an event reminding twice and what re-arms
+    /// one that was rescheduled.
+    #[serde(default)]
+    pub(crate) reminded_at: i64,
 }
 
 /// One person's answer to one event. Keyed `{event_id}:{user_id}` so answering
