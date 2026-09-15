@@ -39,24 +39,6 @@ export function useUploadQueue() {
 
   const reset = useCallback(() => setProgress({}), []);
 
-  /**
-   * Clear everything that landed, keeping the tiles that did not.
-   *
-   * A send used to wipe the whole map the moment it finished, so the "failed"
-   * state a tile had just been put into was gone before it could be read — the
-   * file stayed staged with nothing on it to say why. What failed keeps its
-   * mark until it is retried or removed.
-   */
-  const keepFailures = useCallback(
-    () =>
-      setProgress((prev) =>
-        Object.fromEntries(
-          Object.entries(prev).filter(([, entry]) => entry.status === "failed"),
-        ),
-      ),
-    [],
-  );
-
   const uploadAll = useCallback(
     async (
       files: PendingFile[],
@@ -98,5 +80,5 @@ export function useUploadQueue() {
     [],
   );
 
-  return { progress, uploadAll, reset, keepFailures };
+  return { progress, uploadAll, reset };
 }

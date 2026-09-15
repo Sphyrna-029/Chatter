@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2, Smile } from "lucide-react";
 import { useAppContext } from "@/lib/store";
-import { apiUploadFile } from "@/lib/api";
+import { apiSendThreadMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { MessageItem } from "./MessageItem";
 import { displayUserId } from "@/lib/utils";
@@ -17,30 +17,40 @@ import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { PendingAttachments } from "./PendingAttachments";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
-import { useUploadQueue } from "@/hooks/useUploadQueue";
+import { OutgoingUploads } from "./OutgoingUploads";
+import { enqueueOutgoing, useOutgoingUploads, type OutgoingTarget } from "@/lib/outgoingUploads";
 import { scrollBehavior } from "@/lib/theme/display";
 
 export function ThreadPanel() {
   const confirm = useConfirm();
-  const { state, closeThread, sendThreadMessage, setThreadName, deleteThread } = useAppContext();
+  const { state, closeThread, setThreadName, deleteThread } = useAppContext();
   const [body, setBody] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [uploading, setUploading] = useState(false);
   const {
     files: pendingFiles,
     add: addStagedFile,
     remove: removePendingFile,
-    removeIds: removePendingIds,
+    clear: clearPendingFiles,
   } = usePendingFiles();
-  const { progress: uploadProgressByFile, uploadAll, reset: resetUploadProgress } = useUploadQueue();
+  const outgoing = useOutgoingUploads();
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const { threadRootMessage, threadMessages, userPresence, currentRoomId, roomInfoMap } = state;
+
+  /** What to call this thread when its send is watched from somewhere else. */
+  const threadLabel = threadRootMessage?.thread_name
+    ? `“${threadRootMessage.thread_name}”`
+    : "a thread";
+  /** Where this composer posts, so its own batches are not labelled. */
+  const here: OutgoingTarget | undefined =
+    currentRoomId && state.activeThreadEventId
+      ? { kind: "thread", roomId: currentRoomId, threadEventId: state.activeThreadEventId }
+      : undefined;
 
   const roomCustomEmojis = currentRoomId ? (roomInfoMap[currentRoomId]?.custom_emojis ?? []) : [];
   const emojiAliases = currentRoomId ? (roomInfoMap[currentRoomId]?.emoji_aliases ?? {}) : {};
@@ -52,45 +62,35 @@ export function ThreadPanel() {
   const handleSend = useCallback(async () => {
     const trimmed = body.trim();
     if (!trimmed && pendingFiles.length === 0) return;
+    // Read now rather than when the send resolves: a thread can be closed, or
+    // another one opened, long before a large attachment has finished going
+    // up, and the reply belongs to the thread it was written in.
+    const roomId = state.currentRoomId;
+    const threadEventId = state.activeThreadEventId;
+    if (!roomId || !threadEventId) return;
     setBody("");
 
-    // Nothing is uploaded until here, so the draft stays editable while files
-    // are staged — and the row stays up through the upload, since it is what
-    // the per-file bars are drawn on.
-    const uploadedUrls: string[] = [];
+    // A reply with files is handed to the outgoing queue whole, so closing the
+    // thread — or the panel — does not take the upload with it.
     if (pendingFiles.length > 0) {
-      setUploading(true);
-      try {
-        const outcomes = await uploadAll(pendingFiles, async (file, onProgress) => {
-          const { url } = await apiUploadFile(file, onProgress);
-          return url;
-        });
-        const failed = outcomes.filter((o) => o.url === null);
-        if (failed.length > 0) {
-          toast.error(
-            failed.length === 1
-              ? `${failed[0].file.file.name} could not be uploaded`
-              : `${failed.length} files could not be uploaded`,
-          );
-        }
-        for (const outcome of outcomes) {
-          if (outcome.url) uploadedUrls.push(outcome.url);
-        }
-        // Only what landed leaves the row; a file that failed stays staged.
-        removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
-      } finally {
-        setUploading(false);
-      }
+      const files = pendingFiles.map((staged) => staged.file);
+      clearPendingFiles();
+      enqueueOutgoing({
+        target: { kind: "thread", roomId, threadEventId },
+        label: threadLabel,
+        body: trimmed,
+        files,
+      });
+      return;
     }
-    resetUploadProgress();
 
-    // Text and attachments go out as one message, matching the main composer.
-    const parts = [trimmed, ...uploadedUrls].filter(Boolean);
-    if (parts.length === 0) return;
     try {
-      await sendThreadMessage(parts.join("\n"));
-    } catch {}
-  }, [body, pendingFiles, removePendingIds, sendThreadMessage, uploadAll, resetUploadProgress]);
+      await apiSendThreadMessage(roomId, threadEventId, trimmed);
+    } catch {
+      // Matching the previous behaviour: a refused reply is reported by the
+      // request layer, and the thread stays open.
+    }
+  }, [body, pendingFiles, clearPendingFiles, state.currentRoomId, state.activeThreadEventId, threadLabel]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -390,11 +390,15 @@ export function ThreadPanel() {
         {/* The single bar that stood here said which file it was under; with
             several going up it named them one after another too fast to read.
             Each tile carries its own now. */}
-        <PendingAttachments
-          files={pendingFiles}
-          onRemove={removePendingFile}
-          progress={uploadProgressByFile}
+        <OutgoingUploads
+          batches={outgoing.filter(
+            (batch) =>
+              batch.target.kind === "thread" &&
+              batch.target.threadEventId === state.activeThreadEventId,
+          )}
+          here={here}
         />
+        <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
           <input
             ref={fileInputRef}
@@ -406,7 +410,6 @@ export function ThreadPanel() {
           <button
             className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
             title="Upload file"
           >
             <Paperclip className="h-4 w-4" />
@@ -445,7 +448,9 @@ export function ThreadPanel() {
           <Button
             size="sm"
             className="h-7 px-2 shrink-0"
-            disabled={uploading || (!body.trim() && pendingFiles.length === 0)}
+            // Nothing to wait for any more: a reply with files is handed to
+            // the outgoing queue, so the composer is free straight away.
+            disabled={!body.trim() && pendingFiles.length === 0}
             onClick={handleSend}
           >
             Send

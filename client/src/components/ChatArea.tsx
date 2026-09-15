@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { firstVisibleRow } from "@/lib/scrollAnchor";
 import { useAppContext } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { apiUploadFile, apiCancelUpload, apiResumedBytes, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
+import { apiSendMessage, apiCancelUpload, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage } from "@/lib/api";
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { composerLength, emojiImage, getComposerText, setComposerText } from "@/lib/composer";
 import { MessageItem } from "./MessageItem";
@@ -22,10 +22,11 @@ import { phaseOf } from "@/lib/eventTime";
 import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
 import { InterruptedUploads } from "./InterruptedUploads";
+import { OutgoingUploads } from "./OutgoingUploads";
+import { enqueueOutgoing, useOutgoingUploads, type OutgoingTarget } from "@/lib/outgoingUploads";
 import { isSameFile } from "@/lib/uploadResume";
 import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
-import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { useInterruptedUploads } from "@/hooks/useInterruptedUploads";
 import { Search, X, ArrowDown, CalendarDays, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
@@ -120,7 +121,7 @@ interface ChatAreaProps {
 }
 
 export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
-  const { state, dispatch, sendMessage, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead, saveDraft } = useAppContext();
+  const { state, dispatch, sendTyping, updateTopic, updateRoomSettings, loadOlderMessages, loadMessagesAround, selectChannel, markChannelRead, saveDraft } = useAppContext();
   const isMobile = useIsMobile();
   // A DM's call is keyed by the room, so being in it is a room comparison.
   const inThisDmCall =
@@ -159,7 +160,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   const justSwitchedChannelRef = useRef(false);
   const inputRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
   const [cliMode, setCliMode] = useState(false);
   const [exifDialogOpen, setExifDialogOpen] = useState(false);
   const exifPendingFilesRef = useRef<File[]>([]);
@@ -321,11 +321,10 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     files: pendingFiles,
     addMany: addStagedFiles,
     remove: removePendingFile,
-    removeIds: removePendingIds,
     clear: clearPendingFiles,
     remaining: attachmentsRemaining,
   } = usePendingFiles();
-  const { progress: uploadProgressByFile, uploadAll, keepFailures: keepUploadFailures } = useUploadQueue();
+  const outgoing = useOutgoingUploads();
   const {
     uploads: interruptedUploads,
     refresh: refreshInterruptedUploads,
@@ -710,6 +709,13 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     if (!body && !hasFiles) return;
     if (!state.currentRoomId) return;
     if (displayLength > MAX_MESSAGE_LENGTH) return;
+    // Read now, not when the send resolves. An upload can run for minutes and
+    // its author is free to go and read something else meanwhile — but the
+    // message belongs where it was written. The store's `sendMessage` looks up
+    // the *current* room as it posts, so a large attachment sent from one
+    // channel used to arrive in whichever one its author had wandered into.
+    const roomId = state.currentRoomId;
+    const channelId = state.currentChannelId ?? "";
     const replyEventId = state.replyingTo?.event_id;
     const spoiler = isSpoiler;
     // Posting is an explicit intent to rejoin the live conversation, so follow
@@ -722,13 +728,8 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     // The message is on its way, so it is no longer a draft anywhere.
     if (draftTimerRef.current) clearTimeout(draftTimerRef.current);
     pendingDraftRef.current = null;
-    void saveDraft(state.currentRoomId, state.currentChannelId ?? "", "");
+    void saveDraft(roomId, channelId, "");
     dispatch({ type: "SET_REPLYING_TO", payload: null });
-
-    // The staged row is deliberately *not* cleared here: it stays on screen as
-    // the thing the progress bars are drawn on, and is only let go once the
-    // files are actually up. A failed send then still has them.
-    const hasStagedFiles = pendingFiles.length > 0;
 
     // Auto-resolve :shortcode: patterns to emoji in body text
     const resolveShortcodes = (raw: string) =>
@@ -750,30 +751,36 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       inputRef.current?.focus();
     };
 
-    try {
-      const uploadedUrls = hasStagedFiles ? await uploadStagedFiles() : [];
+    // A send that carries files is handed over whole — text, attachments and
+    // destination — and stops being this component's business. It survives the
+    // room switch, the thread being closed, and this composer unmounting; the
+    // progress for it is drawn from the queue instead of from local state.
+    if (hasFiles) {
+      const files = pendingFiles.map((staged) => staged.file);
+      clearPendingFiles();
+      enqueueOutgoing({
+        target: { kind: "channel", roomId, channelId, replyTo: replyEventId, spoiler },
+        label: destinationLabel(),
+        body: resolveShortcodes(body),
+        files,
+      });
+      return;
+    }
 
-      if (hasStagedFiles && body) {
-        // Files + text: one combined message, so text and images aren't split
-        // into separate spoiler/reply messages.
-        const parts = [resolveShortcodes(body), ...uploadedUrls].filter(Boolean);
-        if (parts.length > 0) {
-          await sendMessage(parts.join("\n"), replyEventId, spoiler);
-        }
-      } else {
-        // Files only: send each as its own message
-        for (const url of uploadedUrls) {
-          await sendMessage(url, undefined, spoiler);
-        }
-        // Text only: send as one message
-        if (body) {
-          await sendMessage(resolveShortcodes(body), replyEventId, spoiler);
-        }
-      }
+    // Text on its own is instant, so it keeps the behaviour that matters for
+    // it: a refusal — slow mode, a rate limit — puts what was written back
+    // rather than eating it.
+    try {
+      await apiSendMessage(
+        roomId,
+        resolveShortcodes(body),
+        replyEventId,
+        spoiler,
+        channelId || undefined,
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to send message");
-      keepUploadFailures();
-      if (body) restoreComposer();
+      restoreComposer();
     }
   };
 
@@ -1072,29 +1079,6 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
    * send then failed, the files were already gone. Now the tiles stay until
    * they have actually landed.
    */
-  // How much of each failed file is already on the server, so its retry button
-  // can say that it is resuming rather than starting again. Read only when
-  // something has actually failed — in the ordinary case this never runs.
-  const [resumedBytes, setResumedBytes] = useState<Record<string, number>>({});
-  useEffect(() => {
-    const failed = pendingFiles.filter(
-      (pf) => uploadProgressByFile[pf.id]?.status === "failed",
-    );
-    if (failed.length === 0) {
-      setResumedBytes((prev) => (Object.keys(prev).length === 0 ? prev : {}));
-      return;
-    }
-    let live = true;
-    void Promise.all(
-      failed.map(async (pf) => [pf.id, await apiResumedBytes(pf.file)] as const),
-    ).then((pairs) => {
-      if (live) setResumedBytes(Object.fromEntries(pairs.filter(([, bytes]) => bytes > 0)));
-    });
-    return () => {
-      live = false;
-    };
-  }, [pendingFiles, uploadProgressByFile]);
-
   /**
    * Take a staged file off the row, and off the server with it.
    *
@@ -1122,35 +1106,24 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     removePendingFile(index);
   };
 
-  const uploadStagedFiles = async (): Promise<string[]> => {
-    if (!state.currentRoomId || pendingFiles.length === 0) return [];
-    setUploading(true);
-    try {
-      const outcomes = await uploadAll(pendingFiles, async (file, onProgress) => {
-        const { url } = await apiUploadFile(file, onProgress);
-        return url;
-      });
-      const failed = outcomes.filter((o) => o.url === null);
-      if (failed.length > 0) {
-        toast.error(
-          failed.length === 1
-            ? `${failed[0].file.file.name} could not be uploaded`
-            : `${failed.length} files could not be uploaded`,
-        );
-      }
-      // Only what landed leaves the row. What did not is still staged, so a
-      // failure halfway through a batch costs the upload and not the file.
-      removePendingIds(outcomes.filter((o) => o.url !== null).map((o) => o.file.id));
-      // What failed keeps its tile *and* its mark, so the row says which file
-      // to press again rather than leaving an unexplained survivor behind.
-      keepUploadFailures();
-      // A send is the one moment the list of unfinished uploads changes on its
-      // own: one just joined it, or one just left.
-      void refreshInterruptedUploads();
-      return outcomes.map((o) => o.url).filter((url): url is string => url !== null);
-    } finally {
-      setUploading(false);
-    }
+  // A send joining or leaving the outgoing queue is the only thing that
+  // changes what is resumable, so the list is refreshed off that rather than
+  // polled.
+  useEffect(() => {
+    void refreshInterruptedUploads();
+  }, [outgoing.length, refreshInterruptedUploads]);
+
+  /** Where this composer posts, so a batch bound elsewhere can say where. */
+  const here: OutgoingTarget | undefined = state.currentRoomId
+    ? { kind: "channel", roomId: state.currentRoomId, channelId: state.currentChannelId ?? "" }
+    : undefined;
+
+  /** What to call where a send is going, for a batch watched from elsewhere. */
+  const destinationLabel = (): string => {
+    const channel = state.channels.find((c) => c.channel_id === state.currentChannelId);
+    if (channel) return `#${channel.name}`;
+    const room = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
+    return room?.name || "this room";
   };
 
   /**
@@ -1968,13 +1941,23 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
             onDiscard={(fingerprint) => void discardInterruptedUpload(fingerprint)}
           />
           {/* Staged file previews */}
-          <PendingAttachments
-            files={pendingFiles}
-            onRemove={discardPendingFile}
-            progress={uploadProgressByFile}
-            onRetry={handleSend}
-            resumedBytes={resumedBytes}
+          {/* Sends already on their way, wherever they are going. Above the
+              staged row, so what has left and what has not read top to
+              bottom. */}
+          <OutgoingUploads
+            batches={outgoing.filter(
+              // A thread's own batch is drawn by the thread panel while that
+              // panel is open, and two copies of one send is a question.
+              (batch) =>
+                !(
+                  state.activeThreadEventId &&
+                  batch.target.kind === "thread" &&
+                  batch.target.threadEventId === state.activeThreadEventId
+                ),
+            )}
+            here={here}
           />
+          <PendingAttachments files={pendingFiles} onRemove={discardPendingFile} />
           {mediaUrls.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2">
               {mediaUrls.map((m, i) => (
@@ -2091,25 +2074,22 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               multiple
               onChange={handleFileSelect}
             />
+            {/* No longer disabled while something is uploading: a send in
+                flight belongs to the outgoing queue now, so the composer is
+                free the moment it is handed over. */}
             {can(state, "attach_files") && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="shrink-0"
-                disabled={uploading}
-                asChild
-              >
+              <Button variant="ghost" size="icon" className="shrink-0" asChild>
                 {/* Using a label instead of onClick+click() is universally reliable */}
                 <label
-                  htmlFor={uploading ? undefined : "chat-file-input"}
-                  className={uploading ? "cursor-not-allowed" : "cursor-pointer"}
+                  htmlFor="chat-file-input"
+                  className="cursor-pointer"
                   title={
                     attachmentsRemaining > 0
                       ? `Attach images or files (${attachmentsRemaining} of ${MAX_ATTACHMENTS} left)`
                       : `This message already has ${MAX_ATTACHMENTS} attachments`
                   }
                 >
-                  {uploading ? "…" : "+"}
+                  +
                 </label>
               </Button>
             )}

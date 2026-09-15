@@ -1650,20 +1650,6 @@ async function uploadChunkedFile(
 }
 
 /**
- * Roughly how much of `file` a previous attempt already got up, in bytes.
- *
- * What a failed tile needs to offer "resume" as something other than a word
- * that might mean starting over. Read locally and not confirmed with the
- * server: this is a label, and a label is not worth a round trip per failed
- * file — the resume itself asks, and the answer there is the one that counts.
- */
-export async function apiResumedBytes(file: File): Promise<number> {
-  const stored = await loadResumable(fingerprintFile(file));
-  if (!stored || stored.size !== file.size) return 0;
-  return receivedBytes(stored.sent, stored.chunkSize, stored.size);
-}
-
-/**
  * Give up on a part-sent upload, on the server as well as here.
  *
  * Without this the chunks wait out the 24-hour sweep for a file the person has
