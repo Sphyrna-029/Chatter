@@ -6,6 +6,7 @@ import {
   apiUploadFile,
 } from "@/lib/api";
 import { isPreviewable } from "@/hooks/usePendingFiles";
+import { runPool, UPLOAD_CONCURRENCY } from "@/lib/concurrency";
 import type { UploadStatus } from "@/hooks/useUploadQueue";
 
 /**
@@ -218,10 +219,13 @@ async function run(id: string) {
   const start = batches.find((batch) => batch.id === id);
   if (!start) return;
 
-  const uploaded: string[] = [];
-  const failed: OutgoingFile[] = [];
-
-  for (const entry of start.files) {
+  // Several at once, rather than each file waiting out the one before it. The
+  // wait was not only for the bytes: `complete` remuxes and probes on the
+  // server, and the uplink sat idle through all of it, so ten files spent most
+  // of their time sending nothing.
+  const outcomes = await runPool(start.files, UPLOAD_CONCURRENCY, async (entry) => {
+    // Discarding the batch stops the files that have not started yet.
+    if (!batches.some((batch) => batch.id === id)) return null;
     patchFile(id, entry.id, "uploading", 0);
     try {
       const { url } = await apiUploadFile(entry.file, (pct) => {
@@ -231,14 +235,19 @@ async function run(id: string) {
         patchFile(id, entry.id, pct >= 100 ? "processing" : "uploading", pct);
       });
       patchFile(id, entry.id, "done", 100);
-      uploaded.push(url);
+      return url;
     } catch {
       patchFile(id, entry.id, "failed", 0);
-      failed.push(entry);
+      return null;
     }
-    // The batch can be discarded while a file is going up.
-    if (!batches.some((batch) => batch.id === id)) return;
-  }
+  });
+  if (!batches.some((batch) => batch.id === id)) return;
+
+  // Kept in staged order, not completion order: these are posted as the
+  // message, and whichever file happened to be quickest is not the one that
+  // should come first.
+  const uploaded = outcomes.filter((url): url is string => url !== null);
+  const failed = start.files.filter((_, index) => outcomes[index] === null);
 
   const current = batches.find((batch) => batch.id === id);
   if (!current) return;

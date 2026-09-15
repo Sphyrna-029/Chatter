@@ -109,6 +109,76 @@ describe("a send that carries files", () => {
   });
 });
 
+describe("a row of files", () => {
+  it("does not wait for each one before starting the next", async () => {
+    // A file is not only sent: `complete` remuxes and probes it on the server,
+    // and one at a time left the uplink idle through all of that — so ten
+    // files spent most of their time sending nothing.
+    const started: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    apiUploadFile.mockImplementation(async (file: File) => {
+      started.push(file.name);
+      await gate;
+      return { url: `/external/f/${file.name}` };
+    });
+
+    enqueueOutgoing({
+      target: { kind: "channel", roomId: "!r:x", channelId: "c" },
+      label: "#general",
+      body: "",
+      files: [fileNamed("a.png"), fileNamed("b.png"), fileNamed("c.png")],
+    });
+
+    await vi.waitFor(() => expect(started).toHaveLength(3));
+    release();
+    await settled();
+  });
+
+  it("posts them in the order they were staged, not the order they finished", async () => {
+    const delays: Record<string, number> = { "a.png": 30, "b.png": 1, "c.png": 15 };
+    apiUploadFile.mockImplementation(async (file: File) => {
+      await new Promise((r) => setTimeout(r, delays[file.name]));
+      return { url: `/external/f/${file.name}` };
+    });
+
+    enqueueOutgoing({
+      target: { kind: "channel", roomId: "!r:x", channelId: "c" },
+      label: "#general",
+      body: "three pictures",
+      files: [fileNamed("a.png"), fileNamed("b.png"), fileNamed("c.png")],
+    });
+    await settled();
+
+    expect(apiSendMessage).toHaveBeenCalledTimes(1);
+    expect(apiSendMessage.mock.calls[0][1]).toBe(
+      "three pictures\n/external/f/a.png\n/external/f/b.png\n/external/f/c.png",
+    );
+  });
+
+  it("keeps only the ones that failed, wherever they were in the row", async () => {
+    apiUploadFile.mockImplementation(async (file: File) => {
+      if (file.name === "b.png") throw new Error("no");
+      return { url: `/external/f/${file.name}` };
+    });
+
+    enqueueOutgoing({
+      target: { kind: "channel", roomId: "!r:x", channelId: "c" },
+      label: "#general",
+      body: "",
+      files: [fileNamed("a.png"), fileNamed("b.png"), fileNamed("c.png")],
+    });
+    await settled();
+
+    const [batch] = outgoingUploads();
+    expect(batch.files.map((entry) => entry.file.name)).toEqual(["b.png"]);
+    expect(apiSendMessage.mock.calls.map((call) => call[1])).toEqual([
+      "/external/f/a.png",
+      "/external/f/c.png",
+    ]);
+  });
+});
+
 describe("a send that goes wrong", () => {
   it("posts what landed and keeps only what did not", async () => {
     // The rule the staged row has always followed: a failure halfway through

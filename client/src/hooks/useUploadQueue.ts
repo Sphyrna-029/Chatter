@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { PendingFile } from "@/hooks/usePendingFiles";
+import { runPool, UPLOAD_CONCURRENCY } from "@/lib/concurrency";
 
 export type UploadStatus = "queued" | "uploading" | "processing" | "done" | "failed";
 
@@ -18,19 +19,22 @@ export interface UploadOutcome {
 }
 
 /**
- * Uploads a row of staged files one after another, reporting where each one has
- * got to.
+ * Uploads a row of staged files, several at a time, reporting where each one
+ * has got to.
  *
  * A composer used to show a single bar for the whole send, which with one file
  * was fine and with ten was a bar that reached 100% and started again under a
  * different name nine times. Progress is per file and keyed by the staged id,
  * so each tile can carry its own.
  *
- * Sequential on purpose: uploads are large, and ten at once would have them
- * fight for the same uplink and all finish last. It also means the urls come
- * back in the order they were staged, which is the order they are posted in.
+ * This ran one file at a time, on the reasoning that ten transfers would fight
+ * for one uplink. What that missed is that a file is not only sent: the server
+ * remuxes and probes it while the link sits idle, so a row of files spent most
+ * of its time sending nothing at all. A few at once keeps the link busy
+ * without ten transfers all finishing last; `runPool` hands the urls back in
+ * staged order, which is the order they are posted in.
  *
- * A file that fails does not stop the ones behind it — it comes back with a
+ * A file that fails does not stop the ones beside it — it comes back with a
  * null url and its tile says so, leaving the caller to decide whether a partial
  * send is worth making.
  */
@@ -55,8 +59,7 @@ export function useUploadQueue() {
       const mark = (id: string, next: FileUploadProgress) =>
         setProgress((prev) => ({ ...prev, [id]: next }));
 
-      const outcomes: UploadOutcome[] = [];
-      for (const pending of files) {
+      return runPool(files, UPLOAD_CONCURRENCY, async (pending) => {
         mark(pending.id, { status: "uploading", pct: 0 });
         try {
           const url = await upload(pending.file, (pct) => {
@@ -69,13 +72,12 @@ export function useUploadQueue() {
             );
           });
           mark(pending.id, { status: "done", pct: 100 });
-          outcomes.push({ file: pending, url });
+          return { file: pending, url };
         } catch {
           mark(pending.id, { status: "failed", pct: 0 });
-          outcomes.push({ file: pending, url: null });
+          return { file: pending, url: null };
         }
-      }
-      return outcomes;
+      });
     },
     [],
   );
