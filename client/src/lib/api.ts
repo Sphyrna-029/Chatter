@@ -13,6 +13,7 @@ import {
 } from "@/lib/uploadResume";
 import {
   forgetResumable,
+  listResumable,
   loadResumable,
   saveResumable,
 } from "@/lib/uploadStore";
@@ -1668,8 +1669,7 @@ export async function apiResumedBytes(file: File): Promise<number> {
  * Without this the chunks wait out the 24-hour sweep for a file the person has
  * already said they do not want.
  */
-export async function apiCancelUpload(file: File): Promise<void> {
-  const fingerprint = fingerprintFile(file);
+export async function apiDiscardInterruptedUpload(fingerprint: string): Promise<void> {
   const stored = await loadResumable(fingerprint);
   await forgetResumable(fingerprint);
   if (!stored) return;
@@ -1678,6 +1678,57 @@ export async function apiCancelUpload(file: File): Promise<void> {
   } catch {
     // The sweeper is the backstop; there is nothing to tell the user here.
   }
+}
+
+/** The same, for a file still in hand. */
+export async function apiCancelUpload(file: File): Promise<void> {
+  await apiDiscardInterruptedUpload(fingerprintFile(file));
+}
+
+/** An upload that stopped part-way and could still be finished. */
+export interface InterruptedUpload {
+  fingerprint: string;
+  name: string;
+  size: number;
+  /** Bytes the server confirms it is holding. */
+  sentBytes: number;
+  /** When this client last sent a chunk of it. */
+  updatedAt: number;
+}
+
+/**
+ * Uploads that stopped part-way and that the server can still be asked to
+ * finish, newest first.
+ *
+ * Confirmed against the server rather than reported from local state: the
+ * staging dir may have been swept, or the upload may have finished without
+ * this client hearing so, and offering to resume something that is not there
+ * would be offering to start over under another name. Anything the server has
+ * no chunks for is dropped from the store as it is found.
+ *
+ * The file's own bytes are deliberately not kept (see `uploadStore`), so
+ * resuming one means picking the same file again — which the row that shows
+ * these has to say.
+ */
+export async function apiListInterruptedUploads(): Promise<InterruptedUpload[]> {
+  const stored = await listResumable();
+  const checked = await Promise.all(
+    stored.map(async (record) => {
+      const status = await fetchUploadStatus(record.uploadId);
+      if (!status || status.fileSize !== record.size || status.status === "done") {
+        await forgetResumable(record.fingerprint);
+        return null;
+      }
+      return {
+        fingerprint: record.fingerprint,
+        name: record.name,
+        size: record.size,
+        sentBytes: status.receivedBytes,
+        updatedAt: record.updatedAt,
+      };
+    }),
+  );
+  return checked.filter((entry): entry is InterruptedUpload => entry !== null);
 }
 
 export async function apiUploadFile(

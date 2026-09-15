@@ -21,9 +21,12 @@ import { notificationPermission, resolveNotificationLevel } from "@/lib/notifica
 import { phaseOf } from "@/lib/eventTime";
 import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
+import { InterruptedUploads } from "./InterruptedUploads";
+import { isSameFile } from "@/lib/uploadResume";
 import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
+import { useInterruptedUploads } from "@/hooks/useInterruptedUploads";
 import { Search, X, ArrowDown, CalendarDays, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
@@ -323,6 +326,11 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     remaining: attachmentsRemaining,
   } = usePendingFiles();
   const { progress: uploadProgressByFile, uploadAll, keepFailures: keepUploadFailures } = useUploadQueue();
+  const {
+    uploads: interruptedUploads,
+    refresh: refreshInterruptedUploads,
+    discard: discardInterruptedUpload,
+  } = useInterruptedUploads();
   const [isSpoiler, setIsSpoiler] = useState(false);
 
   // Get the actual scrollable viewport element from ScrollArea
@@ -1095,6 +1103,19 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
    * said they did not want. `apiCancelUpload` does nothing when there was
    * nothing part-sent.
    */
+  /**
+   * Put a resumed upload back on the composer, where sending it carries on
+   * from what the server already holds.
+   *
+   * Staging rather than uploading straight away: the file still has to end up
+   * in a message, and this is the row that decides which one. It also means
+   * the progress this shows is the same progress every other upload shows.
+   */
+  const resumeInterruptedUpload = (file: File) => {
+    stageFiles([file]);
+    toast.success(`${file.name} will carry on from where it stopped — press send`);
+  };
+
   const discardPendingFile = (index: number) => {
     const staged = pendingFiles[index];
     if (staged) void apiCancelUpload(staged.file);
@@ -1123,6 +1144,9 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       // What failed keeps its tile *and* its mark, so the row says which file
       // to press again rather than leaving an unexplained survivor behind.
       keepUploadFailures();
+      // A send is the one moment the list of unfinished uploads changes on its
+      // own: one just joined it, or one just left.
+      void refreshInterruptedUploads();
       return outcomes.map((o) => o.url).filter((url): url is string => url !== null);
     } finally {
       setUploading(false);
@@ -1930,6 +1954,19 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               <button className="ml-auto hover:text-amber-400 cursor-pointer" onClick={() => setIsSpoiler(false)} title="Disable spoiler"><X className="h-3 w-3" /></button>
             </div>
           )}
+          {/* Uploads that stopped part-way and can still be finished. Above
+              the staged row rather than inside it: these have no file in hand
+              yet, so they are an offer rather than something queued. */}
+          <InterruptedUploads
+            uploads={interruptedUploads.filter(
+              // One already staged is about to be sent, and its tile carries
+              // the progress — two rows for one file would only be a question.
+              (upload) =>
+                !pendingFiles.some((staged) => isSameFile(staged.file, upload)),
+            )}
+            onResume={resumeInterruptedUpload}
+            onDiscard={(fingerprint) => void discardInterruptedUpload(fingerprint)}
+          />
           {/* Staged file previews */}
           <PendingAttachments
             files={pendingFiles}

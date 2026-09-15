@@ -42,6 +42,21 @@ export function fingerprintFile(file: File): string {
   return [file.name, file.size, file.lastModified || 0].join("\u0000");
 }
 
+/**
+ * Whether `file` is the file a stored upload was part-way through.
+ *
+ * The whole fingerprint, not just the name: resuming onto the wrong bytes
+ * splices two files together into one the server will happily assemble and
+ * nobody can open. A file the person edited or re-exported since is a
+ * different file, and has to start again.
+ */
+export function isSameFile(
+  file: File,
+  stored: { name: string; size: number; fingerprint: string },
+): boolean {
+  return fingerprintFile(file) === stored.fingerprint;
+}
+
 /** Everything in `0..chunkCount` the server has not already got, in order. */
 export function missingChunks(chunkCount: number, received: number[]): number[] {
   const have = new Set(received);

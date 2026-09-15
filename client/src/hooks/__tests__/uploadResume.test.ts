@@ -6,6 +6,7 @@ import {
   chunkRange,
   classifyChunkFailure,
   fingerprintFile,
+  isSameFile,
   missingChunks,
   receivedBytes,
 } from "@/lib/uploadResume";
@@ -35,6 +36,27 @@ describe("fingerprintFile", () => {
     expect(fingerprintFile(fileLike("a", 1, 23))).not.toBe(
       fingerprintFile(fileLike("a\u00001", 23, 0)),
     );
+  });
+});
+
+describe("isSameFile", () => {
+  const stored = { name: "holiday.mkv", size: 8_412_773_120, fingerprint: "" };
+  const record = {
+    ...stored,
+    fingerprint: fingerprintFile(fileLike(stored.name, stored.size, 1757894400000)),
+  };
+
+  it("recognises the file a stopped upload was part-way through", () => {
+    expect(isSameFile(fileLike("holiday.mkv", 8_412_773_120, 1757894400000), record)).toBe(true);
+  });
+
+  it("refuses a different file that happens to share a name", () => {
+    // Resuming onto the wrong bytes splices two files into one the server
+    // assembles cleanly and nobody can open — the one outcome worth refusing
+    // an upload over.
+    expect(isSameFile(fileLike("holiday.mkv", 8_412_773_120, 1757999999000), record)).toBe(false);
+    expect(isSameFile(fileLike("holiday.mkv", 999, 1757894400000), record)).toBe(false);
+    expect(isSameFile(fileLike("other.mkv", 8_412_773_120, 1757894400000), record)).toBe(false);
   });
 });
 
