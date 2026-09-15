@@ -29,6 +29,8 @@ use std::{collections::HashMap, sync::Arc};
 const MAX_NAME_LEN: usize = 120;
 const MAX_DESCRIPTION_LEN: usize = 4000;
 const MAX_LOCATION_LEN: usize = 200;
+/// A cover is an uploaded path, not a place to smuggle a payload into the row.
+const MAX_COVER_URL_LEN: usize = 512;
 /// A room with more scheduled events than this is not using a list any more.
 const MAX_EVENTS_PER_ROOM: u64 = 200;
 /// How long after it ends an event stays in the default listing. An event that
@@ -107,6 +109,7 @@ fn validate(
     name: &str,
     description: &str,
     location: &str,
+    cover_url: &str,
     starts_at: i64,
     ends_at: i64,
 ) -> Result<(), (StatusCode, Json<Value>)> {
@@ -133,6 +136,12 @@ fn validate(
         return Err(error_response(
             StatusCode::BAD_REQUEST,
             "That location is too long",
+        ));
+    }
+    if cover_url.chars().count() > MAX_COVER_URL_LEN {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "That image address is too long",
         ));
     }
     if starts_at <= 0 {
@@ -340,7 +349,15 @@ pub(crate) async fn create_event(
     let location = req.location.unwrap_or_default().trim().to_string();
     let channel_id = req.channel_id.unwrap_or_default();
     let ends_at = req.ends_at.unwrap_or(0);
-    validate(&name, &description, &location, req.starts_at, ends_at)?;
+    let cover_url = req.cover_url.unwrap_or_default().trim().to_string();
+    validate(
+        &name,
+        &description,
+        &location,
+        &cover_url,
+        req.starts_at,
+        ends_at,
+    )?;
     check_channel(&state, &room_id, &user_id, &channel_id).await?;
 
     let coll = state.db.collection::<EventRecord>("events");
@@ -366,7 +383,7 @@ pub(crate) async fn create_event(
         channel_id,
         starts_at: req.starts_at,
         ends_at,
-        cover_url: req.cover_url.unwrap_or_default(),
+        cover_url,
         created_at: now,
         updated_at: now,
         cancelled: false,
@@ -445,7 +462,21 @@ pub(crate) async fn update_event(
     let location = location.trim().to_string();
     let starts_at = req.starts_at.unwrap_or(record.starts_at);
     let ends_at = req.ends_at.unwrap_or(record.ends_at);
-    validate(&name, &description, &location, starts_at, ends_at)?;
+    // An empty string is a real answer here — it is how the form says the
+    // cover was removed — so it must not fall back to the stored one.
+    let cover_url = req
+        .cover_url
+        .clone()
+        .unwrap_or_else(|| record.cover_url.clone());
+    let cover_url = cover_url.trim().to_string();
+    validate(
+        &name,
+        &description,
+        &location,
+        &cover_url,
+        starts_at,
+        ends_at,
+    )?;
 
     let channel_id = req
         .channel_id
@@ -466,9 +497,7 @@ pub(crate) async fn update_event(
     if starts_at != record.starts_at {
         set.insert("reminded_at", 0i64);
     }
-    if let Some(cover) = req.cover_url.clone() {
-        set.insert("cover_url", cover);
-    }
+    set.insert("cover_url", &cover_url);
     if let Some(cancelled) = req.cancelled {
         set.insert("cancelled", cancelled);
     }
@@ -803,22 +832,22 @@ mod tests {
         // Someone writes up the thing they are in the middle of. Refusing a
         // start time in the past only teaches them to lie about it.
         let long_ago = now_millis() - 60 * 60 * 1000;
-        assert!(validate("Standup", "", "", long_ago, 0).is_ok());
+        assert!(validate("Standup", "", "", "", long_ago, 0).is_ok());
     }
 
     #[test]
     fn an_open_ended_event_is_allowed_but_a_backwards_one_is_not() {
         let start = now_millis();
-        assert!(validate("Hangout", "", "", start, 0).is_ok());
-        assert!(validate("Hangout", "", "", start, start + 1).is_ok());
-        assert!(validate("Hangout", "", "", start, start).is_err());
-        assert!(validate("Hangout", "", "", start, start - 1).is_err());
+        assert!(validate("Hangout", "", "", "", start, 0).is_ok());
+        assert!(validate("Hangout", "", "", "", start, start + 1).is_ok());
+        assert!(validate("Hangout", "", "", "", start, start).is_err());
+        assert!(validate("Hangout", "", "", "", start, start - 1).is_err());
     }
 
     #[test]
     fn a_nameless_event_is_refused() {
-        assert!(validate("", "", "", now_millis(), 0).is_err());
-        assert!(validate("   ", "", "", now_millis(), 0).is_err());
+        assert!(validate("", "", "", "", now_millis(), 0).is_err());
+        assert!(validate("   ", "", "", "", now_millis(), 0).is_err());
     }
 
     #[test]
@@ -826,7 +855,16 @@ mod tests {
         // 4102444800 is 2100 in seconds; read as millis it is 1970, which is
         // in the past and therefore fine. The other direction is the tell.
         let millis_of_a_seconds_value = 4102444800i64 * 1000 * 1000;
-        assert!(validate("Party", "", "", millis_of_a_seconds_value, 0).is_err());
+        assert!(validate("Party", "", "", "", millis_of_a_seconds_value, 0).is_err());
+    }
+
+    #[test]
+    fn a_cover_address_longer_than_a_path_is_refused() {
+        let now = now_millis();
+        let ok = "/external/".to_string() + &"a".repeat(MAX_COVER_URL_LEN - 10);
+        assert!(validate("Party", "", "", &ok, now, 0).is_ok());
+        let too_long = "x".repeat(MAX_COVER_URL_LEN + 1);
+        assert!(validate("Party", "", "", &too_long, now, 0).is_err());
     }
 
     #[test]
@@ -869,8 +907,8 @@ mod tests {
     #[test]
     fn a_name_longer_than_the_panel_can_show_is_refused() {
         let long = "x".repeat(MAX_NAME_LEN + 1);
-        assert!(validate(&long, "", "", now_millis(), 0).is_err());
+        assert!(validate(&long, "", "", "", now_millis(), 0).is_err());
         let ok = "x".repeat(MAX_NAME_LEN);
-        assert!(validate(&ok, "", "", now_millis(), 0).is_ok());
+        assert!(validate(&ok, "", "", "", now_millis(), 0).is_ok());
     }
 }

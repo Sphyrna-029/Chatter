@@ -4,7 +4,7 @@ import { apiListRsvps, type RoomEvent, type RsvpStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { AuthAvatarImage } from "@/components/AuthImage";
+import { AuthAvatarImage, AuthImage } from "@/components/AuthImage";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -247,11 +247,19 @@ function EventCard({
   return (
     <div
       className={cn(
-        "rounded-lg border px-3 py-2.5 transition-colors",
+        "overflow-hidden rounded-lg border transition-colors",
         phase === "live" ? "border-success/40 bg-success/5" : "border-border",
         (past || event.cancelled) && "opacity-60",
       )}
     >
+      {event.cover_url && (
+        <AuthImage
+          src={event.cover_url}
+          alt=""
+          className="aspect-[3/1] w-full object-cover"
+        />
+      )}
+      <div className="px-3 py-2.5">
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -397,6 +405,7 @@ function EventCard({
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

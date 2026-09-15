@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppContext } from "@/lib/store";
-import type { RoomEvent } from "@/lib/api";
+import { apiUploadFile, type RoomEvent } from "@/lib/api";
+import { AuthImage } from "@/components/AuthImage";
 import {
   Dialog,
   DialogContent,
@@ -10,10 +11,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, MapPin, Volume2 } from "lucide-react";
+import { ImagePlus, Loader2, MapPin, Trash2, Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   REMINDER_LEAD_MINUTES,
@@ -36,6 +38,10 @@ type Place = "channel" | "elsewhere";
 
 const DEFAULT_LENGTH_MS = 60 * 60 * 1000;
 
+/** Covers are decoration, and a card 22rem wide cannot show more than this is
+ *  worth. The server's own upload limit still applies on top. */
+const MAX_COVER_BYTES = 8 * 1024 * 1024;
+
 export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
   const { state, createEvent, updateEvent } = useAppContext();
   const editing = !!event;
@@ -48,6 +54,13 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [saving, setSaving] = useState(false);
+  // Three states, not one: the URL already saved, a file chosen but not yet
+  // uploaded, and the local preview of that file. The upload happens on save
+  // so picking an image and then cancelling leaves nothing behind.
+  const [coverUrl, setCoverUrl] = useState("");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
 
   const voiceChannels = useMemo(
     () => state.channels.filter((c) => c.channel_type === "voice"),
@@ -66,6 +79,7 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
       setPlace(event.channel_id ? "channel" : "elsewhere");
       setStartsAt(toLocalInputValue(event.starts_at));
       setEndsAt(event.ends_at > 0 ? toLocalInputValue(event.ends_at) : "");
+      setCoverUrl(event.cover_url);
     } else {
       const start = nextHalfHour();
       setName("");
@@ -75,7 +89,10 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
       setPlace(voiceChannels.length > 0 ? "channel" : "elsewhere");
       setStartsAt(toLocalInputValue(start));
       setEndsAt(toLocalInputValue(start + DEFAULT_LENGTH_MS));
+      setCoverUrl("");
     }
+    setCoverFile(null);
+    setCoverPreview(null);
     setSaving(false);
     // voiceChannels is only read to pick a default, and re-seeding when the
     // channel list happens to change would wipe a half-typed event.
@@ -90,10 +107,49 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
   // explaining after the fact; everything else the server will take.
   const endOk = !endsAt || (Number.isFinite(endMs) && endMs > startMs);
   const canSave = nameOk && startOk && endOk && !saving;
+  const hasCover = !!coverPreview || !!coverUrl;
+
+  function pickCover(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Let the same file be chosen again after a removal; without this the
+    // input holds the old value and fires no change event.
+    e.target.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("That file is not an image");
+      return;
+    }
+    const serverLimit = state.uploadLimitBytes;
+    const limit = serverLimit > 0 ? Math.min(serverLimit, MAX_COVER_BYTES) : MAX_COVER_BYTES;
+    if (file.size > limit) {
+      toast.error(`That image is too large (max ${Math.floor(limit / 1024 / 1024)}MB)`);
+      return;
+    }
+    setCoverFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setCoverPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  function removeCover() {
+    setCoverFile(null);
+    setCoverPreview(null);
+    setCoverUrl("");
+  }
 
   async function save() {
     if (!canSave) return;
     setSaving(true);
+    let cover = coverUrl;
+    if (coverFile) {
+      try {
+        cover = (await apiUploadFile(coverFile)).url;
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not upload the image");
+        setSaving(false);
+        return;
+      }
+    }
     const draft = {
       name: name.trim(),
       description: description.trim(),
@@ -101,6 +157,7 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
       channel_id: place === "channel" ? channelId : "",
       starts_at: startMs,
       ends_at: endsAt && Number.isFinite(endMs) ? endMs : 0,
+      cover_url: cover,
     };
     try {
       if (event) {
@@ -130,6 +187,52 @@ export function EventDialog({ open, onOpenChange, event }: EventDialogProps) {
         </DialogHeader>
 
         <div className="space-y-3">
+          {/* Empty, this is a slim strip — a cover is optional decoration and
+              should not push the name field down a screen to offer itself.
+              Once there is an image it grows to the 3:1 the card will show. */}
+          <button
+            type="button"
+            onClick={() => coverInputRef.current?.click()}
+            className={cn(
+              "group relative flex w-full items-center justify-center overflow-hidden rounded-md border-2 border-dashed border-muted-foreground/30 transition-colors hover:border-muted-foreground/60 cursor-pointer",
+              hasCover ? "aspect-[3/1]" : "h-14",
+            )}
+            aria-label={hasCover ? "Replace the cover image" : "Add a cover image"}
+          >
+            {coverPreview ? (
+              <img src={coverPreview} alt="" className="h-full w-full object-cover" />
+            ) : coverUrl ? (
+              <AuthImage src={coverUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <ImagePlus className="h-4 w-4" />
+                <span className="text-xs">Add a cover image</span>
+              </span>
+            )}
+            {hasCover && (
+              <span className="absolute inset-0 hidden items-center justify-center bg-background/60 text-xs font-medium group-hover:flex">
+                Replace
+              </span>
+            )}
+          </button>
+          {hasCover && (
+            <button
+              type="button"
+              onClick={removeCover}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors cursor-pointer"
+            >
+              <Trash2 className="h-3 w-3" />
+              Remove cover
+            </button>
+          )}
+          <input
+            ref={coverInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={pickCover}
+          />
+
           <div className="space-y-1.5">
             <Label htmlFor="event-name">Name</Label>
             <Input
