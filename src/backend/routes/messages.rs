@@ -941,21 +941,12 @@ pub(crate) async fn redact_message(
         )
         .await;
 
-    // A deleted message must not linger in the pin list.
-    super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
-
-    // Nor should its attachments stay on disk and served. Only files the
-    // sender uploaded, and only when nothing else still refers to them —
-    // deleting a message must not break someone else's copy of the same link.
-    let attachments = body_before_redaction
-        .as_deref()
-        .map(super::media::attachment_folders)
-        .unwrap_or_default();
-    if !attachments.is_empty() {
-        super::media::purge_attachments(&state, &attachments, Some(msg_sender), Some(&event_id))
-            .await;
-    }
-
+    // Told before the tidying up, not after it. The message is deleted the
+    // moment that update lands, and everything below is housekeeping nobody is
+    // waiting on — but the attachment purge scans the message collection for
+    // other uses of each file, which on a busy room is seconds. Broadcasting
+    // after it meant a delete that had already happened stayed on every screen
+    // in the room, including the screen of the person who asked for it.
     let redaction_event_id = generate_id("$");
     let redaction_event = json!({
         "type": "m.room.redaction",
@@ -967,6 +958,35 @@ pub(crate) async fn redact_message(
     });
 
     broadcast_to_room(&state, &room_id, &redaction_event).await;
+
+    // A deleted message must not linger in the pin list.
+    super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
+
+    // Nor should its attachments stay on disk and served. Only files the
+    // sender uploaded, and only when nothing else still refers to them —
+    // deleting a message must not break someone else's copy of the same link.
+    //
+    // Off the request path: its result is not part of the answer, and its cost
+    // is a scan for every other message that might still name the same file.
+    // The body it works from was read before the update above replaced it.
+    let attachments = body_before_redaction
+        .as_deref()
+        .map(super::media::attachment_folders)
+        .unwrap_or_default();
+    if !attachments.is_empty() {
+        let state = Arc::clone(&state);
+        let owner = msg_sender.to_string();
+        let redacted_event = event_id.clone();
+        tokio::spawn(async move {
+            super::media::purge_attachments(
+                &state,
+                &attachments,
+                Some(&owner),
+                Some(&redacted_event),
+            )
+            .await;
+        });
+    }
 
     // Only a moderator deleting someone else's message is a moderation
     // action. Someone deleting their own is not, and logging it would turn the

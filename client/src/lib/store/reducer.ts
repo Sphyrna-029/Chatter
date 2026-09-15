@@ -154,18 +154,27 @@ export function reducer(state: AppState, action: Action): AppState {
     case "ADD_MESSAGE":
       if (state.messages.some((m) => m.event_id === action.payload.event_id)) return state;
       return { ...state, messages: [...state.messages, action.payload] };
+    // A message is on screen in up to three places at once — the timeline, the
+    // pin list, and an open thread — and only the first two were being cleared,
+    // so deleting a reply from inside a thread left it sitting there. Deleting
+    // a thread's *root* takes the thread with it: what is left is a panel of
+    // replies to something that is gone.
     case "REDACT_MESSAGE":
+    case "REMOVE_MESSAGE": {
+      const goneId = action.payload;
+      const wasThreadRoot = state.activeThreadEventId === goneId;
       return {
         ...state,
-        messages: state.messages.filter((m) => m.event_id !== action.payload),
-        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
+        messages: state.messages.filter((m) => m.event_id !== goneId),
+        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== goneId),
+        activeThreadEventId: wasThreadRoot ? null : state.activeThreadEventId,
+        threadRootMessage:
+          state.threadRootMessage?.event_id === goneId ? null : state.threadRootMessage,
+        threadMessages: wasThreadRoot
+          ? []
+          : state.threadMessages.filter((m) => m.event_id !== goneId),
       };
-    case "REMOVE_MESSAGE":
-      return {
-        ...state,
-        messages: state.messages.filter((m) => m.event_id !== action.payload),
-        pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
-      };
+    }
     case "SET_ROOM_EVENTS":
       return { ...state, roomEvents: action.payload };
     case "UPSERT_ROOM_EVENT": {
