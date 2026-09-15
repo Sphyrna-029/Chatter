@@ -13,6 +13,11 @@ import type { AppState } from "@/lib/store/types";
  *  events one, which has its own panel. */
 type AppPanel = NonNullable<AppState["companionPanel"]>;
 import { EventsPanel } from "./events/EventsPanel";
+import {
+  NotificationBell,
+  NotificationSettingsPopover,
+} from "./NotificationSettingsPopover";
+import { notificationPermission, resolveNotificationLevel } from "@/lib/notifications";
 import { phaseOf } from "@/lib/eventTime";
 import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
@@ -285,6 +290,17 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     }
     return { liveEventCount: live, soonEventCount: soon };
   }, [state.roomEvents]);
+
+  // Shown on the header bell so the setting, and whether the browser will
+  // honour it at all, are visible from wherever the user is reading.
+  const notifyLevel = state.currentRoomId
+    ? resolveNotificationLevel(
+        state.notificationSettings,
+        state.currentRoomId,
+        state.currentChannelId || "",
+      )
+    : "all";
+  const notifyBlocked = notifyLevel !== "none" && notificationPermission() !== "granted";
 
   const openPanel = state.companionPanel;
   const setPanel = (next: AppPanel | null) =>
@@ -1534,6 +1550,35 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
             >
               <UserPlus className="h-4 w-4" />
             </Button>
+          )}
+          {/* The only other way to reach this was the per-channel bell in the
+              channel list, and a DM has no channel list — so someone who lives
+              in DMs could neither grant notification permission nor turn push
+              on, and was never told that was why it was quiet. */}
+          {state.currentRoomId && (
+            <NotificationSettingsPopover
+              roomId={state.currentRoomId}
+              channelId={state.currentChannelId || undefined}
+            >
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0 relative"
+                title={
+                  notifyBlocked
+                    ? "Notifications are off in your browser"
+                    : "Notification settings"
+                }
+                aria-label="Notification settings"
+              >
+                <NotificationBell level={notifyLevel} className="h-4 w-4" />
+                {/* A bell that looks on while the browser is refusing to show
+                    anything is worse than no bell at all. */}
+                {notifyBlocked && (
+                  <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-warning" />
+                )}
+              </Button>
+            </NotificationSettingsPopover>
           )}
           {!roomInfo?.is_direct && (
             <Button

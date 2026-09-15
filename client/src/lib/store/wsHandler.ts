@@ -256,6 +256,11 @@ export function createWsMessageHandler(
     room_id: string;
     sender: string;
     channel_id?: string;
+    /** Stamped on the broadcast by the server. The room list is the fallback
+     *  for a server that predates it, but it cannot be relied on alone: the
+     *  first message of a new conversation can arrive before the room that
+     *  explains it. */
+    is_dm?: boolean;
     content?: { body?: string; msgtype?: string; channel_id?: string; suppress_role_mentions?: boolean };
   }
 
@@ -273,7 +278,7 @@ export function createWsMessageHandler(
     const roomId: string = msg.room_id;
     const channelId: string = msg.channel_id || msg.content?.channel_id || "";
     const roomInfo = stateRef.current.roomInfoMap[roomId];
-    const isDm = roomInfo?.is_direct === true;
+    const isDm = msg.is_dm === true || roomInfo?.is_direct === true;
 
     const myUsername = displayUserId(me);
     const bodyText = msg.content?.body || "";
@@ -358,7 +363,8 @@ export function createWsMessageHandler(
           }
         }
       } else if (msg.content?.msgtype !== "m.system" && msg.sender !== stateRef.current.userId) {
-        const isDm = stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
+        const isDm =
+          msg.is_dm === true || stateRef.current.roomInfoMap[msg.room_id]?.is_direct === true;
         const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
         const bodyText = msg.content?.body || "";
         const hasMention =

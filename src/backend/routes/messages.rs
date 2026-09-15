@@ -399,7 +399,16 @@ pub(crate) async fn send_message(
         let _ = msg_coll.insert_one(doc).await;
     }
 
-    broadcast_to_room(&state, &room_id, &event).await;
+    // The broadcast says whether this is a DM; the stored row does not need to.
+    //
+    // The client used to answer that from its own room list, which it may not
+    // have yet — the first message of a new conversation can arrive before the
+    // room that explains it. A DM read as an ordinary room is one the
+    // "mentions only" setting silently drops, which is exactly the case where
+    // being told matters most.
+    let mut broadcast = event.clone();
+    broadcast["is_dm"] = json!(room.is_dm);
+    broadcast_to_room(&state, &room_id, &broadcast).await;
 
     // Anyone connected has just been handed the event and raises their own
     // notification from it; push covers only the members that reached nobody.
