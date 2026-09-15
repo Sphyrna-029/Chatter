@@ -750,14 +750,20 @@ mod tests {
 
     #[test]
     fn a_post_written_before_multiple_images_keeps_its_one() {
-        assert_eq!(images_of("/external/a.png", &[]), urls(&["/external/a.png"]));
+        assert_eq!(
+            images_of("/external/a.png", &[]),
+            urls(&["/external/a.png"])
+        );
     }
 
     #[test]
     fn the_list_wins_once_a_post_has_one() {
         // Both fields are written now, and the single one is only the lead.
         assert_eq!(
-            images_of("/external/a.png", &urls(&["/external/a.png", "/external/b.png"])),
+            images_of(
+                "/external/a.png",
+                &urls(&["/external/a.png", "/external/b.png"])
+            ),
             urls(&["/external/a.png", "/external/b.png"]),
         );
     }
