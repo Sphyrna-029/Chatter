@@ -124,6 +124,13 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         elevated: true,
       },
       {
+        key: "manage_events",
+        label: "Manage Events",
+        description:
+          "Schedule events for the room, and edit or cancel anyone's. Everybody can RSVP without it.",
+        elevated: true,
+      },
+      {
         key: "manage_emojis",
         label: "Manage Emojis",
         description: "Add and remove the room's custom emoji.",

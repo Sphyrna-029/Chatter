@@ -314,6 +314,58 @@ pub(crate) struct ForumCommentRecord {
     pub(crate) edited_at: i64,
 }
 
+/// A scheduled event in a room.
+///
+/// Times are epoch milliseconds in UTC. The client renders them in the
+/// viewer's own zone, which is the only way a room spread across several
+/// zones can agree on when a thing starts.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct EventRecord {
+    #[serde(rename = "_id")]
+    pub(crate) event_id: String,
+    pub(crate) room_id: String,
+    pub(crate) creator: String,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) description: String,
+    /// Free text — a place, a link, whatever the room uses. Empty when the
+    /// event happens in `channel_id` instead.
+    #[serde(default)]
+    pub(crate) location: String,
+    /// The channel it happens in, usually a voice channel. Empty for an event
+    /// that is somewhere else entirely.
+    #[serde(default)]
+    pub(crate) channel_id: String,
+    pub(crate) starts_at: i64,
+    /// 0 when the event is open-ended, which is why this is not an Option:
+    /// every row written before an end time was offered reads back as 0 too.
+    #[serde(default)]
+    pub(crate) ends_at: i64,
+    #[serde(default)]
+    pub(crate) cover_url: String,
+    pub(crate) created_at: i64,
+    #[serde(default)]
+    pub(crate) updated_at: i64,
+    /// Cancelled rather than deleted: people who said they were coming have
+    /// already put it in their week, so it stays visible with the news on it.
+    #[serde(default)]
+    pub(crate) cancelled: bool,
+}
+
+/// One person's answer to one event. Keyed `{event_id}:{user_id}` so answering
+/// twice replaces rather than accumulates.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct EventRsvpRecord {
+    #[serde(rename = "_id")]
+    pub(crate) id: String,
+    pub(crate) event_id: String,
+    pub(crate) room_id: String,
+    pub(crate) user_id: String,
+    /// "going" | "maybe" | "declined"
+    pub(crate) status: String,
+    pub(crate) responded_at: i64,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct RoomMemberRecord {
     pub(crate) room_id: String,
@@ -665,6 +717,8 @@ pub(crate) struct RolePermissions {
     #[serde(default)]
     pub(crate) manage_emojis: bool,
     #[serde(default)]
+    pub(crate) manage_events: bool,
+    #[serde(default)]
     pub(crate) kick_members: bool,
     #[serde(default)]
     pub(crate) ban_members: bool,
@@ -702,6 +756,7 @@ impl RolePermissions {
             manage_messages: true,
             manage_webhooks: true,
             manage_emojis: true,
+            manage_events: true,
             kick_members: true,
             ban_members: true,
             mention_everyone: true,
@@ -715,6 +770,7 @@ impl RolePermissions {
             manage_messages: true,
             manage_webhooks: true,
             manage_emojis: true,
+            manage_events: true,
             kick_members: true,
             ban_members: true,
             mention_everyone: true,
@@ -724,7 +780,7 @@ impl RolePermissions {
 
     /// Every permission name, in the order the UI presents them. A channel
     /// overwrite addresses permissions by these names.
-    pub(crate) const NAMES: [&'static str; 15] = [
+    pub(crate) const NAMES: [&'static str; 16] = [
         "view_channel",
         "send_messages",
         "attach_files",
@@ -737,6 +793,7 @@ impl RolePermissions {
         "manage_messages",
         "manage_webhooks",
         "manage_emojis",
+        "manage_events",
         "kick_members",
         "ban_members",
         "mention_everyone",
@@ -756,6 +813,7 @@ impl RolePermissions {
             "manage_messages" => self.manage_messages,
             "manage_webhooks" => self.manage_webhooks,
             "manage_emojis" => self.manage_emojis,
+            "manage_events" => self.manage_events,
             "kick_members" => self.kick_members,
             "ban_members" => self.ban_members,
             "mention_everyone" => self.mention_everyone,
@@ -777,6 +835,7 @@ impl RolePermissions {
             "manage_messages" => self.manage_messages = value,
             "manage_webhooks" => self.manage_webhooks = value,
             "manage_emojis" => self.manage_emojis = value,
+            "manage_events" => self.manage_events = value,
             "kick_members" => self.kick_members = value,
             "ban_members" => self.ban_members = value,
             "mention_everyone" => self.mention_everyone = value,
@@ -799,6 +858,7 @@ impl RolePermissions {
             manage_messages: self.manage_messages || other.manage_messages,
             manage_webhooks: self.manage_webhooks || other.manage_webhooks,
             manage_emojis: self.manage_emojis || other.manage_emojis,
+            manage_events: self.manage_events || other.manage_events,
             kick_members: self.kick_members || other.kick_members,
             ban_members: self.ban_members || other.ban_members,
             mention_everyone: self.mention_everyone || other.mention_everyone,
@@ -825,6 +885,7 @@ impl Default for RolePermissions {
             manage_messages: false,
             manage_webhooks: false,
             manage_emojis: false,
+            manage_events: false,
             kick_members: false,
             ban_members: false,
             mention_everyone: false,

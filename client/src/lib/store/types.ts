@@ -1,4 +1,4 @@
-import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, RolePermissions, Embed } from "../api";
+import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, RolePermissions, Embed, RoomEvent, RsvpStatus } from "../api";
 import type { Dispatch } from "react";
 import type { NotificationLevel, NotificationSettings } from "../notifications";
 import type { ProfileTheme } from "../profileTheme";
@@ -121,7 +121,10 @@ export interface AppState {
   currentView: "chat" | "voice";
   /** Which companion panel is open beside the timeline, if any. Lives here so
    *  the layout can give it room on a narrow screen. */
-  companionPanel: "search" | "mentions" | "pins" | null;
+  companionPanel: "search" | "mentions" | "pins" | "events" | null;
+  /** The current room's scheduled events, soonest first. Reloaded on a room
+   *  switch and kept live by the socket. */
+  roomEvents: RoomEvent[];
   search: SearchState;
   replyingTo: MatrixMessage | null;
   // Pinned messages of the current room/channel, newest pin first
@@ -232,6 +235,10 @@ export type Action =
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_SEARCH"; payload: Partial<SearchState> }
   | { type: "SET_COMPANION_PANEL"; payload: AppState["companionPanel"] }
+  | { type: "SET_ROOM_EVENTS"; payload: RoomEvent[] }
+  | { type: "UPSERT_ROOM_EVENT"; payload: RoomEvent }
+  | { type: "REMOVE_ROOM_EVENT"; payload: string }
+  | { type: "SET_MY_RSVP"; payload: { eventId: string; status: RsvpStatus | "" } }
   | { type: "CLOSE_SEARCH" }
   | { type: "SET_MENTION"; payload: { roomId: string; hasMention: boolean; increment?: boolean } }
   | { type: "SET_REPLYING_TO"; payload: MatrixMessage | null }
@@ -372,6 +379,7 @@ export const initialState: AppState = {
   channelMentions: {},
   currentView: "chat",
   companionPanel: null,
+  roomEvents: [],
   search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false, hasMore: false, nextOffset: 0, loadingMore: false },
   replyingTo: null,
   pinnedMessages: [],
@@ -422,6 +430,17 @@ export interface AppContextValue {
   addReaction: (eventId: string, emoji: string) => Promise<void>;
   /** Refresh the pin list for the room/channel currently open (first page). */
   loadPins: () => Promise<void>;
+  /** Refresh the current room's events. Pass a room id to load for a room the
+   *  store has not finished switching to yet. */
+  loadEvents: (roomId?: string) => Promise<void>;
+  createEvent: (draft: import("../api").EventDraft) => Promise<void>;
+  updateEvent: (
+    eventId: string,
+    patch: Partial<import("../api").EventDraft> & { cancelled?: boolean },
+  ) => Promise<void>;
+  deleteEvent: (eventId: string) => Promise<void>;
+  /** An empty status withdraws a previous answer. */
+  setRsvp: (eventId: string, status: RsvpStatus | "") => Promise<void>;
   /** Append the next page of pins. */
   loadMorePins: () => Promise<void>;
   /** Append the next page of search results. */

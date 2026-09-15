@@ -377,3 +377,39 @@ pub(crate) struct UpdateCategoryRequest {
     pub(crate) position: Option<i32>,
     pub(crate) overwrites: Option<Vec<super::state::PermissionOverwrite>>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct CreateEventRequest {
+    pub(crate) name: String,
+    pub(crate) description: Option<String>,
+    pub(crate) location: Option<String>,
+    pub(crate) channel_id: Option<String>,
+    pub(crate) starts_at: i64,
+    pub(crate) ends_at: Option<i64>,
+    pub(crate) cover_url: Option<String>,
+}
+
+/// Every field optional: a PATCH leaves anything it does not name alone.
+#[derive(Deserialize)]
+pub(crate) struct UpdateEventRequest {
+    pub(crate) name: Option<String>,
+    pub(crate) description: Option<String>,
+    pub(crate) location: Option<String>,
+    pub(crate) channel_id: Option<String>,
+    pub(crate) starts_at: Option<i64>,
+    pub(crate) ends_at: Option<i64>,
+    pub(crate) cover_url: Option<String>,
+    pub(crate) cancelled: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RsvpRequest {
+    /// "going" | "maybe" | "declined"
+    pub(crate) status: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct EventsQuery {
+    /// Include events whose end has passed. Defaults to false.
+    pub(crate) include_past: Option<bool>,
+}

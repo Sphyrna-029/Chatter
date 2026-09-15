@@ -1019,6 +1019,7 @@ export interface RolePermissions {
   manage_messages: boolean;
   manage_webhooks: boolean;
   manage_emojis: boolean;
+  manage_events: boolean;
   kick_members: boolean;
   ban_members: boolean;
   mention_everyone: boolean;
@@ -2757,4 +2758,117 @@ export async function apiUnlinkSpotify(): Promise<void> {
     const data = await res.json().catch(() => null);
     throw new Error(data?.error || "Failed to unlink Spotify");
   }
+}
+
+// ─── Events ──────────────────────────────────────────────────────────────────
+
+/** A scheduled event in a room. Times are epoch milliseconds, UTC — the client
+ *  renders them in the viewer's own zone. */
+export interface RoomEvent {
+  event_id: string;
+  room_id: string;
+  creator: string;
+  name: string;
+  description: string;
+  /** Free text. Empty when the event happens in `channel_id` instead. */
+  location: string;
+  /** The channel it happens in, usually a voice channel. */
+  channel_id: string;
+  starts_at: number;
+  /** 0 when open-ended. */
+  ends_at: number;
+  cover_url: string;
+  created_at: number;
+  updated_at: number;
+  cancelled: boolean;
+  going_count: number;
+  maybe_count: number;
+  /** The first few who said they are coming, for the face pile. */
+  going_preview: string[];
+  /** The caller's own answer; "" when they have not said. */
+  my_rsvp: RsvpStatus | "";
+}
+
+export type RsvpStatus = "going" | "maybe" | "declined";
+
+export interface EventDraft {
+  name: string;
+  description?: string;
+  location?: string;
+  channel_id?: string;
+  starts_at: number;
+  ends_at?: number;
+  cover_url?: string;
+}
+
+async function eventsJson(res: Response, fallback: string) {
+  if (!res.ok) {
+    const data = await res.json().catch(() => null);
+    throw new Error(data?.error || fallback);
+  }
+  return res.json();
+}
+
+export async function apiListEvents(roomId: string, includePast = false) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/events?include_past=${includePast}`,
+  );
+  return (await eventsJson(res, "Could not load events")) as { events: RoomEvent[] };
+}
+
+export async function apiCreateEvent(roomId: string, draft: EventDraft) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/events`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  return (await eventsJson(res, "Could not create the event")) as { event: RoomEvent };
+}
+
+export async function apiUpdateEvent(
+  roomId: string,
+  eventId: string,
+  patch: Partial<EventDraft> & { cancelled?: boolean },
+) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/events/${encodeURIComponent(eventId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    },
+  );
+  return eventsJson(res, "Could not save the event");
+}
+
+export async function apiDeleteEvent(roomId: string, eventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/events/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" },
+  );
+  return eventsJson(res, "Could not delete the event");
+}
+
+/** An empty status withdraws a previous answer. */
+export async function apiSetRsvp(roomId: string, eventId: string, status: RsvpStatus | "") {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/events/${encodeURIComponent(eventId)}/rsvp`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    },
+  );
+  return eventsJson(res, "Could not save your answer");
+}
+
+export async function apiListRsvps(roomId: string, eventId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/events/${encodeURIComponent(eventId)}/rsvps`,
+  );
+  return (await eventsJson(res, "Could not load the guest list")) as {
+    going: string[];
+    maybe: string[];
+    declined: string[];
+  };
 }

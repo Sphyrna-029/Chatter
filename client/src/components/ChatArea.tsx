@@ -6,13 +6,20 @@ import { apiUploadFile, apiGetRoomThreads, apiUpdateChannel, type MatrixMessage 
 import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { composerLength, emojiImage, getComposerText, setComposerText } from "@/lib/composer";
 import { MessageItem } from "./MessageItem";
-import { MessagePanel, type PanelMode } from "./MessagePanel";
+import { MessagePanel } from "./MessagePanel";
+import type { AppState } from "@/lib/store/types";
+
+/** Everything the companion slot can show. MessagePanel handles all but the
+ *  events one, which has its own panel. */
+type AppPanel = NonNullable<AppState["companionPanel"]>;
+import { EventsPanel } from "./events/EventsPanel";
+import { phaseOf } from "@/lib/eventTime";
 import { can } from "@/lib/permissions";
 import { PendingAttachments } from "./PendingAttachments";
 import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
-import { Search, X, ArrowDown, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
+import { Search, X, ArrowDown, CalendarDays, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
 import { Button } from "@/components/ui/button";
@@ -265,8 +272,22 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // The open panel lives in the store so the layout can make room for it; the
   // search case also folds in the store flag, since the provider closes search
   // on a room switch.
+  // The header badge has to know before anyone opens the panel, so this is
+  // derived from the store rather than from inside EventsPanel.
+  const { liveEventCount, soonEventCount } = useMemo(() => {
+    let live = 0;
+    let soon = 0;
+    for (const event of state.roomEvents) {
+      if (event.cancelled) continue;
+      const phase = phaseOf(event, Date.now());
+      if (phase === "live") live++;
+      else if (phase === "soon") soon++;
+    }
+    return { liveEventCount: live, soonEventCount: soon };
+  }, [state.roomEvents]);
+
   const openPanel = state.companionPanel;
-  const setPanel = (next: PanelMode | null) =>
+  const setPanel = (next: AppPanel | null) =>
     dispatch({ type: "SET_COMPANION_PANEL", payload: next });
   const panel = openPanel === "search" && !state.search.open ? null : openPanel;
 
@@ -1289,7 +1310,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   // The server refuses a topic edit without manage_channels, so don't offer it.
   const canEditTopic = can(state, "manage_channels");
 
-  const togglePanel = (mode: PanelMode) => {
+  const togglePanel = (mode: AppPanel) => {
     const next = panel === mode ? null : mode;
     // Search keeps its query and results in the store, so keep that in step.
     if (next === "search") {
@@ -1512,6 +1533,31 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               title="Add people to DM"
             >
               <UserPlus className="h-4 w-4" />
+            </Button>
+          )}
+          {!roomInfo?.is_direct && (
+            <Button
+              variant={panel === "events" ? "secondary" : "ghost"}
+              size="icon"
+              className="shrink-0 relative"
+              onClick={() => togglePanel("events")}
+              title={
+                liveEventCount > 0
+                  ? `${liveEventCount} event${liveEventCount === 1 ? "" : "s"} happening now`
+                  : "Events"
+              }
+              aria-pressed={panel === "events"}
+            >
+              <CalendarDays className="h-4 w-4" />
+              {/* Green while something is actually on, primary for one merely
+                  starting soon — the two are worth telling apart at a glance. */}
+              {(liveEventCount > 0 || soonEventCount > 0) && (
+                <span
+                  className={`absolute top-1 right-1 h-1.5 w-1.5 rounded-full ${
+                    liveEventCount > 0 ? "bg-success animate-pulse" : "bg-primary"
+                  }`}
+                />
+              )}
             </Button>
           )}
           <Button
@@ -2066,14 +2112,16 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       })()}
 
       </div>
-      {panel && (
+      {panel === "events" ? (
+        <EventsPanel onClose={closePanel} />
+      ) : panel ? (
         <MessagePanel
           key={`${panel}:${state.currentRoomId}`}
           mode={panel}
           onClose={closePanel}
           onJump={jumpToMessage}
         />
-      )}
+      ) : null}
       </div>
 
       <Dialog open={exifDialogOpen} onOpenChange={setExifDialogOpen}>

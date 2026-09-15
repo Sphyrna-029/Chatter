@@ -451,6 +451,21 @@ export function createWsMessageHandler(
       ) {
         dispatch({ type: "ADD_PINNED_MESSAGE", payload: msg.message });
       }
+    } else if (
+      msg.type === "m.room.event_created" ||
+      msg.type === "m.room.event_updated" ||
+      msg.type === "m.room.event_rsvp"
+    ) {
+      // The reducer drops anything for another room, so no guard here — and
+      // it keeps this client's own `my_rsvp`, which a room-wide broadcast
+      // cannot know.
+      if (msg.event) {
+        dispatch({ type: "UPSERT_ROOM_EVENT", payload: msg.event });
+      }
+    } else if (msg.type === "m.room.event_deleted") {
+      if (msg.room_id === stateRef.current.currentRoomId) {
+        dispatch({ type: "REMOVE_ROOM_EVENT", payload: msg.event_id });
+      }
     } else if (msg.type === "m.room.unpinned") {
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REMOVE_PINNED_MESSAGE", payload: msg.event_id });

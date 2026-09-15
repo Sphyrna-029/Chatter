@@ -20,6 +20,7 @@ use super::{
             update_category, update_channel,
         },
         continuity::{get_continuity, set_draft, set_resume_point},
+        events::{create_event, delete_event, list_events, list_rsvps, set_rsvp, update_event},
         forum::{
             create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post,
             get_post, list_posts, search_posts,
@@ -80,7 +81,7 @@ use axum::{
     extract::DefaultBodyLimit,
     http::{header, HeaderValue, Method},
     middleware,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use std::sync::Arc;
@@ -392,6 +393,20 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route(
             "/api/forum/{room_id}/posts/{post_id}/comments/{comment_id}",
             delete(delete_comment).put(edit_comment),
+        )
+        // Events
+        .route(
+            "/api/rooms/{room_id}/events",
+            get(list_events).post(create_event),
+        )
+        .route(
+            "/api/rooms/{room_id}/events/{event_id}",
+            patch(update_event).delete(delete_event),
+        )
+        .route("/api/rooms/{room_id}/events/{event_id}/rsvp", put(set_rsvp))
+        .route(
+            "/api/rooms/{room_id}/events/{event_id}/rsvps",
+            get(list_rsvps),
         )
         // Room Groups
         .route(

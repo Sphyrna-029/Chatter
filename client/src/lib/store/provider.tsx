@@ -47,6 +47,13 @@ import {
   apiEditMessage,
   apiAddReaction,
   apiGetPins,
+  apiListEvents,
+  apiCreateEvent,
+  apiUpdateEvent,
+  apiDeleteEvent,
+  apiSetRsvp,
+  type EventDraft,
+  type RsvpStatus,
   apiGetMyPermissions,
   apiPinMessage,
   apiUnpinMessage,
@@ -950,6 +957,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: {} });
         }
 
+        // Fetched on the room switch rather than when the panel opens: the
+        // header badge has to know about an event starting soon before anyone
+        // thinks to look for one.
+        void loadEventsRef.current(roomId);
       }
 
       // Load messages (with channel_id if available)
@@ -1117,6 +1128,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   // ─── Pinned messages ──────────────────────────────────────────────────
+  const loadEvents = useCallback(async (roomId?: string) => {
+    const target = roomId ?? stateRef.current.currentRoomId;
+    if (!target) return;
+    try {
+      const { events } = await apiListEvents(target);
+      // A slow answer for a room the user has already left must not land.
+      if (stateRef.current.currentRoomId !== target) return;
+      dispatch({ type: "SET_ROOM_EVENTS", payload: events });
+    } catch {
+      if (stateRef.current.currentRoomId === target) {
+        dispatch({ type: "SET_ROOM_EVENTS", payload: [] });
+      }
+    }
+  }, []);
+  const loadEventsRef = useRef(loadEvents);
+  useEffect(() => { loadEventsRef.current = loadEvents; }, [loadEvents]);
+
+  const createEvent = useCallback(async (draft: EventDraft) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    const { event } = await apiCreateEvent(roomId, draft);
+    // The broadcast will arrive too, but it cannot carry this client's own
+    // RSVP — and creating an event answers "going" for you.
+    dispatch({ type: "UPSERT_ROOM_EVENT", payload: event });
+  }, []);
+
+  const updateEvent = useCallback(
+    async (eventId: string, patch: Partial<EventDraft> & { cancelled?: boolean }) => {
+      const roomId = stateRef.current.currentRoomId;
+      if (!roomId) return;
+      await apiUpdateEvent(roomId, eventId, patch);
+    },
+    [],
+  );
+
+  const deleteEvent = useCallback(async (eventId: string) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    await apiDeleteEvent(roomId, eventId);
+    // Deleting is the one case the broadcast covers fully, but dropping it
+    // here too means the card goes as the button is released.
+    dispatch({ type: "REMOVE_ROOM_EVENT", payload: eventId });
+  }, []);
+
+  const setRsvp = useCallback(async (eventId: string, status: RsvpStatus | "") => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    const previous = stateRef.current.roomEvents.find((e) => e.event_id === eventId)?.my_rsvp ?? "";
+    dispatch({ type: "SET_MY_RSVP", payload: { eventId, status } });
+    try {
+      await apiSetRsvp(roomId, eventId, status);
+    } catch (err) {
+      dispatch({ type: "SET_MY_RSVP", payload: { eventId, status: previous } });
+      throw err;
+    }
+  }, []);
+
   const loadPins = useCallback(async () => {
     const cur = stateRef.current;
     if (!cur.currentRoomId) return;
@@ -1670,6 +1738,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       addReaction,
       loadPins,
+      loadEvents,
+      createEvent,
+      updateEvent,
+      deleteEvent,
+      setRsvp,
       loadMorePins,
       loadMoreSearchResults,
       pinMessage,
@@ -1724,7 +1797,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

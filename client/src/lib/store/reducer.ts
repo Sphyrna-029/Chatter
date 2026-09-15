@@ -126,6 +126,7 @@ export function reducer(state: AppState, action: Action): AppState {
           : state.roomMentions,
         myPermissions: null,
         companionPanel: null,
+        roomEvents: [],
         pinnedMessages: [],
         pinsHasMore: false,
         pinsNextOffset: 0,
@@ -165,6 +166,47 @@ export function reducer(state: AppState, action: Action): AppState {
         messages: state.messages.filter((m) => m.event_id !== action.payload),
         pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
       };
+    case "SET_ROOM_EVENTS":
+      return { ...state, roomEvents: action.payload };
+    case "UPSERT_ROOM_EVENT": {
+      const incoming = action.payload;
+      if (incoming.room_id !== state.currentRoomId) return state;
+      const known = state.roomEvents.find((e) => e.event_id === incoming.event_id);
+      // A broadcast reaches the whole room, so it cannot carry anyone's own
+      // answer. Keep the one this client already knows rather than letting a
+      // neighbour's RSVP blank out yours.
+      const merged = known ? { ...incoming, my_rsvp: known.my_rsvp } : incoming;
+      const rest = state.roomEvents.filter((e) => e.event_id !== incoming.event_id);
+      return {
+        ...state,
+        roomEvents: [...rest, merged].sort((a, b) => a.starts_at - b.starts_at),
+      };
+    }
+    case "REMOVE_ROOM_EVENT":
+      return {
+        ...state,
+        roomEvents: state.roomEvents.filter((e) => e.event_id !== action.payload),
+      };
+    case "SET_MY_RSVP": {
+      const { eventId, status } = action.payload;
+      return {
+        ...state,
+        roomEvents: state.roomEvents.map((e) => {
+          if (e.event_id !== eventId) return e;
+          // The counts move optimistically so the face pile and the tally
+          // agree with the button the moment it is pressed; the broadcast
+          // that follows replaces them with the server's figures.
+          const was = e.my_rsvp;
+          const delta = (s: string) => (status === s ? 1 : 0) - (was === s ? 1 : 0);
+          return {
+            ...e,
+            my_rsvp: status,
+            going_count: Math.max(0, e.going_count + delta("going")),
+            maybe_count: Math.max(0, e.maybe_count + delta("maybe")),
+          };
+        }),
+      };
+    }
     case "SET_PINNED_MESSAGES":
       return {
         ...state,
