@@ -70,6 +70,7 @@ import {
   apiSetMemberRole,
   apiSetNameColors,
   apiGetRoomGroups,
+  apiSetSidebarOrder,
   apiCreateRoomGroup,
   apiDeleteRoomGroup,
   apiUpdateRoomGroup,
@@ -1624,8 +1625,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadRoomGroups = useCallback(async () => {
     try {
-      const groups = await apiGetRoomGroups();
+      const { groups, order } = await apiGetRoomGroups();
       dispatch({ type: "SET_ROOM_GROUPS", payload: groups });
+      dispatch({ type: "SET_SIDEBAR_ORDER", payload: order });
     } catch {}
   }, []);
 
@@ -1653,6 +1655,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "TOGGLE_GROUP_COLLAPSED", payload: { groupId, collapsed } });
     await apiSetGroupCollapsed(groupId, collapsed);
   }, []);
+
+  /** Applied before it is saved: a dragged icon that waits for a round trip
+   *  to move springs back to where it was and lands a moment later, which
+   *  reads as the drag having failed. The server is the record, so a refusal
+   *  reloads rather than leaving the two disagreeing. */
+  const setSidebarOrder = useCallback(async (order: string[]) => {
+    dispatch({ type: "SET_SIDEBAR_ORDER", payload: order });
+    try {
+      await apiSetSidebarOrder(order);
+    } catch {
+      await loadRoomGroups();
+    }
+  }, [loadRoomGroups]);
 
   const loadFriends = useCallback(async () => {
     try {
@@ -1789,6 +1804,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       renameRoomGroup,
       setGroupRooms,
       toggleGroupCollapsed,
+      setSidebarOrder,
       loadFriends,
       loadUnreads,
       markChannelRead,
@@ -1806,7 +1822,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, setSidebarOrder, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

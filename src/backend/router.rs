@@ -52,7 +52,7 @@ use super::{
         },
         room_groups::{
             create_room_group, delete_room_group, get_room_groups, set_group_collapsed,
-            set_group_rooms, update_room_group,
+            set_group_rooms, set_sidebar_order, update_room_group,
         },
         rooms::{
             add_to_dm, ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
@@ -419,6 +419,8 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/api/room-groups",
             get(get_room_groups).post(create_room_group),
         )
+        // Before the `{group_id}` route, or "order" is read as a group id.
+        .route("/api/room-groups/order", put(set_sidebar_order))
         .route(
             "/api/room-groups/{group_id}",
             put(update_room_group).delete(delete_room_group),

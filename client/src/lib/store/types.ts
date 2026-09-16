@@ -157,6 +157,10 @@ export interface AppState {
   totpVerified: boolean;
   // Room Groups
   roomGroups: RoomGroup[];
+  /** The order the sidebar's top level is drawn in: a flat list of ids, each
+   *  a folder or a room outside every folder. Partial — anything it does not
+   *  name keeps the place it had. See `lib/sidebarOrder.ts`. */
+  sidebarOrder: string[];
   // Custom Roles
   customRoles: CustomRole[];
   memberCustomRoles: Record<string, string[]>; // user_id -> role_ids
@@ -271,6 +275,7 @@ export type Action =
   | { type: "SET_TOTP_VERIFIED"; payload: boolean }
   | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
   | { type: "SET_ROOM_GROUPS"; payload: RoomGroup[] }
+  | { type: "SET_SIDEBAR_ORDER"; payload: string[] }
   | { type: "UPDATE_ROOM_GROUP"; payload: RoomGroup }
   | { type: "REMOVE_ROOM_GROUP"; payload: string }
   | { type: "TOGGLE_GROUP_COLLAPSED"; payload: { groupId: string; collapsed: boolean } }
@@ -399,6 +404,7 @@ export const initialState: AppState = {
   storageLimitBytes: 0,
   totpVerified: false,
   roomGroups: [],
+  sidebarOrder: [],
   customRoles: [],
   memberCustomRoles: {},
   myPermissions: null,
@@ -485,6 +491,9 @@ export interface AppContextValue {
   renameRoomGroup: (groupId: string, name: string) => Promise<void>;
   setGroupRooms: (groupId: string, roomIds: string[]) => Promise<void>;
   toggleGroupCollapsed: (groupId: string, collapsed: boolean) => Promise<void>;
+  /** Save where the sidebar's folders and loose rooms sit, for this user
+   *  wherever they are signed in. */
+  setSidebarOrder: (order: string[]) => Promise<void>;
   // Friends
   loadFriends: () => Promise<void>;
   /** Pull server-computed unread + mention counts (survives a refresh). */

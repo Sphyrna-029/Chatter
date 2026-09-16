@@ -22,7 +22,7 @@ const NOTIFICATION_LEVELS: { value: NotificationLevel; label: string }[] = [
 import { UserProfileDialog } from "@/components/UserProfileDialog";
 import { RoomGroupDialog } from "@/components/RoomGroupDialog";
 import { GroupDMDialog } from "@/components/GroupDMDialog";
-import { LayoutDashboard, ChevronRight, ChevronDown, FolderPlus, MessageCircle, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check, Video, Volume2 } from "lucide-react";
+import { LayoutDashboard, ChevronRight, ChevronDown, Folder, FolderOpen, FolderPlus, MessageCircle, Palette, Pencil, Plus, Trash2, Settings2, Shield, UsersRound, MoreVertical, LogOut, Check, Video, Volume2 } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -43,6 +43,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn, displayUserId } from "@/lib/utils";
 import { AuthImage } from "@/components/AuthImage";
 import { useConfirm } from "@/components/ConfirmDialog";
+import {
+  arrangeSidebar,
+  folderUnread,
+  groupRoomsWithDrop,
+  orderWithMove,
+  type SidebarEntry,
+} from "@/lib/sidebarOrder";
 
 interface AppSidebarProps {
   onCreateRoom: () => void;
@@ -51,7 +58,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const confirm = useConfirm();
-  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms, setNotificationLevel } = useAppContext();
+  const { state, dispatch, selectRoom, leaveRoom, logout, toggleGroupCollapsed, deleteRoomGroup, setGroupRooms, setSidebarOrder, setNotificationLevel } = useAppContext();
   const { isMobile, setOpenMobile, setOpen, state: sidebarState, toggleSidebar } = useSidebar();
   // Only the desktop sidebar collapses to the rail; on mobile it is a sheet
   // that is either open or gone.
@@ -78,6 +85,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const [dragOverRoomId, setDragOverRoomId] = useState<string | null>(null);
   const [dragOverSide, setDragOverSide] = useState<"before" | "after">("before");
+  // The rail's own drag state. Separate from the expanded list's because the
+  // two never render together and mean different things by a drop: the rail
+  // has folders in the same column as rooms, so where in an icon the cursor
+  // is decides between landing beside it and landing inside it.
+  const [railDragId, setRailDragId] = useState<string | null>(null);
+  const [railOverId, setRailOverId] = useState<string | null>(null);
+  const [railOverSide, setRailOverSide] = useState<"before" | "after">("before");
+  const [railOverFolderId, setRailOverFolderId] = useState<string | null>(null);
 
   const displayName = (state.userId && state.userPresence[state.userId]?.displayName) || displayUserId(state.userId ?? "") || "User";
   const initial = displayName.substring(0, 1).toUpperCase();
@@ -128,6 +143,78 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   const dmRoomIds = state.joinedRoomIds.filter(
     (id) => state.roomInfoMap[id]?.is_direct
   );
+
+  // The one arrangement both halves of the sidebar draw from: the rail lays
+  // folders and loose rooms out in a single column, the expanded list draws
+  // the same folders as sections above the same loose rooms, and both read
+  // their order from here so they cannot disagree about it.
+  const sidebar = arrangeSidebar(state.roomGroups, regularRoomIds, state.sidebarOrder);
+  const draggingFolder = !!railDragId && state.roomGroups.some((g) => g.group_id === railDragId);
+
+  /** A room lands at the top level: out of whatever folder held it, and into
+   *  the order at the point it was dropped.
+   *
+   *  The room keeps its id in the stored order while it is inside a folder —
+   *  an id for a grouped room is ignored when the arrangement is built — so
+   *  pulling one out later puts it back where it used to sit rather than at
+   *  the end of the rail. */
+  async function dropAtTopLevel(
+    movedId: string,
+    targetId: string | null,
+    side: "before" | "after",
+  ) {
+    if (!movedId) return;
+    const holder = state.roomGroups.find((g) => g.room_ids.includes(movedId));
+    const nextOrder = orderWithMove(sidebar.order, movedId, targetId, side);
+    // Leaving the folder first, and awaited: setting a folder's rooms reloads
+    // the folders *and* the stored order from the server, which was written
+    // before this drop. Saving the order first would have that reload answer
+    // with the order from a moment ago and put the icon back.
+    if (holder) {
+      try {
+        await setGroupRooms(
+          holder.group_id,
+          holder.room_ids.filter((id) => id !== movedId),
+        );
+      } catch {
+        return;
+      }
+    }
+    try {
+      await setSidebarOrder(nextOrder);
+    } catch {
+      // `setSidebarOrder` reloads on a refusal; nothing to add here.
+    }
+  }
+
+  /** A room lands inside a folder. `targetRoomId` is the room it was dropped
+   *  next to, or null when the folder icon itself was the target — dropping on
+   *  a closed folder names no position inside it, so it goes on the end.
+   *
+   *  Leaving the folder it came from is the server's business: setting a
+   *  folder's rooms takes those rooms out of every other folder, because a
+   *  room belongs to one. */
+  function dropIntoFolder(
+    movedId: string,
+    groupId: string,
+    targetRoomId: string | null,
+    side: "before" | "after",
+  ) {
+    const group = state.roomGroups.find((g) => g.group_id === groupId);
+    // A folder cannot hold a folder: there is one level, and the rail has no
+    // way to draw a second.
+    if (!group || !movedId || state.roomGroups.some((g) => g.group_id === movedId)) return;
+    void setGroupRooms(
+      groupId,
+      groupRoomsWithDrop(group.room_ids, movedId, targetRoomId, side),
+    ).catch(() => {});
+  }
+
+  function clearRailDrag() {
+    setRailDragId(null);
+    setRailOverId(null);
+    setRailOverFolderId(null);
+  }
 
   function renderRoomCard(roomId: string, isDm: boolean) {
     const notificationLevel = resolveNotificationLevel(state.notificationSettings, roomId);
@@ -241,6 +328,12 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             const insertIdx = dragOverSide === "before" ? targetIdx : targetIdx + 1;
             newIds.splice(insertIdx, 0, srcId);
             setGroupRooms(targetGroup.group_id, newIds);
+          } else {
+            // The row dropped on belongs to no folder, so this is a move at
+            // the top level — the same move the rail makes, saved the same
+            // way. Without this the expanded list could reorder rooms inside
+            // a folder and silently refuse to reorder the rest.
+            void dropAtTopLevel(srcId, roomId, dragOverSide);
           }
           setDraggedRoomId(null);
           setDragOverGroupId(null);
@@ -437,10 +530,28 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     );
   }
 
+  /** The line drawn between two rail items to say where a drop will land. */
+  function renderRailDropLine(side: "before" | "after" | null) {
+    if (!side) return null;
+    return (
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none absolute left-0 right-0 h-0.5 rounded-full bg-primary",
+          side === "before" ? "-top-1" : "-bottom-1",
+        )}
+      />
+    );
+  }
+
   /** One room as Discord draws it: a 48px squircle that rounds off on hover,
    *  the name in a tooltip because there is no room for it, and the left-edge
-   *  pill carrying the unread state the expanded row spells out in badges. */
-  function renderRailIcon(roomId: string) {
+   *  pill carrying the unread state the expanded row spells out in badges.
+   *
+   *  `folderId` is the folder it is drawn inside, if any. It decides what a
+   *  drop next to this icon means: a place inside that folder, rather than a
+   *  place at the top level. */
+  function renderRailIcon(roomId: string, folderId?: string) {
     const info = state.roomInfoMap[roomId];
     const isActive = roomId === state.currentRoomId && !state.adminDashboardOpen;
     const mentions = (!isActive && state.roomMentions[roomId]) || 0;
@@ -456,14 +567,59 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const roomInitial = roomName.substring(0, 1).toUpperCase();
     const iconUrl = info?.icon_url || "";
 
+    const overSide = railOverId === roomId ? railOverSide : null;
+
     return (
-      <Tooltip key={roomId}>
+      <div
+        key={folderId ? `${folderId}:${roomId}` : roomId}
+        className="relative flex w-12 shrink-0 justify-center"
+      >
+        {renderRailDropLine(overSide)}
+      <Tooltip>
         <TooltipTrigger asChild>
           <button
             onClick={() => selectRoom(roomId)}
             aria-label={roomName}
             aria-current={isActive ? "page" : undefined}
-            className="group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("text/plain", roomId);
+              e.dataTransfer.effectAllowed = "move";
+              setRailDragId(roomId);
+            }}
+            onDragEnd={clearRailDrag}
+            onDragOver={(e) => {
+              if (!railDragId || railDragId === roomId) return;
+              // A folder cannot be dropped inside one.
+              if (folderId && draggingFolder) return;
+              e.preventDefault();
+              e.stopPropagation();
+              e.dataTransfer.dropEffect = "move";
+              const rect = e.currentTarget.getBoundingClientRect();
+              setRailOverSide(e.clientY < rect.top + rect.height / 2 ? "before" : "after");
+              setRailOverId(roomId);
+              setRailOverFolderId(null);
+            }}
+            onDragLeave={() => {
+              if (railOverId === roomId) setRailOverId(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const movedId = e.dataTransfer.getData("text/plain") || railDragId;
+              if (!movedId || movedId === roomId) return clearRailDrag();
+              const side = railOverId === roomId ? railOverSide : "before";
+              if (folderId) {
+                dropIntoFolder(movedId, folderId, roomId, side);
+              } else {
+                void dropAtTopLevel(movedId, roomId, side);
+              }
+              clearRailDrag();
+            }}
+            className={cn(
+              "group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer",
+              railDragId === roomId && "opacity-40",
+            )}
           >
             {/* Discord's tell: nothing when read, a stub when unread, the full
                 bar for the room you are in. */}
@@ -532,6 +688,162 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           {onCamera && ", on camera"}
         </TooltipContent>
       </Tooltip>
+      </div>
+    );
+  }
+
+  /** A folder on the rail: the rooms it holds, shown as one icon.
+   *
+   *  Closed it is a 2x2 of the first four room icons — the same tell Discord
+   *  uses, and the only thing at this size that says "several rooms" rather
+   *  than "a room" — and it carries their unread state, since a badge on a
+   *  room nobody can see is a badge nobody can see. Clicking opens it in
+   *  place: the rooms stack under it against a tinted panel, which is what
+   *  makes them visibly *its* rooms rather than the rail continuing.
+   *
+   *  Open and closed is `collapsed` on the folder, the same field the expanded
+   *  list toggles, so a folder open on the rail is open in the list and open
+   *  on every other machine this user signs in from. */
+  function renderRailFolder(entry: Extract<SidebarEntry, { kind: "group" }>) {
+    const { group, roomIds } = entry;
+    const open = !group.collapsed;
+    const { mentions, unread } = folderUnread(
+      roomIds,
+      state.roomMentions,
+      state.roomUnreadCounts,
+      state.currentRoomId,
+    );
+    const holdsCurrent = !!state.currentRoomId && roomIds.includes(state.currentRoomId);
+    const overSide = railOverId === group.group_id ? railOverSide : null;
+    const isTarget = railOverFolderId === group.group_id;
+    const label = `${group.name} — ${roomIds.length} room${roomIds.length === 1 ? "" : "s"}`;
+
+    return (
+      <div key={group.group_id} className="flex w-full flex-col items-center gap-2">
+        <div className="relative flex w-12 shrink-0 justify-center">
+          {renderRailDropLine(overSide)}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => void toggleGroupCollapsed(group.group_id, open).catch(() => {})}
+                aria-label={label}
+                aria-expanded={open}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("text/plain", group.group_id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setRailDragId(group.group_id);
+                }}
+                onDragEnd={clearRailDrag}
+                onDragOver={(e) => {
+                  if (!railDragId || railDragId === group.group_id) return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  e.dataTransfer.dropEffect = "move";
+                  // The edges of a folder mean "beside", the middle means
+                  // "inside". Without the edges a folder could be dropped on
+                  // but never moved past, and the order of the rail's folders
+                  // would be unreachable.
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const at = (e.clientY - rect.top) / rect.height;
+                  if (!draggingFolder && at > 0.25 && at < 0.75) {
+                    setRailOverFolderId(group.group_id);
+                    setRailOverId(null);
+                    return;
+                  }
+                  setRailOverSide(at <= 0.5 ? "before" : "after");
+                  setRailOverId(group.group_id);
+                  setRailOverFolderId(null);
+                }}
+                onDragLeave={() => {
+                  if (railOverId === group.group_id) setRailOverId(null);
+                  if (railOverFolderId === group.group_id) setRailOverFolderId(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const movedId = e.dataTransfer.getData("text/plain") || railDragId;
+                  if (!movedId || movedId === group.group_id) return clearRailDrag();
+                  if (railOverFolderId === group.group_id) {
+                    dropIntoFolder(movedId, group.group_id, null, "after");
+                  } else {
+                    void dropAtTopLevel(
+                      movedId,
+                      group.group_id,
+                      railOverId === group.group_id ? railOverSide : "before",
+                    );
+                  }
+                  clearRailDrag();
+                }}
+                className={cn(
+                  "group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer",
+                  railDragId === group.group_id && "opacity-40",
+                )}
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
+                    holdsCurrent ? "h-10" : unread ? "h-2 group-hover/rail:h-5" : "h-0 group-hover/rail:h-5",
+                  )}
+                />
+                <span
+                  className={cn(
+                    "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
+                    open ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
+                    isTarget
+                      ? "bg-sidebar-primary text-sidebar-primary-foreground ring-2 ring-primary"
+                      : open
+                        ? "bg-sidebar-accent/60 text-sidebar-foreground"
+                        : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
+                  )}
+                >
+                  {open || roomIds.length === 0 ? (
+                    open ? <FolderOpen className="h-5 w-5" /> : <Folder className="h-5 w-5" />
+                  ) : (
+                    <span className="grid h-9 w-9 grid-cols-2 grid-rows-2 gap-0.5">
+                      {roomIds.slice(0, 4).map((roomId) => {
+                        const info = state.roomInfoMap[roomId];
+                        const initial = (info?.name || "?").substring(0, 1).toUpperCase();
+                        return info?.icon_url ? (
+                          <AuthImage
+                            key={roomId}
+                            src={info.icon_url}
+                            alt=""
+                            className="h-full w-full rounded-[3px] object-cover"
+                          />
+                        ) : (
+                          <span
+                            key={roomId}
+                            className="flex h-full w-full items-center justify-center rounded-[3px] bg-sidebar-foreground/15 text-3xs font-bold leading-none"
+                          >
+                            {initial}
+                          </span>
+                        );
+                      })}
+                    </span>
+                  )}
+                </span>
+                {/* Only while closed: open, every room shows its own. */}
+                {!open && mentions > 0 && (
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-sidebar bg-destructive px-1 text-3xs font-bold leading-none text-white">
+                    {mentions > 99 ? "99+" : mentions}
+                  </span>
+                )}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={8}>
+              {label}
+              {!open && mentions > 0 && ` — ${mentions} unread mention${mentions === 1 ? "" : "s"}`}
+            </TooltipContent>
+          </Tooltip>
+        </div>
+        {open && roomIds.length > 0 && (
+          <div className="flex w-12 flex-col items-center gap-2 rounded-2xl bg-sidebar-foreground/[0.07] py-2">
+            {roomIds.map((roomId) => renderRailIcon(roomId, group.group_id))}
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -601,27 +913,6 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     (id) => id !== state.currentRoomId && (state.roomUnreadCounts[id] || 0) > 0,
   );
 
-  /** The rail shows every room, in the order the expanded list shows them —
-   *  including the rooms of a collapsed group, which would otherwise be
-   *  unreachable while the sidebar is narrow. */
-  function railRoomIds(): string[] {
-    const sortedGroups = [...state.roomGroups].sort((a, b) => a.position - b.position);
-    const seen = new Set<string>();
-    const ordered: string[] = [];
-    for (const group of sortedGroups) {
-      for (const id of group.room_ids) {
-        if (!seen.has(id) && regularRoomIds.includes(id)) {
-          seen.add(id);
-          ordered.push(id);
-        }
-      }
-    }
-    for (const id of regularRoomIds) {
-      if (!seen.has(id)) ordered.push(id);
-    }
-    return ordered;
-  }
-
   return (
     <Sidebar
       collapsible="icon"
@@ -661,7 +952,39 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
           <ScrollArea className="w-full flex-1 min-h-0">
             <div className="flex flex-col items-center gap-2 pb-1">
-              {railRoomIds().map((roomId) => renderRailIcon(roomId))}
+              {sidebar.entries.map((entry) =>
+                entry.kind === "group"
+                  ? renderRailFolder(entry)
+                  : renderRailIcon(entry.id),
+              )}
+              {/* Somewhere to drop that means "last". Every other target is an
+                  icon, so without this the end of the rail is only reachable
+                  by aiming at the bottom half of whatever happens to be
+                  there — and nothing at all once a folder is. */}
+              {railDragId && (
+                <div
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setRailOverId("__end__");
+                    setRailOverFolderId(null);
+                  }}
+                  onDragLeave={() => {
+                    if (railOverId === "__end__") setRailOverId(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const movedId = e.dataTransfer.getData("text/plain") || railDragId;
+                    void dropAtTopLevel(movedId, null, "after");
+                    clearRailDrag();
+                  }}
+                  className={cn(
+                    "h-8 w-12 shrink-0 rounded-2xl border-2 border-dashed transition-colors",
+                    railOverId === "__end__" ? "border-primary bg-accent/40" : "border-border/60",
+                  )}
+                  aria-hidden
+                />
+              )}
             </div>
           </ScrollArea>
 
@@ -814,9 +1137,15 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   </div>
                   {/* Sorted group sections */}
                   {(() => {
-                    const sortedGroups = [...state.roomGroups].sort((a, b) => a.position - b.position);
-                    const groupedRoomIds = new Set(sortedGroups.flatMap((g) => g.room_ids));
-                    const ungroupedRoomIds = regularRoomIds.filter((id) => !groupedRoomIds.has(id));
+                    // Both orders come from the one arrangement, so a folder
+                    // or a room dragged on the rail is where it was put when
+                    // the sidebar is opened again.
+                    const sortedGroups = sidebar.entries
+                      .filter((entry) => entry.kind === "group")
+                      .map((entry) => (entry as Extract<SidebarEntry, { kind: "group" }>).group);
+                    const ungroupedRoomIds = sidebar.entries
+                      .filter((entry) => entry.kind === "room")
+                      .map((entry) => entry.id);
 
                     return (
                       <>

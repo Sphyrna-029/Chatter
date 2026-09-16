@@ -585,6 +585,17 @@ pub(crate) struct UserRoomGroupsRecord {
     #[serde(rename = "_id")]
     pub(crate) user_id: String,
     pub(crate) groups: Vec<RoomGroupEntry>,
+    /// The order the sidebar's top level is laid out in, as a flat list of
+    /// ids that are each either a group or a room outside every group. One
+    /// list rather than a field on each, because the two are dragged past one
+    /// another: a folder sits *between* two rooms, which two separate
+    /// orderings cannot express.
+    ///
+    /// Defaulted because every record written before this had none, and
+    /// partial by design — an id missing from it is appended in the order it
+    /// has always appeared in, so joining a room does not need this rewritten.
+    #[serde(default)]
+    pub(crate) order: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

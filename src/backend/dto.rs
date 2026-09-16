@@ -286,6 +286,11 @@ pub(crate) struct SetGroupCollapsedRequest {
 }
 
 #[derive(Deserialize)]
+pub(crate) struct SetSidebarOrderRequest {
+    pub(crate) order: Vec<String>,
+}
+
+#[derive(Deserialize)]
 pub(crate) struct SetThreadNameRequest {
     pub(crate) name: String,
 }

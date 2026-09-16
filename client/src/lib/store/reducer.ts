@@ -640,6 +640,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, totpVerified: action.payload };
     case "SET_ROOM_GROUPS":
       return { ...state, roomGroups: action.payload };
+    case "SET_SIDEBAR_ORDER":
+      return { ...state, sidebarOrder: action.payload };
     case "UPDATE_ROOM_GROUP":
       return {
         ...state,

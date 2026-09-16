@@ -2531,11 +2531,25 @@ export interface RoomGroup {
   room_ids: string[];
 }
 
-export async function apiGetRoomGroups(): Promise<RoomGroup[]> {
+/** The user's folders and the order their sidebar's top level is drawn in.
+ *  The order is a flat list of ids, each a folder or a room outside every
+ *  folder, and is partial — see `lib/sidebarOrder.ts`. */
+export async function apiGetRoomGroups(): Promise<{ groups: RoomGroup[]; order: string[] }> {
   const res = await authenticatedFetch("/api/room-groups");
   if (!res.ok) throw new Error("Failed to load room groups");
   const data = await res.json();
-  return data.groups;
+  return { groups: data.groups ?? [], order: data.order ?? [] };
+}
+
+export async function apiSetSidebarOrder(order: string[]): Promise<void> {
+  const res = await authenticatedFetch("/api/room-groups/order", {
+    method: "PUT",
+    body: JSON.stringify({ order }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || "Failed to save sidebar order");
+  }
 }
 
 export async function apiCreateRoomGroup(name: string): Promise<string> {
