@@ -14,6 +14,13 @@ export function toImagePreviewUrl(url: string): string {
   if (!url || !url.includes("/external/")) return url;
   const [base, query] = url.split("?");
   if (base.endsWith(".preview.webp")) return url; // already a preview
+  // A video's thumbnail is already the downscaled version of something, and
+  // asking for a preview of it costs rather than saves: the server scales a
+  // 640px sidecar up to 1024 to answer, and — because the thumbnail is
+  // generated on demand, keyed to a request for the thumbnail itself — a video
+  // nobody has opened yet has nothing to make the preview from, so the request
+  // 404s and the message shows an empty black box instead of a first frame.
+  if (base.endsWith(".thumb.jpg")) return url;
   if (PREVIEW_IMAGE_EXT.test(base)) {
     const suffix = query ? `?${query}` : "";
     return `${base}.preview.webp${suffix}`;

@@ -624,6 +624,16 @@ async fn extract_subtitles(video: &str) {
 /// older (frame-0) generator and must be treated as stale.
 const THUMB_TARGET_WIDTH: u32 = 640;
 
+/// Remove a thumbnail and anything derived from it.
+///
+/// The `.preview.webp` beside it is a copy of the picture being replaced, and
+/// a preview is only ever generated when it is missing — left behind, it goes
+/// on being served in place of the thumbnail that replaced it.
+async fn remove_thumbnail(thumb_path: &str) {
+    let _ = tokio::fs::remove_file(thumb_path).await;
+    let _ = tokio::fs::remove_file(format!("{thumb_path}.preview.webp")).await;
+}
+
 /// True when a video has no thumbnail, or its thumbnail was produced by a
 /// legacy (stale) version and should be regenerated.
 async fn thumb_needs_update(video: &str) -> bool {
@@ -782,7 +792,7 @@ pub(crate) async fn backfill_image_dimensions(state: Arc<AppState>) {
 /// Idempotent — healthy (newer-generation) thumbnails are left untouched, and
 /// a regenerated thumbnail meets the width target, so it is never
 /// re-processed on restart.
-pub(crate) async fn fix_black_thumbnails() {
+pub(crate) async fn fix_black_thumbnails(state: Arc<AppState>) {
     let root = "external";
     let mut stack = vec![std::path::PathBuf::from(root)];
     let mut fixed = 0u32;
@@ -817,8 +827,11 @@ pub(crate) async fn fix_black_thumbnails() {
             if !thumb_needs_update(&video).await && !is_image_black(&thumb_path).await {
                 continue;
             }
-            let _ = tokio::fs::remove_file(&thumb_path).await;
+            remove_thumbnail(&thumb_path).await;
             generate_thumbnail(&video).await;
+            // The new capture is not necessarily the shape the old one was,
+            // and the record still describes the old one.
+            record_thumbnail_dimensions(&state, &video).await;
             fixed += 1;
         }
     }
@@ -931,6 +944,37 @@ pub(crate) async fn probe_video_dimensions(video_path: &str) -> Option<(u32, u32
         return None;
     }
     probe_image_dimensions(&thumb).await
+}
+
+/// Record the size of a video's thumbnail against its upload, replacing
+/// whatever an earlier thumbnail left there.
+///
+/// The thumbnail is what a message lays out, not the video (see
+/// `probe_video_dimensions`), so a regenerated one that came out a different
+/// shape — a legacy capture, or one taken before a conversion baked in a
+/// rotation — leaves every reader reserving a box the picture no longer fits.
+/// Regenerating without this is half the job: the picture is fixed and the
+/// space held for it is still wrong.
+///
+/// Matched on the folder rather than the path because a conversion moves
+/// `disk_path`, `filename` and `url` together, and the folder is the one thing
+/// about an upload it cannot move.
+pub(crate) async fn record_thumbnail_dimensions(state: &AppState, video_disk: &str) {
+    let Some((w, h)) = probe_video_dimensions(video_disk).await else {
+        return; // no thumbnail to measure; nothing to say about the geometry
+    };
+    let Some(folder) = upload_folder_path(video_disk)
+        .and_then(|dir| dir.file_name().and_then(|n| n.to_str()).map(String::from))
+    else {
+        return;
+    };
+    let uploads = state.db.collection::<UploadRecord>("uploads");
+    let _ = uploads
+        .update_many(
+            doc! { "folder": &folder },
+            doc! { "$set": { "width": w as i64, "height": h as i64 } },
+        )
+        .await;
 }
 
 /// The URL an upload is served at. Folder and filename both come from the
@@ -3149,8 +3193,13 @@ pub(crate) async fn upload_guard(
         if let Some(thumb_disk) = external_disk_path(&uri_path) {
             let video_disk = thumb_disk.strip_suffix(".thumb.jpg").unwrap_or(&thumb_disk);
             if thumb_needs_update(video_disk).await {
-                let _ = tokio::fs::remove_file(&thumb_disk).await;
+                remove_thumbnail(&thumb_disk).await;
                 generate_thumbnail(video_disk).await;
+                // What the message reserves space with is measured from the
+                // thumbnail, so a new one has to be measured again.
+                if let Some(state) = req.extensions().get::<Arc<AppState>>() {
+                    record_thumbnail_dimensions(state, video_disk).await;
+                }
             }
         }
     }
@@ -3209,6 +3258,14 @@ pub(crate) async fn upload_guard(
             let source_disk = preview_disk
                 .strip_suffix(".preview.webp")
                 .unwrap_or(&preview_disk);
+            // Clients no longer ask for the preview of a video thumbnail, but
+            // one running an older build still does, and the thumbnail it
+            // names is generated on demand — so it may not be there to make a
+            // preview from. Generating it here answers with a picture rather
+            // than the 404 that leaves a black box in the message.
+            if let Some(video_disk) = source_disk.strip_suffix(".thumb.jpg") {
+                generate_thumbnail(video_disk).await;
+            }
             generate_image_preview(source_disk).await;
         }
     }

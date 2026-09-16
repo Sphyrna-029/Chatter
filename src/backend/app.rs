@@ -619,8 +619,9 @@ pub async fn run() {
 
     let state = build_state().await;
 
-    // Regenerate any legacy all-black video thumbnails in the background.
-    tokio::spawn(media::fix_black_thumbnails());
+    // Regenerate any legacy all-black video thumbnails in the background, and
+    // re-measure what it replaces: the record still describes the old capture.
+    tokio::spawn(media::fix_black_thumbnails(Arc::clone(&state)));
 
     // Measure images uploaded before their dimensions were recorded, so old
     // history reserves space for them the same way new messages do.
