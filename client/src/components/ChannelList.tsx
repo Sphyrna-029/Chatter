@@ -42,15 +42,16 @@ import { resolveNotificationLevel } from "@/lib/notifications";
 import { ScreenFpsMenu } from "./voice/ScreenFpsMenu";
 import { useScreenShareFps } from "@/hooks/useScreenShareFps";
 import { clickable } from "@/lib/a11y";
+import {
+  DEFAULT_PANEL_WIDTH,
+  MAX_PANEL_WIDTH,
+  MIN_PANEL_WIDTH,
+  chosenChannelPanelWidth,
+  clampPanelWidth,
+  storeChannelPanelWidth,
+} from "@/lib/channelPanelWidth";
 import { toast } from "sonner";
 
-/** How wide the channel column may get when sizing itself to its contents,
- *  and how narrow it may be dragged. */
-const MIN_PANEL_WIDTH = 180;
-const MAX_PANEL_WIDTH = 400;
-const MIN_DRAG_WIDTH = 140;
-/** Used until the first measurement, and if a canvas context is unavailable. */
-const DEFAULT_PANEL_WIDTH = 208;
 
 /** Space each row needs beside its text, in pixels.
  *
@@ -833,9 +834,14 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
   // The column sizes itself to whatever it has to show. It used to measure the
   // room name alone, so any channel with a longer name than the room simply
   // truncated — which is most of them, since a room is usually one word.
-  const [width, setWidth] = useState(DEFAULT_PANEL_WIDTH);
+  //
+  // A width the reader dragged is held outside this component, because mount
+  // happens on every room change: selecting a room empties `channels`, and the
+  // layout drops this column while it has nothing to show. Component state
+  // cannot carry a width across that, which is why a dragged width used to
+  // last exactly as long as the room it was set in.
+  const [width, setWidth] = useState(() => chosenChannelPanelWidth() ?? DEFAULT_PANEL_WIDTH);
   const resizing = useRef(false);
-  const manuallyResized = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
 
@@ -847,7 +853,8 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
     ...categories.map((c) => c.name),
   ].join("\u0000");
   useEffect(() => {
-    if (manuallyResized.current) return;
+    // A width the reader chose outranks the measurement, for every room.
+    if (chosenChannelPanelWidth() !== null) return;
     setWidth(
       measurePanelWidth(
         roomInfo?.name || "Room",
@@ -866,14 +873,17 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
     startX.current = e.clientX;
     startW.current = width;
 
+    // The last width the drag passed through, kept here because `onUp` is
+    // what saves it and state has not settled by the time it runs.
+    let latest = width;
     const onMove = (ev: MouseEvent) => {
       if (!resizing.current) return;
-      const newW = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_DRAG_WIDTH, startW.current + (ev.clientX - startX.current)));
-      setWidth(newW);
+      latest = clampPanelWidth(startW.current + (ev.clientX - startX.current));
+      setWidth(latest);
     };
     const onUp = () => {
       resizing.current = false;
-      manuallyResized.current = true;
+      storeChannelPanelWidth(latest);
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
       document.body.style.cursor = "";
