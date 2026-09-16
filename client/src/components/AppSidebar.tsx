@@ -41,6 +41,7 @@ import { Separator } from "@/components/ui/separator";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn, displayUserId } from "@/lib/utils";
+import { hueFromId } from "@/lib/color";
 import { AuthImage } from "@/components/AuthImage";
 import { useConfirm } from "@/components/ConfirmDialog";
 import {
@@ -717,9 +718,38 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     const overSide = railOverId === group.group_id ? railOverSide : null;
     const isTarget = railOverFolderId === group.group_id;
     const label = `${group.name} — ${roomIds.length} room${roomIds.length === 1 ? "" : "s"}`;
+    // Hue from the folder's id, lightness and saturation fixed: a wash this
+    // soft reads the same over a light sidebar and a dark one, and two open
+    // folders read as two folders. The theme's own accent cannot do this job —
+    // it is greyscale in the default light theme, and one colour for
+    // everything in the rest.
+    const hue = hueFromId(group.group_id);
+    // As variables rather than backgrounds, so hover stays a class like every
+    // other hover in the rail.
+    const hues = {
+      "--folder-wash": `hsl(${hue} 65% 52% / 0.18)`,
+      "--folder-head": `hsl(${hue} 65% 52% / 0.28)`,
+      "--folder-hover": `hsl(${hue} 65% 52% / 0.42)`,
+    } as React.CSSProperties;
 
     return (
-      <div key={group.group_id} className="flex w-full flex-col items-center gap-2">
+      <div
+        key={group.group_id}
+        className={cn(
+          "flex flex-col items-center gap-2",
+          // Open, the folder and its rooms sit on one soft wash of the theme's
+          // own accent. The wash used to start below the folder icon and be
+          // exactly as wide as the icons, which drew a strip *behind* a column
+          // rather than a container around it — a folder, and then some rooms.
+          // Wider than the icons by a few pixels on each side is what makes it
+          // read as holding them, and the rail is 4.5rem to their 3rem, so
+          // there is room for it without moving anything.
+          open && roomIds.length > 0
+            ? "w-16 rounded-[2rem] bg-[var(--folder-wash)] py-2"
+            : "w-full",
+        )}
+        style={hues}
+      >
         <div className="relative flex w-12 shrink-0 justify-center">
           {renderRailDropLine(overSide)}
           <Tooltip>
@@ -791,11 +821,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   className={cn(
                     "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
                     open ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
+                    // Open, the icon heads the wash and is drawn in the same
+                    // hue a shade up from it, so it belongs to the rooms under
+                    // it rather than to the rail. Closed, that hue is all
+                    // there is to say this icon holds rooms rather than being
+                    // one.
                     isTarget
                       ? "bg-sidebar-primary text-sidebar-primary-foreground ring-2 ring-primary"
-                      : open
-                        ? "bg-sidebar-accent/60 text-sidebar-foreground"
-                        : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
+                      : "bg-[var(--folder-head)] text-sidebar-foreground group-hover/rail:bg-[var(--folder-hover)]",
                   )}
                 >
                   {open || roomIds.length === 0 ? (
@@ -839,7 +872,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           </Tooltip>
         </div>
         {open && roomIds.length > 0 && (
-          <div className="flex w-12 flex-col items-center gap-2 rounded-2xl bg-sidebar-foreground/[0.07] py-2">
+          <div className="flex w-12 flex-col items-center gap-2">
             {roomIds.map((roomId) => renderRailIcon(roomId, group.group_id))}
           </div>
         )}
