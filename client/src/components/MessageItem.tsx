@@ -523,18 +523,19 @@ function LazyVideo({ url, dims, onExpand, onCast, castState }: { url: string; di
   if (!activated) {
     return (
       <div
-        className="relative w-fit max-w-full rounded-md cursor-pointer bg-zinc-900 overflow-hidden group"
+        className="relative w-fit max-w-[min(640px,100%)] rounded-md cursor-pointer bg-zinc-900 overflow-hidden group"
+        // The box goes here rather than on the picture: this is the element
+        // whose background shows when the two disagree. See `thumbnailBox`.
+        style={thumbnailBox(dims)}
         onClick={() => setActivated(true)}
       >
         {isLocal ? (
           <AuthImage
             src={thumbUrl}
             alt=""
-            className="max-w-[min(640px,100%)] max-h-[480px] rounded-md object-contain"
-            // Without this the wrapper takes the thumbnail's full 640px even
-            // when `max-h` has drawn it narrower, and its dark background fills
-            // the difference. See `thumbnailBox`.
-            style={thumbnailBox(dims)}
+            // Fills the box the wrapper holds; the caps here are what sizes
+            // that box when nothing is known about the video yet.
+            className="w-full h-full max-h-[480px] rounded-md object-contain"
             onError={(e) => {
               const el = e.currentTarget as HTMLImageElement;
               el.style.display = "none";
@@ -546,7 +547,7 @@ function LazyVideo({ url, dims, onExpand, onCast, castState }: { url: string; di
           <video
             src={url}
             preload="metadata"
-            className="max-w-[min(640px,100%)] max-h-[480px] rounded-md pointer-events-none"
+            className="w-full h-full max-h-[480px] rounded-md pointer-events-none"
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-black/15 to-transparent pointer-events-none" />
@@ -577,7 +578,13 @@ function LazyVideo({ url, dims, onExpand, onCast, castState }: { url: string; di
   }
 
   return (
-    <div className="relative w-fit max-w-full group">
+    <div
+      className="relative w-fit max-w-[min(640px,100%)] group"
+      // Same box as the thumbnail it replaces, on the same element, so
+      // clicking play moves nothing and `CcControls` — which hangs off this
+      // wrapper's right edge — stays against the picture.
+      style={thumbnailBox(dims)}
+    >
       <video
         ref={(el) => {
           videoRef.current = el;
@@ -592,12 +599,7 @@ function LazyVideo({ url, dims, onExpand, onCast, castState }: { url: string; di
         src={authSrc}
         controls
         preload="auto"
-        className="max-w-[min(640px,100%)] max-h-[480px] rounded-md cursor-pointer"
-        // Same box as the thumbnail it replaces, for the same reason: the
-        // wrapper is shrink-to-fit and `CcControls` hangs off its right edge,
-        // which on a tall video sat out in space beside the picture. Matching
-        // the thumbnail also means clicking play moves nothing.
-        style={thumbnailBox(dims)}
+        className="w-full h-full max-h-[480px] rounded-md cursor-pointer"
         onClick={(e) => {
           const video = e.currentTarget;
           video.pause();

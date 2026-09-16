@@ -40,16 +40,23 @@ export const THUMBNAIL_MAX_W_PX = 640;
 export const THUMBNAIL_MAX_H_PX = 480;
 
 /**
- * The same rule for a video's thumbnail, and the fix for a black box beside it.
+ * The same rule for a video's thumbnail — and it belongs on the *container*,
+ * not on the picture inside it.
  *
- * The thumbnail sits in a shrink-to-fit container with a dark background, and a
- * replaced element contributes its *intrinsic* width to that container —
- * `max-height` does not feed back into the calculation. So a thumbnail taller
- * than the cap was drawn narrow inside a box still the full 640 wide, and the
- * background showed to the right of it: a portrait video rendered 270px of
- * picture against 370px of black, while a landscape one, never reaching the
- * cap, looked perfect. Giving the image a width the container can agree with
- * settles both.
+ * The thumbnail sits in a shrink-to-fit box with a dark background. Sizing the
+ * picture alone never settles that box, because a replaced element under a
+ * `max-height` contributes the width that cap implies through its aspect ratio,
+ * not the width it is actually drawn at. A 16:9 thumbnail capped at 480 tall
+ * therefore offered 853px to the container while being drawn 640px wide, and
+ * the background filled the remaining quarter — a black band down the right of
+ * every landscape video wide enough for the column. Sizing a portrait one that
+ * way hid the same fault rather than fixing it: its cap happened to imply a
+ * narrower box, so container and picture agreed by accident.
+ *
+ * Put the box on the container and let the picture fill it and there is nothing
+ * left to disagree: one element decides the geometry, and `object-contain`
+ * keeps a thumbnail whose recorded shape has gone stale inside it rather than
+ * stretching.
  *
  * The video's own width is not a bound here the way an image's is. Thumbnails
  * are generated at exactly `THUMBNAIL_MAX_W_PX` across whatever the source
