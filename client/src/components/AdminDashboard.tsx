@@ -743,6 +743,39 @@ function UsersTab({
   );
 }
 
+/** How long ago a room last saw a message, at the precision an admin cares
+ *  about — which is "today, this week, or long enough to consider deleting". */
+function lastActiveLabel(ts: number): string {
+  if (!ts) return "no messages yet";
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "active just now";
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 60) return `active ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `active ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `active ${days}d ago`;
+  return `active ${new Date(ts).toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
+}
+
+/** One figure in a room's metric strip: the number, then what it counts. */
+function RoomMetric({
+  value,
+  label,
+  title,
+}: {
+  value: string;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <div className="rounded-md bg-muted/40 px-2 py-1.5 min-w-0" title={title}>
+      <p className="text-sm font-medium tabular-nums truncate">{value}</p>
+      <p className="text-3xs text-muted-foreground truncate">{label}</p>
+    </div>
+  );
+}
+
 function RoomsTab({
   rooms,
   onDelete,
@@ -752,30 +785,63 @@ function RoomsTab({
   onDelete: (id: string, name: string) => void;
   displayName: (id: string) => string;
 }) {
+  // Busiest first: a list of every room on the server is only useful ordered by
+  // something, and "what is still being used" is the question this tab answers.
+  // Rooms nobody has written in sort to the bottom, which is where an admin
+  // looking for something to clean up wants them.
+  const ordered = [...rooms].sort((a, b) => b.last_activity - a.last_activity);
+
   return (
     <div className="space-y-2">
-      {rooms.map((room) => (
-        <div key={room.room_id} className="flex items-center gap-3 border rounded-lg p-3">
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-sm font-medium truncate max-w-[200px]">{room.name || "Unnamed"}</span>
-              <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-muted text-muted-foreground">
-                {room.is_dm ? "DM" : room.room_type || "text"}
-              </span>
+      {ordered.map((room) => (
+        <div key={room.room_id} className="border rounded-lg p-3">
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-sm font-medium truncate max-w-[200px]">{room.name || "Unnamed"}</span>
+                <span className="px-1.5 py-0.5 text-3xs font-medium rounded bg-muted text-muted-foreground">
+                  {room.is_dm ? "DM" : room.room_type || "text"}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground truncate">
+                Created by {displayName(room.creator)} &middot; {lastActiveLabel(room.last_activity)}
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground truncate max-w-[300px]">
-              Created by {displayUserId(room.creator)} &middot; {room.member_count} member{room.member_count !== 1 ? "s" : ""} &middot; {room.message_count} message{room.message_count !== 1 ? "s" : ""}
-            </p>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7 text-destructive hover:text-destructive shrink-0"
+              onClick={() => onDelete(room.room_id, room.name)}
+            >
+              Delete
+            </Button>
           </div>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-xs h-7 text-destructive hover:text-destructive shrink-0"
-            onClick={() => onDelete(room.room_id, room.name)}
-          >
-            Delete
-          </Button>
+          <div className="mt-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
+            <RoomMetric
+              value={`${room.online_count}/${room.member_count}`}
+              label="online"
+              title={`${room.online_count} of ${room.member_count} members connected`}
+            />
+            <RoomMetric
+              value={room.message_count.toLocaleString()}
+              label={room.message_count === 1 ? "message" : "messages"}
+            />
+            <RoomMetric
+              value={formatBytes(room.storage_bytes)}
+              label={`in ${room.file_count.toLocaleString()} file${room.file_count !== 1 ? "s" : ""}`}
+              title="Total size of the uploads this room's messages reference. A file posted in more than one room counts in each."
+            />
+            <RoomMetric
+              value={room.channel_count.toLocaleString()}
+              label={room.channel_count === 1 ? "channel" : "channels"}
+            />
+            <RoomMetric
+              value={room.thread_count.toLocaleString()}
+              label={room.thread_count === 1 ? "thread" : "threads"}
+            />
+          </div>
         </div>
       ))}
       {rooms.length === 0 && (

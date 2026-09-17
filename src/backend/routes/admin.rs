@@ -1,6 +1,6 @@
 use super::super::{
     app::generate_invite_code,
-    helpers::{error_response, hash_password, require_admin},
+    helpers::{error_response, hash_password, now_secs, presence_status, require_admin},
     metrics::{resident_bytes, METRICS},
     state::{AppState, UploadRecord, UserRecord},
 };
@@ -418,21 +418,38 @@ pub(crate) async fn admin_list_rooms(
         .await
         .map_err(|_| error_response(StatusCode::INTERNAL_SERVER_ERROR, "DB error"))?;
 
-    let room_members = state.room_members.read().await;
+    let mut room_records = Vec::new();
+    while let Some(room) = cursor.try_next().await.unwrap_or(None) {
+        room_records.push(room);
+    }
+
+    let stats = room_statistics(&state).await;
+    let channel_counts = count_by_room(&state, "channels").await;
+    let thread_counts = count_by_room(&state, "threads").await;
+
+    // Snapshot both caches rather than reading under a guard held across the
+    // loop, as everything else on this path now does.
+    let members: std::collections::HashMap<String, Vec<String>> = {
+        let rm = state.room_members.read().await;
+        rm.clone()
+    };
+    let online: std::collections::HashSet<String> = {
+        let now = now_secs();
+        let up = state.user_presence.read().await;
+        up.iter()
+            .filter(|(_, p)| presence_status(p, now) != "offline")
+            .map(|(user_id, _)| user_id.clone())
+            .collect()
+    };
 
     let mut rooms = Vec::new();
-    while let Some(room) = cursor.try_next().await.unwrap_or(None) {
-        let member_count = room_members
-            .get(&room.room_id)
-            .map(|m| m.len())
+    for room in room_records {
+        let room_members = members.get(&room.room_id);
+        let member_count = room_members.map(|m| m.len()).unwrap_or(0);
+        let online_count = room_members
+            .map(|m| m.iter().filter(|id| online.contains(*id)).count())
             .unwrap_or(0);
-
-        let message_count = state
-            .db
-            .collection::<mongodb::bson::Document>("messages")
-            .count_documents(doc! { "room_id": &room.room_id })
-            .await
-            .unwrap_or(0);
+        let stat = stats.get(&room.room_id);
 
         rooms.push(json!({
             "room_id": room.room_id,
@@ -441,11 +458,163 @@ pub(crate) async fn admin_list_rooms(
             "is_dm": room.is_dm,
             "room_type": room.room_type,
             "member_count": member_count,
-            "message_count": message_count
+            "online_count": online_count,
+            "message_count": stat.map(|s| s.messages).unwrap_or(0),
+            "last_activity": stat.map(|s| s.last_activity).unwrap_or(0),
+            "channel_count": channel_counts.get(&room.room_id).copied().unwrap_or(0),
+            "thread_count": thread_counts.get(&room.room_id).copied().unwrap_or(0),
+            "file_count": stat.map(|s| s.file_count).unwrap_or(0),
+            "storage_bytes": stat.map(|s| s.storage_bytes).unwrap_or(0),
         }));
     }
 
     Ok(Json(json!({ "rooms": rooms })))
+}
+
+/// What one room's messages add up to.
+#[derive(Default)]
+struct RoomStatistics {
+    messages: u64,
+    /// Newest `origin_server_ts` in the room, or 0 for a room nobody has
+    /// written in.
+    last_activity: i64,
+    file_count: u64,
+    storage_bytes: u64,
+}
+
+/// Message, activity and attachment totals for every room, in one pass.
+///
+/// This replaces a `count_documents` per room, which meant a query per room on
+/// a page that lists all of them. It has to read message bodies regardless —
+/// an upload is linked to a room only by its URL appearing in one, there being
+/// no room_id on an upload record — so counting and finding the newest
+/// timestamp in the same pass costs nothing beyond it.
+///
+/// Attachments are matched with `attachment_folders`, the same function the
+/// housekeeping passes use to decide what a message still references, so the
+/// dashboard cannot disagree with the sweeper about what a room is holding
+/// on to.
+///
+/// A file posted in two rooms counts once in each: there is one copy on disk,
+/// but both rooms are keeping it alive. Per-room storage therefore sums to
+/// more than the disk usage, which is the honest answer to "what would
+/// deleting this room free" rather than to "where did the bytes go".
+async fn room_statistics(state: &AppState) -> std::collections::HashMap<String, RoomStatistics> {
+    use super::media::attachment_folders;
+    use futures_util::TryStreamExt;
+    use std::collections::{HashMap, HashSet};
+
+    let mut out: HashMap<String, RoomStatistics> = HashMap::new();
+    let mut folders: HashMap<String, HashSet<String>> = HashMap::new();
+
+    let messages = state.db.collection::<mongodb::bson::Document>("messages");
+    let Ok(mut cursor) = messages
+        .find(doc! {})
+        .projection(doc! { "room_id": 1, "content.body": 1, "origin_server_ts": 1 })
+        .await
+    else {
+        return out;
+    };
+
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        let Ok(room_id) = doc.get_str("room_id") else {
+            continue;
+        };
+        let entry = out.entry(room_id.to_string()).or_default();
+        entry.messages += 1;
+
+        // Written as i64 now and as i32 by older builds.
+        let ts = doc
+            .get_i64("origin_server_ts")
+            .or_else(|_| doc.get_i32("origin_server_ts").map(i64::from))
+            .unwrap_or(0);
+        if ts > entry.last_activity {
+            entry.last_activity = ts;
+        }
+
+        if let Some(body) = doc
+            .get_document("content")
+            .ok()
+            .and_then(|content| content.get_str("body").ok())
+        {
+            let found = attachment_folders(body);
+            if !found.is_empty() {
+                folders
+                    .entry(room_id.to_string())
+                    .or_default()
+                    .extend(found);
+            }
+        }
+    }
+
+    if folders.is_empty() {
+        return out;
+    }
+
+    // One read of the upload records, then the sizes are looked up per room.
+    let mut folder_sizes: HashMap<String, u64> = HashMap::new();
+    let uploads = state.db.collection::<mongodb::bson::Document>("uploads");
+    if let Ok(mut cursor) = uploads
+        .find(doc! {})
+        .projection(doc! { "folder": 1, "size": 1 })
+        .await
+    {
+        while let Ok(Some(doc)) = cursor.try_next().await {
+            let Ok(folder) = doc.get_str("folder") else {
+                continue;
+            };
+            let size = doc
+                .get_i64("size")
+                .or_else(|_| doc.get_i32("size").map(i64::from))
+                .unwrap_or(0);
+            if size > 0 {
+                folder_sizes.insert(folder.to_string(), size as u64);
+            }
+        }
+    }
+
+    for (room_id, room_folders) in folders {
+        let entry = out.entry(room_id).or_default();
+        for folder in room_folders {
+            if let Some(&size) = folder_sizes.get(&folder) {
+                entry.file_count += 1;
+                entry.storage_bytes += size;
+            }
+        }
+    }
+
+    out
+}
+
+/// How many documents each room has in `collection`, grouped by the database
+/// rather than counted a room at a time.
+async fn count_by_room(
+    state: &AppState,
+    collection: &str,
+) -> std::collections::HashMap<String, u64> {
+    use futures_util::TryStreamExt;
+
+    let mut out = std::collections::HashMap::new();
+    let coll = state.db.collection::<mongodb::bson::Document>(collection);
+    let Ok(mut cursor) = coll
+        .aggregate(vec![
+            doc! { "$group": { "_id": "$room_id", "n": { "$sum": 1 } } },
+        ])
+        .await
+    else {
+        return out;
+    };
+    while let Ok(Some(doc)) = cursor.try_next().await {
+        let Ok(room_id) = doc.get_str("_id") else {
+            continue;
+        };
+        let n = doc
+            .get_i64("n")
+            .or_else(|_| doc.get_i32("n").map(i64::from))
+            .unwrap_or(0);
+        out.insert(room_id.to_string(), n.max(0) as u64);
+    }
+    out
 }
 
 /// DELETE /api/admin/rooms/{room_id}

@@ -2299,7 +2299,17 @@ export interface AdminRoom {
   is_dm: boolean;
   room_type: string;
   member_count: number;
+  /** Members currently connected, of `member_count`. */
+  online_count: number;
   message_count: number;
+  /** Newest message timestamp, epoch ms. Zero for a room nobody has written in. */
+  last_activity: number;
+  channel_count: number;
+  thread_count: number;
+  file_count: number;
+  /** Total size of the uploads this room's messages reference. A file posted
+   *  in two rooms counts in both, so these sum to more than disk usage. */
+  storage_bytes: number;
 }
 
 export async function apiGetServerInfo(): Promise<{ invite_only: boolean; require_auth_for_uploads: boolean; storage_limit_bytes: number; upload_limit_bytes: number }> {
