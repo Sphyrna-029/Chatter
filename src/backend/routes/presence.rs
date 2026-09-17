@@ -97,47 +97,62 @@ pub(crate) async fn get_voice_channel_status(
 // Presence
 // ---------------------------------------------------------------------------
 
-/// The presence record the client expects for one user: their live status when
-/// the server has seen them, and their stored profile either way, so an offline
-/// user still renders with their avatar and display name.
+/// The presence records the client expects for a set of users: their live
+/// status when the server has seen them, and their stored profile either way,
+/// so an offline user still renders with their avatar and display name.
+///
+/// One query for the whole set, and the presence guard is taken here rather
+/// than by the caller. Both halves matter: this was a `find_one` per user in a
+/// loop, under a read guard the caller held for the whole loop, so a
+/// twenty-member room cost twenty serial round trips — every ten seconds, for
+/// every connected client — with every presence writer queued behind it the
+/// entire time. The profiles are fetched before the guard is taken, so nothing
+/// awaits while it is held.
 ///
 /// Shared with the friends endpoint, which reports on people the caller may not
 /// share a room with — the two must not drift apart.
-pub(crate) async fn build_presence_entry(
+pub(crate) async fn build_presence_entries(
     state: &AppState,
-    up: &std::collections::HashMap<String, PresenceRecord>,
-    user_id: &str,
+    user_ids: &[String],
+) -> serde_json::Map<String, Value> {
+    let mut users: std::collections::HashMap<String, UserRecord> = std::collections::HashMap::new();
+    if !user_ids.is_empty() {
+        let users_coll = state.db.collection::<UserRecord>("users");
+        if let Ok(mut cursor) = users_coll.find(doc! { "_id": { "$in": user_ids } }).await {
+            while let Ok(Some(u)) = futures_util::TryStreamExt::try_next(&mut cursor).await {
+                users.insert(u.user_id.clone(), u);
+            }
+        }
+    }
+
+    let current_time = now_secs();
+    let up = state.user_presence.read().await;
+    let mut out = serde_json::Map::new();
+    for user_id in user_ids {
+        out.insert(
+            user_id.clone(),
+            build_presence_entry(users.get(user_id), up.get(user_id), current_time),
+        );
+    }
+    out
+}
+
+/// One user's entry, built from records already in hand.
+fn build_presence_entry(
+    user_record: Option<&UserRecord>,
+    presence: Option<&PresenceRecord>,
     current_time: f64,
 ) -> Value {
-    let users_coll = state.db.collection::<UserRecord>("users");
-    let user_record = users_coll
-        .find_one(doc! { "_id": user_id })
-        .await
-        .ok()
-        .flatten();
-    let avatar_url = user_record
-        .as_ref()
-        .map(|u| u.avatar_url.as_str())
-        .unwrap_or("");
-    let about = user_record.as_ref().map(|u| u.about.as_str()).unwrap_or("");
-    let banner_url = user_record
-        .as_ref()
-        .map(|u| u.banner_url.as_str())
-        .unwrap_or("");
-    let display_name = user_record
-        .as_ref()
-        .map(|u| u.display_name.as_str())
-        .unwrap_or("");
-    let name_font_url = user_record
-        .as_ref()
-        .map(|u| u.name_font_url.as_str())
-        .unwrap_or("");
+    let avatar_url = user_record.map(|u| u.avatar_url.as_str()).unwrap_or("");
+    let about = user_record.map(|u| u.about.as_str()).unwrap_or("");
+    let banner_url = user_record.map(|u| u.banner_url.as_str()).unwrap_or("");
+    let display_name = user_record.map(|u| u.display_name.as_str()).unwrap_or("");
+    let name_font_url = user_record.map(|u| u.name_font_url.as_str()).unwrap_or("");
     let profile_theme = user_record
-        .as_ref()
         .map(|u| u.profile_theme.clone())
         .unwrap_or_default();
 
-    match up.get(user_id) {
+    match presence {
         Some(presence) => {
             let status = presence_status(presence, current_time);
 
@@ -203,20 +218,12 @@ pub(crate) async fn get_room_presence(
         return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
     }
 
-    let current_time = now_secs();
-    let rm = state.room_members.read().await;
-    let up = state.user_presence.read().await;
-
-    let mut presence_data = serde_json::Map::new();
-
-    if let Some(members) = rm.get(&room_id) {
-        for member_id in members {
-            presence_data.insert(
-                member_id.clone(),
-                build_presence_entry(&state, &up, member_id, current_time).await,
-            );
-        }
-    }
+    // Snapshot the membership so the guard is not held across the query.
+    let members: Vec<String> = {
+        let rm = state.room_members.read().await;
+        rm.get(&room_id).cloned().unwrap_or_default()
+    };
+    let presence_data = build_presence_entries(&state, &members).await;
 
     Ok(Json(json!({
         "room_id": room_id,

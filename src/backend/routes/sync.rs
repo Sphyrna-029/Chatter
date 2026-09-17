@@ -29,19 +29,38 @@ pub(crate) async fn sync(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    let rm = state.room_members.read().await;
-    let room_roles = state.room_roles.read().await;
+    // Snapshot the two caches this needs and let go of both guards before any
+    // database work starts. Held across the loop below — which is hundreds of
+    // round trips for an account in a few busy rooms — a read guard here is
+    // enough to stall the whole server: tokio's RwLock is write-preferring, so
+    // one join or role change arriving mid-sync queues a writer behind this
+    // guard, and every later reader then queues behind that writer. Sending a
+    // room list built a few milliseconds ago is the lesser problem by far.
+    let my_rooms: Vec<(String, Vec<String>)> = {
+        let rm = state.room_members.read().await;
+        rm.iter()
+            .filter(|(_, members)| members.contains(&user_id))
+            .map(|(room_id, members)| (room_id.clone(), members.clone()))
+            .collect()
+    };
+    let room_roles: std::collections::HashMap<String, std::collections::HashMap<String, String>> = {
+        let rr = state.room_roles.read().await;
+        my_rooms
+            .iter()
+            .filter_map(|(room_id, _)| {
+                rr.get(room_id)
+                    .map(|roles| (room_id.clone(), roles.clone()))
+            })
+            .collect()
+    };
+
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
     let users_coll = state.db.collection::<UserRecord>("users");
 
     let mut joined_rooms_data = serde_json::Map::new();
 
-    for (room_id, members) in rm.iter() {
-        if !members.contains(&user_id) {
-            continue;
-        }
-
+    for (room_id, members) in &my_rooms {
         let room_data = match rooms_coll.find_one(doc! { "_id": room_id }).await {
             Ok(Some(r)) => r,
             _ => continue,
@@ -290,11 +309,8 @@ pub(crate) async fn sync(
             // and members are only loaded for the room currently open — a list
             // of every conversation needs the ids up front. Taken from the
             // membership cache, so this costs no query.
-            // `members` is the list this loop is already iterating. Taking a
-            // second read on `room_members` here risked a deadlock rather than
-            // a stale answer: tokio's RwLock is write-preferring, so a join
-            // arriving mid-sync would queue a writer behind the guard held for
-            // the whole loop, and this read would then wait on that writer.
+            // `members` is the snapshot this loop is already iterating, so
+            // this costs no lock and no query.
             let others: Vec<String> = members.iter().filter(|m| **m != user_id).cloned().collect();
             // Their avatar travels with the id. Presence — the client's usual
             // source for a face — is only loaded for the room being viewed, so

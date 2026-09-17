@@ -382,6 +382,121 @@ async fn create_indexes(db: &mongodb::Database) {
         .collection::<mongodb::bson::Document>("bots")
         .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
         .await;
+
+    // messages: thread_id. The reply count beside a root message is a query
+    // for every reply carrying that root's id, and with no index for it that
+    // was a scan of the entire messages collection — paid on every channel
+    // switch, and growing with the whole server's history rather than with
+    // the number of threads.
+    let _ = db
+        .collection::<mongodb::bson::Document>("messages")
+        .create_index(IndexModel::builder().keys(doc! { "thread_id": 1 }).build())
+        .await;
+
+    // The room-scoped lookups behind channel visibility. Resolving which
+    // channels a member may see reads all four of these, once per room, on
+    // every message fetch and every sync — so each one was a scan.
+    let _ = db
+        .collection::<mongodb::bson::Document>("channels")
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
+        .await;
+
+    let _ = db
+        .collection::<mongodb::bson::Document>("channel_categories")
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
+        .await;
+
+    let _ = db
+        .collection::<mongodb::bson::Document>("custom_roles")
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
+        .await;
+
+    // member_custom_roles is read two ways: one member's roles when deciding
+    // what they may do, and a whole room's assignments when the client opens
+    // it. The compound key serves both, because room_id is its prefix.
+    let _ = db
+        .collection::<mongodb::bson::Document>("member_custom_roles")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "user_id": 1 })
+                .build(),
+        )
+        .await;
+
+    // dm_rooms: resolving a room back to the pair it belongs to, which every
+    // DM message does to keep the streak current
+    let _ = db
+        .collection::<mongodb::bson::Document>("dm_rooms")
+        .create_index(IndexModel::builder().keys(doc! { "room_id": 1 }).build())
+        .await;
+
+    // events: one room's calendar, soonest first
+    let _ = db
+        .collection::<mongodb::bson::Document>("events")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "starts_at": 1 })
+                .build(),
+        )
+        .await;
+
+    // event_rsvps: the attendee list for one event
+    let _ = db
+        .collection::<mongodb::bson::Document>("event_rsvps")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "event_id": 1, "user_id": 1 })
+                .build(),
+        )
+        .await;
+
+    // forum_posts: one room's posts, deleted ones excluded. The sort column is
+    // chosen by the caller, so the key stops at the filter.
+    let _ = db
+        .collection::<mongodb::bson::Document>("forum_posts")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "deleted": 1 })
+                .build(),
+        )
+        .await;
+
+    // forum_comments: one post's comments in the order they were written
+    let _ = db
+        .collection::<mongodb::bson::Document>("forum_comments")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "post_id": 1, "created_at": 1 })
+                .build(),
+        )
+        .await;
+
+    // banned_users: checked on every join attempt, listed per room
+    let _ = db
+        .collection::<mongodb::bson::Document>("banned_users")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "user_id": 1 })
+                .build(),
+        )
+        .await;
+
+    // whiteboard_strokes: one channel's board, in drawing order
+    let _ = db
+        .collection::<mongodb::bson::Document>("whiteboard_strokes")
+        .create_index(
+            IndexModel::builder()
+                .keys(doc! { "room_id": 1, "channel_id": 1, "timestamp": 1 })
+                .build(),
+        )
+        .await;
+
+    // notification_settings: read per user, and for a room's whole membership
+    // at once when deciding who to push to
+    let _ = db
+        .collection::<mongodb::bson::Document>("notification_settings")
+        .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
+        .await;
 }
 
 /// One-time, idempotent conversion of the legacy `view_roles` / `write_roles`

@@ -1,13 +1,13 @@
 use super::super::{
     dto::FriendActionRequest,
     helpers::{
-        error_response, extract_token, generate_id, get_user_from_token, now_millis, now_secs,
-        rate_limited, send_to_user,
+        error_response, extract_token, generate_id, get_user_from_token, now_millis, rate_limited,
+        send_to_user,
     },
     ratelimit,
     state::{AppState, BlockRecord, FriendRequestRecord, FriendshipRecord, UserRecord},
 };
-use super::presence::build_presence_entry;
+use super::presence::build_presence_entries;
 use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
@@ -76,13 +76,8 @@ pub(crate) async fn get_friends_presence(
         }
     }
 
-    let current_time = now_secs();
-    let up = state.user_presence.read().await;
-    let mut presence_data = serde_json::Map::new();
-    for subject in subjects {
-        let entry = build_presence_entry(&state, &up, &subject, current_time).await;
-        presence_data.insert(subject, entry);
-    }
+    let subjects: Vec<String> = subjects.into_iter().collect();
+    let presence_data = build_presence_entries(&state, &subjects).await;
 
     Ok(Json(json!({ "presence": Value::Object(presence_data) })))
 }

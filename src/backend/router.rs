@@ -86,6 +86,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::{
+    compression::CompressionLayer,
     cors::{Any, CorsLayer},
     services::ServeDir,
     set_header::SetResponseHeaderLayer,
@@ -162,7 +163,6 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/icon-badge.png",
             get(|| serve_dist_file("icon-badge.png", PNG)),
         )
-        .nest("/external", external_router)
         // Matrix versions
         .route("/_matrix/client/versions", get(versions))
         .route("/api/version", get(build_version))
@@ -485,6 +485,17 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/admin/rooms/{room_id}", delete(admin_delete_room))
         // Invite page with OG meta tags for link previews
         .route("/invite/{code}", get(serve_invite_page))
+        // Everything above is text the wire should not be carrying whole: the
+        // client bundle is over a megabyte of JavaScript, and a sync response
+        // is one JSON document listing every room with its members. Both were
+        // going out uncompressed, which a phone pays for on every cold start.
+        .layer(CompressionLayer::new())
+        // Registered *after* the layer, because `Router::layer` covers only
+        // the routes declared before it — and neither of these may be
+        // re-encoded. Uploaded media is already compressed and is served with
+        // byte ranges, which a second encoding of the body would invalidate;
+        // a WebSocket handshake is a protocol upgrade with no body to encode.
+        .nest("/external", external_router)
         // WebSocket
         .route("/ws", get(ws_upgrade))
 }
