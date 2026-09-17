@@ -1,5 +1,5 @@
 import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X, MoreHorizontal } from "lucide-react";
+import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Link2, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X, MoreHorizontal } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { useVideoResume } from "@/hooks/useVideoResume";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
@@ -29,6 +29,13 @@ import {
 } from "@/components/ui/dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
+import { MessageLinkEmbed } from "./MessageLinkEmbed";
+import {
+  findMessageLinks,
+  messageLinkFor,
+  parseMessageLink,
+  resolveMessagePreview,
+} from "@/lib/messageLinks";
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
 import { useChromecast } from "@/hooks/useChromecast";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -110,6 +117,17 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     // Also suppress uploaded file URLs since FileAttachmentCard renders those
     if (/\/external\//.test(url)) {
       return "";
+    }
+    // A link to a message on this instance reads as what it is, not as a line
+    // of percent-encoded id. Kept as a link rather than suppressed the way
+    // media is: the card below it only renders for a viewer allowed to see the
+    // message, and dropping the text too would leave the rest of the room
+    // looking at a message with a hole in it. `href` stays real so
+    // middle-click and "copy link address" behave; the left-click is
+    // intercepted by the delegate on the container, which jumps in-app.
+    const linkedEventId = parseMessageLink(url);
+    if (linkedEventId) {
+      return `<a href="${escapeAttr(url)}" data-message-link="${escapeAttr(linkedEventId)}" class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20 hover:underline">Message link</a>`;
     }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline break-all">${displayUrl}</a>`;
@@ -1032,7 +1050,7 @@ function ActionRow({
 
 function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
   const confirm = useConfirm();
-  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
+  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, openMessage, pinMessage, unpinMessage } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1212,6 +1230,13 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
   const canPin =
     !hidePinControls && inCurrentChannel && !inThread && !isSystem && canManageMessages(state);
   const canReact = !disableReactions && can(state, "add_reactions");
+  // Anyone who can see a message can link to it — a link grants nothing, since
+  // following one is checked against the follower's own access. What is
+  // excluded is what a link could not lead anywhere useful: a thread reply,
+  // which `pendingJump` cannot open and the server refuses to resolve, and a
+  // system notice, which has no author or content to preview. Bot and webhook
+  // messages are ordinary messages here and stay linkable.
+  const canLink = !inThread && !isSystem;
 
   const togglePin = async () => {
     try {
@@ -1333,10 +1358,61 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
   }
 
   const reactions = state.messageReactions[message.event_id] || {};
-  const segments = useMemo(
-    () => parseMessageSegments(message.content.body),
+  // One memo for both passes over the body. `linkedEventIds` names the
+  // messages this one links to, each of which draws a card below — or draws
+  // nothing, for a viewer the server will not resolve the link for.
+  const { segments, linkedEventIds } = useMemo(
+    () => ({
+      segments: parseMessageSegments(message.content.body),
+      linkedEventIds: findMessageLinks(message.content.body),
+    }),
     [message.content.body]
   );
+
+  /** Left-clicking a message link jumps in-app instead of navigating.
+   *
+   *  Delegated because the body is set as HTML, so there is no element to hang
+   *  a handler on. A link the viewer cannot follow says so rather than doing
+   *  nothing: its card is absent by design, and a dead click with no card and
+   *  no message would just look broken. */
+  const handleBodyClick = (e: React.MouseEvent) => {
+    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(
+      "[data-message-link]"
+    );
+    if (!anchor) return;
+    // Leave the modified clicks to the browser — a middle-click or ctrl-click
+    // on a link is a request for a new tab, and the link is real.
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+    e.preventDefault();
+    const linkedId = anchor.dataset.messageLink;
+    if (!linkedId) return;
+    void resolveMessagePreview(linkedId)
+      .then((preview) => {
+        if (!preview) {
+          toast.error("That message is not available to you");
+          return;
+        }
+        openMessage({
+          roomId: preview.room_id,
+          eventId: preview.event_id,
+          channelId: preview.channel_id,
+          ts: preview.origin_server_ts,
+        });
+      })
+      .catch(() => toast.error("Could not open that message"));
+  };
+
+  const copyMessageLink = async () => {
+    try {
+      await navigator.clipboard.writeText(messageLinkFor(message.event_id));
+      toast.success("Message link copied");
+    } catch {
+      // Clipboard access is refused outside a secure context, and on a
+      // self-hosted instance reached over plain HTTP that is the normal case
+      // rather than an edge one.
+      toast.error("Could not copy — clipboard needs HTTPS");
+    }
+  };
 
   const handleReply = () => {
     dispatch({ type: "SET_REPLYING_TO", payload: message });
@@ -1508,6 +1584,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 }
               }}
               onMouseLeave={() => setEmojiTip(null)}
+              onClick={handleBodyClick}
             >
               {segments.map((segment, i) =>
                 segment.type === "code" ? (
@@ -1534,6 +1611,15 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
               )}
             </div>
           )}
+
+          {/* Cards for messages this one links to. Each renders nothing unless
+              the server resolves the link for this viewer, so a message shared
+              out of a private channel shows its link to everyone and its
+              contents only to the people already allowed to read it. */}
+          {!isDeleted &&
+            linkedEventIds.map((linkedId) => (
+              <MessageLinkEmbed key={linkedId} eventId={linkedId} />
+            ))}
 
           {/* Thread reply count indicator */}
           {!inThread && !isDeleted && (message.thread_reply_count ?? 0) > 0 && (
@@ -1710,6 +1796,17 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 {isPinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
               </Button>
             )}
+            {canLink && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={copyMessageLink}
+                title="Copy message link"
+              >
+                <Link2 className="h-4 w-4" />
+              </Button>
+            )}
             {canReact && <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-7 w-7" title="Add reaction">
@@ -1827,6 +1924,16 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                     onSelect={() => {
                       setActionsOpen(false);
                       togglePin();
+                    }}
+                  />
+                )}
+                {canLink && (
+                  <ActionRow
+                    icon={Link2}
+                    label="Copy message link"
+                    onSelect={() => {
+                      setActionsOpen(false);
+                      void copyMessageLink();
                     }}
                   />
                 )}

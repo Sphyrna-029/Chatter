@@ -2,6 +2,7 @@ import type { Dispatch, MutableRefObject } from "react";
 import type { Action, AppState, VoiceChannelMember } from "./types";
 import { apiGetRoomMembers } from "../api";
 import { displayUserId } from "@/lib/utils";
+import { forgetMessagePreview } from "@/lib/messageLinks";
 import { toast } from "sonner";
 import {
   notificationBody,
@@ -453,6 +454,11 @@ export function createWsMessageHandler(
       }
       loadRoomsRef.current();
     } else if (msg.type === "m.room.redaction") {
+      // Outside the current-room gate below on purpose: a card for this
+      // message may be on screen in a different room entirely, which is the
+      // whole point of a shared link. Getting this broadcast at all means we
+      // are a member of the room it came from.
+      if (msg.redacts) forgetMessagePreview(msg.redacts);
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REDACT_MESSAGE", payload: msg.redacts });
         // A deleted reply is the one thing that changes a thread's count
@@ -467,10 +473,12 @@ export function createWsMessageHandler(
         }
       }
     } else if (msg.type === "m.room.message_removed") {
+      if (msg.event_id) forgetMessagePreview(msg.event_id);
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({ type: "REMOVE_MESSAGE", payload: msg.event_id });
       }
     } else if (msg.type === "m.room.edit") {
+      if (msg.edits) forgetMessagePreview(msg.edits);
       if (msg.room_id === stateRef.current.currentRoomId) {
         dispatch({
           type: "EDIT_MESSAGE",

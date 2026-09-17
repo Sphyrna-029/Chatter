@@ -3010,6 +3010,46 @@ export async function apiGetUnreads() {
   return res.json() as Promise<{ unreads: UnreadEntry[] }>;
 }
 
+/** What a shared message link resolves to, for this viewer. */
+export interface MessagePreview {
+  event_id: string;
+  room_id: string;
+  room_name: string;
+  /** Null for a DM, and for a message from before the room had channels. */
+  channel_id: string | null;
+  channel_name: string | null;
+  sender: string;
+  sender_display_name: string;
+  sender_avatar_url: string;
+  /** Empty when `spoiler` is set — a spoiler's text never travels. */
+  body: string;
+  spoiler: boolean;
+  attachment_count: number;
+  origin_server_ts: number;
+  edited: boolean;
+}
+
+/**
+ * Resolve a shared message link, or `null` when it is not available to this
+ * viewer.
+ *
+ * `null` covers every refusal without distinguishing them, because the server
+ * does not either: a message that does not exist, one in a room the caller is
+ * not in, and one in a channel they cannot see all answer 404 so that holding
+ * a link reveals nothing. Anything else — a network failure, a rate limit —
+ * throws, so a caller can tell "not for you" from "ask again".
+ */
+export async function apiGetMessagePreview(
+  eventId: string,
+): Promise<MessagePreview | null> {
+  const res = await authenticatedFetch(
+    `/api/messages/${encodeURIComponent(eventId)}/preview`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load message preview");
+  return res.json() as Promise<MessagePreview>;
+}
+
 /** Record that the user has read a channel up to now. Markers only move forward. */
 export async function apiMarkRead(roomId: string, channelId?: string) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/read`, {

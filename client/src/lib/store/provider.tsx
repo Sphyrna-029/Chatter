@@ -105,6 +105,7 @@ import {
   type RoomInfo,
 } from "../api";
 import { clearMediaBlobs } from "@/lib/mediaBlobs";
+import { clearMessagePreviews } from "@/lib/messageLinks";
 import { fetchIceServers } from "../webrtc";
 import { AppActionsContext, AppStateContext, type AppActions } from "./context";
 import {
@@ -689,6 +690,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // otherwise — the blob URLs are held by the cache, not by the tab — and
     // the next person to sign in here shares this document.
     clearMediaBlobs();
+    // Likewise a resolved message link: what one account was allowed to read
+    // is not what the next one is, and these were resolved against the
+    // account that is leaving.
+    clearMessagePreviews();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -701,6 +706,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await apiDeleteAccount(totpCode);
     clearTokens();
     clearMediaBlobs();
+    clearMessagePreviews();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();

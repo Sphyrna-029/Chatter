@@ -55,6 +55,14 @@ pub(crate) const REGISTER_GLOBAL: Quota = Quota::per(30.0, 3600.0);
 pub(crate) const FRIEND_REQUEST: Quota = Quota::per(20.0, 3600.0);
 /// Reactions: cheap individually, and a loop can write thousands.
 pub(crate) const REACTION: Quota = Quota::per(30.0, 10.0);
+/// Resolving shared message links.
+///
+/// The burst is what matters here and it has to be large: opening a channel
+/// draws every card on the page at once, and a channel people share links in
+/// can easily hold fifty distinct ones. The client caches each resolution for
+/// minutes, so the *sustained* rate a person produces is near zero — which is
+/// what lets the refill be slow enough to meter a script walking event ids.
+pub(crate) const MESSAGE_PREVIEW: Quota = Quota::per(120.0, 60.0);
 /// Moving in a spatial voice channel. A drag is a stream of small updates, so
 /// this sits well above what one produces (the client throttles to ~15/s) and
 /// still meters a loop. Refusals here are *dropped rather than reported*: the

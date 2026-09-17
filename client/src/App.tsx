@@ -9,6 +9,7 @@ import { ConfirmProvider } from "@/components/ConfirmDialog";
 import { ThemeProvider } from "@/lib/theme";
 import { ThemeSync } from "@/components/ThemeSync";
 import { ThemeInvite } from "@/components/ThemeInvite";
+import { MessageLinkOpener } from "@/components/MessageLinkOpener";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { lazyRetry } from "@/lib/lazyRetry";
 
@@ -84,6 +85,7 @@ function App() {
             <ConfirmProvider>
               <ThemeSync />
               <ThemeInvite />
+              <MessageLinkOpener />
               <AppContent />
             </ConfirmProvider>
           </TooltipProvider>

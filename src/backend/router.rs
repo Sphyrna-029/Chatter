@@ -35,6 +35,7 @@ use super::{
             delete_upload, gif_search, link_preview, list_uploads, upload_abort, upload_chunk,
             upload_complete, upload_file, upload_guard, upload_init, upload_status,
         },
+        message_links::get_message_preview,
         messages::{
             delete_notification, delete_thread, edit_message, get_room_messages, get_room_threads,
             get_thread_messages, redact_message, search_messages, send_message,
@@ -224,6 +225,10 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
             "/api/rooms/{room_id}/messages/{event_id}",
             delete(delete_notification),
         )
+        // Not scoped to a room: an event id names a message across the whole
+        // instance, and which room it is in is one of the things the caller is
+        // asking. See `routes/message_links.rs`.
+        .route("/api/messages/{event_id}/preview", get(get_message_preview))
         .route(
             "/_matrix/client/r0/rooms/{room_id}/edit/{event_id}/{txn_id}",
             put(edit_message),
@@ -477,6 +482,17 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/admin/rooms/{room_id}", delete(admin_delete_room))
         // Invite page with OG meta tags for link previews
         .route("/invite/{code}", get(serve_invite_page))
+        // A shared message link. Serves the client and nothing else: the event
+        // id is read from the path by `MessageLinkOpener`, which resolves it
+        // against the viewer's own access once there is a session.
+        //
+        // Deliberately *not* the invite page's treatment. OG meta tags are
+        // served to whoever asks, with no token and no membership — so putting
+        // the message in them would publish the contents of a private channel
+        // to any crawler, scraper or chat client that unfurls the link, which
+        // is the exact thing the per-viewer preview exists to prevent. A
+        // message link has no preview outside Chatter on purpose.
+        .route("/m/{event_id}", get(serve_client))
         // Everything above is text the wire should not be carrying whole: the
         // client bundle is over a megabyte of JavaScript, and a sync response
         // is one JSON document listing every room with its members. Both were
