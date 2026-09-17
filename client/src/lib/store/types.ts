@@ -42,6 +42,16 @@ export interface SearchState {
   loadingMore: boolean;
 }
 
+/** Enough to find a message and show it: which room and channel hold it, and
+ *  the timestamp a page around it is fetched by. */
+export interface MessageTarget {
+  roomId: string;
+  eventId: string;
+  /** Null for a DM, and for a message from before the room had channels. */
+  channelId: string | null;
+  ts: number;
+}
+
 export interface AppState {
   // Auth
   accessToken: string | null;
@@ -155,6 +165,11 @@ export interface AppState {
   storageLimitBytes: number; // per-user total storage quota; 0 = unlimited
   // 2FA
   totpVerified: boolean;
+  /** A message named from outside the room it lives in — an activity row, a
+   *  cross-room search hit. Selecting a room cannot carry a scroll position
+   *  with it (the room's own load decides what is on screen), so the target
+   *  waits here until the room is up and `ChatArea` lands on it. */
+  pendingJump: MessageTarget | null;
   // Room Groups
   roomGroups: RoomGroup[];
   /** The order the sidebar's top level is drawn in: a flat list of ids, each
@@ -274,6 +289,7 @@ export type Action =
   | { type: "SET_SERVER_SETTINGS"; payload: { requireAuthForUploads: boolean; uploadLimitBytes: number; storageLimitBytes: number } }
   | { type: "SET_TOTP_VERIFIED"; payload: boolean }
   | { type: "SET_FRIENDS_DATA"; payload: { friends: string[]; incomingRequests: { userId: string; requestId: string }[]; outgoingRequests: { userId: string; requestId: string }[]; blocked: string[] } }
+  | { type: "SET_PENDING_JUMP"; payload: MessageTarget | null }
   | { type: "SET_ROOM_GROUPS"; payload: RoomGroup[] }
   | { type: "SET_SIDEBAR_ORDER"; payload: string[] }
   | { type: "UPDATE_ROOM_GROUP"; payload: RoomGroup }
@@ -403,6 +419,7 @@ export const initialState: AppState = {
   uploadLimitBytes: 0,
   storageLimitBytes: 0,
   totpVerified: false,
+  pendingJump: null,
   roomGroups: [],
   sidebarOrder: [],
   customRoles: [],
@@ -427,6 +444,10 @@ export interface AppContextValue {
   selectRoom: (roomId: string) => Promise<void>;
   sendMessage: (body: string, inReplyTo?: string, spoiler?: boolean) => Promise<void>;
   openThread: (eventId: string) => Promise<void>;
+  /** Open a room *on* one of its messages. For rows outside the room that
+   *  stand for a message — the activity page, cross-room search — where
+   *  selecting the room alone lands on whatever is newest instead. */
+  openMessage: (target: MessageTarget) => Promise<void>;
   closeThread: () => void;
   sendThreadMessage: (body: string) => Promise<void>;
   setThreadName: (name: string) => Promise<void>;

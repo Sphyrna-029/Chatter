@@ -24,7 +24,15 @@ import { toast } from "sonner";
 
 interface RoomActivity {
   roomId: string;
-  lastMessage?: { sender: string; body: string; timestamp: number };
+  /** Identified, not just quoted: the row stands for this message, so
+   *  clicking it has to be able to open the room *on* it. */
+  lastMessage?: {
+    eventId: string;
+    channelId: string | null;
+    sender: string;
+    body: string;
+    timestamp: number;
+  };
   memberCount: number;
 }
 
@@ -84,7 +92,7 @@ function statusColor(status: string) {
 }
 
 export function ActivityPage() {
-  const { state, dispatch, selectRoom, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser, loadUnreads, sendFriendRequest } = useAppContext();
+  const { state, dispatch, selectRoom, openMessage, openDM, acceptFriendRequest, rejectFriendRequest, removeFriend, unblockUser, loadUnreads, sendFriendRequest } = useAppContext();
   const [activities, setActivities] = useState<RoomActivity[]>([]);
   const [loading, setLoading] = useState(true);
   const [blockedExpanded, setBlockedExpanded] = useState(false);
@@ -126,6 +134,10 @@ export function ActivityPage() {
               .sort((a: any, b: any) => (b.origin_server_ts ?? 0) - (a.origin_server_ts ?? 0));
             if (msgs.length > 0) {
               lastMessage = {
+                eventId: msgs[0].event_id,
+                // Absent on a DM, and on anything from before the room had
+                // channels; the jump then stays in whichever channel opens.
+                channelId: msgs[0].channel_id ?? null,
                 sender: msgs[0].sender,
                 body: msgs[0].content.body,
                 timestamp: msgs[0].origin_server_ts,
@@ -345,7 +357,20 @@ export function ActivityPage() {
                     return (
                       <button
                         key={roomId}
-                        onClick={() => selectRoom(roomId)}
+                        // The row shows a message, so it opens that message.
+                        // Selecting the room alone lands on whatever is
+                        // newest, which is the same thing only until someone
+                        // else says something.
+                        onClick={() =>
+                          lastMessage
+                            ? void openMessage({
+                                roomId,
+                                eventId: lastMessage.eventId,
+                                channelId: lastMessage.channelId,
+                                ts: lastMessage.timestamp,
+                              })
+                            : void selectRoom(roomId)
+                        }
                         className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 text-left transition-colors hover:bg-accent/50 cursor-pointer w-full overflow-hidden"
                       >
                         {/* Room icon */}

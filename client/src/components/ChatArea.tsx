@@ -7,7 +7,7 @@ import { STANDARD_SHORTCODES } from "@/lib/emojiShortcodes";
 import { composerLength, emojiImage, getComposerText, setComposerText } from "@/lib/composer";
 import { MessageItem } from "./MessageItem";
 import { MessagePanel } from "./MessagePanel";
-import type { AppState } from "@/lib/store/types";
+import type { AppState, MessageTarget } from "@/lib/store/types";
 
 /** Everything the companion slot can show. MessagePanel handles all but the
  *  events one, which has its own panel. */
@@ -1392,6 +1392,55 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     }
     setScrollToEventId(msg.event_id);
   };
+
+  // The target itself rather than its id: a row clicked twice hands over two
+  // targets naming the same message, and both have to land. Identity is what
+  // separates "this effect already ran" from "asked again".
+  const jumpedRef = useRef<MessageTarget | null>(null);
+
+  // A message named from outside the room it lives in — a row on the activity
+  // page — arrives as `pendingJump`, because selecting a room cannot carry a
+  // scroll position with it: the room's own load decides what is on screen,
+  // and the row that asked is unmounted by that very switch. This is where it
+  // lands, once there are channels and a timeline to land in.
+  useEffect(() => {
+    const target = state.pendingJump;
+    if (!target || target.roomId !== state.currentRoomId) return;
+    // Effects re-run; a jump is made once.
+    if (jumpedRef.current === target) return;
+    // A channel cannot be chosen before the room's channels have arrived. A
+    // DM has none, so there is nothing to wait for there.
+    const isDm = !!state.roomInfoMap[target.roomId]?.is_direct;
+    if (!isDm && !state.currentChannelId) return;
+    jumpedRef.current = target;
+
+    let cancelled = false;
+    void (async () => {
+      if (target.channelId && target.channelId !== state.currentChannelId) {
+        await selectChannel(target.channelId);
+      }
+      if (cancelled) return;
+      // Fetched rather than assumed, and unconditionally: a page centred on
+      // the message is the point — the room's own load lands on the newest
+      // one, which leaves the message that was clicked off the bottom of a
+      // long timeline even when it happens to be in it.
+      await loadMessagesAround(target.roomId, target.ts);
+      if (cancelled) return;
+      setScrollToEventId(target.eventId);
+      dispatch({ type: "SET_PENDING_JUMP", payload: null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    state.pendingJump,
+    state.currentRoomId,
+    state.currentChannelId,
+    state.roomInfoMap,
+    selectChannel,
+    loadMessagesAround,
+    dispatch,
+  ]);
 
   // Scroll to a message after search/mentions closes and messages are rendered
   useEffect(() => {

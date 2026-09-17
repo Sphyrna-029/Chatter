@@ -130,6 +130,13 @@ export function reducer(state: AppState, action: Action): AppState {
         pinnedMessages: [],
         pinsHasMore: false,
         pinsNextOffset: 0,
+        // A pending jump is kept only while it points at the room being
+        // opened. Any other target belongs to a room this switch walked away
+        // from, and would fire the next time that room came up.
+        pendingJump:
+          state.pendingJump && state.pendingJump.roomId === action.payload
+            ? state.pendingJump
+            : null,
         loadingMorePins: false,
         activeThreadEventId: null,
         threadRootMessage: null,
@@ -638,6 +645,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, requireAuthForUploads: action.payload.requireAuthForUploads, uploadLimitBytes: action.payload.uploadLimitBytes, storageLimitBytes: action.payload.storageLimitBytes };
     case "SET_TOTP_VERIFIED":
       return { ...state, totpVerified: action.payload };
+    case "SET_PENDING_JUMP":
+      return { ...state, pendingJump: action.payload };
     case "SET_ROOM_GROUPS":
       return { ...state, roomGroups: action.payload };
     case "SET_SIDEBAR_ORDER":

@@ -110,6 +110,7 @@ import {
   resumePointsMap,
   THREAD_ACTIVE_WINDOW_MS,
   THREAD_PREVIEW_LIMIT,
+  type MessageTarget,
   type ThreadPreview,
   type VoiceChannelMember,
 } from "./types";
@@ -1076,6 +1077,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /** Open a room on one of its messages.
+   *
+   *  The target is recorded before the room is selected and acted on in
+   *  `ChatArea`, because the two halves cannot happen in one place: landing
+   *  on a message needs the room's channels and timeline, which exist only
+   *  once selecting the room has finished, and the caller is a row on another
+   *  page that this very switch is about to unmount. */
+  const openMessage = useCallback(
+    async (target: MessageTarget) => {
+      dispatch({ type: "SET_PENDING_JUMP", payload: target });
+      // Already here: nothing to load, and `ChatArea` acts on the target as
+      // soon as it sees it.
+      if (stateRef.current.currentRoomId === target.roomId) return;
+      await selectRoom(target.roomId);
+    },
+    [selectRoom],
+  );
+
   const loadMessagesAround = useCallback(async (roomId: string, ts: number) => {
     const msgData = await apiGetMessages(roomId, 50, undefined, ts, stateRef.current.currentChannelId || undefined);
     const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
@@ -1753,6 +1772,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadMessagesAround,
       sendMessage,
       openThread,
+      openMessage,
       closeThread,
       sendThreadMessage,
       setThreadName,
@@ -1822,7 +1842,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, setSidebarOrder, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, openMessage, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, setSidebarOrder, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (
