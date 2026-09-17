@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
 import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
@@ -572,7 +572,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     return (
       <div
         key={folderId ? `${folderId}:${roomId}` : roomId}
-        className="relative flex w-12 shrink-0 justify-center"
+        className="relative flex w-(--rail-icon) shrink-0 justify-center"
       >
         {renderRailDropLine(overSide)}
       <Tooltip>
@@ -617,7 +617,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               clearRailDrag();
             }}
             className={cn(
-              "group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer",
+              "group/rail relative flex size-(--rail-icon) shrink-0 items-center justify-center cursor-pointer",
               railDragId === roomId && "opacity-40",
             )}
           >
@@ -628,15 +628,15 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               className={cn(
                 "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
                 isActive
-                  ? "h-10"
+                  ? "h-[calc(var(--rail-icon)*0.83)]"
                   : mentions > 0 || unreadCount > 0
-                    ? "h-2 group-hover/rail:h-5"
-                    : "h-0 group-hover/rail:h-5",
+                    ? "h-[calc(var(--rail-icon)*0.17)] group-hover/rail:h-[calc(var(--rail-icon)*0.42)]"
+                    : "h-0 group-hover/rail:h-[calc(var(--rail-icon)*0.42)]",
               )}
             />
             <span
               className={cn(
-                "flex h-12 w-12 items-center justify-center overflow-hidden text-base font-semibold transition-all duration-200",
+                "flex size-(--rail-icon) items-center justify-center overflow-hidden text-sm font-semibold transition-all duration-200",
                 // The squircle morph: a circle at rest, a rounded square when
                 // it is the room you are in or the one under the cursor.
                 isActive ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
@@ -652,7 +652,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               )}
             >
               {iconUrl ? (
-                <Avatar className="h-12 w-12 rounded-none">
+                <Avatar className="size-(--rail-icon) rounded-none">
                   <AuthAvatarImage src={iconUrl} />
                   <AvatarFallback className="rounded-none bg-transparent text-base font-semibold">
                     {roomInitial}
@@ -742,11 +742,11 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           // and it carries the theme's hue, which an alpha of the foreground
           // cannot.
           open && roomIds.length > 0
-            ? "w-16 rounded-[2rem] bg-muted py-2"
+            ? "w-[calc(var(--rail-icon)+0.75rem)] rounded-[2rem] bg-muted py-2"
             : "w-full",
         )}
       >
-        <div className="relative flex w-12 shrink-0 justify-center">
+        <div className="relative flex w-(--rail-icon) shrink-0 justify-center">
           {renderRailDropLine(overSide)}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -802,7 +802,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   clearRailDrag();
                 }}
                 className={cn(
-                  "group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer",
+                  "group/rail relative flex size-(--rail-icon) shrink-0 items-center justify-center cursor-pointer",
                   railDragId === group.group_id && "opacity-40",
                 )}
               >
@@ -810,12 +810,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   aria-hidden
                   className={cn(
                     "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
-                    holdsCurrent ? "h-10" : unread ? "h-2 group-hover/rail:h-5" : "h-0 group-hover/rail:h-5",
+                    holdsCurrent
+                      ? "h-[calc(var(--rail-icon)*0.83)]"
+                      : unread
+                        ? "h-[calc(var(--rail-icon)*0.17)] group-hover/rail:h-[calc(var(--rail-icon)*0.42)]"
+                        : "h-0 group-hover/rail:h-[calc(var(--rail-icon)*0.42)]",
                   )}
                 />
                 <span
                   className={cn(
-                    "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
+                    "flex size-(--rail-icon) items-center justify-center overflow-hidden transition-all duration-200",
                     open ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
                     // The same background as the wash it heads, so an open
                     // folder is one unbroken recess with the glyph at the top
@@ -831,7 +835,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   {open || roomIds.length === 0 ? (
                     open ? <FolderOpen className="h-5 w-5" /> : <Folder className="h-5 w-5" />
                   ) : (
-                    <span className="grid h-9 w-9 grid-cols-2 grid-rows-2 gap-0.5">
+                    <span className="grid size-[calc(var(--rail-icon)*0.75)] grid-cols-2 grid-rows-2 gap-0.5">
                       {roomIds.slice(0, 4).map((roomId) => {
                         const info = state.roomInfoMap[roomId];
                         const initial = (info?.name || "?").substring(0, 1).toUpperCase();
@@ -869,7 +873,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           </Tooltip>
         </div>
         {open && roomIds.length > 0 && (
-          <div className="flex w-12 flex-col items-center gap-2">
+          <div className="flex w-(--rail-icon) flex-col items-center gap-2">
             {roomIds.map((roomId) => renderRailIcon(roomId, group.group_id))}
           </div>
         )}
@@ -899,18 +903,22 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           <button
             onClick={onClick}
             aria-label={label}
-            className="group/rail relative flex h-12 w-12 shrink-0 items-center justify-center cursor-pointer"
+            className="group/rail relative flex size-(--rail-icon) shrink-0 items-center justify-center cursor-pointer"
           >
             <span
               aria-hidden
               className={cn(
                 "absolute -left-2 w-1 rounded-r-full bg-sidebar-foreground transition-all duration-200",
-                active ? "h-10" : unread ? "h-2 group-hover/rail:h-5" : "h-0 group-hover/rail:h-5",
+                active
+                  ? "h-[calc(var(--rail-icon)*0.83)]"
+                  : unread
+                    ? "h-[calc(var(--rail-icon)*0.17)] group-hover/rail:h-[calc(var(--rail-icon)*0.42)]"
+                    : "h-0 group-hover/rail:h-[calc(var(--rail-icon)*0.42)]",
               )}
             />
             <span
               className={cn(
-                "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
+                "flex size-(--rail-icon) items-center justify-center overflow-hidden transition-all duration-200",
                 active ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
                 active
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
@@ -949,7 +957,14 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
       className="rounded-lg overflow-hidden border border-border bg-sidebar !top-2 !bottom-2 left-2 !h-auto"
     >
       {railed ? (
-        <div className="flex h-full w-full flex-col items-center gap-2 py-3">
+        <div
+          className="flex h-full w-full flex-col items-center gap-2 py-3"
+          // Every icon on the rail is one square, declared once here. 15%
+          // down from the 48px Discord uses — which is what the sidebar's
+          // 4.5rem collapsed width was picked around, and that width does not
+          // change, so the room the icons give up becomes the gap around them.
+          style={{ "--rail-icon": "2.55rem" } as CSSProperties}
+        >
           {renderRailAction({
             label: "Activity",
             active: !state.currentRoomId && !state.adminDashboardOpen,
@@ -1009,7 +1024,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                     clearRailDrag();
                   }}
                   className={cn(
-                    "h-8 w-12 shrink-0 rounded-2xl border-2 border-dashed transition-colors",
+                    "h-7 w-(--rail-icon) shrink-0 rounded-2xl border-2 border-dashed transition-colors",
                     railOverId === "__end__" ? "border-primary bg-accent/40" : "border-border/60",
                   )}
                   aria-hidden
@@ -1034,7 +1049,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             label: "You",
             onClick: () => setProfileOpen(true),
             children: (
-              <Avatar className="h-12 w-12 rounded-none">
+              <Avatar className="size-(--rail-icon) rounded-none">
                 <AuthAvatarImage src={state.userId ? state.userPresence[state.userId]?.avatarUrl : undefined} />
                 <AvatarFallback className="rounded-none bg-transparent text-base font-bold">
                   {initial}
@@ -1048,7 +1063,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
               <button
                 onClick={toggleSidebar}
                 aria-label="Expand sidebar"
-                className="flex h-6 w-12 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors cursor-pointer"
+                className="flex h-6 w-(--rail-icon) shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors cursor-pointer"
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
