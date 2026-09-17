@@ -730,13 +730,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           // Wider than the icons by a few pixels on each side is what makes it
           // read as holding them, and the rail is 4.5rem to their 3rem, so
           // there is room for it without moving anything.
-          // A shade of the sidebar itself rather than the theme's accent: the
-          // foreground at a low alpha lifts a dark theme and deepens a light
-          // one, so the wash is always the same surface a step away — where
-          // the accent was a second colour competing with the one the rooms
-          // are already drawn in.
+          // The theme's own background, which is the one colour on screen
+          // that carries the theme's hue without being its accent: a folder
+          // reads as a recess cut into the rail rather than a panel laid on
+          // it. An alpha of the foreground was the neutral version of this
+          // and came out grey under every theme, whatever the theme was.
           open && roomIds.length > 0
-            ? "w-16 rounded-[2rem] bg-sidebar-foreground/10 py-2"
+            ? "w-16 rounded-[2rem] bg-background py-2"
             : "w-full",
         )}
       >
@@ -811,14 +811,15 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                   className={cn(
                     "flex h-12 w-12 items-center justify-center overflow-hidden transition-all duration-200",
                     open ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
-                    // The icon heads the wash and is drawn in the same colour
-                    // a shade up from it, so it belongs to the rooms under it
-                    // rather than to the rail. Closed, that undertone is all
-                    // there is to say this icon holds rooms rather than being
-                    // one.
+                    // The same background as the wash it heads, so an open
+                    // folder is one unbroken recess with the glyph at the top
+                    // of it rather than a chip sitting on a panel. Closed,
+                    // being drawn in the background rather than in the raised
+                    // surface every room uses is what says this icon holds
+                    // rooms rather than being one.
                     isTarget
                       ? "bg-sidebar-primary text-sidebar-primary-foreground ring-2 ring-primary"
-                      : "bg-sidebar-foreground/[0.18] text-sidebar-foreground group-hover/rail:bg-sidebar-foreground/[0.28]",
+                      : "bg-background text-sidebar-foreground group-hover/rail:bg-sidebar-accent",
                   )}
                 >
                   {open || roomIds.length === 0 ? (
