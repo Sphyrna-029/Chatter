@@ -421,9 +421,6 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                         steam_game: None,
                         steam_appid: None,
                         game_session_start: None,
-                        spotify_track: None,
-                        spotify_artist: None,
-                        spotify_album_art: None,
                     },
                 );
             }
@@ -438,16 +435,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 .map(|(rid, _)| rid.clone())
                 .collect();
             drop(rm);
-            let (
-                custom_status,
-                presence_is_mobile,
-                steam_game,
-                steam_appid,
-                game_session_start,
-                spotify_track,
-                spotify_artist,
-                spotify_album_art,
-            ) = {
+            let (custom_status, presence_is_mobile, steam_game, steam_appid, game_session_start) = {
                 let up = state.user_presence.read().await;
                 let p = up.get(&user_id);
                 (
@@ -456,9 +444,6 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                     p.and_then(|p| p.steam_game.clone()),
                     p.and_then(|p| p.steam_appid.clone()),
                     p.and_then(|p| p.game_session_start),
-                    p.and_then(|p| p.spotify_track.clone()),
-                    p.and_then(|p| p.spotify_artist.clone()),
-                    p.and_then(|p| p.spotify_album_art.clone()),
                 )
             };
             // Get avatar/about/banner/display_name from MongoDB
@@ -478,9 +463,6 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
                 "game_session_start": game_session_start,
-                "spotify_track": spotify_track,
-                "spotify_artist": spotify_artist,
-                "spotify_album_art": spotify_album_art,
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -1639,16 +1621,7 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                     doc! { "$set": { "custom_status": &custom_status } },
                 )
                 .await;
-            let (
-                effective_status,
-                p_is_mobile,
-                steam_game,
-                steam_appid,
-                game_session_start,
-                spotify_track,
-                spotify_artist,
-                spotify_album_art,
-            ) = {
+            let (effective_status, p_is_mobile, steam_game, steam_appid, game_session_start) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
                     p.custom_status = custom_status.clone();
@@ -1663,21 +1636,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         p.steam_game.clone(),
                         p.steam_appid.clone(),
                         p.game_session_start,
-                        p.spotify_track.clone(),
-                        p.spotify_artist.clone(),
-                        p.spotify_album_art.clone(),
                     )
                 } else {
-                    (
-                        "active".to_string(),
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
+                    ("active".to_string(), false, None, None, None)
                 }
             };
             let profile = get_user_profile(&state, user_id).await;
@@ -1703,9 +1664,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
                 "game_session_start": game_session_start,
-                "spotify_track": spotify_track,
-                "spotify_artist": spotify_artist,
-                "spotify_album_art": spotify_album_art,
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -1743,9 +1701,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 steam_game,
                 steam_appid,
                 game_session_start,
-                spotify_track,
-                spotify_artist,
-                spotify_album_art,
             ) = {
                 let mut up = state.user_presence.write().await;
                 if let Some(p) = up.get_mut(user_id) {
@@ -1762,22 +1717,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         p.steam_game.clone(),
                         p.steam_appid.clone(),
                         p.game_session_start,
-                        p.spotify_track.clone(),
-                        p.spotify_artist.clone(),
-                        p.spotify_album_art.clone(),
                     )
                 } else {
-                    (
-                        "active".to_string(),
-                        String::new(),
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
+                    ("active".to_string(), String::new(), false, None, None, None)
                 }
             };
             let profile = get_user_profile(&state, user_id).await;
@@ -1803,9 +1745,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
                 "game_session_start": game_session_start,
-                "spotify_track": spotify_track,
-                "spotify_artist": spotify_artist,
-                "spotify_album_art": spotify_album_art,
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -1942,9 +1881,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 steam_game,
                 steam_appid,
                 game_session_start,
-                spotify_track,
-                spotify_artist,
-                spotify_album_art,
             ) = {
                 let up = state.user_presence.read().await;
                 if let Some(p) = up.get(user_id) {
@@ -1960,22 +1896,9 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                         p.steam_game.clone(),
                         p.steam_appid.clone(),
                         p.game_session_start,
-                        p.spotify_track.clone(),
-                        p.spotify_artist.clone(),
-                        p.spotify_album_art.clone(),
                     )
                 } else {
-                    (
-                        String::new(),
-                        "active".to_string(),
-                        false,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
+                    (String::new(), "active".to_string(), false, None, None, None)
                 }
             };
             let rm = state.room_members.read().await;
@@ -2000,9 +1923,6 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
                 "steam_game": steam_game,
                 "steam_appid": steam_appid,
                 "game_session_start": game_session_start,
-                "spotify_track": spotify_track,
-                "spotify_artist": spotify_artist,
-                "spotify_album_art": spotify_album_art,
             });
             for rid in user_rooms {
                 broadcast_to_room(&state, &rid, &event).await;
@@ -2859,9 +2779,8 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
                     p.last_active = now_secs();
                     // The broadcast below has always said `is_mobile: false`;
                     // the record itself kept saying true, so every later reader
-                    // — the presence endpoint, and the Steam and Spotify
-                    // pollers, which re-broadcast this field — put the phone
-                    // icon back.
+                    // — the presence endpoint, and the Steam poller, which
+                    // re-broadcasts this field — put the phone icon back.
                     p.is_mobile = false;
                 }
             }

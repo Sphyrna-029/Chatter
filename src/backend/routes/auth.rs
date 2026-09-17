@@ -403,8 +403,6 @@ pub(crate) async fn totp_verify(
             must_reset_password: false,
             steam_id: None,
             hide_steam_game: false,
-            spotify_refresh_token: None,
-            hide_spotify: false,
         };
         users.insert_one(user_record).await.map_err(|_| {
             error_response(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create user")

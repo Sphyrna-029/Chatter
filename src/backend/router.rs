@@ -59,9 +59,6 @@ use super::{
             leave_room, list_all_rooms, list_banned_users, list_room_members, set_member_role,
             set_name_colors, unban_member, update_room_settings, update_room_topic,
         },
-        spotify::{
-            spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink,
-        },
         static_content::{
             build_version, serve_client, serve_dist_file, serve_invite_page, versions,
         },
@@ -450,12 +447,6 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/api/steam/status", get(steam_status))
         .route("/api/steam/hide-game", put(steam_set_hide_game))
         .route("/api/steam/unlink", delete(steam_unlink))
-        // Spotify
-        .route("/api/auth/spotify/callback", get(spotify_callback))
-        .route("/api/spotify/link-url", get(spotify_link_url))
-        .route("/api/spotify/status", get(spotify_status))
-        .route("/api/spotify/hide", put(spotify_set_hide))
-        .route("/api/spotify/unlink", delete(spotify_unlink))
         // Server info (public)
         .route("/api/server/info", get(server_info))
         .route("/api/ice-servers", get(ice_servers))

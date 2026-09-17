@@ -1483,10 +1483,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!roomId) return;
     try {
       const data = await apiGetPresence(roomId);
-      const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
+      const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number }> = {};
       for (const [uid, p] of Object.entries(data.presence)) {
         const pAny = p as any;
-        mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
+        mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, isMobile: pAny.is_mobile || false, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined };
       }
       dispatch({ type: "SET_PRESENCE", payload: mapped });
     } catch {}

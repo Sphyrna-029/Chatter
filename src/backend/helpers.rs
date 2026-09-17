@@ -1561,9 +1561,6 @@ mod tests {
             steam_game: None,
             steam_appid: None,
             game_session_start: None,
-            spotify_track: None,
-            spotify_artist: None,
-            spotify_album_art: None,
         }
     }
 

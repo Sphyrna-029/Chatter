@@ -368,14 +368,12 @@ export function LoginScreen() {
 
   useEffect(() => () => clearStepTimeouts(), [clearStepTimeouts]);
 
-  // Handle OAuth redirect params on initial load (Steam account linking, Spotify linking)
+  // Handle OAuth redirect params on initial load (Steam account linking)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const steamCode = params.get("steam_code");
     const steamLinked = params.get("steam_linked");
     const steamError = params.get("steam_error");
-    const spotifyLinked = params.get("spotify_linked");
-    const spotifyError = params.get("spotify_error");
 
     if (steamCode) {
       window.history.replaceState({}, "", "/");
@@ -395,7 +393,7 @@ export function LoginScreen() {
       return;
     }
 
-    if (steamLinked === "true" || spotifyLinked === "true") {
+    if (steamLinked === "true") {
       window.history.replaceState({}, "", "/");
       return;
     }
@@ -411,18 +409,6 @@ export function LoginScreen() {
       setError(messages[steamError] || `Steam login failed: ${steamError}`);
     }
 
-    if (spotifyError) {
-      window.history.replaceState({}, "", "/");
-      const messages: Record<string, string> = {
-        missing_code: "Spotify authorization was cancelled.",
-        missing_state: "Invalid Spotify OAuth state. Please try again.",
-        invalid_state: "Invalid state token. Please try again.",
-        token_exchange_failed: "Failed to exchange Spotify authorization code. Please try again.",
-        token_parse_failed: "Failed to parse Spotify token response. Please try again.",
-        no_refresh_token: "Spotify did not provide a refresh token. Please try again.",
-      };
-      setError(messages[spotifyError] || `Spotify linking failed: ${spotifyError}`);
-    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

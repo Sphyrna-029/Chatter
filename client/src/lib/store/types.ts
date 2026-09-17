@@ -67,7 +67,7 @@ export interface AppState {
   loadingOlderMessages: boolean;
   // Members
   roomMembers: { userId: string; displayName: string; role: string; joinedAt?: number }[];
-  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }>;
+  userPresence: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number }>;
   // Channels
   channels: Channel[];
   channelCategories: ChannelCategory[];
@@ -236,7 +236,7 @@ export type Action =
   | { type: "EDIT_MESSAGE"; payload: { eventId: string; newBody: string; newEmbeds?: Embed[] } }
   | { type: "SET_REACTIONS"; payload: { eventId: string; reactions: Record<string, string[]> } }
   | { type: "SET_ROOM_MEMBERS"; payload: { userId: string; displayName: string; role: string; joinedAt?: number }[] }
-  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> }
+  | { type: "SET_PRESENCE"; payload: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; isMobile?: boolean; steamGame?: string; steamAppId?: string; gameSessionStart?: number }> }
   | { type: "SET_VOICE_STATE"; payload: Partial<Pick<AppState, "inVoiceChannel" | "isMuted" | "isDeafened" | "voiceInputMode" | "voiceRoomId" | "isScreenSharing" | "isWebcamActive" | "voiceChannelId" | "voiceChannelName" | "voicePublisherState">> }
   | { type: "SET_VOICE_MEMBERS"; payload: { members: string[]; states: Record<string, { muted: boolean; deafened: boolean; screen_sharing: boolean }> } }
   | { type: "VOICE_USER_JOINED"; payload: string }

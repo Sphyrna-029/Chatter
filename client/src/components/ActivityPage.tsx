@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserProfileDialog } from "./UserProfileDialog";
 import { displayUserId } from "@/lib/utils";
 import { AuthImage, AuthAvatarImage } from "@/components/AuthImage";
-import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, HeadphoneOff, Music, Gamepad2, MessageCircle } from "lucide-react";
+import { AtSign, Users, MessageSquare, Clock, UserPlus, UserCheck, Ban, ChevronDown, Radio, Volume2, Monitor, MicOff, HeadphoneOff, Gamepad2, MessageCircle } from "lucide-react";
 import { ActivityStats } from "./activity/ActivityStats";
 import { StorageManager } from "./activity/StorageManager";
 import { RecentDiscussions } from "./activity/RecentDiscussions";
@@ -214,9 +214,6 @@ export function ActivityPage() {
             steamGame: (p.steam_game as string) || undefined,
             steamAppId: (p.steam_appid as string) || undefined,
             gameSessionStart: (p.game_session_start as number) || undefined,
-            spotifyTrack: (p.spotify_track as string) || undefined,
-            spotifyArtist: (p.spotify_artist as string) || undefined,
-            spotifyAlbumArt: (p.spotify_album_art as string) || undefined,
           };
         }
         // SET_PRESENCE replaces the whole map, so merge rather than clobbering
@@ -504,8 +501,7 @@ export function ActivityPage() {
                     const isOffline = status === "offline";
                     // Rich presence arrives on the global presence_update event,
                     // so it is as live here as it is in the members panel.
-                    const spotify = !isOffline && presence?.spotifyTrack;
-                    const steam = !isOffline && !spotify && presence?.steamGame;
+                    const steam = !isOffline && presence?.steamGame;
 
                     return (
                       <button
@@ -522,23 +518,6 @@ export function ActivityPage() {
                         </div>
                         <div className="min-w-0 flex-1">
                           <span className="block font-medium text-sm truncate">{displayName}</span>
-                          {spotify && (
-                            <span className="flex items-center gap-1 text-2xs text-muted-foreground truncate">
-                              {presence?.spotifyAlbumArt ? (
-                                <img
-                                  src={presence.spotifyAlbumArt}
-                                  alt=""
-                                  className="h-3 w-3 rounded-[2px] object-cover shrink-0"
-                                />
-                              ) : (
-                                <Music className="h-3 w-3 shrink-0 text-success" />
-                              )}
-                              <span className="truncate">
-                                {presence?.spotifyTrack}
-                                {presence?.spotifyArtist ? ` — ${presence.spotifyArtist}` : ""}
-                              </span>
-                            </span>
-                          )}
                           {steam && (
                             <span className="flex items-center gap-1 text-2xs text-muted-foreground truncate">
                               <Gamepad2 className="h-3 w-3 shrink-0 text-blue-400" />

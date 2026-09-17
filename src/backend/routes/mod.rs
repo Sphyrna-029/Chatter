@@ -21,7 +21,6 @@ pub(crate) mod read_markers;
 pub(crate) mod roles;
 pub(crate) mod room_groups;
 pub(crate) mod rooms;
-pub(crate) mod spotify;
 pub(crate) mod static_content;
 pub(crate) mod steam;
 pub(crate) mod sync;

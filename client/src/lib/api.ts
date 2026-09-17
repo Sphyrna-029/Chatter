@@ -3070,46 +3070,6 @@ export async function apiUnlinkSteam(): Promise<void> {
   }
 }
 
-// ─── Spotify ──────────────────────────────────────────────────────────────────
-
-export async function apiGetSpotifyLinkUrl(): Promise<{ url: string }> {
-  const res = await authenticatedFetch("/api/spotify/link-url");
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Spotify integration not configured");
-  }
-  return res.json();
-}
-
-export async function apiGetSpotifyStatus(): Promise<{ linked: boolean; hide: boolean }> {
-  const res = await authenticatedFetch("/api/spotify/status");
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to get Spotify status");
-  }
-  return res.json();
-}
-
-export async function apiSetSpotifyHide(hide: boolean): Promise<void> {
-  const res = await authenticatedFetch("/api/spotify/hide", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ hide }),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to update Spotify visibility");
-  }
-}
-
-export async function apiUnlinkSpotify(): Promise<void> {
-  const res = await authenticatedFetch("/api/spotify/unlink", { method: "DELETE" });
-  if (!res.ok) {
-    const data = await res.json().catch(() => null);
-    throw new Error(data?.error || "Failed to unlink Spotify");
-  }
-}
-
 // ─── Events ──────────────────────────────────────────────────────────────────
 
 /** A scheduled event in a room. Times are epoch milliseconds, UTC — the client

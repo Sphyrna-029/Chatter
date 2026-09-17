@@ -414,10 +414,10 @@ export function createWsMessageHandler(
               });
             }
             const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; steamGame?: string; steamAppId?: string; gameSessionStart?: number; spotifyTrack?: string; spotifyArtist?: string; spotifyAlbumArt?: string }> = {};
+            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; steamGame?: string; steamAppId?: string; gameSessionStart?: number }> = {};
             for (const [uid, p] of Object.entries(presData.presence)) {
               const pAny = p as any;
-              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined, spotifyTrack: pAny.spotify_track || undefined, spotifyArtist: pAny.spotify_artist || undefined, spotifyAlbumArt: pAny.spotify_album_art || undefined };
+              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined };
             }
             dispatch({ type: "SET_PRESENCE", payload: mapped });
           } catch {}
@@ -782,9 +782,6 @@ export function createWsMessageHandler(
               steamGame: msg.steam_game !== undefined ? (msg.steam_game || undefined) : existing?.steamGame,
               steamAppId: msg.steam_appid !== undefined ? (msg.steam_appid || undefined) : existing?.steamAppId,
               gameSessionStart: msg.game_session_start !== undefined ? (msg.game_session_start || undefined) : existing?.gameSessionStart,
-              spotifyTrack: msg.spotify_track !== undefined ? (msg.spotify_track || undefined) : existing?.spotifyTrack,
-              spotifyArtist: msg.spotify_artist !== undefined ? (msg.spotify_artist || undefined) : existing?.spotifyArtist,
-              spotifyAlbumArt: msg.spotify_album_art !== undefined ? (msg.spotify_album_art || undefined) : existing?.spotifyAlbumArt,
             },
           },
         });

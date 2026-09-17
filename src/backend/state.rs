@@ -98,10 +98,6 @@ pub struct AppState {
     pub(crate) watch_party_rooms: RwLock<HashMap<String, WatchPartyState>>,
     pub(crate) klipy_api_key: String,
     pub(crate) steam_api_key: String,
-    pub(crate) spotify_client_id: String,
-    pub(crate) spotify_client_secret: String,
-    // Cache: user_id -> (access_token, expires_at_unix_secs)
-    pub(crate) spotify_tokens: RwLock<HashMap<String, (String, f64)>>,
     // One-time login codes for Steam OAuth — nonce -> payload, expires in 60s
     pub(crate) steam_login_codes: RwLock<HashMap<String, SteamLoginCode>>,
     // Web Push application-server keypair. None when push is misconfigured, in
@@ -172,10 +168,6 @@ pub(crate) struct UserRecord {
     pub(crate) steam_id: Option<String>,
     #[serde(default)]
     pub(crate) hide_steam_game: bool,
-    #[serde(default)]
-    pub(crate) spotify_refresh_token: Option<String>,
-    #[serde(default)]
-    pub(crate) hide_spotify: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -1035,9 +1027,6 @@ pub(crate) struct PresenceRecord {
     pub(crate) steam_game: Option<String>,
     pub(crate) steam_appid: Option<String>,
     pub(crate) game_session_start: Option<f64>,
-    pub(crate) spotify_track: Option<String>,
-    pub(crate) spotify_artist: Option<String>,
-    pub(crate) spotify_album_art: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
