@@ -642,7 +642,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                 isActive ? "rounded-2xl" : "rounded-3xl group-hover/rail:rounded-2xl",
                 isActive
                   ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                  : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
+                  // Inside a folder the ground is the page colour, and
+                  // `sidebar-accent` is that same colour under most themes —
+                  // a room drawn in it there is a letter floating on the
+                  // wash. The rail's own surface is what keeps it a disc.
+                  : folderId
+                    ? "bg-sidebar text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground"
+                    : "bg-sidebar-accent text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
               )}
             >
               {iconUrl ? (
@@ -730,13 +736,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           // Wider than the icons by a few pixels on each side is what makes it
           // read as holding them, and the rail is 4.5rem to their 3rem, so
           // there is room for it without moving anything.
-          // The theme's own background, which is the one colour on screen
-          // that carries the theme's hue without being its accent: a folder
-          // reads as a recess cut into the rail rather than a panel laid on
-          // it. An alpha of the foreground was the neutral version of this
-          // and came out grey under every theme, whatever the theme was.
+          // `muted` is what the page itself is painted in behind every panel
+          // (see `ChatLayout`), so an open folder reads as a hole cut through
+          // the rail onto the page rather than a panel laid on top of it —
+          // and it carries the theme's hue, which an alpha of the foreground
+          // cannot.
           open && roomIds.length > 0
-            ? "w-16 rounded-[2rem] bg-background py-2"
+            ? "w-16 rounded-[2rem] bg-muted py-2"
             : "w-full",
         )}
       >
@@ -819,7 +825,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                     // rooms rather than being one.
                     isTarget
                       ? "bg-sidebar-primary text-sidebar-primary-foreground ring-2 ring-primary"
-                      : "bg-background text-sidebar-foreground group-hover/rail:bg-sidebar-accent",
+                      : "bg-muted text-sidebar-foreground group-hover/rail:bg-sidebar-primary group-hover/rail:text-sidebar-primary-foreground",
                   )}
                 >
                   {open || roomIds.length === 0 ? (
