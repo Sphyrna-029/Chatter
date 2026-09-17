@@ -776,6 +776,12 @@ pub async fn run() {
     // clock can announce it.
     tokio::spawn(crate::backend::routes::events::run_event_reminder_scheduler(Arc::clone(&state)));
 
+    // A poll ending is the absence of an action, so nothing but a clock can
+    // announce it. See routes/polls.rs.
+    tokio::spawn(crate::backend::routes::polls::run_poll_scheduler(
+        Arc::clone(&state),
+    ));
+
     // Spawn Steam presence poller if API key is configured
     if !state.steam_api_key.is_empty() {
         let state_for_poller = Arc::clone(&state);

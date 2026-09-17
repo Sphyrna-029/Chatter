@@ -294,6 +294,11 @@ export function createWsMessageHandler(
     const me = stateRef.current.userId;
     if (!me || msg.sender === me) return;
     if (msg.content?.msgtype === "m.system") return;
+    // A poll's results are posted by a clock, not by a person, and reach every
+    // member of the room at once. The server sends no push for one either —
+    // the two halves of notification have to agree, or someone away from their
+    // desk is woken by the half that was not told.
+    if (msg.content?.msgtype === "m.poll_results") return;
 
     const roomId: string = msg.room_id;
     const channelId: string = msg.channel_id || msg.content?.channel_id || "";
@@ -485,6 +490,11 @@ export function createWsMessageHandler(
           payload: { eventId: msg.edits, newBody: msg.new_body, newEmbeds: msg.new_embeds },
         });
       }
+    } else if (msg.type === "m.poll.vote" || msg.type === "m.poll.closed") {
+      // Keyed by poll, so this is safe to apply for any room — and has to be:
+      // a poll can be on screen in a pin list or a search result while the
+      // timeline showing it is somewhere else entirely.
+      if (msg.poll) dispatch({ type: "UPDATE_POLL", payload: msg.poll });
     } else if (msg.type === "m.room.pinned") {
       // Only track pins for the channel currently on screen; switching channels
       // reloads the list from the server.

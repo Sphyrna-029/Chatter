@@ -28,9 +28,10 @@ import { isSameFile } from "@/lib/uploadResume";
 import { DMCallBar } from "./DMCallBar";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import { useInterruptedUploads } from "@/hooks/useInterruptedUploads";
-import { Search, X, ArrowDown, CalendarDays, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
+import { Search, X, ArrowDown, BarChart3, CalendarDays, Film, EyeOff, AtSign, UserPlus, Pencil, Pin, Smile, Phone, PhoneOff } from "lucide-react";
 import { CommandBar } from "./CommandBar";
 import { AddToDMDialog } from "./AddToDMDialog";
+import { PollDialog } from "./PollDialog";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -129,6 +130,7 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
   const [input, setInput] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [gifOpen, setGifOpen] = useState(false);
+  const [pollOpen, setPollOpen] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [mentionSearch, setMentionSearch] = useState("");
   const [mentionStart, setMentionStart] = useState(-1);
@@ -2153,6 +2155,21 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
               <EyeOff className="h-4 w-4" />
             </Button>
 
+            {/* Creating a poll is posting a message, so it is offered under
+                the same permission and sits beside the other things a message
+                can be made of. */}
+            {can(state, "send_messages") && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => setPollOpen(true)}
+                title="Create a poll"
+              >
+                <BarChart3 className="h-4 w-4" />
+              </Button>
+            )}
+
             <div className="relative flex-1 min-w-0">
               {/* Placeholder — shown when the div is empty */}
               {!input && (
@@ -2275,6 +2292,8 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
         />
       ) : null}
       </div>
+
+      <PollDialog open={pollOpen} onOpenChange={setPollOpen} />
 
       <Dialog open={exifDialogOpen} onOpenChange={setExifDialogOpen}>
         <DialogContent className="sm:max-w-[360px]">

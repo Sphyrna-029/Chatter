@@ -942,7 +942,19 @@ export interface MatrixMessage {
     /** Set by the server when the sender lacks mention_everyone: role mentions
      *  render as written but must not notify. */
     suppress_role_mentions?: boolean;
+    // ── Polls. Present on `m.poll`; see PollContent.
+    poll_id?: string;
+    question?: string;
+    options?: string[];
+    multi_select?: boolean;
+    ends_at?: number;
+    // ── Poll results. Present on `m.poll_results`; see PollResultsContent.
+    counts?: number[];
+    total_voters?: number;
   };
+  /** A poll's live state, attached by the message page to an `m.poll`. The
+   *  card reads the store rather than this, but this is what seeds it. */
+  poll?: PollState;
   redacted?: boolean;
   edited?: boolean;
   edited_at?: number;
@@ -3231,4 +3243,99 @@ export async function apiListRsvps(roomId: string, eventId: string) {
     maybe: string[];
     declined: string[];
   };
+}
+
+// ─── Polls ───────────────────────────────────────────────────────────────────
+
+/** A poll's live state: who has answered, and whether it is still running.
+ *
+ *  The question and the answers are not here — they are on the poll's message,
+ *  which never changes. This is only the part that moves, which is why it
+ *  arrives attached to the message page, on two broadcasts, and from a fetch,
+ *  all in the same shape. */
+export interface PollState {
+  poll_id: string;
+  /** Voter ids per option, in the order the options are shown. Always one
+   *  entry per option, empty for the ones nobody picked. */
+  voters: string[][];
+  /** People, not votes: a multi-select voter is counted once. */
+  total_voters: number;
+  closed: boolean;
+  ends_at: number;
+  multi_select: boolean;
+  creator: string;
+}
+
+/** The parts of a poll that live on its message and never change. */
+export interface PollContent {
+  poll_id: string;
+  question: string;
+  options: string[];
+  multi_select: boolean;
+  ends_at: number;
+}
+
+/** The results message posted when a poll ends. Self-contained: it renders
+ *  with nothing else loaded, and outlives the poll it came from. */
+export interface PollResultsContent {
+  poll_id: string;
+  question: string;
+  options: string[];
+  counts: number[];
+  total_voters: number;
+  multi_select: boolean;
+}
+
+export interface PollDraft {
+  question: string;
+  options: string[];
+  channel_id?: string;
+  duration_minutes: number;
+  multi_select: boolean;
+}
+
+export async function apiCreatePoll(roomId: string, draft: PollDraft) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/polls`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(draft),
+  });
+  return (await eventsJson(res, "Could not create the poll")) as {
+    event_id: string;
+    poll: PollState;
+  };
+}
+
+/**
+ * Cast, change or withdraw a vote.
+ *
+ * `options` is the whole selection rather than a change to it, so sending the
+ * same request twice casts the same vote rather than a second one — and an
+ * empty list is how a vote is taken back.
+ */
+export async function apiVotePoll(roomId: string, pollId: string, options: number[]) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/polls/${encodeURIComponent(pollId)}/vote`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ options }),
+    },
+  );
+  return (await eventsJson(res, "Could not save your vote")) as { poll: PollState };
+}
+
+export async function apiGetPoll(roomId: string, pollId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/polls/${encodeURIComponent(pollId)}`,
+  );
+  return (await eventsJson(res, "Could not load the poll")) as { poll: PollState };
+}
+
+export async function apiClosePoll(roomId: string, pollId: string) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${encodeURIComponent(roomId)}/polls/${encodeURIComponent(pollId)}/close`,
+    { method: "POST" },
+  );
+  return (await eventsJson(res, "Could not end the poll")) as { poll: PollState };
 }

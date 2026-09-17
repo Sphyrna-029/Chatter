@@ -30,6 +30,7 @@ import {
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { EmojiPicker, isCustomEmojiUrl, renderInlineEmojis } from "./EmojiPicker";
 import { MessageLinkEmbed } from "./MessageLinkEmbed";
+import { PollCard, PollResultsCard } from "./PollCard";
 import {
   findMessageLinks,
   messageLinkFor,
@@ -1117,6 +1118,17 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     return walk(div).replace(/\n+$/, "");
   }, []);
   const isSystem = message.content.msgtype === "m.system";
+  // A poll, and the results posted when it ends, replace the message *body*
+  // with a card and nothing else. They keep the avatar, the timestamp, the
+  // reactions, the reply arrow and the delete — a poll is a message, and
+  // pulling it out into a branch of its own would be quietly taking all of
+  // that away from it.
+  const pollKind: "poll" | "results" | null =
+    message.content.msgtype === "m.poll"
+      ? "poll"
+      : message.content.msgtype === "m.poll_results"
+        ? "results"
+        : null;
   const isWebhook = message.content.webhook === true;
   const isBot = message.content.bot === true;
   const isExternal = isWebhook || isBot;
@@ -1527,6 +1539,10 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 <span>Esc to cancel</span>
               </div>
             </div>
+          ) : pollKind === "poll" && !isDeleted ? (
+            <PollCard message={message} />
+          ) : pollKind === "results" && !isDeleted ? (
+            <PollResultsCard message={message} />
           ) : spoilerHasVisibleText ? (
             <div
               className={cn("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md cursor-pointer bg-muted hover:bg-muted/70 transition-colors select-none", !grouped && "mt-0.5")}

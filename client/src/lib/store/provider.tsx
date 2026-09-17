@@ -52,7 +52,12 @@ import {
   apiUpdateEvent,
   apiDeleteEvent,
   apiSetRsvp,
+  apiCreatePoll,
+  apiVotePoll,
+  apiGetPoll,
+  apiClosePoll,
   type EventDraft,
+  type PollDraft,
   type RsvpStatus,
   apiGetMyPermissions,
   apiPinMessage,
@@ -1285,6 +1290,62 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const createPoll = useCallback(async (draft: PollDraft) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    // The channel is read here rather than in the dialog: it is the one the
+    // person is looking at, and a poll that quietly landed in the room's
+    // default channel would be a poll asked of the wrong people.
+    draft = { ...draft, channel_id: stateRef.current.currentChannelId ?? undefined };
+    // The poll's own message arrives on the socket and carries its state, so
+    // nothing is inserted here — this is the one path where the broadcast is
+    // complete, because a poll nobody has voted in has no per-viewer half.
+    await apiCreatePoll(roomId, draft);
+  }, []);
+
+  const votePoll = useCallback(async (pollId: string, options: number[]) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    const previous = stateRef.current.polls[pollId];
+    const me = stateRef.current.userId;
+    // Move the bars as the button is released rather than a round trip later.
+    // The broadcast that follows replaces this with the server's tally, and a
+    // refusal puts back exactly what was there.
+    if (previous && me) {
+      dispatch({
+        type: "UPDATE_POLL",
+        payload: {
+          ...previous,
+          voters: previous.voters.map((voters, index) => {
+            const without = voters.filter((id) => id !== me);
+            return options.includes(index) ? [...without, me] : without;
+          }),
+        },
+      });
+    }
+    try {
+      const { poll } = await apiVotePoll(roomId, pollId, options);
+      dispatch({ type: "UPDATE_POLL", payload: poll });
+    } catch (err) {
+      if (previous) dispatch({ type: "UPDATE_POLL", payload: previous });
+      throw err;
+    }
+  }, []);
+
+  const closePoll = useCallback(async (pollId: string) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    const { poll } = await apiClosePoll(roomId, pollId);
+    dispatch({ type: "UPDATE_POLL", payload: poll });
+  }, []);
+
+  const loadPoll = useCallback(async (pollId: string) => {
+    const roomId = stateRef.current.currentRoomId;
+    if (!roomId) return;
+    const { poll } = await apiGetPoll(roomId, pollId);
+    dispatch({ type: "UPDATE_POLL", payload: poll });
+  }, []);
+
   const loadPins = useCallback(async () => {
     const cur = stateRef.current;
     if (!cur.currentRoomId) return;
@@ -1879,6 +1940,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createEvent,
       updateEvent,
       deleteEvent,
+      createPoll,
+      votePoll,
+      closePoll,
+      loadPoll,
       setRsvp,
       loadMorePins,
       loadMoreSearchResults,
@@ -1935,7 +2000,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       blockUser,
       unblockUser,
     }),
-    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, openMessage, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, setSidebarOrder, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
+    [login, register, logout, deleteAccount, loadRooms, selectRoom, loadOlderMessages, loadMessagesAround, sendMessage, openThread, openMessage, closeThread, sendThreadMessage, setThreadName, deleteThread, deleteMessage, hardDeleteNotification, editMessage, addReaction, loadPins, loadEvents, createEvent, updateEvent, deleteEvent, createPoll, votePoll, closePoll, loadPoll, setRsvp, loadMorePins, loadMoreSearchResults, pinMessage, unpinMessage, createRoom, joinRoom, leaveRoom, loadVoiceMembers, sendTyping, getAllRooms, openDM, addToGroupDM, updateTopic, updateRoomSettings, setCustomStatus, setManualStatus, updateProfile, kickMember, banMember, unbanMember, setMemberRole, setNameColors, selectChannel, createChannel, updateChannel, deleteChannel, loadRoles, createRole, updateRole, deleteRole, assignMemberRoles, loadRoomGroups, createRoomGroup, deleteRoomGroup, renameRoomGroup, setGroupRooms, toggleGroupCollapsed, setSidebarOrder, loadFriends, loadUnreads, markChannelRead, loadNotificationSettings, loadContinuity, loadActiveThreads, saveDraft, saveResumePoint, setNotificationLevel, moderateVoice, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser],
   );
 
   return (

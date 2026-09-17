@@ -1,5 +1,23 @@
 import type { AppState, Action, VoiceChannelMember } from "./types";
+import type { MatrixMessage, PollState } from "../api";
 import { initialState, THREAD_PREVIEW_LIMIT } from "./types";
+
+/**
+ * Fold the poll state a page of messages arrived with into the poll map.
+ *
+ * Every path that puts messages into state runs through this rather than each
+ * caller remembering to, because a poll card that finds no entry draws no bars
+ * and has to fetch what it was already handed.
+ */
+function seedPolls(state: AppState, messages: MatrixMessage[]): Record<string, PollState> {
+  let polls = state.polls;
+  for (const message of messages) {
+    if (!message.poll) continue;
+    if (polls === state.polls) polls = { ...polls };
+    polls[message.poll.poll_id] = message.poll;
+  }
+  return polls;
+}
 
 /**
  * The room whose call this client is showing.
@@ -148,6 +166,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         messages: action.payload.messages,
         hasMoreMessages: action.payload.hasMore,
+        polls: seedPolls(state, action.payload.messages),
       };
     case "PREPEND_MESSAGES":
       return {
@@ -155,12 +174,24 @@ export function reducer(state: AppState, action: Action): AppState {
         messages: [...action.payload.messages, ...state.messages],
         hasMoreMessages: action.payload.hasMore,
         loadingOlderMessages: false,
+        polls: seedPolls(state, action.payload.messages),
       };
     case "SET_LOADING_OLDER":
       return { ...state, loadingOlderMessages: action.payload };
     case "ADD_MESSAGE":
       if (state.messages.some((m) => m.event_id === action.payload.event_id)) return state;
-      return { ...state, messages: [...state.messages, action.payload] };
+      return {
+        ...state,
+        messages: [...state.messages, action.payload],
+        polls: seedPolls(state, [action.payload]),
+      };
+    case "SET_POLLS":
+      return { ...state, polls: { ...state.polls, ...action.payload } };
+    case "UPDATE_POLL":
+      return {
+        ...state,
+        polls: { ...state.polls, [action.payload.poll_id]: action.payload },
+      };
     // A message is on screen in up to three places at once — the timeline, the
     // pin list, and an open thread — and only the first two were being cleared,
     // so deleting a reply from inside a thread left it sitting there. Deleting

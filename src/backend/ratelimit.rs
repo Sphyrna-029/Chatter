@@ -71,6 +71,12 @@ pub(crate) const MESSAGE_PREVIEW: Quota = Quota::per(120.0, 60.0);
 pub(crate) const VOICE_MOVE: Quota = Quota::per(60.0, 2.0);
 /// Invite creation, which mints credentials to the room.
 pub(crate) const CREATE_INVITE: Quota = Quota::per(10.0, 600.0);
+/// Poll creation. A poll is a message that keeps a record and a timer behind
+/// it, so it is metered well below the message limit.
+pub(crate) const CREATE_POLL: Quota = Quota::per(5.0, 300.0);
+/// Casting a vote. A person changes their mind a few times at most; the burst
+/// is what a multi-select poll produces when they tick four boxes in a row.
+pub(crate) const POLL_VOTE: Quota = Quota::per(20.0, 30.0);
 
 /// Above this many tracked buckets, spent-and-recovered entries are dropped.
 /// Buckets are created per key, so an unbounded map is itself an attack.

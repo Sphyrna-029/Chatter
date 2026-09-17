@@ -1,4 +1,4 @@
-import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, RolePermissions, Embed, RoomEvent, RsvpStatus } from "../api";
+import type { MatrixMessage, PinnedMessage, RoomInfo, RoomGroup, Channel, ChannelCategory, CustomRole, RolePermissions, Embed, PollState, RoomEvent, RsvpStatus } from "../api";
 import type { Dispatch } from "react";
 import type { NotificationLevel, NotificationSettings } from "../notifications";
 import type { ProfileTheme } from "../profileTheme";
@@ -135,6 +135,14 @@ export interface AppState {
   /** The current room's scheduled events, soonest first. Reloaded on a room
    *  switch and kept live by the socket. */
   roomEvents: RoomEvent[];
+  /** Live poll state keyed by poll id, which is the poll message's event id.
+   *
+   *  Beside the messages rather than on them, because one poll is on screen in
+   *  up to three places at once — the timeline, the pin list, a search result —
+   *  and a vote has to move all of them. Seeded from whatever the message page
+   *  attached, then kept live by the socket. Never cleared on a room switch:
+   *  it is keyed by poll, so a stale entry is only ever the poll it names. */
+  polls: Record<string, PollState>;
   search: SearchState;
   replyingTo: MatrixMessage | null;
   // Pinned messages of the current room/channel, newest pin first
@@ -254,6 +262,8 @@ export type Action =
   | { type: "SET_VIEW"; payload: "chat" | "voice" }
   | { type: "SET_SEARCH"; payload: Partial<SearchState> }
   | { type: "SET_COMPANION_PANEL"; payload: AppState["companionPanel"] }
+  | { type: "SET_POLLS"; payload: Record<string, PollState> }
+  | { type: "UPDATE_POLL"; payload: PollState }
   | { type: "SET_ROOM_EVENTS"; payload: RoomEvent[] }
   | { type: "UPSERT_ROOM_EVENT"; payload: RoomEvent }
   | { type: "REMOVE_ROOM_EVENT"; payload: string }
@@ -401,6 +411,7 @@ export const initialState: AppState = {
   currentView: "chat",
   companionPanel: null,
   roomEvents: [],
+  polls: {},
   search: { open: false, query: "", filter: "all", fileTypeFilter: "all", thisChannel: true, results: [], loading: false, hasMore: false, nextOffset: 0, loadingMore: false },
   replyingTo: null,
   pinnedMessages: [],
@@ -468,6 +479,15 @@ export interface AppContextValue {
   deleteEvent: (eventId: string) => Promise<void>;
   /** An empty status withdraws a previous answer. */
   setRsvp: (eventId: string, status: RsvpStatus | "") => Promise<void>;
+  createPoll: (draft: import("../api").PollDraft) => Promise<void>;
+  /** The caller's whole selection, not a change to it: an empty list
+   *  withdraws their vote. */
+  votePoll: (pollId: string, options: number[]) => Promise<void>;
+  /** End a poll before its time. Its author, or anyone who can manage
+   *  messages. */
+  closePoll: (pollId: string) => Promise<void>;
+  /** Fetch one poll's state, for a card that arrived without it. */
+  loadPoll: (pollId: string) => Promise<void>;
   /** Append the next page of pins. */
   loadMorePins: () => Promise<void>;
   /** Append the next page of search results. */

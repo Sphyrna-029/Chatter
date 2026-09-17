@@ -398,6 +398,59 @@ pub(crate) struct ReactionRecord {
     pub(crate) user_id: String,
 }
 
+/// A poll, keyed by the `event_id` of the message that *is* the poll.
+///
+/// The message carries everything that never changes — the question, the
+/// options, when it ends — so a poll renders from the timeline alone. This
+/// record is the authority for the parts that move: whether it is still open,
+/// and (through `PollVoteRecord`) who has answered. Keying it off the message
+/// is what makes a poll exactly as private, as deletable and as searchable as
+/// the message it arrived as, with no second permission system behind it.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct PollRecord {
+    #[serde(rename = "_id")]
+    pub(crate) poll_id: String,
+    pub(crate) room_id: String,
+    /// Empty for rooms whose messages carry no channel (DMs).
+    #[serde(default)]
+    pub(crate) channel_id: String,
+    pub(crate) creator: String,
+    pub(crate) question: String,
+    /// Answers in the order they are shown. A vote names an index into this,
+    /// so the list is fixed for the life of the poll.
+    pub(crate) options: Vec<String>,
+    /// Whether one person may pick more than one answer.
+    #[serde(default)]
+    pub(crate) multi_select: bool,
+    pub(crate) created_at: i64,
+    pub(crate) ends_at: i64,
+    #[serde(default)]
+    pub(crate) closed: bool,
+    #[serde(default)]
+    pub(crate) closed_at: i64,
+    /// The results message posted when it ended.
+    ///
+    /// Also the record of *having* posted one: the scheduler claims a poll by
+    /// setting `closed` in the same update that matches on it being unset, so
+    /// two ticks — or two processes — cannot both announce the same poll.
+    #[serde(default)]
+    pub(crate) results_event_id: String,
+}
+
+/// One person's answer to one option. A multi-select vote is several of these.
+///
+/// Rows rather than a list on the poll, for the reason reactions are rows: a
+/// vote is written by the person casting it and read by everyone, so a
+/// document per vote keeps two people answering at once from overwriting each
+/// other's answer.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct PollVoteRecord {
+    pub(crate) poll_id: String,
+    pub(crate) option_index: i64,
+    pub(crate) user_id: String,
+    pub(crate) voted_at: i64,
+}
+
 /// A message pinned to a room/channel. `_id` is the pinned message's event_id,
 /// so a message can only ever be pinned once.
 #[derive(Clone, Serialize, Deserialize)]

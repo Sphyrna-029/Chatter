@@ -899,6 +899,27 @@ pub(crate) async fn delete_room(
         .collection::<super::super::state::PinRecord>("pins");
     let _ = pins_coll.delete_many(doc! { "room_id": &room_id }).await;
 
+    // Remove polls and the votes cast in them. The votes are keyed by poll
+    // rather than by room, so the ids have to be read before the polls go —
+    // afterwards there is nothing left that names them.
+    let polls_coll = state
+        .db
+        .collection::<super::super::state::PollRecord>("polls");
+    if let Ok(mut cursor) = polls_coll.find(doc! { "room_id": &room_id }).await {
+        let mut poll_ids: Vec<String> = Vec::new();
+        while let Ok(Some(poll)) = cursor.try_next().await {
+            poll_ids.push(poll.poll_id);
+        }
+        if !poll_ids.is_empty() {
+            let _ = state
+                .db
+                .collection::<super::super::state::PollVoteRecord>("poll_votes")
+                .delete_many(doc! { "poll_id": { "$in": &poll_ids } })
+                .await;
+        }
+    }
+    let _ = polls_coll.delete_many(doc! { "room_id": &room_id }).await;
+
     // Remove DM mapping
     let dm_coll = state.db.collection::<DmRoomRecord>("dm_rooms");
     let _ = dm_coll.delete_many(doc! { "room_id": &room_id }).await;

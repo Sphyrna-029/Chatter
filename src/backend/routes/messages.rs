@@ -39,7 +39,7 @@ fn body_has_attachment(body: &str) -> bool {
 
 /// The name a notification should call this sender, falling back to the user id
 /// when no display name has been set.
-async fn display_name_for(state: &AppState, user_id: &str) -> String {
+pub(crate) async fn display_name_for(state: &AppState, user_id: &str) -> String {
     let name = state
         .db
         .collection::<UserRecord>("users")
@@ -157,6 +157,16 @@ pub(crate) async fn send_message(
 
     const MAX_MESSAGE_LENGTH: usize = 4000;
     let msgtype = req.msgtype.as_deref().unwrap_or("m.text");
+    // A poll and its results are minted by the server and backed by a record.
+    // Sent from here they would be a card with nothing behind it — one that
+    // could never be voted in, and one that could claim any numbers its author
+    // liked. There is an endpoint for making a poll; this is not it.
+    if msgtype == "m.poll" || msgtype == "m.poll_results" {
+        return Err(error_response(
+            StatusCode::BAD_REQUEST,
+            "Polls are created through the poll endpoint",
+        ));
+    }
     // Count display length: each :emoji{url}: marker counts as 1 character
     let emoji_marker = regex::Regex::new(r":emoji\{[^}]+\}:").unwrap();
     let display_body = emoji_marker.replace_all(&req.body, "X");
@@ -817,6 +827,20 @@ pub(crate) async fn get_room_messages(
         .collect();
     let reactions_map = get_reactions_for_events(&state, &event_ids).await;
     let thread_counts = get_thread_counts_for_events(&state, &event_ids).await;
+    // A poll's question and answers are on the message; only the votes move,
+    // so only those are fetched here — one query for the page rather than one
+    // per card.
+    let poll_ids: Vec<String> = chunk
+        .iter()
+        .filter(|m| {
+            m.get("content")
+                .and_then(|c| c.get("msgtype"))
+                .and_then(|v| v.as_str())
+                == Some("m.poll")
+        })
+        .filter_map(|m| m.get("event_id").and_then(|v| v.as_str()).map(String::from))
+        .collect();
+    let polls_map = super::polls::get_polls_for_events(&state, &poll_ids).await;
 
     // Attach reactions and thread reply counts to each message
     for msg in chunk.iter_mut() {
@@ -840,6 +864,11 @@ pub(crate) async fn get_room_messages(
                         serde_json::to_value(count).unwrap(),
                     );
                 }
+            }
+            if let Some(poll) = polls_map.get(&eid) {
+                msg.as_object_mut()
+                    .unwrap()
+                    .insert("poll".to_string(), poll.clone());
             }
         }
     }
@@ -999,6 +1028,13 @@ pub(crate) async fn redact_message(
 
     // A deleted message must not linger in the pin list.
     super::pins::remove_pin_for_event(&state, &room_id, &event_id).await;
+
+    // Deleting a poll's message is deleting the poll — that is what it means
+    // for a poll to *be* a message. The record and the votes go with it, or a
+    // poll nothing can show keeps its answers forever and the scheduler keeps
+    // finding it. The scheduler also reads the message back before it
+    // announces anything, so a poll deleted mid-run posts no results.
+    super::polls::purge_poll(&state, &event_id).await;
 
     // Nor should its attachments stay on disk and served. Only files the
     // sender uploaded, and only when nothing else still refers to them —

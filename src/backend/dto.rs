@@ -418,3 +418,23 @@ pub(crate) struct EventsQuery {
     /// Include events whose end has passed. Defaults to false.
     pub(crate) include_past: Option<bool>,
 }
+
+#[derive(Deserialize)]
+pub(crate) struct CreatePollRequest {
+    pub(crate) question: String,
+    pub(crate) options: Vec<String>,
+    pub(crate) channel_id: Option<String>,
+    /// How long it runs for, from now. Minutes rather than an end timestamp:
+    /// the poll starts when the server accepts it, and a client that sent an
+    /// absolute time would be asking the server to trust its clock.
+    pub(crate) duration_minutes: i64,
+    pub(crate) multi_select: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PollVoteRequest {
+    /// The caller's whole selection, not a change to it — an empty list
+    /// withdraws their vote. Stated as the end state so a retry of a request
+    /// whose answer was lost casts the same vote rather than a second one.
+    pub(crate) options: Vec<i64>,
+}

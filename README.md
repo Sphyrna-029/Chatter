@@ -28,6 +28,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Friend Requests
 - Chat Search
 - Message Pins
+- Polls with Timed Results
 - Shareable Message Links with Permission-Aware Previews
 - Webhooks
 - Push Notifications and Installable App (PWA, requires HTTPS)

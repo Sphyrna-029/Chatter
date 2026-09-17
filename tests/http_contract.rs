@@ -2323,3 +2323,316 @@ async fn chunked_upload_verifies_each_chunk_before_assembling() {
     }
     let _ = std::fs::remove_dir_all(&staging);
 }
+
+#[tokio::test]
+async fn poll_contract_vote_change_withdraw_and_close_posts_results() {
+    // A poll is a message with a record behind it. This walks the whole life
+    // of one: the message it posts, a vote, a vote changed, a vote withdrawn,
+    // and the results message that lands in the same channel when it ends.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (alice_id, alice_token) = register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Polls",
+        None,
+        false,
+    )
+    .await;
+    let join = client
+        .post(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/join",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(join.status(), StatusCode::OK);
+
+    let created = client
+        .post(format!("{}/api/rooms/{room_id}/polls", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({
+            "question": "Lunch on Friday?",
+            "options": ["Tacos", "Ramen", "Salad"],
+            "duration_minutes": 1,
+            "multi_select": false,
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    let created: Value = created.json().await.unwrap();
+    let poll_id = created["event_id"].as_str().unwrap().to_string();
+    // Every option has a slot from the start, including the ones nobody has
+    // picked — the card draws a bar per option and reads its length from here.
+    assert_eq!(created["poll"]["voters"].as_array().unwrap().len(), 3);
+    assert_eq!(created["poll"]["total_voters"], 0);
+    assert_eq!(created["poll"]["closed"], false);
+
+    // The poll arrives in the timeline as an ordinary message, and its body
+    // repeats the question: search, push and the channel preview read that and
+    // nothing else.
+    let page: Value = client
+        .get(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/messages?limit=50",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let posted = page["chunk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["event_id"] == poll_id.as_str())
+        .expect("the poll is in the timeline");
+    assert_eq!(posted["content"]["msgtype"], "m.poll");
+    assert!(posted["content"]["body"]
+        .as_str()
+        .unwrap()
+        .contains("Lunch on Friday?"));
+    // The page carries the live state, so a channel of polls costs one request
+    // rather than one per card.
+    assert_eq!(posted["poll"]["total_voters"], 0);
+
+    let vote = |token: String, options: Vec<i64>| {
+        let client = client.clone();
+        let base = server.base_url.clone();
+        let room = room_id.clone();
+        let poll = poll_id.clone();
+        async move {
+            let res = client
+                .put(format!("{base}/api/rooms/{room}/polls/{poll}/vote"))
+                .header("authorization", bearer(&token))
+                .json(&json!({ "options": options }))
+                .send()
+                .await
+                .unwrap();
+            let status = res.status();
+            let body: Value = res.json().await.unwrap();
+            (status, body)
+        }
+    };
+
+    let (status, body) = vote(bob_token.clone(), vec![0]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["poll"]["voters"][0], json!([bob_id.clone()]));
+    assert_eq!(body["poll"]["total_voters"], 1);
+
+    // Changing a vote replaces it rather than adding a second one: the request
+    // states the caller's whole selection.
+    let (_, body) = vote(bob_token.clone(), vec![1]).await;
+    assert_eq!(body["poll"]["voters"][0], json!([]));
+    assert_eq!(body["poll"]["voters"][1], json!([bob_id.clone()]));
+    assert_eq!(body["poll"]["total_voters"], 1);
+
+    // Two answers on a single-answer poll is a refusal, not a silent truncation.
+    let (status, _) = vote(bob_token.clone(), vec![0, 1]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // An answer that is not on the poll is refused too.
+    let (status, _) = vote(bob_token.clone(), vec![9]).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (_, body) = vote(alice_token.clone(), vec![1]).await;
+    assert_eq!(body["poll"]["total_voters"], 2);
+
+    // An empty selection is how a vote is taken back.
+    let (_, body) = vote(alice_token.clone(), vec![]).await;
+    assert_eq!(body["poll"]["total_voters"], 1);
+    let (_, body) = vote(alice_token.clone(), vec![2]).await;
+    assert_eq!(body["poll"]["total_voters"], 2);
+
+    // A poll is minted by its own endpoint. Sent as an ordinary message it
+    // would be a card with no record behind it, claiming whatever it liked.
+    let forged = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/send/m.room.message/forge1",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .json(&json!({"msgtype": "m.poll", "body": "not a poll"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(forged.status(), StatusCode::BAD_REQUEST);
+
+    // Only the author — or someone who can manage messages — ends it early.
+    let refused = client
+        .post(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}/close",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+
+    let closed = client
+        .post(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}/close",
+            server.base_url
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(closed.status(), StatusCode::OK);
+    let closed: Value = closed.json().await.unwrap();
+    assert_eq!(closed["poll"]["closed"], true);
+
+    // Ending it twice is a refusal rather than a second results message.
+    let again = client
+        .post(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}/close",
+            server.base_url
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::CONFLICT);
+
+    // A closed poll takes no more votes.
+    let (status, _) = vote(bob_token.clone(), vec![0]).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    // The results are posted into the channel the poll was asked in, and carry
+    // the question, the answers and the numbers — it has to read correctly
+    // with nothing else loaded, years later, in a search result.
+    let page: Value = client
+        .get(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/messages?limit=50",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let results = page["chunk"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["content"]["msgtype"] == "m.poll_results")
+        .expect("the results were posted into the channel");
+    assert_eq!(results["content"]["poll_id"], poll_id.as_str());
+    assert_eq!(results["content"]["question"], "Lunch on Friday?");
+    assert_eq!(results["content"]["counts"], json!([0, 1, 1]));
+    assert_eq!(results["content"]["total_voters"], 2);
+    assert!(results["content"]["body"]
+        .as_str()
+        .unwrap()
+        .contains("tied"));
+    assert_eq!(results["sender"], alice_id.as_str());
+
+    // Deleting a poll's message is deleting the poll: nothing is left to vote
+    // in, and nothing is left for the scheduler to find.
+    let redact = client
+        .delete(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/redact/{poll_id}/rd1",
+            server.base_url
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(redact.status(), StatusCode::OK);
+    let gone = client
+        .get(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}",
+            server.base_url
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(gone.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn a_poll_is_only_as_visible_as_the_channel_it_was_asked_in() {
+    // Every refusal answers the same 404: which polls exist in a channel
+    // somebody cannot open is itself something they should not learn.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_id, alice_token) = register_user(&client, &server.base_url, "alice", "pw").await;
+    let (_mallory_id, mallory_token) =
+        register_user(&client, &server.base_url, "mallory", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Private",
+        None,
+        false,
+    )
+    .await;
+
+    let created: Value = client
+        .post(format!("{}/api/rooms/{room_id}/polls", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({
+            "question": "Who is coming?",
+            "options": ["Yes", "No"],
+            "duration_minutes": 60,
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let poll_id = created["event_id"].as_str().unwrap().to_string();
+
+    // A non-member is told nothing, and cannot vote.
+    let read = client
+        .get(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}",
+            server.base_url
+        ))
+        .header("authorization", bearer(&mallory_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::NOT_FOUND);
+
+    let voted = client
+        .put(format!(
+            "{}/api/rooms/{room_id}/polls/{poll_id}/vote",
+            server.base_url
+        ))
+        .header("authorization", bearer(&mallory_token))
+        .json(&json!({ "options": [0] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(voted.status(), StatusCode::NOT_FOUND);
+
+    // A poll that does not exist answers the same way, so holding an id
+    // reveals nothing either.
+    let missing = client
+        .get(format!(
+            "{}/api/rooms/{room_id}/polls/$nope",
+            server.base_url
+        ))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}

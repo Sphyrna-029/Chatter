@@ -15,6 +15,7 @@ pub(crate) mod message_links;
 pub(crate) mod messages;
 pub(crate) mod notification_settings;
 pub(crate) mod pins;
+pub(crate) mod polls;
 pub(crate) mod presence;
 pub(crate) mod push;
 pub(crate) mod reactions;
