@@ -730,8 +730,13 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
           // Wider than the icons by a few pixels on each side is what makes it
           // read as holding them, and the rail is 4.5rem to their 3rem, so
           // there is room for it without moving anything.
+          // A shade of the sidebar itself rather than the theme's accent: the
+          // foreground at a low alpha lifts a dark theme and deepens a light
+          // one, so the wash is always the same surface a step away — where
+          // the accent was a second colour competing with the one the rooms
+          // are already drawn in.
           open && roomIds.length > 0
-            ? "w-16 rounded-[2rem] bg-sidebar-primary/15 py-2"
+            ? "w-16 rounded-[2rem] bg-sidebar-foreground/10 py-2"
             : "w-full",
         )}
       >
@@ -813,7 +818,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
                     // one.
                     isTarget
                       ? "bg-sidebar-primary text-sidebar-primary-foreground ring-2 ring-primary"
-                      : "bg-sidebar-primary/25 text-sidebar-foreground group-hover/rail:bg-sidebar-primary/40",
+                      : "bg-sidebar-foreground/[0.18] text-sidebar-foreground group-hover/rail:bg-sidebar-foreground/[0.28]",
                   )}
                 >
                   {open || roomIds.length === 0 ? (
