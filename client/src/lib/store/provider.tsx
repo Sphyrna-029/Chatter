@@ -104,6 +104,7 @@ import {
   apiAssignMemberRoles,
   type RoomInfo,
 } from "../api";
+import { clearMediaBlobs } from "@/lib/mediaBlobs";
 import { fetchIceServers } from "../webrtc";
 import { AppActionsContext, AppStateContext, type AppActions } from "./context";
 import {
@@ -684,6 +685,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await apiLogout();
     } catch {}
     clearTokens();
+    // Media fetched with the session's credentials outlives the session
+    // otherwise — the blob URLs are held by the cache, not by the tab — and
+    // the next person to sign in here shares this document.
+    clearMediaBlobs();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();
@@ -695,6 +700,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const deleteAccount = useCallback(async (totpCode: string) => {
     await apiDeleteAccount(totpCode);
     clearTokens();
+    clearMediaBlobs();
     if (wsRef.current) {
       wsRef.current.onclose = null;
       wsRef.current.close();

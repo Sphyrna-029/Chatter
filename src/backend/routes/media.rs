@@ -8,7 +8,7 @@ use super::super::{
 use axum::{
     body::Body,
     extract::{Multipart, Path as AxumPath, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Json, Response},
 };
 use futures_util::TryStreamExt;
@@ -3115,6 +3115,92 @@ fn external_disk_path(uri_path: &str) -> Option<String> {
     Some(format!("external/{decoded}"))
 }
 
+/// Sidecars this server derives from an upload and serves at a URL that never
+/// changes — so, unlike the upload itself, their bytes *can* change.
+///
+/// Every one of these is generated on demand in `upload_guard` and some are
+/// regenerated afterwards: `thumb_needs_update` replaces a stale thumbnail,
+/// and `fix_black_thumbnails` rewrites the legacy all-black ones at startup.
+/// Both do it in place, so a client told to cache one forever would keep the
+/// bad picture and the repair would never reach it.
+/// Matched against the raw, still-percent-encoded path: every suffix here is
+/// ASCII that neither `upload_url`'s encode set nor a browser escapes, and the
+/// `%40` spelling is allowed for the one that hangs off a literal `@` so a
+/// client that does escape it cannot win an `immutable` by accident. Erring
+/// this way only costs a revalidation; erring the other way pins a stale file.
+fn is_regenerable_derivative(uri_path: &str) -> bool {
+    uri_path.ends_with(".thumb.jpg")
+        || uri_path.ends_with(".preview.webp")
+        || uri_path.ends_with("@subs.json")
+        || uri_path.ends_with("%40subs.json")
+        || uri_path.ends_with(".vtt")
+}
+
+/// `Cache-Control` for a request under `/external`, by what the URL promises
+/// about its bytes.
+///
+/// An upload lands in a folder named from 16 random bytes, so `<32 hex>/<name>`
+/// identifies those exact bytes for good: a replacement avatar is a new folder
+/// and therefore a new URL, which is what lets this be `immutable` without
+/// costing anyone a stale profile picture. The broadcast that announces the
+/// change carries the new URL, so every client fetches a name it has never
+/// seen — cached or not, the update lands in one round trip.
+///
+/// Everything else here is something whose bytes can be replaced under a fixed
+/// name — the derivatives above, and the built-in sounds at the `external/`
+/// root, which an operator is free to swap — so those revalidate. ServeDir
+/// sends `Last-Modified`, and a regenerated file has a newer one, so the
+/// revalidation is a 304 until the moment it isn't.
+///
+/// `private` throughout, never `public`: `require_auth_for_uploads` can be on,
+/// and it can be turned on *after* a response was cached, so a shared proxy
+/// must never be allowed to hand one user's media to another.
+fn cache_control_for(uri_path: &str) -> &'static str {
+    const REVALIDATE: &str = "private, max-age=300, must-revalidate";
+    const IMMUTABLE: &str = "private, max-age=31536000, immutable";
+
+    if is_regenerable_derivative(uri_path) {
+        return REVALIDATE;
+    }
+    // `<32 hex folder>/<filename>`, exactly one level below the root. Anything
+    // shallower or deeper is not an upload this server laid out.
+    let mut segments = uri_path.trim_start_matches('/').split('/');
+    let Some(folder) = segments.next() else {
+        return REVALIDATE;
+    };
+    let is_upload = segments.next().is_some_and(|name| !name.is_empty())
+        && segments.next().is_none()
+        && is_upload_folder(folder);
+
+    if is_upload {
+        IMMUTABLE
+    } else {
+        REVALIDATE
+    }
+}
+
+/// Stamp `Cache-Control` on a response that carries file bytes.
+///
+/// Only on a success, and that is the whole point of doing this here rather
+/// than with a `SetResponseHeaderLayer` over the router: a layer stamps every
+/// response, and a 404 given explicit freshness is a 404 the browser is
+/// entitled to keep. A preview whose source is not generated yet answers 404
+/// (see the note in `AuthImage.tsx`), and that request is *expected* to
+/// succeed on a later load — cached, it would leave a permanently empty frame
+/// on that one client and nowhere else.
+fn with_cache_control(mut resp: Response<Body>, uri_path: &str) -> Response<Body> {
+    let cacheable = matches!(
+        resp.status(),
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT | StatusCode::NOT_MODIFIED
+    );
+    if cacheable && !resp.headers().contains_key(header::CACHE_CONTROL) {
+        if let Ok(value) = HeaderValue::from_str(cache_control_for(uri_path)) {
+            resp.headers_mut().insert(header::CACHE_CONTROL, value);
+        }
+    }
+    resp
+}
+
 /// Middleware for uploaded file requests: auth check, dangerous extension
 /// blocking, and MKV→MP4 conversion. Safe files pass through to ServeDir.
 pub(crate) async fn upload_guard(
@@ -3180,11 +3266,14 @@ pub(crate) async fn upload_guard(
                     .unwrap();
             }
         };
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "text/plain")
-            .body(Body::from(data))
-            .unwrap();
+        return with_cache_control(
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from(data))
+                .unwrap(),
+            &uri_path,
+        );
     }
 
     // Generate (or regenerate stale/black) thumbnail on demand when the
@@ -3236,11 +3325,14 @@ pub(crate) async fn upload_guard(
         }
         match tokio::fs::read(&disk_path).await {
             Ok(data) => {
-                return Response::builder()
-                    .status(StatusCode::OK)
-                    .header(header::CONTENT_TYPE, content_type)
-                    .body(Body::from(data))
-                    .unwrap();
+                return with_cache_control(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, content_type)
+                        .body(Body::from(data))
+                        .unwrap(),
+                    &uri_path,
+                );
             }
             Err(_) => {
                 return Response::builder()
@@ -3304,7 +3396,7 @@ pub(crate) async fn upload_guard(
         let mp4_uri = format!("{}.mp4", base);
         let mp4_disk = external_disk_path(&mp4_uri).unwrap_or_default();
         if disk_path.is_empty() || mp4_disk.is_empty() {
-            return next.run(req).await.into_response();
+            return with_cache_control(next.run(req).await.into_response(), &uri_path);
         }
 
         // Extract subtitle sidecars + manifest keyed to the ORIGINAL video.
@@ -3336,12 +3428,16 @@ pub(crate) async fn upload_guard(
             let (mut parts, body) = req.into_parts();
             parts.uri = mp4_uri.parse().unwrap_or(parts.uri);
             let req = axum::http::Request::from_parts(parts, body);
-            return next.run(req).await.into_response();
+            // Keyed to the URI the client actually holds — the `.mkv` — not
+            // the `.mp4` being served in its place. The remux finishes above
+            // before a byte goes out, so what lands in the cache is the
+            // converted file, not a half-made one.
+            return with_cache_control(next.run(req).await.into_response(), &uri_path);
         }
     }
 
     // Pass through to ServeDir
-    next.run(req).await.into_response()
+    with_cache_control(next.run(req).await.into_response(), &uri_path)
 }
 
 #[cfg(test)]
@@ -3856,6 +3952,135 @@ mod tests {
         for p in [&mp4, &marker] {
             let _ = tokio::fs::remove_file(p).await;
         }
+    }
+
+    // ─── Cache-Control scoping ──────────────────────────────────────────────
+
+    const UPLOAD_FOLDER: &str = "0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn an_upload_is_cached_for_good_because_its_url_names_its_bytes() {
+        // The folder is 16 random bytes, so these bytes are the only ones this
+        // URL will ever have. A replaced avatar is a new folder and a new URL.
+        let cc = cache_control_for(&format!("/{UPLOAD_FOLDER}/avatar.png"));
+        assert!(cc.contains("immutable"), "got {cc}");
+        assert!(
+            cc.starts_with("private"),
+            "must not be proxy-cacheable: {cc}"
+        );
+    }
+
+    #[test]
+    fn a_regenerable_sidecar_revalidates() {
+        // Each of these is generated on demand and can be *re*generated in
+        // place — `fix_black_thumbnails` exists to do exactly that — so the
+        // repair has to be able to reach a client that already has one.
+        for path in [
+            format!("/{UPLOAD_FOLDER}/clip.mp4.thumb.jpg"),
+            format!("/{UPLOAD_FOLDER}/photo.png.preview.webp"),
+            format!("/{UPLOAD_FOLDER}/clip.mkv@subs.json"),
+            format!("/{UPLOAD_FOLDER}/clip.mkv%40subs.json"),
+            format!("/{UPLOAD_FOLDER}/clip.mkv@0.vtt"),
+        ] {
+            let cc = cache_control_for(&path);
+            assert!(
+                !cc.contains("immutable"),
+                "{path} can change under a fixed name, got {cc}"
+            );
+            assert!(cc.contains("must-revalidate"), "{path} got {cc}");
+        }
+    }
+
+    #[test]
+    fn the_built_in_sounds_stay_replaceable() {
+        // These sit at the `external/` root rather than in a folder of their
+        // own, and an operator is free to swap the files. Pinning them for a
+        // year would make that change unobservable.
+        for path in ["/vc-join.wav", "/mute.wav", "/unmute.wav"] {
+            let cc = cache_control_for(path);
+            assert!(!cc.contains("immutable"), "{path} got {cc}");
+        }
+    }
+
+    #[test]
+    fn only_the_upload_shape_counts_as_immutable() {
+        // A folder that is not 32 hex characters was not laid out by this
+        // server, and a path deeper or shallower than `<folder>/<file>` is not
+        // an upload either.
+        for path in [
+            "/not-a-folder/avatar.png".to_string(),
+            format!("/{UPLOAD_FOLDER}"),
+            format!("/{UPLOAD_FOLDER}/"),
+            format!("/{UPLOAD_FOLDER}/nested/avatar.png"),
+        ] {
+            let cc = cache_control_for(&path);
+            assert!(!cc.contains("immutable"), "{path} got {cc}");
+        }
+    }
+
+    #[test]
+    fn a_failure_is_never_given_freshness() {
+        // The reason this is a function and not a SetResponseHeaderLayer. A
+        // preview whose source is not generated yet answers 404 and is
+        // expected to succeed on a later load; a 404 handed explicit
+        // freshness is one the browser may keep, which would leave a
+        // permanently empty frame on that client alone.
+        let path = format!("/{UPLOAD_FOLDER}/photo.png.preview.webp");
+        for status in [
+            StatusCode::NOT_FOUND,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ] {
+            let resp = with_cache_control(
+                Response::builder()
+                    .status(status)
+                    .body(Body::empty())
+                    .unwrap(),
+                &path,
+            );
+            assert!(
+                !resp.headers().contains_key(header::CACHE_CONTROL),
+                "{status} must not be cacheable"
+            );
+        }
+    }
+
+    #[test]
+    fn a_served_file_and_a_range_of_one_both_get_the_header() {
+        let path = format!("/{UPLOAD_FOLDER}/clip.mp4");
+        for status in [StatusCode::OK, StatusCode::PARTIAL_CONTENT] {
+            let resp = with_cache_control(
+                Response::builder()
+                    .status(status)
+                    .body(Body::empty())
+                    .unwrap(),
+                &path,
+            );
+            let cc = resp
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            assert!(cc.contains("immutable"), "{status} got {cc:?}");
+        }
+    }
+
+    #[test]
+    fn a_header_already_set_upstream_is_left_alone() {
+        let path = format!("/{UPLOAD_FOLDER}/avatar.png");
+        let resp = with_cache_control(
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(Body::empty())
+                .unwrap(),
+            &path,
+        );
+        assert_eq!(
+            resp.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
     }
 
     #[test]

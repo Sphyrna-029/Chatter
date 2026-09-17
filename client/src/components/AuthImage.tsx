@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiGetAuthenticatedBlobUrl } from "@/lib/api";
+import {
+  peekMediaBlob,
+  retainMediaBlob,
+  loadMediaBlob,
+  releaseMediaBlob,
+} from "@/lib/mediaBlobs";
 import { AvatarImage } from "@/components/ui/avatar";
 
 const PREVIEW_IMAGE_EXT = /\.(jpe?g|png|webp|bmp|tiff)(\?.*)?$/i;
@@ -26,6 +32,73 @@ export function toImagePreviewUrl(url: string): string {
     return `${base}.preview.webp${suffix}`;
   }
   return url;
+}
+
+/**
+ * Resolve a `src` to something an `<img>` can use, fetching it with the
+ * session's credentials when the server demands them.
+ *
+ * `null` while there is nothing to show yet, which happens only on a genuine
+ * first load: a URL already in the blob cache is answered during this render,
+ * so remounting an avatar — scrolling a member list, reopening a dialog — no
+ * longer blanks it while a fetch it does not need goes out.
+ *
+ * Shared by both components below, which had the same effect written twice.
+ */
+function useResolvedSrc(src: string | undefined, needsAuth: boolean) {
+  const key = needsAuth && src ? src : null;
+
+  // Answered during render, so a URL the cache already holds needs no state
+  // and no effect to display — that is the whole point, and it is what stops
+  // a remounting avatar from blanking on its way back.
+  const cached = key ? peekMediaBlob(key) : null;
+
+  // Only a miss has anything to remember, and the key is stored beside the
+  // result: a stale answer is then ignored by the render below rather than
+  // cleared by the effect, which is what keeps this a fetch lifecycle instead
+  // of a state-sync.
+  const [fetched, setFetched] = useState<{
+    key: string;
+    url: string | null;
+    failed: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!key) return;
+
+    // Whether this effect is holding a reference, so the cleanup knows if it
+    // owes one back. The fetch can land either side of unmount.
+    let held = false;
+    let live = true;
+
+    if (retainMediaBlob(key)) {
+      held = true;
+    } else {
+      loadMediaBlob(key, apiGetAuthenticatedBlobUrl).then(
+        (objectUrl) => {
+          if (!live) {
+            releaseMediaBlob(key);
+            return;
+          }
+          held = true;
+          setFetched({ key, url: objectUrl, failed: false });
+        },
+        () => {
+          if (live) setFetched({ key, url: null, failed: true });
+        },
+      );
+    }
+
+    return () => {
+      live = false;
+      if (held) releaseMediaBlob(key);
+    };
+  }, [key]);
+
+  if (!key) return { resolved: null, failed: false };
+  if (cached) return { resolved: cached, failed: false };
+  if (fetched?.key === key) return { resolved: fetched.url, failed: fetched.failed };
+  return { resolved: null, failed: false };
 }
 
 /**
@@ -57,19 +130,7 @@ export function AuthImage({
   const effectiveSrc = preview ? toImagePreviewUrl(src) : src;
   const isUpload = effectiveSrc.includes("/external/");
   const needsAuth = isUpload && state.requireAuthForUploads;
-  const [blobSrc, setBlobSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!needsAuth) return;
-    let objectUrl: string | null = null;
-    setBlobSrc(null);
-    setFailed(false);
-    apiGetAuthenticatedBlobUrl(effectiveSrc)
-      .then((url) => { objectUrl = url; setBlobSrc(url); })
-      .catch(() => setFailed(true));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [effectiveSrc, needsAuth]);
+  const { resolved: blobSrc, failed } = useResolvedSrc(effectiveSrc, needsAuth);
 
   if (failed) return null;
   if (needsAuth && !blobSrc) return null;
@@ -97,19 +158,7 @@ export function AuthAvatarImage({ src, className, preview = true }: { src?: stri
   const effectiveSrc = preview && src ? toImagePreviewUrl(src) : src;
   const isUpload = !!effectiveSrc && effectiveSrc.includes("/external/");
   const needsAuth = isUpload && state.requireAuthForUploads;
-  const [blobSrc, setBlobSrc] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!needsAuth || !effectiveSrc) return;
-    let objectUrl: string | null = null;
-    setBlobSrc(null);
-    setFailed(false);
-    apiGetAuthenticatedBlobUrl(effectiveSrc)
-      .then((url) => { objectUrl = url; setBlobSrc(url); })
-      .catch(() => setFailed(true));
-    return () => { if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [effectiveSrc, needsAuth]);
+  const { resolved: blobSrc, failed } = useResolvedSrc(effectiveSrc, needsAuth);
 
   if (!src || failed) return null;
   if (needsAuth && !blobSrc) return null;
