@@ -1528,12 +1528,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   loadPresenceRef.current = loadPresence;
 
+  /** Open a channel.
+   *
+   *  The same shape as `selectRoom`: messages, permissions and pins are three
+   *  independent questions about the channel being opened, so they go out
+   *  together and only the messages are awaited. Run one after another — which
+   *  is what this did — the timeline waited on two answers it never reads.
+   */
   const selectChannel = useCallback(async (channelId: string) => {
     dispatch({ type: "SELECT_CHANNEL", payload: channelId });
     const cur = stateRef.current;
-    if (!cur.currentRoomId) return;
-    // Load messages for the new channel
-    const msgData = await apiGetMessages(cur.currentRoomId, 50, undefined, undefined, channelId);
+    const roomId = cur.currentRoomId;
+    if (!roomId) return;
+
+    // Whether this switch is still the one on screen, as in `selectRoom`: these
+    // no longer finish in order, and a slow answer for the channel someone just
+    // left must not paint over the one they are now in.
+    const stillCurrent = () =>
+      stateRef.current.currentRoomId === roomId &&
+      stateRef.current.currentChannelId === channelId;
+
+    // Overwrites make permissions channel-scoped, so they follow the channel.
+    void apiGetMyPermissions(roomId, channelId)
+      .then((permsData) => {
+        if (!stillCurrent()) return;
+        dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
+      })
+      .catch(() => {
+        if (!stillCurrent()) return;
+        dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
+      });
+    void apiGetPins(roomId, channelId)
+      .then((page) => {
+        if (!stillCurrent()) return;
+        dispatch({
+          type: "SET_PINNED_MESSAGES",
+          payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+        });
+      })
+      .catch(() => {
+        if (!stillCurrent()) return;
+        dispatch({
+          type: "SET_PINNED_MESSAGES",
+          payload: { pins: [], hasMore: false, nextOffset: 0 },
+        });
+      });
+
+    const msgData = await apiGetMessages(roomId, 50, undefined, undefined, channelId);
     const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
     dispatch({
       type: "SET_MESSAGES",
@@ -1549,25 +1590,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
           payload: { eventId: msg.event_id, reactions: msg.reactions },
         });
       }
-    }
-    // Overwrites make permissions channel-scoped, so they follow the channel.
-    try {
-      const permsData = await apiGetMyPermissions(cur.currentRoomId, channelId);
-      dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
-    } catch {
-      dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
-    }
-    try {
-      const page = await apiGetPins(cur.currentRoomId, channelId);
-      dispatch({
-        type: "SET_PINNED_MESSAGES",
-        payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
-      });
-    } catch {
-      dispatch({
-        type: "SET_PINNED_MESSAGES",
-        payload: { pins: [], hasMore: false, nextOffset: 0 },
-      });
     }
   }, []);
 

@@ -229,6 +229,23 @@ async fn create_indexes(db: &mongodb::Database) {
         .create_index(IndexModel::builder().keys(doc! { "user_id": 1 }).build())
         .await;
 
+    // uploads: url. Every page of messages asks this collection how big the
+    // images in it are, so that a message can reserve their space before they
+    // load — one query for the page, but against no index it was a scan of
+    // every file ever uploaded, on every channel switch. It is the one index
+    // here that a reader pays for directly.
+    let _ = db
+        .collection::<mongodb::bson::Document>("uploads")
+        .create_index(IndexModel::builder().keys(doc! { "url": 1 }).build())
+        .await;
+
+    // uploads: folder. How the housekeeping passes match a file on disk back
+    // to its record.
+    let _ = db
+        .collection::<mongodb::bson::Document>("uploads")
+        .create_index(IndexModel::builder().keys(doc! { "folder": 1 }).build())
+        .await;
+
     // refresh_tokens: unique on token
     let _ = db
         .collection::<mongodb::bson::Document>("refresh_tokens")
