@@ -453,6 +453,21 @@ export async function apiSync() {
   return res.json();
 }
 
+/** Who is in one room.
+ *
+ *  Opening a room used to read its members out of a full `/sync`, which
+ *  rebuilt every room the account belongs to — permissions, a message page
+ *  and a membership query each — to answer a question about one of them.
+ */
+export async function apiGetRoomMembers(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/members`);
+  if (!res.ok) throw new Error("Failed to load members");
+  return res.json() as Promise<{
+    room_id: string;
+    members: { user_id: string; display_name: string; role: string; joined_at?: number }[];
+  }>;
+}
+
 export async function apiCreateRoom(name: string, topic: string, tags?: string[], iconUrl?: string, unlisted?: boolean, password?: string, roomType?: string) {
   const res = await authenticatedFetch("/_matrix/client/r0/createRoom", {
     method: "POST",

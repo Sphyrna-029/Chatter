@@ -465,6 +465,24 @@ pub(crate) async fn effective_permissions(
     room_id: &str,
     user_id: &str,
 ) -> RolePermissions {
+    let role = get_user_role(state, room_id, user_id).await;
+    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
+    effective_permissions_for(state, room_id, user_id, &role, &role_ids).await
+}
+
+/// `effective_permissions` for a caller that has already resolved the member's
+/// built-in role and the ids of the custom roles they hold.
+///
+/// Both of those cost a lookup, and the callers that go on to apply channel
+/// overwrites need them in their own right — so resolving them once and passing
+/// them down replaces three separate resolutions of the same two facts.
+pub(crate) async fn effective_permissions_for(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+    role: &str,
+    role_ids: &[String],
+) -> RolePermissions {
     use super::state::{CustomRoleRecord, RoomRecord};
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
@@ -488,18 +506,16 @@ pub(crate) async fn effective_permissions(
         }
     }
 
-    let role = get_user_role(state, room_id, user_id).await;
     if role == "owner" {
         return RolePermissions::all();
     }
 
     // Union the custom roles the member holds.
-    let role_ids = get_user_custom_role_ids(state, room_id, user_id).await;
     let mut custom: Option<RolePermissions> = None;
     if !role_ids.is_empty() {
         let roles_coll = state.db.collection::<CustomRoleRecord>("custom_roles");
         if let Ok(mut cursor) = roles_coll
-            .find(doc! { "room_id": room_id, "_id": { "$in": &role_ids } })
+            .find(doc! { "room_id": room_id, "_id": { "$in": role_ids } })
             .await
         {
             while let Ok(Some(r)) = cursor.try_next().await {
@@ -632,8 +648,13 @@ pub(crate) async fn channel_permissions(
 ) -> RolePermissions {
     use mongodb::bson::doc;
 
-    let base = effective_permissions(state, room_id, user_id).await;
-    if channel_id.is_empty() || overwrites_bypassed(state, room_id, user_id).await {
+    // The role and the member's custom role ids are each resolved once and
+    // reused: the room-level set needs both, the bypass decision needs the
+    // role, and applying the overwrites needs the role ids.
+    let role = get_user_role(state, room_id, user_id).await;
+    let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
+    let base = effective_permissions_for(state, room_id, user_id, &role, &user_roles).await;
+    if channel_id.is_empty() || overwrites_bypassed(&role) {
         return base;
     }
 
@@ -646,7 +667,6 @@ pub(crate) async fn channel_permissions(
     };
 
     let category = category_overwrites(state, &channel).await;
-    let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
     apply_overwrites(
         base,
         &merged_overwrites(&category, &channel),
@@ -696,8 +716,10 @@ pub(crate) fn merged_overwrites(
 /// Owners and moderators are not subject to channel overwrites: an owner must
 /// not be able to lock themselves out, and moderators already saw every channel
 /// under the `view_roles` rules this replaces.
-pub(crate) async fn overwrites_bypassed(state: &AppState, room_id: &str, user_id: &str) -> bool {
-    let role = get_user_role(state, room_id, user_id).await;
+///
+/// Takes the role rather than looking it up, because both callers have just
+/// resolved it for the room-level permission set.
+pub(crate) fn overwrites_bypassed(role: &str) -> bool {
     role == "owner" || role == "moderator"
 }
 
@@ -920,14 +942,19 @@ pub(crate) async fn get_allowed_channel_ids(
     use futures_util::TryStreamExt;
     use mongodb::bson::doc;
 
-    if overwrites_bypassed(state, room_id, user_id).await {
-        return None; // privileged: unrestricted access
-    }
     use super::state::ChannelCategoryRecord;
     use std::collections::HashMap;
 
-    let base = effective_permissions(state, room_id, user_id).await;
+    // As in `channel_permissions`: one resolution of the role and the member's
+    // custom role ids, shared by the bypass check, the room-level permission
+    // set, and the overwrites applied per channel. This ran the two lookups
+    // three times over, on a function every message fetch calls.
+    let role = get_user_role(state, room_id, user_id).await;
+    if overwrites_bypassed(&role) {
+        return None; // privileged: unrestricted access
+    }
     let user_roles = get_user_custom_role_ids(state, room_id, user_id).await;
+    let base = effective_permissions_for(state, room_id, user_id, &role, &user_roles).await;
 
     // One pass for the categories rather than a lookup per channel.
     let mut categories: HashMap<String, Vec<PermissionOverwrite>> = HashMap::new();
@@ -1209,6 +1236,94 @@ pub(crate) async fn send_to_user(state: &AppState, user_id: &str, message: &Valu
             let _ = tx.send(Message::Text(text.clone().into()));
         }
     }
+}
+
+/// One member of a room as the client models them.
+pub(crate) struct RoomMemberEntry {
+    pub(crate) user_id: String,
+    pub(crate) display_name: String,
+    pub(crate) role: String,
+    pub(crate) joined_at: Option<i64>,
+}
+
+/// The name to show for a user who has set no display name: the local part of
+/// their id.
+pub(crate) fn fallback_display_name(user_id: &str) -> &str {
+    user_id
+        .split(':')
+        .next()
+        .unwrap_or(user_id)
+        .trim_start_matches('@')
+}
+
+/// One room's membership: who is in it, the name to show, their built-in role,
+/// and when they joined.
+///
+/// Two queries for the whole room, however many people are in it. Sync used to
+/// build this with a `find_one` per member, which is what made opening a room
+/// cost a round trip per person in every room the account belonged to.
+///
+/// Shared by `/api/rooms/{id}/members` and the membership half of `/sync` so
+/// that the list a client gets on a room switch cannot disagree with the one it
+/// got at startup. `members` is passed in rather than read here because both
+/// callers already hold it, and sync holds a snapshot of the whole cache.
+pub(crate) async fn room_member_entries(
+    state: &AppState,
+    room_id: &str,
+    members: &[String],
+    creator: &str,
+) -> Vec<RoomMemberEntry> {
+    use super::state::UserRecord;
+    use futures_util::TryStreamExt;
+    use mongodb::bson::doc;
+    use std::collections::HashMap;
+
+    let mut display_names: HashMap<String, String> = HashMap::new();
+    if !members.is_empty() {
+        let users_coll = state.db.collection::<UserRecord>("users");
+        if let Ok(mut cursor) = users_coll.find(doc! { "_id": { "$in": members } }).await {
+            while let Ok(Some(u)) = cursor.try_next().await {
+                if !u.display_name.is_empty() {
+                    display_names.insert(u.user_id, u.display_name);
+                }
+            }
+        }
+    }
+
+    let mut joined_at: HashMap<String, i64> = HashMap::new();
+    let member_records = state.db.collection::<RoomMemberRecord>("room_members");
+    if let Ok(mut cursor) = member_records.find(doc! { "room_id": room_id }).await {
+        while let Ok(Some(rec)) = cursor.try_next().await {
+            if rec.joined_at != 0 {
+                joined_at.insert(rec.user_id, rec.joined_at);
+            }
+        }
+    }
+
+    let roles = {
+        let rr = state.room_roles.read().await;
+        rr.get(room_id).cloned().unwrap_or_default()
+    };
+
+    members
+        .iter()
+        .map(|mid| {
+            let mut role = roles.get(mid).map(|r| r.as_str()).unwrap_or("member");
+            // Legacy fallback: the creator is always owner.
+            if role == "member" && mid == creator {
+                role = "owner";
+            }
+            RoomMemberEntry {
+                user_id: mid.clone(),
+                display_name: display_names
+                    .get(mid)
+                    .cloned()
+                    .unwrap_or_else(|| fallback_display_name(mid).to_string()),
+                role: role.to_string(),
+                joined_at: joined_at.get(mid).copied(),
+            }
+        })
+        .collect()
 }
 
 /// Batch-query thread reply counts for multiple event IDs.

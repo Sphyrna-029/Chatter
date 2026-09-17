@@ -2,12 +2,9 @@ use super::super::{
     dto::SyncQuery,
     helpers::{
         error_response, extract_token, get_allowed_channel_ids, get_reactions_for_events,
-        get_user_from_token,
+        get_user_from_token, room_member_entries,
     },
-    state::{
-        AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomMemberRecord, RoomRecord,
-        UserRecord,
-    },
+    state::{AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, UserRecord},
 };
 use axum::{
     extract::{Query, State},
@@ -29,13 +26,13 @@ pub(crate) async fn sync(
     let user_id = get_user_from_token(&state, &token)
         .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
 
-    // Snapshot the two caches this needs and let go of both guards before any
-    // database work starts. Held across the loop below — which is hundreds of
-    // round trips for an account in a few busy rooms — a read guard here is
-    // enough to stall the whole server: tokio's RwLock is write-preferring, so
-    // one join or role change arriving mid-sync queues a writer behind this
-    // guard, and every later reader then queues behind that writer. Sending a
-    // room list built a few milliseconds ago is the lesser problem by far.
+    // Snapshot the membership cache and let go of the guard before any database
+    // work starts. Held across the loop below — which is hundreds of round
+    // trips for an account in a few busy rooms — a read guard here is enough to
+    // stall the whole server: tokio's RwLock is write-preferring, so one join
+    // arriving mid-sync queues a writer behind this guard, and every later
+    // reader then queues behind that writer. Sending a room list built a few
+    // milliseconds ago is the lesser problem by far.
     let my_rooms: Vec<(String, Vec<String>)> = {
         let rm = state.room_members.read().await;
         rm.iter()
@@ -43,20 +40,9 @@ pub(crate) async fn sync(
             .map(|(room_id, members)| (room_id.clone(), members.clone()))
             .collect()
     };
-    let room_roles: std::collections::HashMap<String, std::collections::HashMap<String, String>> = {
-        let rr = state.room_roles.read().await;
-        my_rooms
-            .iter()
-            .filter_map(|(room_id, _)| {
-                rr.get(room_id)
-                    .map(|roles| (room_id.clone(), roles.clone()))
-            })
-            .collect()
-    };
 
     let rooms_coll = state.db.collection::<RoomRecord>("rooms");
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
-    let users_coll = state.db.collection::<UserRecord>("users");
 
     let mut joined_rooms_data = serde_json::Map::new();
 
@@ -125,63 +111,30 @@ pub(crate) async fn sync(
             }
         }
 
-        // Build a map of display_names for members in this room
-        let mut member_display_names: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-        for mid in members {
-            if let Ok(Some(u)) = users_coll.find_one(doc! { "_id": mid }).await {
-                if !u.display_name.is_empty() {
-                    member_display_names.insert(mid.clone(), u.display_name);
-                }
-            }
-        }
-
-        // Fetch joined_at timestamps from MongoDB
-        let member_records_coll = state.db.collection::<RoomMemberRecord>("room_members");
-        let mut joined_at_map: std::collections::HashMap<String, i64> =
-            std::collections::HashMap::new();
-        if let Ok(mut cursor) = member_records_coll.find(doc! { "room_id": room_id }).await {
-            while let Ok(Some(rec)) = cursor.try_next().await {
-                if rec.joined_at != 0 {
-                    joined_at_map.insert(rec.user_id, rec.joined_at);
-                }
-            }
-        }
-
-        let member_events: Vec<Value> = members
-            .iter()
-            .map(|mid| {
-                let display = member_display_names
-                    .get(mid)
-                    .map(|s| s.as_str())
-                    .unwrap_or_else(|| {
-                        mid.split(':').next().unwrap_or(mid).trim_start_matches('@')
+        // Names, roles and join times for the whole room, from the same
+        // helper `/api/rooms/{id}/members` uses. Two queries for the room
+        // rather than one per person, which is what this was.
+        let member_events: Vec<Value> =
+            room_member_entries(&state, room_id, members, &room_data.creator)
+                .await
+                .into_iter()
+                .map(|e| {
+                    let mut content = json!({
+                        "membership": "join",
+                        "displayname": e.display_name,
+                        "role": e.role
                     });
-                let mut role = room_roles
-                    .get(room_id)
-                    .and_then(|m| m.get(mid))
-                    .map(|r| r.as_str())
-                    .unwrap_or("member");
-                // Legacy fallback: creator is always owner
-                if role == "member" && *mid == room_data.creator {
-                    role = "owner";
-                }
-                let mut content = json!({
-                    "membership": "join",
-                    "displayname": display,
-                    "role": role
-                });
-                if let Some(&ts) = joined_at_map.get(mid) {
-                    content["joined_at"] = json!(ts);
-                }
-                json!({
-                    "type": "m.room.member",
-                    "state_key": mid,
-                    "content": content,
-                    "sender": mid
+                    if let Some(ts) = e.joined_at {
+                        content["joined_at"] = json!(ts);
+                    }
+                    json!({
+                        "type": "m.room.member",
+                        "state_key": e.user_id,
+                        "content": content,
+                        "sender": e.user_id
+                    })
                 })
-            })
-            .collect();
+                .collect();
 
         // For DMs, show all other members' names unless a custom name has been set
         let display_name = if room_data.is_dm && !room_data.dm_name_override {

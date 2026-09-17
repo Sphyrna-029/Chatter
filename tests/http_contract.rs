@@ -164,6 +164,85 @@ async fn room_contract_join_leave_and_dm_dedup() {
     assert_eq!(self_dm.status(), StatusCode::BAD_REQUEST);
 }
 
+/// The member list a room switch reads, which used to be carved out of a full
+/// `/sync`. Its shape is what the client renders the roster from, and it must
+/// stay closed to anyone outside the room.
+#[tokio::test]
+async fn room_members_contract_shape_and_membership_gate() {
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+    let (_carol_user_id, carol_token) =
+        register_user(&client, &server.base_url, "carol", "pw").await;
+
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "General",
+        Some(vec![bob_user_id.clone()]),
+        false,
+    )
+    .await;
+
+    let members = client
+        .get(format!("{}/api/rooms/{}/members", server.base_url, room_id))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(members.status(), StatusCode::OK);
+    let body: Value = members.json().await.unwrap();
+    assert_eq!(body["room_id"].as_str(), Some(room_id.as_str()));
+
+    let listed = body["members"].as_array().unwrap();
+    assert_eq!(listed.len(), 2);
+
+    let alice = listed
+        .iter()
+        .find(|m| m["user_id"].as_str() == Some(alice_user_id.as_str()))
+        .expect("the creator is in the list");
+    // The creator is the owner, and a display name is always present: a member
+    // with none set falls back to the local part of their id rather than
+    // rendering as an empty row.
+    assert_eq!(alice["role"].as_str(), Some("owner"));
+    assert_eq!(alice["display_name"].as_str(), Some("alice"));
+
+    let bob = listed
+        .iter()
+        .find(|m| m["user_id"].as_str() == Some(bob_user_id.as_str()))
+        .expect("the invitee is in the list");
+    assert_eq!(bob["role"].as_str(), Some("member"));
+
+    // Bob is in the room and sees the same list.
+    let bob_view = client
+        .get(format!("{}/api/rooms/{}/members", server.base_url, room_id))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bob_view.status(), StatusCode::OK);
+
+    // Carol is not, and a member list names everyone in the room.
+    let carol_view = client
+        .get(format!("{}/api/rooms/{}/members", server.base_url, room_id))
+        .header("authorization", bearer(&carol_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(carol_view.status(), StatusCode::FORBIDDEN);
+
+    let anonymous = client
+        .get(format!("{}/api/rooms/{}/members", server.base_url, room_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+}
+
 #[tokio::test]
 async fn message_contract_reply_redact_reaction_toggle_and_sync_shape() {
     let server = spawn_server().await;

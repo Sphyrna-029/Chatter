@@ -56,8 +56,8 @@ use super::{
         },
         rooms::{
             add_to_dm, ban_member, create_room, delete_room, join_room, joined_rooms, kick_member,
-            leave_room, list_all_rooms, list_banned_users, set_member_role, set_name_colors,
-            unban_member, update_room_settings, update_room_topic,
+            leave_room, list_all_rooms, list_banned_users, list_room_members, set_member_role,
+            set_name_colors, unban_member, update_room_settings, update_room_topic,
         },
         spotify::{
             spotify_callback, spotify_link_url, spotify_set_hide, spotify_status, spotify_unlink,
@@ -193,6 +193,7 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         .route("/_matrix/client/r0/joined_rooms", get(joined_rooms))
         .route("/api/rooms", get(list_all_rooms))
         .route("/api/rooms/{room_id}", delete(delete_room))
+        .route("/api/rooms/{room_id}/members", get(list_room_members))
         .route(
             "/api/upload",
             post(upload_file).layer(DefaultBodyLimit::disable()),

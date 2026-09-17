@@ -89,6 +89,7 @@ import {
   apiSetThreadName,
   apiDeleteThread,
   apiGetChannels,
+  apiGetRoomMembers,
   apiCreateChannel,
   apiUpdateChannel,
   apiDeleteChannel,
@@ -923,16 +924,61 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  /** Open a room.
+   *
+   *  Six requests used to run here strictly one after another — channels, then
+   *  roles, then messages, then permissions, then pins, then a full `/sync` for
+   *  the member list — so the timeline waited on two calls it does not read,
+   *  and the member list waited on all five. Only one dependency is real: the
+   *  channel to land on comes out of the channel list, and messages, pins and
+   *  permissions are all scoped to it. Everything else now runs alongside.
+   */
   const selectRoom = useCallback(
     async (roomId: string) => {
       dispatch({ type: "SELECT_ROOM", payload: roomId });
       void loadActiveThreadsRef.current(roomId);
+
+      // Whether this switch is still the one on screen. Requests that are no
+      // longer awaited in order can land after the next switch has started, and
+      // the roster or pins of the room someone just left must not paint over
+      // the room they are now in.
+      const stillCurrent = () => stateRef.current.currentRoomId === roomId;
+
+      // Started first and never waited on: it depends on nothing else here.
+      void apiGetRoomMembers(roomId)
+        .then((data) => {
+          if (!stillCurrent()) return;
+          dispatch({
+            type: "SET_ROOM_MEMBERS",
+            payload: data.members.map((m) => ({
+              userId: m.user_id,
+              displayName: m.display_name || displayUserId(m.user_id),
+              role: m.role || "member",
+              joinedAt: m.joined_at || undefined,
+            })),
+          });
+        })
+        .catch(() => {});
 
       // Load channels for non-DM rooms and auto-select default text channel
       const roomInfo = stateRef.current.roomInfoMap[roomId];
       const isDm = roomInfo?.is_direct;
       let selectedChannelId: string | undefined;
       if (!isDm) {
+        // Custom roles and their assignments decide which controls render, not
+        // what the timeline contains, so they run alongside it.
+        void Promise.all([apiGetRoles(roomId), apiGetAllMemberRoles(roomId)])
+          .then(([rolesData, memberRolesData]) => {
+            if (!stillCurrent()) return;
+            dispatch({ type: "SET_CUSTOM_ROLES", payload: rolesData.roles || [] });
+            dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: memberRolesData.member_roles || {} });
+          })
+          .catch(() => {
+            if (!stillCurrent()) return;
+            dispatch({ type: "SET_CUSTOM_ROLES", payload: [] });
+            dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: {} });
+          });
+
         try {
           const channelsData = await apiGetChannels(roomId);
           dispatch({ type: "SET_CHANNELS", payload: channelsData.channels || [] });
@@ -946,26 +992,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SET_CHANNELS", payload: [] });
         }
 
-        // Load custom roles and member role assignments
-        try {
-          const [rolesData, memberRolesData] = await Promise.all([
-            apiGetRoles(roomId),
-            apiGetAllMemberRoles(roomId),
-          ]);
-          dispatch({ type: "SET_CUSTOM_ROLES", payload: rolesData.roles || [] });
-          dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: memberRolesData.member_roles || {} });
-        } catch {
-          dispatch({ type: "SET_CUSTOM_ROLES", payload: [] });
-          dispatch({ type: "SET_MEMBER_CUSTOM_ROLES", payload: {} });
-        }
-
         // Fetched on the room switch rather than when the panel opens: the
         // header badge has to know about an event starting soon before anyone
         // thinks to look for one.
         void loadEventsRef.current(roomId);
       }
 
-      // Load messages (with channel_id if available)
+      // All three are scoped to the channel just landed on, so they go out
+      // together. Only the messages are awaited, because they are what the
+      // room is.
+      //
+      // The server computes effective permissions; the client only mirrors them
+      // to decide which controls to show.
+      void apiGetMyPermissions(roomId, selectedChannelId)
+        .then((permsData) => {
+          if (!stillCurrent()) return;
+          dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
+        })
+        .catch(() => {
+          if (!stillCurrent()) return;
+          dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
+        });
+      void apiGetPins(roomId, selectedChannelId)
+        .then((page) => {
+          if (!stillCurrent()) return;
+          dispatch({
+            type: "SET_PINNED_MESSAGES",
+            payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
+          });
+        })
+        .catch(() => {
+          if (!stillCurrent()) return;
+          dispatch({
+            type: "SET_PINNED_MESSAGES",
+            payload: { pins: [], hasMore: false, nextOffset: 0 },
+          });
+        });
+
       const msgData = await apiGetMessages(roomId, 50, undefined, undefined, selectedChannelId);
       const messages = msgData.chunk.filter((m) => m.type === "m.room.message");
       dispatch({
@@ -983,45 +1046,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
             payload: { eventId: msg.event_id, reactions: msg.reactions },
           });
         }
-      }
-      // The server computes effective permissions; the client only mirrors them
-      // to decide which controls to show.
-      try {
-        const permsData = await apiGetMyPermissions(roomId, selectedChannelId);
-        dispatch({ type: "SET_MY_PERMISSIONS", payload: permsData.permissions });
-      } catch {
-        dispatch({ type: "SET_MY_PERMISSIONS", payload: null });
-      }
-      // Load pinned messages for the channel we landed on
-      try {
-        const page = await apiGetPins(roomId, selectedChannelId);
-        dispatch({
-          type: "SET_PINNED_MESSAGES",
-          payload: { pins: page.items, hasMore: page.hasMore, nextOffset: page.nextOffset },
-        });
-      } catch {
-        dispatch({
-          type: "SET_PINNED_MESSAGES",
-          payload: { pins: [], hasMore: false, nextOffset: 0 },
-        });
-      }
-      // Load members
-      const syncData = await apiSync();
-      const roomData = syncData.rooms?.join?.[roomId];
-      if (roomData) {
-        const memberEvents = roomData.state.events.filter(
-          (e: any) => e.type === "m.room.member"
-        );
-        dispatch({
-          type: "SET_ROOM_MEMBERS",
-          payload: memberEvents.map((e: any) => ({
-            userId: e.state_key,
-            displayName:
-              e.content.displayname || displayUserId(e.state_key),
-            role: e.content.role || "member",
-            joinedAt: e.content.joined_at || undefined,
-          })),
-        });
       }
       // Load presence. The same call the poll makes, rather than a second copy
       // of the mapping that could drift from it — this one dropped `is_mobile`,

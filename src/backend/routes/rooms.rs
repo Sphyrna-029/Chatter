@@ -7,7 +7,8 @@ use super::super::{
     helpers::{
         broadcast_to_room, do_join_room, effective_permissions, error_response, extract_token,
         generate_id, get_system_channel_id, get_user_from_token, get_user_role, hash_password,
-        is_blocked_between, now_millis, public_channel_ids, send_to_user, verify_password,
+        is_blocked_between, now_millis, public_channel_ids, room_member_entries, send_to_user,
+        verify_password,
     },
     state::{
         AppState, BannedUserRecord, ChannelRecord, DmRoomRecord, RoomMemberRecord, RoomRecord,
@@ -727,6 +728,66 @@ pub(crate) async fn joined_rooms(
         .collect();
 
     Ok(Json(json!({"joined_rooms": joined})))
+}
+
+/// GET /api/rooms/{room_id}/members — who is in one room.
+///
+/// This exists so that opening a room does not have to call `/sync`. The
+/// client needed a member list and `/sync` was the only thing that produced
+/// one, so every room switch re-synced every room the account belonged to —
+/// each with its own permission resolution, message page and membership
+/// query — to read one room's members out of the result.
+pub(crate) async fn list_room_members(
+    State(state): State<Arc<AppState>>,
+    Path(room_id): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let token = extract_token(&headers)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Missing token"))?;
+    let user_id = get_user_from_token(&state, &token)
+        .ok_or_else(|| error_response(StatusCode::UNAUTHORIZED, "Invalid token"))?;
+
+    // Snapshot the membership, and answer nothing to someone outside the room:
+    // a member list names everyone in it, which is not public.
+    let members: Vec<String> = {
+        let rm = state.room_members.read().await;
+        let Some(members) = rm.get(&room_id) else {
+            return Err(error_response(StatusCode::NOT_FOUND, "Room not found"));
+        };
+        if !members.contains(&user_id) {
+            return Err(error_response(
+                StatusCode::FORBIDDEN,
+                "Not a member of this room",
+            ));
+        }
+        members.clone()
+    };
+
+    let rooms_coll = state.db.collection::<RoomRecord>("rooms");
+    let room = rooms_coll
+        .find_one(doc! { "_id": &room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Room not found"))?;
+
+    let entries = room_member_entries(&state, &room_id, &members, &room.creator).await;
+    let members: Vec<Value> = entries
+        .into_iter()
+        .map(|e| {
+            let mut out = json!({
+                "user_id": e.user_id,
+                "display_name": e.display_name,
+                "role": e.role,
+            });
+            if let Some(ts) = e.joined_at {
+                out["joined_at"] = json!(ts);
+            }
+            out
+        })
+        .collect();
+
+    Ok(Json(json!({ "room_id": room_id, "members": members })))
 }
 
 pub(crate) async fn delete_room(
