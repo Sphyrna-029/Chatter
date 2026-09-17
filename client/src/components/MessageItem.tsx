@@ -209,6 +209,12 @@ function extractMediaUrls(body: string): { images: string[]; videos: string[]; a
   const matches = stripped.match(urlRegex);
   if (matches) {
     for (const url of matches) {
+      // A message link draws its own card, resolved against this viewer's
+      // access. Left to fall through to `links` it would *also* be handed to
+      // the generic OG preview below, which fetches this app's own
+      // index.html and answers with its <title> — so every shared message
+      // came with a second, contentless "Chatter" card under the real one.
+      if (parseMessageLink(url)) continue;
       const ytId = getYouTubeVideoId(url);
       if (ytId) youtubeIds.push(ytId);
       else if (imageExtensions.test(url)) images.push(url);
