@@ -148,25 +148,3 @@ export function mixToContrast(
 export function isDarkColor(hex: string): boolean {
   return relativeLuminance(hex) < 0.35;
 }
-
-/**
- * A stable hue for an id, in degrees.
- *
- * For marks that say "these belong together" rather than "this is important":
- * a folder's wash on the room rail, where the point is that two folders read
- * as two folders. Hue only, so the surface it tints decides lightness and
- * saturation and the result stays soft under any theme — the app's own accent
- * is no help here, being greyscale in the default light theme and one colour
- * for everything in the others.
- *
- * FNV-1a over the id: cheap, and the same id has to come out the same colour
- * on every machine, which rules out anything to do with insertion order.
- */
-export function hueFromId(id: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < id.length; i++) {
-    hash ^= id.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return Math.abs(hash) % 360;
-}
