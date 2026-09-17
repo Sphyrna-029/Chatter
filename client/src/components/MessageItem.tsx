@@ -34,7 +34,6 @@ import {
   findMessageLinks,
   messageLinkFor,
   parseMessageLink,
-  resolveMessagePreview,
 } from "@/lib/messageLinks";
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
 import { useChromecast } from "@/hooks/useChromecast";
@@ -118,16 +117,12 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     if (/\/external\//.test(url)) {
       return "";
     }
-    // A link to a message on this instance reads as what it is, not as a line
-    // of percent-encoded id. Kept as a link rather than suppressed the way
-    // media is: the card below it only renders for a viewer allowed to see the
-    // message, and dropping the text too would leave the rest of the room
-    // looking at a message with a hole in it. `href` stays real so
-    // middle-click and "copy link address" behave; the left-click is
-    // intercepted by the delegate on the container, which jumps in-app.
-    const linkedEventId = parseMessageLink(url);
-    if (linkedEventId) {
-      return `<a href="${escapeAttr(url)}" data-message-link="${escapeAttr(linkedEventId)}" class="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-primary hover:bg-primary/20 hover:underline">Message link</a>`;
+    // Suppressed the way media is, because the card below replaces it whole:
+    // it carries where the message is, who wrote it and what it says, it
+    // jumps there when clicked, and it has a button to copy the link back
+    // out. A line of percent-encoded id beside all that is noise.
+    if (parseMessageLink(url)) {
+      return "";
     }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline break-all">${displayUrl}</a>`;
@@ -1056,7 +1051,7 @@ function ActionRow({
 
 function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone, disableReactions, hidePinControls }: MessageItemProps) {
   const confirm = useConfirm();
-  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, openMessage, pinMessage, unpinMessage } = useAppContext();
+  const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
   const isMobile = useIsMobile();
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -1375,39 +1370,6 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     [message.content.body]
   );
 
-  /** Left-clicking a message link jumps in-app instead of navigating.
-   *
-   *  Delegated because the body is set as HTML, so there is no element to hang
-   *  a handler on. A link the viewer cannot follow says so rather than doing
-   *  nothing: its card is absent by design, and a dead click with no card and
-   *  no message would just look broken. */
-  const handleBodyClick = (e: React.MouseEvent) => {
-    const anchor = (e.target as HTMLElement).closest<HTMLAnchorElement>(
-      "[data-message-link]"
-    );
-    if (!anchor) return;
-    // Leave the modified clicks to the browser — a middle-click or ctrl-click
-    // on a link is a request for a new tab, and the link is real.
-    if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-    e.preventDefault();
-    const linkedId = anchor.dataset.messageLink;
-    if (!linkedId) return;
-    void resolveMessagePreview(linkedId)
-      .then((preview) => {
-        if (!preview) {
-          toast.error("That message is not available to you");
-          return;
-        }
-        openMessage({
-          roomId: preview.room_id,
-          eventId: preview.event_id,
-          channelId: preview.channel_id,
-          ts: preview.origin_server_ts,
-        });
-      })
-      .catch(() => toast.error("Could not open that message"));
-  };
-
   const copyMessageLink = async () => {
     try {
       await navigator.clipboard.writeText(messageLinkFor(message.event_id));
@@ -1590,7 +1552,6 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 }
               }}
               onMouseLeave={() => setEmojiTip(null)}
-              onClick={handleBodyClick}
             >
               {segments.map((segment, i) =>
                 segment.type === "code" ? (
