@@ -419,12 +419,17 @@ pub(crate) async fn get_user_role(state: &AppState, room_id: &str, user_id: &str
         let rooms_coll = state.db.collection::<RoomRecord>("rooms");
         if let Ok(Some(room)) = rooms_coll.find_one(doc! { "_id": room_id }).await {
             if room.creator == user_id {
-                // Backfill the cache so we don't hit DB again
-                let mut roles_w = state.room_roles.write().await;
-                roles_w
-                    .entry(room_id.to_string())
-                    .or_default()
-                    .insert(user_id.to_string(), "owner".to_string());
+                // Backfill the cache so we don't hit DB again. Scoped, so the
+                // write guard is gone before the update below: held across
+                // that round trip it stops every reader of `room_roles`, and
+                // a sync builds several rooms at once through this path.
+                {
+                    let mut roles_w = state.room_roles.write().await;
+                    roles_w
+                        .entry(room_id.to_string())
+                        .or_default()
+                        .insert(user_id.to_string(), "owner".to_string());
+                }
 
                 // Also update MongoDB so the record is consistent
                 let members_coll = state
