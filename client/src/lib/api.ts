@@ -950,6 +950,7 @@ export interface MatrixMessage {
     ends_at?: number;
     // ── Poll results. Present on `m.poll_results`; see PollResultsContent.
     counts?: number[];
+    voters?: string[][];
     total_voters?: number;
   };
   /** A poll's live state, attached by the message page to an `m.poll`. The
@@ -3282,6 +3283,10 @@ export interface PollResultsContent {
   question: string;
   options: string[];
   counts: number[];
+  /** Who voted for what, in option order. Absent on results posted before
+   *  they were recorded, which is why the card draws the disclosure only
+   *  where there is a list behind it. */
+  voters?: string[][];
   total_voters: number;
   multi_select: boolean;
 }

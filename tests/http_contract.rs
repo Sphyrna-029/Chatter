@@ -2533,6 +2533,12 @@ async fn poll_contract_vote_change_withdraw_and_close_posts_results() {
     assert_eq!(results["content"]["question"], "Lunch on Friday?");
     assert_eq!(results["content"]["counts"], json!([0, 1, 1]));
     assert_eq!(results["content"]["total_voters"], 2);
+    // Who voted rides the results message, because the record that knew is
+    // deleted with the poll — the card's disclosure has nothing else to read.
+    assert_eq!(
+        results["content"]["voters"],
+        json!([[], [bob_id.clone()], [alice_id.clone()]])
+    );
     assert!(results["content"]["body"]
         .as_str()
         .unwrap()

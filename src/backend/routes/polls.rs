@@ -604,6 +604,12 @@ async fn close_and_announce(state: &Arc<AppState>, record: &PollRecord, now: i64
             "question": record.question,
             "options": record.options,
             "counts": counts,
+            // Who voted for what, carried on the message for the same reason
+            // the question and the answers are: the results card names them,
+            // and the record that knew is deleted with the poll. A tally is
+            // the one part of a poll that cannot be recovered afterwards, so
+            // if it is ever going to be shown it has to be written down here.
+            "voters": &tally,
             "total_voters": total_voters,
             "multi_select": record.multi_select,
         },

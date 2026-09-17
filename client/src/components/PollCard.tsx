@@ -10,18 +10,24 @@ import {
   voterLabel,
   winningIndexes,
 } from "@/lib/polls";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { BarChart3, Check, Loader2 } from "lucide-react";
+import { BarChart3, Check, ChevronDown, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 /**
- * One answer's row: the label, a bar behind it, and the count.
+ * One answer's row: the label, a bar behind it, the count, and a disclosure
+ * that opens the list of people who picked it.
  *
  * The same markup for a poll that is running and for one that has finished, so
  * the two cannot come to disagree about what an answer looks like — only
- * whether it can be clicked. The bar is a background layer rather than a
+ * whether it can be voted in. The bar is a background layer rather than a
  * sibling element, because the label has to sit *on* it: a bar beside the text
  * would make the row twice as tall for no more information.
+ *
+ * Voting and opening the list are two separate buttons on one row rather than
+ * one element doing both: a row that cast a vote *and* expanded would make
+ * every look at who voted change the tally. Which is also why the chevron
+ * cannot be nested inside the vote button — a button inside a button is not a
+ * thing the browser will honour.
  */
 function OptionRow({
   label,
@@ -38,72 +44,94 @@ function OptionRow({
   percent: number;
   chosen: boolean;
   winner: boolean;
-  /** Display names of the people who picked this, for the tooltip. Empty when
-   *  the card has no voter list — a results message carries only counts. */
+  /** Display names of the people who picked this. Empty when nobody did, and
+   *  also on results posted before voters were recorded — in both cases there
+   *  is no disclosure to open, which is the same thing to a reader. */
   voters: string[];
   onClick?: () => void;
   disabled?: boolean;
 }) {
-  const row = (
-    <div
-      className={cn(
-        "relative flex items-center gap-2 overflow-hidden rounded-md border px-2.5 py-1.5 text-sm",
-        chosen ? "border-primary/60" : "border-border",
-        onClick && !disabled
-          ? "cursor-pointer transition-colors hover:border-primary/40 hover:bg-accent/40"
-          : "",
-      )}
-    >
-      <div
-        aria-hidden
-        className={cn(
-          "absolute inset-y-0 left-0 transition-[width] duration-300",
-          winner ? "bg-primary/25" : "bg-muted-foreground/15",
-        )}
-        style={{ width: `${percent}%` }}
-      />
+  const [open, setOpen] = useState(false);
+  const votable = !!onClick;
+
+  const inner = (
+    <>
       <span
         className={cn(
-          "relative flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
-          chosen ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
+          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+          chosen
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-muted-foreground/40",
         )}
       >
         {chosen && <Check className="h-3 w-3" />}
       </span>
-      <span className={cn("relative min-w-0 flex-1 break-words", winner && "font-medium")}>
-        {label}
-      </span>
-      <span className="relative shrink-0 tabular-nums text-xs text-muted-foreground">
+      <span className={cn("min-w-0 flex-1 break-words", winner && "font-medium")}>{label}</span>
+      <span className="shrink-0 tabular-nums text-xs text-muted-foreground">
         {percent}% · {count}
       </span>
-    </div>
+    </>
   );
 
-  const clickable = onClick ? (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={chosen}
-      className="block w-full text-left disabled:cursor-not-allowed disabled:opacity-70"
-    >
-      {row}
-    </button>
-  ) : (
-    row
-  );
-
-  if (voters.length === 0) return clickable;
-  const shown = voters.slice(0, 8);
-  const remaining = voters.length - shown.length;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{clickable}</TooltipTrigger>
-      <TooltipContent className="max-w-60">
-        {shown.join(", ")}
-        {remaining > 0 ? ` +${remaining} more` : ""}
-      </TooltipContent>
-    </Tooltip>
+    <div
+      className={cn(
+        "overflow-hidden rounded-md border",
+        chosen ? "border-primary/60" : "border-border",
+      )}
+    >
+      {/* The bar lives in here, not on the outer box: `inset-y-0` on the box
+          would stretch it down behind an open voter list. */}
+      <div className="relative flex items-stretch text-sm">
+        <div
+          aria-hidden
+          className={cn(
+            "absolute inset-y-0 left-0 transition-[width] duration-300",
+            winner ? "bg-primary/25" : "bg-muted-foreground/15",
+          )}
+          style={{ width: `${percent}%` }}
+        />
+        {votable ? (
+          <button
+            type="button"
+            onClick={onClick}
+            disabled={disabled}
+            aria-pressed={chosen}
+            className="relative flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-accent/40 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {inner}
+          </button>
+        ) : (
+          <div className="relative flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5">
+            {inner}
+          </div>
+        )}
+        {voters.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            title={open ? "Hide who voted" : "Show who voted"}
+            className="relative flex shrink-0 items-center border-l border-border/60 px-1.5 text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+          >
+            <ChevronDown
+              className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")}
+            />
+            <span className="sr-only">
+              {open ? "Hide" : "Show"} the {voters.length} who voted for {label}
+            </span>
+          </button>
+        )}
+      </div>
+      {open && (
+        // Every name, not the first few: this is the disclosure somebody
+        // opened to find out, and a truncated list is the one answer it must
+        // not give.
+        <div className="border-t border-border/60 bg-muted/30 px-2.5 py-1.5 text-xs text-muted-foreground">
+          {voters.join(", ")}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -267,11 +295,17 @@ export function PollCard({ message }: { message: MatrixMessage }) {
  * rather than pointing at a record.
  */
 export function PollResultsCard({ message }: { message: MatrixMessage }) {
+  const { state } = useAppContext();
   const question = message.content.question ?? message.content.body;
   const options = message.content.options ?? [];
   const counts = message.content.counts ?? [];
+  const voters = message.content.voters ?? [];
   const totalVoters = message.content.total_voters ?? 0;
   const winners = winningIndexes(counts);
+  // The presence map is the best name available and may not hold someone who
+  // has since left the room — the id is the fallback, and is what the message
+  // actually recorded.
+  const nameOf = (id: string) => state.userPresence[id]?.displayName || displayUserId(id);
 
   return (
     <CardShell
@@ -298,7 +332,7 @@ export function PollResultsCard({ message }: { message: MatrixMessage }) {
           percent={sharePercent(counts[index] ?? 0, totalVoters)}
           chosen={false}
           winner={winners.includes(index)}
-          voters={[]}
+          voters={(voters[index] ?? []).map(nameOf)}
         />
       ))}
     </CardShell>
