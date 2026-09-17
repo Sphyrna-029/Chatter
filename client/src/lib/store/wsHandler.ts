@@ -1,6 +1,6 @@
 import type { Dispatch, MutableRefObject } from "react";
 import type { Action, AppState, VoiceChannelMember } from "./types";
-import { apiSync, apiGetPresence } from "../api";
+import { apiGetRoomMembers } from "../api";
 import { displayUserId } from "@/lib/utils";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,24 @@ import {
 // Warm the derived leave sound now, so the first leave is not silent while
 // it decodes. See lib/sounds.ts.
 prewarmSounds();
+
+/** Coalesce room-list refreshes.
+ *
+ *  A join or leave changes the member counts the room list shows, and the only
+ *  way to recompute them is a sync. Ten people arriving at once is ten of those
+ *  per client, all answering the same question, so the last one wins and the
+ *  rest never run.
+ */
+let roomListRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+function scheduleRoomListRefresh(
+  loadRoomsRef: MutableRefObject<() => Promise<void>>,
+): void {
+  if (roomListRefreshTimer !== undefined) clearTimeout(roomListRefreshTimer);
+  roomListRefreshTimer = setTimeout(() => {
+    roomListRefreshTimer = undefined;
+    void loadRoomsRef.current();
+  }, 1000);
+}
 
 /** The member records the server sends with a voice event or snapshot. */
 function voiceMemberRecords(states: unknown): VoiceChannelMember[] {
@@ -250,6 +268,7 @@ export function createWsMessageHandler(
   stateRef: MutableRefObject<AppState>,
   typingTimeoutsRef: MutableRefObject<Record<string, ReturnType<typeof setTimeout>>>,
   loadRoomsRef: MutableRefObject<() => Promise<void>>,
+  loadPresenceRef: MutableRefObject<(roomId?: string) => Promise<void>>,
 ) {
   /** The fields maybeNotify reads off an m.room.message event. */
   interface IncomingMessage {
@@ -391,40 +410,42 @@ export function createWsMessageHandler(
         }
       }
     } else if (msg.type === "m.room.member") {
-      // Re-fetch members and presence for the current room
+      // Somebody joined or left the room on screen.
+      //
+      // This used to answer that with a full `/sync` — every room the account
+      // is in, each with its own permission resolution, message page and
+      // membership query — to read one room's members out of the result, and
+      // then `loadRooms`, which runs a second one. Every connected client did
+      // both, at the same moment, for every join. It is one small request now.
+      //
+      // Presence comes with it because the person who just arrived has no
+      // presence here yet: their connection was announced to the rooms they
+      // were in at the time, and this was not one of them. `loadPresence` is
+      // the shared mapping rather than a copy — the copy that used to live
+      // here dropped `is_mobile`, so a join took the phone badge off everyone
+      // in the room until something else put it back.
       const curRoom = stateRef.current.currentRoomId;
       if (curRoom) {
         (async () => {
           try {
-            const syncData = await apiSync();
-            const roomData = syncData.rooms?.join?.[curRoom];
-            if (roomData) {
-              const memberEvents = roomData.state.events.filter(
-                (e: any) => e.type === "m.room.member"
-              );
-              dispatch({
-                type: "SET_ROOM_MEMBERS",
-                payload: memberEvents.map((e: any) => ({
-                  userId: e.state_key,
-                  displayName:
-                    e.content.displayname || displayUserId(e.state_key),
-                  role: e.content.role || "member",
-                  joinedAt: e.content.joined_at || undefined,
-                })),
-              });
-            }
-            const presData = await apiGetPresence(curRoom);
-            const mapped: Record<string, { status: string; customStatus?: string; avatarUrl?: string; about?: string; bannerUrl?: string; displayName?: string; nameFontUrl?: string; profileTheme?: unknown; steamGame?: string; steamAppId?: string; gameSessionStart?: number }> = {};
-            for (const [uid, p] of Object.entries(presData.presence)) {
-              const pAny = p as any;
-              mapped[uid] = { status: pAny.status, customStatus: pAny.custom_status || undefined, avatarUrl: pAny.avatar_url || undefined, about: pAny.about || undefined, bannerUrl: pAny.banner_url || undefined, displayName: pAny.display_name || undefined, nameFontUrl: pAny.name_font_url || undefined, profileTheme: pAny.profile_theme || undefined, steamGame: pAny.steam_game || undefined, steamAppId: pAny.steam_appid || undefined, gameSessionStart: pAny.game_session_start || undefined };
-            }
-            dispatch({ type: "SET_PRESENCE", payload: mapped });
+            const data = await apiGetRoomMembers(curRoom);
+            if (stateRef.current.currentRoomId !== curRoom) return;
+            dispatch({
+              type: "SET_ROOM_MEMBERS",
+              payload: data.members.map((m) => ({
+                userId: m.user_id,
+                displayName: m.display_name || displayUserId(m.user_id),
+                role: m.role || "member",
+                joinedAt: m.joined_at || undefined,
+              })),
+            });
           } catch {}
         })();
+        void loadPresenceRef.current(curRoom);
       }
-      // Refresh room list (member counts may have changed)
-      loadRoomsRef.current();
+      // Member counts on the room list changed. Debounced, because a room
+      // filling up is a burst of these and each one costs a sync.
+      scheduleRoomListRefresh(loadRoomsRef);
     } else if (msg.type === "m.room.deleted") {
       // Room was deleted by the owner — deselect if active and refresh room list
       if (msg.room_id === stateRef.current.currentRoomId) {

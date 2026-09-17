@@ -18,7 +18,7 @@ vi.mock("@/lib/sounds", () => ({
   arrivalSound: () => "", deferArrivalSound: () => {}, playSound: () => {},
   playSoundUrl: () => {}, prewarmSounds: () => {},
 }));
-vi.mock("../api", () => ({ apiSync: vi.fn(), apiGetPresence: vi.fn() }));
+vi.mock("../api", () => ({ apiGetRoomMembers: vi.fn() }));
 vi.mock("sonner", () => ({ toast: Object.assign(() => {}, { error: () => {}, success: () => {} }) }));
 
 import { createWsMessageHandler } from "@/lib/store/wsHandler";
@@ -28,6 +28,7 @@ function harness(state: Partial<AppState>) {
   const ref = { current: full };
   const handler = createWsMessageHandler(
     vi.fn(), ref, { current: {} }, { current: async () => {} },
+    { current: async () => {} },
   );
   return handler;
 }

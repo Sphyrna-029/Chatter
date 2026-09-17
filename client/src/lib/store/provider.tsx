@@ -131,6 +131,14 @@ const WS_RECONNECT_MS = 3000;
  * is measured in minutes, so reporting oftener than this would buy nothing. */
 const ACTIVITY_PING_MS = 60_000;
 
+/** How often presence is reconciled against the server when nothing prompted it.
+ *
+ *  Long, because it is a safety net rather than the mechanism: presence rides
+ *  the socket, and the paths that can actually miss something — a closed
+ *  socket, a room switch, a backgrounded tab — each re-fetch on their own.
+ */
+const PRESENCE_RECONCILE_MS = 5 * 60_000;
+
 /** Retry schedule for restoring a session at page load when nothing answers.
  *
  * Backed off rather than hammered, and bounded: a server that has not come
@@ -325,7 +333,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const handleWsMessage = useCallback(
-    createWsMessageHandler(dispatch, stateRef, typingTimeoutsRef, loadRoomsRef),
+    createWsMessageHandler(dispatch, stateRef, typingTimeoutsRef, loadRoomsRef, loadPresenceRef),
     []
   );
 
@@ -605,13 +613,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [state.accessToken]);
 
-  // Presence polling
+  // Presence reconciliation.
+  //
+  // Not a poll. The server broadcasts every presence transition as it happens
+  // — connecting, disconnecting, a manual or custom status, a profile edit,
+  // going active — and announces the one that has no event of its own, going
+  // idle, from a sweep a few seconds wide. So presence arrives over the socket,
+  // and a fetch is only ever needed where the socket could not have told us:
+  // when it was closed, and when the room on screen changed. The first is
+  // handled on reconnect, the second by `selectRoom`.
+  //
+  // What is left is the tab coming back to the foreground, which is both a
+  // catch-up and the reason this stopped being an interval: the old ten-second
+  // poll had no visibility check at all, so a backgrounded phone asked for a
+  // room's entire roster six times a minute for as long as the app stayed
+  // open. The long timer below is a belt-and-braces net for a broadcast lost
+  // to something we have not thought of, not the mechanism.
   useEffect(() => {
     if (!state.currentRoomId || !state.accessToken) return;
-    const interval = setInterval(() => {
+
+    const refreshIfVisible = () => {
+      if (document.visibilityState === "hidden") return;
       void loadPresenceRef.current();
-    }, 10000);
-    return () => clearInterval(interval);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") void loadPresenceRef.current();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const interval = setInterval(refreshIfVisible, PRESENCE_RECONCILE_MS);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(interval);
+    };
   }, [state.currentRoomId, state.accessToken]);
 
   // ─── Actions ───────────────────────────────────────────────────────────────

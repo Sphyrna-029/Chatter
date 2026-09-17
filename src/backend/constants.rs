@@ -118,9 +118,19 @@ pub(crate) const OPUS_FRAME_SAMPLES: u32 = 48 * VOICE_PTIME_MS;
 ///
 /// Going idle is the one presence transition nothing announces: it is the
 /// absence of activity, so no event marks it and no client can work it out
-/// about somebody else. Without a sweep it would surface only when a client
-/// happened to poll the room it was looking at.
-pub(crate) const PRESENCE_SWEEP_SECS: u64 = 30;
+/// about somebody else. Every other transition — connecting, disconnecting,
+/// a manual or custom status, a profile edit, going active again — broadcasts
+/// where it happens, which is why this is the only clock presence needs.
+///
+/// Short, because the sweep is what makes idle feel live and it costs almost
+/// nothing to run: it reads two in-memory maps, compares each connected user's
+/// status to the one last announced, and sends only where that differs. No
+/// query, no request, and nothing on the wire on a quiet server. Clients used
+/// to poll a room's whole roster every ten seconds to cover this, which was
+/// both slower and immeasurably more expensive — and only ever covered the one
+/// room on screen, so someone going idle elsewhere stayed active in the
+/// sidebar until the sweep caught up.
+pub(crate) const PRESENCE_SWEEP_SECS: u64 = 5;
 
 /// Largest input timestamp jump carried through to a slot's output. Anything
 /// beyond a second is treated as a discontinuity rather than trusted.
