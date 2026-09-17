@@ -23,6 +23,10 @@ services:
       #STEAM_API_KEY: steam integration
       #SERVER_URL: https://yourdomain.com (for steam integration)
 
+      ################  SPOTIFY  ################
+      #SPOTIFY_CLIENT_ID: spotify integration
+      #SPOTIFY_CLIENT_SECRET: spotify integration
+      #Set spotify redirect URI to https://yourdomain.com/api/auth/spotify/callback
 
       ################  WEBRTC  ################
       #WEBRTC_IP: your-public-ip (required if behind NAT; LAN clients connect via local IP automatically)
