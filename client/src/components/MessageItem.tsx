@@ -1579,10 +1579,11 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
             </div>
           )}
 
-          {/* Cards for messages this one links to. Each renders nothing unless
-              the server resolves the link for this viewer, so a message shared
-              out of a private channel shows its link to everyone and its
-              contents only to the people already allowed to read it. */}
+          {/* Cards for messages this one links to. Each draws a card only if
+              the server resolves the link for this viewer, and an inert
+              "Message unavailable" otherwise — so a message shared out of a
+              private channel reaches the whole room, and its contents reach
+              only the people already allowed to read them. */}
           {!isDeleted &&
             linkedEventIds.map((linkedId) => (
               <MessageLinkEmbed key={linkedId} eventId={linkedId} />
