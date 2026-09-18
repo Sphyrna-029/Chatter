@@ -2,6 +2,7 @@ import { memo, useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { EyeOff, Star, Play, FileText, FileArchive, FileCode, FileSpreadsheet, File as FileIcon, Copy, Check, Cast, Subtitles, Link2, Pin, PinOff, Reply, MessagesSquare, SmilePlus, Pencil, Trash2, X, MoreHorizontal } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { useVideoResume } from "@/hooks/useVideoResume";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { MatrixMessage, Embed, EmbedAction, EmbedSelect } from "@/lib/api";
 import {
   apiGetLinkPreview,
@@ -1054,6 +1055,16 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
   const confirm = useConfirm();
   const { state, dispatch, deleteMessage, hardDeleteNotification, editMessage, addReaction, openThread, pinMessage, unpinMessage } = useAppContext();
   const isMobile = useIsMobile();
+  // Whether the message actions have to be *asked* for rather than hovered to.
+  //
+  // `isMobile` is a viewport width and this is a question about the pointer,
+  // which is why a tablet — or a phone held sideways — fell between the two:
+  // wider than the breakpoint, so it got the desktop bubble, and unable to
+  // hover, so the bubble's only way of hiding never came. Every message in the
+  // timeline carried a permanent row of buttons. The width still counts, so a
+  // narrow desktop window keeps the sheet it already had.
+  const canHover = useMediaQuery("(hover: hover) and (pointer: fine)");
+  const touchActions = isMobile || !canHover;
   const [isEditing, setIsEditing] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [spoilerRevealed, setSpoilerRevealed] = useState(false);
@@ -1716,7 +1727,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
             message in the timeline carried its own row of buttons. One trigger
             instead, opening the same actions as a sheet. Laid out in the row
             rather than positioned over it, so it cannot land on the text. */}
-        {!isDeleted && isMobile && (
+        {!isDeleted && touchActions && (
           <button
             type="button"
             aria-label="Message actions"
@@ -1731,22 +1742,22 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
         )}
 
         {/* Floating action bubble, revealed on hover over the message */}
-        {!isDeleted && !isMobile && (
+        {!isDeleted && !touchActions && (
           <div
             className={cn(
               "absolute right-2 z-10 flex items-center gap-0.5 rounded-lg border border-border bg-popover p-0.5 shadow-md transition-opacity",
-              // Hidden until hover only where hovering is possible; on touch the
-              // bubble stays put inside the message instead of overlapping it.
-              "can-hover:opacity-0 can-hover:group-hover:opacity-100 focus-within:opacity-100",
-              // Overlap the top edge the way Discord does — but only with a real
-              // pointer. A permanently visible bubble on touch must not cover the
-              // message above it. Uses translate, not top, so it cannot collide
-              // with the base offset below.
-              "can-hover:-translate-y-1/2",
+              // Plainly hover-gated, with no touch fallback: this only renders
+              // where a pointer can hover at all, so a `can-hover:` prefix here
+              // would be describing a case that cannot reach it — and the
+              // fallback it used to carry is what the sheet replaced.
+              "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+              // Overlap the top edge the way Discord does. Uses translate, not
+              // top, so it cannot collide with the base offset below.
+              "-translate-y-1/2",
               grouped ? "top-0" : "top-1",
               // Keep the bubble up while the emoji picker is open — the popover
               // portals outside the message, so hover would otherwise drop.
-              emojiPickerOpen && "can-hover:opacity-100",
+              emojiPickerOpen && "opacity-100",
             )}
           >
             <Button
@@ -1847,7 +1858,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           </div>
         )}
       </div>
-      {!isDeleted && isMobile && (
+      {!isDeleted && touchActions && (
         <Sheet
           open={actionsOpen}
           onOpenChange={(open) => {
