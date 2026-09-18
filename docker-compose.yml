@@ -16,12 +16,30 @@ services:
       MONGODB_URI: mongodb://mongodb:27017
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
 
+      # This instance's public https URL. Not tied to one integration: the
+      # Steam login flow builds its return address from it, and Web Push signs
+      # with it when VAPID_SUBJECT is unset.
+      #SERVER_URL: https://yourdomain.com
+
       #################  KLIPY  #################
       #KLIPY_API_KEY: your-klipy-key (for gif pallette)
 
+      ###############  WEB PUSH  ###############
+      # How a push service reaches whoever runs this instance. Left unset, and
+      # with no https SERVER_URL above, notifications are signed as
+      # mailto:admin@localhost — not a real address. Services differ on whether
+      # they accept that, so it tends to show up as push arriving on one
+      # browser and not another rather than as a clear failure. The server
+      # warns at boot when it has fallen back.
+      #VAPID_SUBJECT: mailto:you@example.com
+      # Optional: the server mints a keypair on first boot and keeps it. Set
+      # this only to hold the key outside the database. Changing it, or losing
+      # the stored pair, invalidates every subscription already enrolled —
+      # devices re-enrol themselves, but each has to open the app first.
+      #VAPID_PRIVATE_KEY: base64url-raw-p256-scalar
+
       #################  STEAM  #################
       #STEAM_API_KEY: steam integration
-      #SERVER_URL: https://yourdomain.com (for steam integration)
 
       ################  SPOTIFY  ################
       #SPOTIFY_CLIENT_ID: spotify integration
