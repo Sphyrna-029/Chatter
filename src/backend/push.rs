@@ -496,6 +496,10 @@ async fn send_one(
     };
 
     let Ok(body) = webpush::encrypt(payload, &ua_public, &auth_secret) else {
+        eprintln!(
+            "push: cannot encrypt to {} — dropping the subscription",
+            endpoint_origin(&sub.endpoint)
+        );
         prune(state, &sub.id).await;
         return;
     };
@@ -505,6 +509,14 @@ async fn send_one(
         &vapid.subject,
         now_secs() as u64,
     ) else {
+        // Nothing about this subscription is wrong — the key or the subject
+        // this server signs with is. Says so, because the alternative is a
+        // server that pushes to nobody and reports nothing.
+        eprintln!(
+            "push: could not sign for {} — check VAPID_PRIVATE_KEY and VAPID_SUBJECT ({})",
+            endpoint_origin(&sub.endpoint),
+            vapid.subject
+        );
         return;
     };
 
@@ -524,17 +536,64 @@ async fn send_one(
 
     match response {
         Ok(response) => {
-            // 404/410 is the push service saying this endpoint is permanently
-            // gone — the browser dropped the subscription without telling us.
-            // Anything else may be transient and is left alone.
             let status = response.status();
-            if status == reqwest::StatusCode::NOT_FOUND || status == reqwest::StatusCode::GONE {
+            if status.is_success() {
+                return;
+            }
+            // Every refusal used to be discarded, so a server that had stopped
+            // delivering entirely looked exactly like one with nothing to
+            // deliver. The push service always says why, and its answer is the
+            // only evidence there is — a failure nobody can see is the reason
+            // "push is not working" has nowhere to start.
+            let detail = response.text().await.unwrap_or_default();
+            let detail: String = detail.split_whitespace().collect::<Vec<_>>().join(" ");
+            let detail: String = detail.chars().take(200).collect();
+            eprintln!(
+                "push: {} refused a notification with {}{}{}",
+                endpoint_origin(&sub.endpoint),
+                status.as_u16(),
+                if detail.is_empty() { "" } else { " — " },
+                detail
+            );
+
+            // 404/410 is the endpoint being permanently gone: the browser
+            // dropped the subscription without telling us. 403 is the service
+            // saying this endpoint belongs to a *different* application server
+            // key — which is what every stored subscription says the moment
+            // the instance's VAPID key changes. Both are final, and dropping
+            // the row is what lets the browser enrol again on its next load.
+            if matches!(
+                status,
+                reqwest::StatusCode::NOT_FOUND
+                    | reqwest::StatusCode::GONE
+                    | reqwest::StatusCode::FORBIDDEN
+            ) {
                 prune(state, &sub.id).await;
             }
         }
-        Err(_) => {
-            // Network failure: the endpoint may well be fine, so keep it.
+        Err(err) => {
+            // Network failure: the endpoint may well be fine, so keep it. Say
+            // so anyway — an instance that cannot reach any push service at
+            // all (no egress, a proxy in the way) is otherwise indistinguishable
+            // from one with nobody to notify.
+            eprintln!(
+                "push: could not reach {} — {err}",
+                endpoint_origin(&sub.endpoint)
+            );
         }
+    }
+}
+
+/// An endpoint reduced to its origin, for a log line.
+///
+/// The path of a push endpoint is a bearer credential for that device — anyone
+/// holding it can push to it — so it must not be written to a log file. The
+/// origin is enough to say which service refused.
+fn endpoint_origin(endpoint: &str) -> &str {
+    let after_scheme = endpoint.find("://").map(|i| i + 3).unwrap_or(0);
+    match endpoint[after_scheme..].find('/') {
+        Some(i) => &endpoint[..after_scheme + i],
+        None => endpoint,
     }
 }
 

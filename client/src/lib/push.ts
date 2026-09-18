@@ -72,12 +72,73 @@ export async function registerServiceWorker(): Promise<ServiceWorkerRegistration
  * Backed by an explicit ArrayBuffer: `applicationServerKey` will not accept a
  * view that might sit on a SharedArrayBuffer.
  */
-function decodeVapidKey(base64: string): Uint8Array<ArrayBuffer> {
+export function decodeVapidKey(base64: string): Uint8Array<ArrayBuffer> {
   const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), "=");
   const binary = atob(padded.replace(/-/g, "+").replace(/_/g, "/"));
   const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
+}
+
+/** The inverse of `decodeVapidKey`, in the unpadded form the server sends.
+ *
+ *  Exported alongside its inverse so the round trip can be tested: the two have
+ *  to agree with `b64url_encode` in src/backend/webpush.rs exactly, or every
+ *  load decides the key has changed and re-enrols a device that was fine. */
+export function encodeVapidKey(key: ArrayBuffer): string {
+  let binary = "";
+  for (const byte of new Uint8Array(key)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Whether a subscription was enrolled with the key this server signs with now.
+ *
+ * A subscription is bound to the application server key it was created with,
+ * and the browser has no idea when that key changes: `getSubscription()` goes
+ * on returning a perfectly valid object that the push service will refuse for
+ * the rest of its life. Nothing else in the app can notice — the enrollment
+ * call succeeds, the row is stored, and every push is rejected far away with a
+ * 403 nobody sees.
+ *
+ * So the two are compared here, on every load. A browser that cannot tell us
+ * which key it used (no `options`, older Safari) is given the benefit of the
+ * doubt: re-subscribing on a guess would drop a subscription that works.
+ */
+function matchesServerKey(subscription: PushSubscription, publicKey: string): boolean {
+  const enrolled = subscription.options?.applicationServerKey;
+  if (!enrolled) return true;
+  return encodeVapidKey(enrolled) === publicKey;
+}
+
+/**
+ * Subscribe with the server's current key, retiring anything enrolled under an
+ * older one first.
+ *
+ * The retirement is not optional: `subscribe()` with an `applicationServerKey`
+ * different from the existing subscription's throws `InvalidStateError`. That
+ * is what made a changed VAPID key unrecoverable from inside the app — push
+ * stopped arriving, and switching it off and on again failed at this very
+ * call, so the one thing anybody would try could not work either.
+ */
+async function subscribeWithCurrentKey(
+  registration: ServiceWorkerRegistration,
+  publicKey: string,
+): Promise<PushSubscription> {
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) {
+    if (matchesServerKey(existing, publicKey)) return existing;
+    // Tell the server before dropping it locally, or the row outlives the
+    // endpoint and the next push goes to something nothing answers.
+    await apiPushUnsubscribe(existing.endpoint).catch(() => {});
+    await existing.unsubscribe();
+  }
+  return registration.pushManager.subscribe({
+    // Chrome refuses a subscription that cannot show a notification, and
+    // showing one for every message is what we do anyway.
+    userVisibleOnly: true,
+    applicationServerKey: decodeVapidKey(publicKey),
+  });
 }
 
 /** A subscription in the shape the server stores. */
@@ -113,12 +174,7 @@ export async function enablePush(): Promise<NotificationPermission | "unsupporte
   // A registration that is still installing has no pushManager yet.
   await navigator.serviceWorker.ready;
 
-  const subscription = await registration.pushManager.subscribe({
-    // Chrome refuses a subscription that cannot show a notification, and
-    // showing one for every message is what we do anyway.
-    userVisibleOnly: true,
-    applicationServerKey: decodeVapidKey(public_key),
-  });
+  const subscription = await subscribeWithCurrentKey(registration, public_key);
 
   await apiPushSubscribe(serialize(subscription));
   rememberEnabled(true);
@@ -162,19 +218,15 @@ export async function syncPushSubscription(): Promise<void> {
     if (!registration) return;
     await navigator.serviceWorker.ready;
 
-    const existing = await registration.pushManager.getSubscription();
-    if (existing) {
-      await apiPushSubscribe(serialize(existing));
-      return;
-    }
-
-    // The subscription is gone; re-create it so this device keeps receiving.
+    // The key is fetched even when a subscription already exists, because
+    // "already subscribed" is not the same as "subscribed to this server".
+    // This is the request that catches a VAPID key that has moved on, and it
+    // is the only chance to catch it: every other signal is a silent refusal
+    // on the far side of a push service.
     const { enabled, public_key } = await apiGetPushPublicKey();
     if (!enabled || !public_key) return;
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: decodeVapidKey(public_key),
-    });
+
+    const subscription = await subscribeWithCurrentKey(registration, public_key);
     await apiPushSubscribe(serialize(subscription));
   } catch {
     // Leave the remembered state alone: a transient failure now should not
