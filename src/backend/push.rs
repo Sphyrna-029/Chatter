@@ -65,6 +65,14 @@ fn public_key_for(private_key: &str) -> Option<String> {
 /// misconfiguration worth failing loudly about rather than silently replacing.
 pub(crate) async fn load_or_create_vapid_keys(db: &mongodb::Database) -> Option<VapidKeys> {
     let subject = vapid_subject();
+    if subject == FALLBACK_SUBJECT {
+        eprintln!(
+            "Web Push: no VAPID_SUBJECT and no https SERVER_URL, so notifications are \
+             signed as {FALLBACK_SUBJECT}. Some push services refuse that, which shows up \
+             as push working on one browser and not another. Set VAPID_SUBJECT to a \
+             mailto: address you read."
+        );
+    }
     let coll = db.collection::<Document>("server_settings");
 
     if let Ok(key) = std::env::var("VAPID_PRIVATE_KEY") {
@@ -114,9 +122,20 @@ pub(crate) async fn load_or_create_vapid_keys(db: &mongodb::Database) -> Option<
     })
 }
 
+/// Used when the operator has named no way to be contacted. It is not a real
+/// address, and some push services will not accept it — which is the whole
+/// reason `vapid_subject` says so out loud.
+const FALLBACK_SUBJECT: &str = "mailto:admin@localhost";
+
 /// The `sub` claim: a way to contact whoever runs this instance. Push services
 /// want a `mailto:` or an `https:` URL, so the public server URL is used when
 /// one is configured.
+///
+/// How strictly this is enforced is *per service*, which is what makes getting
+/// it wrong so confusing: the same message reaches Chrome and is refused by
+/// Safari, and the instance looks like it has a browser problem rather than a
+/// configuration one. So an unset subject is a warning at boot rather than a
+/// discovery made later, one platform at a time.
 fn vapid_subject() -> String {
     if let Ok(subject) = std::env::var("VAPID_SUBJECT") {
         let subject = subject.trim();
@@ -126,7 +145,7 @@ fn vapid_subject() -> String {
     }
     match std::env::var("SERVER_URL") {
         Ok(url) if url.starts_with("https://") => url,
-        _ => "mailto:admin@localhost".to_string(),
+        _ => FALLBACK_SUBJECT.to_string(),
     }
 }
 
