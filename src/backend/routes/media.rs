@@ -215,6 +215,94 @@ async fn has_audio(path: &str) -> bool {
     stream_kinds(path).await.iter().any(|kind| kind == "audio")
 }
 
+async fn has_video(path: &str) -> bool {
+    stream_kinds(path).await.iter().any(|kind| kind == "video")
+}
+
+/// What browsers can actually decode out of an MP4.
+///
+/// Legal in the container is not the same question. MP4 has a tag for MPEG-4
+/// Part 2 — Xvid and DivX, which is what most AVI files carry — so ffmpeg will
+/// copy one in without a word of complaint, and no browser will draw a single
+/// frame of it. The same goes for MJPEG, the Windows Media codecs, and the
+/// other things that pre-date H.264 and still turn up in old files.
+///
+/// H.265 is the entry worth arguing about: Safari plays it, Chrome and Edge
+/// play it where the hardware does, Firefox largely does not. It stays on the
+/// list because re-encoding it would mean re-encoding every video an iPhone
+/// has ever produced — a real cost, paid by everyone, to fix a case that
+/// mostly works — where the codecs above it play for nobody at all.
+const WEB_PLAYABLE_VIDEO_CODECS: [&str; 4] = ["h264", "hevc", "av1", "vp9"];
+
+/// The codec of a file's first video stream, as ffprobe names it.
+async fn video_codec(path: &str) -> Option<String> {
+    let output = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path,
+        ])
+        .output()
+        .await
+        .ok()?;
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Marker written beside an MP4 once its picture is known to be drawable.
+///
+/// The check behind it is an ffprobe, and the place that asks runs on every
+/// range request — a video being scrubbed produces dozens. The answer cannot
+/// change without the file being rewritten, so it is worth writing down.
+fn playable_marker(mp4: &str) -> String {
+    format!("{mp4}.playable")
+}
+
+async fn mark_video_playable(mp4: &str) {
+    let _ = tokio::fs::write(playable_marker(mp4), b"").await;
+}
+
+/// Whether an MP4 already on disk has to be made again because a browser
+/// cannot draw what is in it.
+///
+/// Answers `false` for a file that is not there at all — that is the caller's
+/// other branch, and "missing" is not "unplayable".
+async fn needs_replayable_mp4(mp4: &str) -> bool {
+    if tokio::fs::metadata(mp4).await.is_err() {
+        return false;
+    }
+    if tokio::fs::metadata(playable_marker(mp4)).await.is_ok() {
+        return false;
+    }
+    if video_is_web_playable(mp4).await {
+        mark_video_playable(mp4).await;
+        return false;
+    }
+    true
+}
+
+/// Whether a converted file's picture will actually draw in a browser.
+///
+/// A codec ffprobe cannot name is treated as playable: the check exists to
+/// catch the codecs known not to work, and refusing on "I could not tell"
+/// would re-encode every file whose probe hiccupped.
+async fn video_is_web_playable(path: &str) -> bool {
+    match video_codec(path).await {
+        Some(codec) => WEB_PLAYABLE_VIDEO_CODECS.contains(&codec.as_str()),
+        None => true,
+    }
+}
+
 /// One conversion attempt. `Err` carries the tail of ffmpeg's complaint, which
 /// used to go to `/dev/null` — so a conversion that failed left no trace
 /// anywhere and the only symptom was a video that behaved oddly days later.
@@ -267,10 +355,19 @@ fn owned(args: &[&str]) -> Vec<String> {
 /// Audio is never what is given up, and the result is checked rather than
 /// assumed: a conversion that exits cleanly having quietly dropped the audio
 /// is the same failure as one that refused outright, so it is treated as one.
+///
+/// The picture is checked the same way, and for a failure that looks exactly
+/// like the one above with the halves swapped. Copying the video stream only
+/// asks whether MP4 can *hold* the codec, and MP4 can hold far more than a
+/// browser can decode — an AVI carrying Xvid copies through without a
+/// complaint from anyone and plays as sound over a blank rectangle. So a rung
+/// whose output a browser could not draw is a failed rung, and the ladder goes
+/// on to the one that re-encodes.
 async fn remux_with_subs(src: &str) -> Option<String> {
     let _job = metrics::media_job();
     let dst = format!("{}.cc.tmp", src);
     let source_had_audio = has_audio(src).await;
+    let source_had_video = has_video(src).await;
 
     // Only text subtitles can become `mov_text`. Mapping them by ordinal keeps
     // the ones that can travel when a bitmap track in the same file would
@@ -317,6 +414,21 @@ async fn remux_with_subs(src: &str) -> Option<String> {
             Ok(()) => {
                 if source_had_audio && !has_audio(&dst).await {
                     eprintln!("[media] {src}: {what} lost the audio");
+                    let _ = tokio::fs::remove_file(&dst).await;
+                    continue;
+                }
+                // The mirror of the audio check, and the same failure wearing
+                // the other face: a rung that copies a codec no browser can
+                // decode exits cleanly and writes a file that plays its sound
+                // over a blank rectangle. MP4 will hold the codecs in an AVI
+                // quite happily; a browser will not draw them. Falling through
+                // costs a re-encode and is the only thing that produces a
+                // picture.
+                if source_had_video && !video_is_web_playable(&dst).await {
+                    eprintln!(
+                        "[media] {src}: {what} kept a picture browsers cannot decode ({})",
+                        video_codec(&dst).await.unwrap_or_else(|| "unknown".into())
+                    );
                     let _ = tokio::fs::remove_file(&dst).await;
                     continue;
                 }
@@ -2871,7 +2983,13 @@ async fn remove_upload_record(state: &Arc<AppState>, record: &UploadRecord) {
         // A record from something that did not follow that layout. Take what
         // can be named and nothing else.
         let _ = tokio::fs::remove_file(&record.disk_path).await;
-        for suffix in [".thumb.jpg", ".preview.webp", "@subs.json", ".faststarted"] {
+        for suffix in [
+            ".thumb.jpg",
+            ".preview.webp",
+            "@subs.json",
+            ".faststarted",
+            ".playable",
+        ] {
             let _ = tokio::fs::remove_file(format!("{}{suffix}", record.disk_path)).await;
         }
     }
@@ -3404,19 +3522,37 @@ pub(crate) async fn upload_guard(
             extract_subtitles(&disk_path).await;
         }
 
-        // Convert if the cached MP4 doesn't exist yet. Parallel range requests
-        // all land here at once, so only one of them gets to run the remux;
-        // the rest wait and then find the finished MP4.
-        if tokio::fs::metadata(&mp4_disk).await.is_err()
+        // Convert if the cached MP4 doesn't exist yet — or if the one sitting
+        // there is the kind an earlier ladder was willing to produce and no
+        // browser can draw. A conversion that *failed* leaves no MP4 and is
+        // retried here the next time anyone plays the file; one that succeeded
+        // badly leaves a file that looks finished, so it has to be recognised
+        // rather than merely missed.
+        //
+        // The answer is remembered in a marker beside the MP4, because this
+        // runs on every range request and a scrubbed video makes a great many
+        // of them — one probe per file, not one per request.
+        let needs_redo = needs_replayable_mp4(&mp4_disk).await;
+        if (tokio::fs::metadata(&mp4_disk).await.is_err() || needs_redo)
             && tokio::fs::metadata(&disk_path).await.is_ok()
         {
             let job = media_job_lock(&disk_path).await;
             let _guard = job.lock().await;
-            if tokio::fs::metadata(&mp4_disk).await.is_err() {
+            // Re-asked under the lock: the request that was waiting for it has
+            // to see the finished file rather than convert it a second time.
+            if tokio::fs::metadata(&mp4_disk).await.is_err()
+                || needs_replayable_mp4(&mp4_disk).await
+            {
                 if let Some(tmp_path) = remux_with_subs(&disk_path).await {
                     let _ = tokio::fs::rename(&tmp_path, &mp4_disk).await;
                     // Already faststarted by the remux.
                     let _ = tokio::fs::write(format!("{}.faststarted", mp4_disk), b"").await;
+                    // The thumbnail is deliberately left alone: a re-encode
+                    // keeps the picture and its shape, so the one already cut
+                    // is still right — and regenerating it would oblige us to
+                    // drop its `.preview.webp` and re-record its dimensions,
+                    // bookkeeping with nothing to fix at the end of it.
+                    mark_video_playable(&mp4_disk).await;
                 }
             }
         }
@@ -3754,8 +3890,12 @@ mod tests {
 
     /// Build an MKV shaped like an ordinary rip: H.264 video, AC-3 audio the
     /// MP4 container will not take as-is, and a SubRip caption track.
-    async fn build_mkv_fixture() -> String {
-        let dir = std::env::temp_dir().join(format!("chatter_mkv_{}", std::process::id()));
+    /// `tag` keeps each test's fixture in a directory of its own. The path used
+    /// to come from the process id alone, which two tests running at once
+    /// share — and they then raced on the source file, on the `.cc.tmp` the
+    /// remux writes beside it, and on each other's cleanup.
+    async fn build_mkv_fixture(tag: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_mkv_{}_{tag}", std::process::id()));
         let _ = tokio::fs::create_dir_all(&dir).await;
         let mkv = dir.join("movie.mkv").to_string_lossy().to_string();
         let subs = dir.join("movie_src.vtt").to_string_lossy().to_string();
@@ -3842,6 +3982,122 @@ mod tests {
         mkv
     }
 
+    /// An AVI carrying MPEG-4 Part 2 — what Xvid and DivX produce, and what
+    /// most AVI files in the wild actually hold.
+    ///
+    /// The point of it is that nothing here *fails*: MP4 has a tag for this
+    /// codec, so `-c:v copy` muxes it in and exits cleanly. Only a browser
+    /// ever objects, by drawing nothing.
+    async fn build_xvid_avi_fixture() -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_avi_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let avi = dir.join("clip.avi").to_string_lossy().to_string();
+        for suffix in ["", ".cc.tmp"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", avi, suffix)).await;
+        }
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x120:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-c:v",
+                "mpeg4",
+                "-vtag",
+                "XVID",
+                "-c:a",
+                "mp3",
+                "-shortest",
+                &avi,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "avi fixture build failed");
+        avi
+    }
+
+    #[tokio::test]
+    async fn an_avi_is_re_encoded_rather_than_copied_into_a_picture_nobody_can_draw() {
+        // The mirror of the audio failure below, and the reason it was missed:
+        // copying only asks whether MP4 can *hold* the codec, and MP4 holds
+        // far more than a browser decodes. The rung exits cleanly, the check
+        // for lost audio passes — audio is there — and the result plays its
+        // sound over a blank rectangle.
+        let avi = build_xvid_avi_fixture().await;
+        assert_eq!(
+            video_codec(&avi).await.as_deref(),
+            Some("mpeg4"),
+            "fixture is not the codec this test is about"
+        );
+
+        let tmp = remux_with_subs(&avi)
+            .await
+            .expect("the ladder should get there by re-encoding");
+
+        assert_eq!(
+            video_codec(&tmp).await.as_deref(),
+            Some("h264"),
+            "the copy rung was accepted, so the picture will not draw"
+        );
+        let kinds = stream_kinds(&tmp).await;
+        assert!(
+            kinds.iter().any(|k| k == "audio"),
+            "audio lost while fixing the picture: {kinds:?}"
+        );
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&avi).await;
+    }
+
+    #[tokio::test]
+    async fn a_picture_browsers_can_already_draw_is_copied_untouched() {
+        // The guard on the test above: the check must reject the codecs that
+        // do not work, not send everything through a re-encode. H.264 in,
+        // H.264 out, and on the first rung — a needless re-encode costs CPU
+        // and a generation of quality on every video anyone uploads.
+        let mkv = build_mkv_fixture("already_h264").await;
+        assert_eq!(video_codec(&mkv).await.as_deref(), Some("h264"));
+
+        let tmp = remux_with_subs(&mkv)
+            .await
+            .expect("an h264 source should convert");
+
+        assert_eq!(video_codec(&tmp).await.as_deref(), Some("h264"));
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&mkv).await;
+    }
+
+    #[tokio::test]
+    async fn only_the_codecs_a_browser_decodes_are_accepted() {
+        assert!(WEB_PLAYABLE_VIDEO_CODECS.contains(&"h264"));
+        // What an AVI carries, and the reason this list exists.
+        assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"mpeg4"));
+        assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"msmpeg4v3"));
+        assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"mjpeg"));
+        assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"wmv2"));
+    }
+
+    #[tokio::test]
+    async fn a_missing_mp4_is_not_an_unplayable_one() {
+        // "Missing" is the caller's other branch. Answering true here would
+        // have it convert a file that is not there.
+        let missing = std::env::temp_dir()
+            .join("chatter_absent_video.mp4")
+            .to_string_lossy()
+            .to_string();
+        let _ = tokio::fs::remove_file(&missing).await;
+        assert!(!needs_replayable_mp4(&missing).await);
+    }
+
     #[tokio::test]
     async fn a_video_the_first_attempt_refuses_still_keeps_its_audio() {
         // The whole conversion used to be one command, so anything ffmpeg
@@ -3871,7 +4127,7 @@ mod tests {
 
     #[tokio::test]
     async fn remux_writes_a_real_mp4_not_just_a_tmp_file() {
-        let mkv = build_mkv_fixture().await;
+        let mkv = build_mkv_fixture("remux").await;
 
         // Regression: the destination is `{src}.cc.tmp`, and ffmpeg picks its
         // muxer from the output extension. `.tmp` matches no format, so every
