@@ -1566,6 +1566,38 @@ async function beginSession(file: File, fingerprint: string): Promise<UploadSess
   return session;
 }
 
+/** How long to wait on `complete` before falling back to asking. */
+const COMPLETE_TIMEOUT_MS = 300_000;
+
+/** How long to go on asking after that, and how often. */
+const PROCESSING_POLL_MS = 5_000;
+const PROCESSING_WAIT_MS = 1_800_000;
+
+/**
+ * Wait out a conversion that outlived the request that started it.
+ *
+ * `complete` does the assembly, the remux and the probes inline, so for a long
+ * video it answers well after the client has stopped listening. The server
+ * writes the URL down for exactly this case and `GET /api/upload/{id}` hands
+ * it back; without this the work finished, the file sat on disk, and the
+ * person was told the upload had failed.
+ *
+ * Answers the URL, or null if the wait runs out or the upload is gone —
+ * either of which is a real failure for the caller to report.
+ */
+async function waitForProcessing(uploadId: string): Promise<string | null> {
+  const deadline = Date.now() + PROCESSING_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, PROCESSING_POLL_MS));
+    const status = await fetchUploadStatus(uploadId);
+    // A null is the network being unreachable or the staging dir having been
+    // swept; neither is worth abandoning a conversion over while there is
+    // still time on the clock, and the next poll settles it either way.
+    if (status?.status === "done" && status.resultUrl) return status.resultUrl;
+  }
+  return null;
+}
+
 /** Send everything `session` is still owed, then assemble. */
 async function runUploadSession(
   file: File,
@@ -1620,7 +1652,7 @@ async function runUploadSession(
 
   // Assembly and any ffmpeg pass the server runs; allow up to 5 minutes.
   const completeCtrl = new AbortController();
-  const completeTimeout = setTimeout(() => completeCtrl.abort(), 300_000);
+  const completeTimeout = setTimeout(() => completeCtrl.abort(), COMPLETE_TIMEOUT_MS);
   let completeRes: Response;
   try {
     completeRes = await authenticatedFetch("/api/upload/complete", {
@@ -1632,6 +1664,18 @@ async function runUploadSession(
   } catch (err: any) {
     clearTimeout(completeTimeout);
     if (err.name === "AbortError") {
+      // Not a failure — a wait that ran out. The server is single-mindedly
+      // converting the file and will record the URL when it is done, which is
+      // the entire reason it writes one down. Giving up here threw that away
+      // and told someone their upload had failed while it was being finished
+      // on disk; an AVI is re-encoded frame by frame and routinely takes
+      // longer than the five minutes above.
+      const url = await waitForProcessing(uploadId);
+      if (url) {
+        await forgetResumable(fingerprint);
+        onProgress?.(100);
+        return { url };
+      }
       throw new Error("Upload processing timed out — the server may still be converting your video. Try refreshing in a minute.");
     }
     throw err;

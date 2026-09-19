@@ -184,6 +184,25 @@ fn is_text_subtitle_codec(codec: &str) -> bool {
     )
 }
 
+/// Subtitle codecs that are pictures rather than text.
+///
+/// `mov_text` holds text and nothing else, so a rung asked to encode one of
+/// these into it fails every time — ffmpeg will only go text-to-text or
+/// bitmap-to-bitmap. Naming them lets a pass that was never going to work be
+/// skipped rather than waited for, which on a Blu-ray rip is a full read of
+/// the file spent to learn what its stream list already said.
+///
+/// Deliberately a list of the known picture codecs rather than "anything
+/// `is_text_subtitle_codec` does not name": the codecs in neither list —
+/// `eia_608`, `dvb_teletext` — carry text, and ffmpeg can often place them in
+/// an MP4. Those keep their attempt.
+fn is_bitmap_subtitle_codec(codec: &str) -> bool {
+    matches!(
+        codec,
+        "hdmv_pgs_subtitle" | "dvd_subtitle" | "dvb_subtitle" | "xsub"
+    )
+}
+
 /// Remux a video with text-based subtitle streams into an MP4 copy
 /// (video/audio copied, subtitles as mov_text). Output is written to
 /// `{src}.cc.tmp`; the caller renames into place. Returns the tmp path.
@@ -363,11 +382,24 @@ fn owned(args: &[&str]) -> Vec<String> {
 /// complaint from anyone and plays as sound over a blank rectangle. So a rung
 /// whose output a browser could not draw is a failed rung, and the ladder goes
 /// on to the one that re-encodes.
+///
+/// Which rungs exist is decided per file rather than fixed, from what ffprobe
+/// says is in it. A rung the stream list has already ruled out is not a cheap
+/// rung — it is a full read of the file, inside the request the uploader is
+/// waiting on — so a source whose picture no browser can decode starts at the
+/// re-encode, and the rung that maps every subtitle is offered only to a file
+/// with no bitmap track to sink it.
+///
+/// Subtitles survive a re-encode. They did not always: the only re-encoding
+/// rung dropped them, so an MKV that reached it lost its captions for good,
+/// the original having been deleted by the same upload that converted it.
 async fn remux_with_subs(src: &str) -> Option<String> {
     let _job = metrics::media_job();
     let dst = format!("{}.cc.tmp", src);
     let source_had_audio = has_audio(src).await;
     let source_had_video = has_video(src).await;
+
+    let subtitles = probe_subtitles(src).await;
 
     // Only text subtitles can become `mov_text`. Mapping them by ordinal keeps
     // the ones that can travel when a bitmap track in the same file would
@@ -376,38 +408,100 @@ async fn remux_with_subs(src: &str) -> Option<String> {
     // position in this filtered list — a file whose only text track is the
     // second of three would otherwise be mapped by the first, which is the
     // bitmap one that stopped the rung above.
-    let text_subs: Vec<String> = probe_subtitles(src)
-        .await
+    let text_subs: Vec<String> = subtitles
         .iter()
+        .filter(|stream| stream.is_text())
         .map(|stream| format!("0:s:{}", stream.index))
         .collect();
-    let mut text_only = owned(&["-map", "0:v:0", "-map", "0:a?"]);
-    for stream in &text_subs {
-        text_only.push("-map".to_string());
-        text_only.push(stream.clone());
-    }
-    text_only.extend(owned(&["-c:v", "copy", "-c:a", "aac", "-ac", "2"]));
-    if !text_subs.is_empty() {
-        text_only.extend(owned(&["-c:s", "mov_text"]));
+
+    /// The maps and codecs that carry this file's text subtitles across,
+    /// appended to whatever a rung does with the picture.
+    fn sub_args(text_subs: &[String]) -> Vec<String> {
+        let mut args = Vec::new();
+        for stream in text_subs {
+            args.push("-map".to_string());
+            args.push(stream.clone());
+        }
+        if !text_subs.is_empty() {
+            args.extend(owned(&["-c:s", "mov_text"]));
+        }
+        args
     }
 
-    let ladder: Vec<(&str, Vec<String>)> = vec![
-        (
-            "copying the video, every subtitle",
-            owned(&[
-                "-map", "0:v:0", "-map", "0:a?", "-map", "0:s?", "-c:v", "copy", "-c:a", "aac",
-                "-ac", "2", "-c:s", "mov_text",
-            ]),
-        ),
-        ("copying the video, text subtitles only", text_only),
-        (
-            "re-encoding the video, no subtitles",
-            owned(&[
-                "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast", "-crf",
-                "23", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ac", "2",
-            ]),
-        ),
-    ];
+    let mut text_only = owned(&["-map", "0:v:0", "-map", "0:a?"]);
+    text_only.extend(sub_args(&text_subs));
+    text_only.extend(owned(&["-c:v", "copy", "-c:a", "aac", "-ac", "2"]));
+
+    // H.264 refuses an odd width or height in yuv420p, so a re-encode of one
+    // dies with "could not open encoder" and takes the whole conversion with
+    // it — the file is then left in a container the browser cannot open at
+    // all. Old AVI rips are where odd dimensions actually turn up. Rounding
+    // down to even costs at most a row and a column of pixels, and is a
+    // no-op for every file that was already even.
+    let reencode = owned(&[
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-ac",
+        "2",
+    ]);
+    let mut reencode_with_subs = owned(&["-map", "0:v:0", "-map", "0:a?"]);
+    reencode_with_subs.extend(sub_args(&text_subs));
+    reencode_with_subs.extend(reencode.clone());
+    let mut reencode_plain = owned(&["-map", "0:v:0", "-map", "0:a?"]);
+    reencode_plain.extend(reencode);
+
+    let mut ladder: Vec<(&str, Vec<String>)> = Vec::new();
+
+    // Copying the picture is only worth trying when the picture is one a
+    // browser can draw. When it is not — an AVI carrying Xvid, the case the
+    // playability check exists for — both copy rungs are reads of the entire
+    // file that end with the output thrown away over a codec ffprobe named
+    // before a byte was written. On a long video that is minutes spent to
+    // learn nothing, and they are spent inside the upload request, with the
+    // client waiting on a five-minute timer.
+    let skipped_copy_rungs = source_had_video && !video_is_web_playable(src).await;
+    if skipped_copy_rungs {
+        eprintln!(
+            "[media] {src}: re-encoding straight away, browsers cannot decode {}",
+            video_codec(src).await.unwrap_or_else(|| "unknown".into())
+        );
+    } else {
+        // `-map 0:s?` takes the bitmap tracks too, and `mov_text` cannot hold
+        // one, so this rung only has a chance when there are none.
+        if !subtitles.iter().any(|s| is_bitmap_subtitle_codec(&s.codec)) {
+            ladder.push((
+                "copying the video, every subtitle",
+                owned(&[
+                    "-map", "0:v:0", "-map", "0:a?", "-map", "0:s?", "-c:v", "copy", "-c:a", "aac",
+                    "-ac", "2", "-c:s", "mov_text",
+                ]),
+            ));
+        }
+        ladder.push(("copying the video, text subtitles only", text_only));
+    }
+
+    // Re-encoding does not mean giving up the captions. This rung used not to
+    // exist, so every file that got this far — an MKV whose picture a browser
+    // cannot decode, anything the copy rungs refused — arrived as a video with
+    // no subtitles, and the original it could have been extracted from had
+    // already been deleted by the upload that converted it.
+    if !text_subs.is_empty() {
+        ladder.push((
+            "re-encoding the video, text subtitles only",
+            reencode_with_subs,
+        ));
+    }
+    ladder.push(("re-encoding the video, no subtitles", reencode_plain));
 
     for (rung, (what, args)) in ladder.iter().enumerate() {
         match try_remux(src, &dst, args).await {
@@ -432,7 +526,10 @@ async fn remux_with_subs(src: &str) -> Option<String> {
                     let _ = tokio::fs::remove_file(&dst).await;
                     continue;
                 }
-                if rung > 0 {
+                // Worth a line whenever the straightforward pass was not the
+                // one that worked — either because it was tried and refused,
+                // or because the stream list said not to bother.
+                if rung > 0 || skipped_copy_rungs {
                     eprintln!("[media] {src}: converted by {what}");
                 }
                 return Some(dst);
@@ -577,7 +674,7 @@ async fn is_image_black(path: &str) -> bool {
     false
 }
 
-/// Subtitle streams extracted from a video, in decode order.
+/// Subtitle streams of a video, in decode order.
 #[derive(Debug)]
 struct SubtitleStream {
     index: usize,
@@ -586,16 +683,25 @@ struct SubtitleStream {
     title: String,
 }
 
-/// List text-based subtitle streams of a video (ordinal subtitle index,
-/// codec, language, title). `index` is 0-based *within subtitle streams*
+impl SubtitleStream {
+    /// Whether this stream can become a WebVTT sidecar or an MP4 `mov_text`
+    /// track. Callers that want captions filter on it; the ladder also wants
+    /// the ones that answer `false`, to know which passes to skip.
+    fn is_text(&self) -> bool {
+        is_text_subtitle_codec(&self.codec)
+    }
+}
+
+/// List the subtitle streams of a video (ordinal subtitle index, codec,
+/// language, title). `index` is 0-based *within subtitle streams*
 /// (matching ffmpeg's `-map 0:s:N` selector), NOT the global ffprobe
 /// stream position — using the global position here previously made
 /// extraction fail for any file with audio/video streams before the subs.
 ///
-/// The ordinal counts EVERY subtitle stream, including bitmap ones (PGS,
-/// dvd_subtitle) that cannot become WebVTT. Counting only the text streams
+/// EVERY subtitle stream is returned, bitmap ones (PGS, dvd_subtitle)
+/// included, and the ordinal counts them all. Dropping them here instead
 /// shifts the ordinal whenever a bitmap track comes first — the common
-/// layout in Blu-ray rips — so `-map 0:s:N` then extracts the wrong stream,
+/// layout in Blu-ray rips — so `-map 0:s:N` then names the wrong stream,
 /// or fails outright and leaves the video with no captions at all.
 async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
     let Ok(output) = tokio::process::Command::new("ffprobe")
@@ -624,9 +730,6 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
             .and_then(|c| c.as_str())
             .unwrap_or("")
             .to_string();
-        if !is_text_subtitle_codec(&codec) {
-            continue;
-        }
         let tags = s.get("tags").cloned().unwrap_or(Value::Null);
         result.push(SubtitleStream {
             index: ordinal,
@@ -682,7 +785,14 @@ async fn extract_subtitles(video: &str) {
     }
     let _job = metrics::media_job();
 
-    let streams = probe_subtitles(video).await;
+    // Only the text streams can become WebVTT, and `position` counts this
+    // filtered list — it is the track's place in the caption menu, not its
+    // ordinal in the file, which skips numbers wherever a bitmap track sits.
+    let streams: Vec<SubtitleStream> = probe_subtitles(video)
+        .await
+        .into_iter()
+        .filter(SubtitleStream::is_text)
+        .collect();
     if streams.is_empty() {
         return;
     }
@@ -3835,8 +3945,11 @@ mod tests {
         // was dropped, no manifest was written, and the player reported that
         // the video had no captions at all.
         let streams = probe_subtitles(&video).await;
-        assert_eq!(streams.len(), 1, "only the mov_text stream is extractable");
-        assert_eq!(streams[0].index, 1, "ordinal must count the skipped stream");
+        assert_eq!(streams.len(), 2, "both subtitle streams are reported");
+        assert!(!streams[0].is_text(), "ttml cannot become WebVTT");
+        let text: Vec<&SubtitleStream> = streams.iter().filter(|s| s.is_text()).collect::<Vec<_>>();
+        assert_eq!(text.len(), 1, "only the mov_text stream is extractable");
+        assert_eq!(text[0].index, 1, "ordinal must count the skipped stream");
 
         extract_subtitles(&video).await;
 
@@ -4055,6 +4168,173 @@ mod tests {
 
         let _ = tokio::fs::remove_file(&tmp).await;
         let _ = tokio::fs::remove_file(&avi).await;
+    }
+
+    /// An AVI whose picture is an odd number of pixels across and down.
+    ///
+    /// Old rips really are shaped like this, and it is the one thing H.264
+    /// will not accept: the encoder refuses odd dimensions in yuv420p.
+    async fn build_odd_sized_avi_fixture() -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_avi_odd_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let avi = dir.join("odd.avi").to_string_lossy().to_string();
+        for suffix in ["", ".cc.tmp"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", avi, suffix)).await;
+        }
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=161x121:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-c:v",
+                "mpeg4",
+                "-vtag",
+                "XVID",
+                "-c:a",
+                "mp3",
+                "-shortest",
+                &avi,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "odd avi fixture build failed");
+        avi
+    }
+
+    #[tokio::test]
+    async fn an_avi_with_odd_dimensions_still_converts() {
+        // Regression: every rung above the re-encode is refused for an AVI —
+        // the picture is one no browser draws — and the re-encode itself then
+        // died on "could not open encoder", because libx264 will not take an
+        // odd width or height in yuv420p. Nothing was left to fall through to,
+        // so the whole conversion failed and the uploader was handed back the
+        // AVI: an upload that looked like it had failed in processing.
+        let avi = build_odd_sized_avi_fixture().await;
+
+        let tmp = remux_with_subs(&avi)
+            .await
+            .expect("an odd-sized AVI must still convert");
+
+        assert_eq!(video_codec(&tmp).await.as_deref(), Some("h264"));
+        let size = tokio::process::Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=p=0",
+                &tmp,
+            ])
+            .output()
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default();
+        assert_eq!(size, "160,120", "not rounded to even: {size}");
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&avi).await;
+    }
+
+    /// An MKV shaped so that no rung can copy its picture: MPEG-4 Part 2
+    /// video, which MP4 holds and no browser draws, plus a SubRip track.
+    async fn build_unplayable_mkv_with_subs_fixture() -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_mkv_xvid_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let mkv = dir.join("rip.mkv").to_string_lossy().to_string();
+        let subs = dir.join("rip_src.vtt").to_string_lossy().to_string();
+        for suffix in ["", ".cc.tmp"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", mkv, suffix)).await;
+        }
+        tokio::fs::write(
+            &subs,
+            "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello world\n",
+        )
+        .await
+        .unwrap();
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x120:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-i",
+                &subs,
+                "-c:v",
+                "mpeg4",
+                "-c:a",
+                "mp3",
+                "-c:s",
+                "srt",
+                "-shortest",
+                &mkv,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "xvid mkv fixture build failed");
+        mkv
+    }
+
+    #[tokio::test]
+    async fn captions_survive_a_video_that_has_to_be_re_encoded() {
+        // Regression: the only re-encoding rung mapped video and audio and
+        // nothing else, so an MKV that reached it — anything the copy rungs
+        // refused, and every file whose picture a browser cannot decode —
+        // arrived as an MP4 with no captions. Unrecoverable, too: the upload
+        // deletes the source once it has converted it, so the subtitle streams
+        // went with it and re-requesting the file could not bring them back.
+        let mkv = build_unplayable_mkv_with_subs_fixture().await;
+        assert_eq!(video_codec(&mkv).await.as_deref(), Some("mpeg4"));
+
+        let tmp = remux_with_subs(&mkv)
+            .await
+            .expect("the ladder should get there by re-encoding");
+
+        assert_eq!(
+            video_codec(&tmp).await.as_deref(),
+            Some("h264"),
+            "the picture still will not draw"
+        );
+        let kinds = stream_kinds(&tmp).await;
+        assert!(kinds.iter().any(|k| k == "audio"), "audio lost: {kinds:?}");
+        assert!(
+            kinds.iter().any(|k| k == "subtitle"),
+            "captions lost to the re-encode: {kinds:?}"
+        );
+
+        // And they are captions the player can actually be handed.
+        extract_subtitles(&tmp).await;
+        let text = String::from_utf8(
+            tokio::fs::read(format!("{}@0.vtt", tmp))
+                .await
+                .expect("vtt sidecar not created"),
+        )
+        .unwrap();
+        assert!(text.contains("Hello world"), "wrong text: {text}");
+
+        for suffix in ["", "@0.vtt", "@subs.json"] {
+            let _ = tokio::fs::remove_file(format!("{}{}", tmp, suffix)).await;
+        }
+        let _ = tokio::fs::remove_file(&mkv).await;
     }
 
     #[tokio::test]
