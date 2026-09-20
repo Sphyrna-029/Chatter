@@ -166,6 +166,107 @@ function SteamGameCard({ game, appId, sessionStart }: { game: string; appId?: st
   );
 }
 
+/**
+ * One titled group of settings.
+ *
+ * The dialog used to be a single flat stack of label-and-control pairs, which
+ * made a preference that applies instantly look exactly like a field waiting
+ * on Save. Each group gets a card and a title so the eye can tell them apart.
+ */
+function SettingsSection({
+  title,
+  hint,
+  tone,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  tone?: "danger";
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      className={cn(
+        "space-y-3 rounded-lg border p-3.5",
+        tone === "danger"
+          ? "border-destructive/30 bg-destructive/5"
+          : "border-border/50 bg-muted/20",
+      )}
+    >
+      <div className="space-y-0.5">
+        <h3
+          className={cn(
+            "text-sm font-semibold leading-none",
+            tone === "danger" && "text-destructive",
+          )}
+        >
+          {title}
+        </h3>
+        {hint && <p className="ui-hint">{hint}</p>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A run of related sections under one heading. */
+function SettingsGroup({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="ui-heading">{label}</p>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+/** One control inside a section: its name, the control, and its note. */
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-foreground">{label}</label>
+      {children}
+      {hint && <p className="ui-hint">{hint}</p>}
+    </div>
+  );
+}
+
+/** A setting that is simply on or off, with its note beside the switch. */
+function ToggleField({
+  label,
+  hint,
+  checked,
+  onCheckedChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onCheckedChange: (value: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0 space-y-0.5">
+        <p className="text-xs font-medium text-foreground">{label}</p>
+        {hint && <p className="ui-hint">{hint}</p>}
+      </div>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
 interface UserProfileDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -502,8 +603,21 @@ export function UserProfileDialog({
       ),
     );
 
+  /** Put every field that is waiting on Save back to what the server holds. */
+  const handleReset = () => {
+    setNicknameInput(nicknameFromPresence);
+    setStatusInput(customStatus);
+    setAboutInput(about);
+    setAvatarPreview(avatarUrl);
+    setPendingAvatarFile(null);
+    setBannerPreview(bannerUrl);
+    setPendingBannerFile(null);
+    setPendingFontFile(null);
+    setThemeDraft(savedTheme);
+  };
+
   const profileContent = (
-    <div className="flex flex-col" style={profileWashStyle(theme, "modal")}>
+    <div className="flex flex-col">
       {/* Banner */}
       <div
         className={cn("relative h-[9.2rem] w-full overflow-hidden shrink-0", isSelf && "cursor-pointer group")}
@@ -576,57 +690,83 @@ export function UserProfileDialog({
         </div>
 
       {isSelf ? (
-        <>
-        <div className="w-full space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Display Name</label>
-          <Input
-            value={nicknameInput}
-            onChange={(e) => setNicknameInput(e.target.value)}
-            placeholder="Set a display name..."
-            className="text-sm"
-            maxLength={32}
-          />
+        <div className="w-full space-y-3">
+          <SettingsSection
+            title="Identity"
+            hint="Your name and the lines under it. Everyone who can see you sees these."
+          >
+            <Field label="Display Name">
+              <Input
+                value={nicknameInput}
+                onChange={(e) => setNicknameInput(e.target.value)}
+                placeholder="Set a display name..."
+                className="text-sm"
+                maxLength={32}
+              />
+            </Field>
+            <Field label="Custom Status">
+              <Input
+                value={statusInput}
+                onChange={(e) => setStatusInput(e.target.value)}
+                placeholder="Set a status..."
+                className="text-sm"
+                maxLength={80}
+              />
+            </Field>
+            <Field label="About Me">
+              <Textarea
+                value={aboutInput}
+                onChange={(e) => setAboutInput(e.target.value)}
+                placeholder="Tell others about yourself..."
+                className="text-sm resize-none"
+                maxLength={200}
+                rows={3}
+              />
+              <p className="text-3xs text-muted-foreground text-right">{aboutInput.length}/200</p>
+            </Field>
+          </SettingsSection>
+          <SettingsSection
+            title="Availability"
+            hint="Takes effect the moment you pick it — there is nothing to save."
+          >
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-input bg-background text-sm hover:bg-accent/50 transition-colors">
+                  {(() => {
+                    const active = STATUS_OPTIONS.find(
+                      (o) => o.value === status ||
+                        (o.value === "online" && status === "active") ||
+                        (o.value === "away" && status === "idle")
+                    ) ?? STATUS_OPTIONS[0];
+                    return (
+                      <>
+                        <span className="flex items-center gap-2">
+                          <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", active.color)} />
+                          {active.label}
+                        </span>
+                        <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </>
+                    );
+                  })()}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
+                {STATUS_OPTIONS.map((opt) => (
+                  <DropdownMenuItem
+                    key={opt.value}
+                    onClick={() => setManualStatus(opt.value)}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
+                    <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", opt.color)} />
+                    {opt.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </SettingsSection>
         </div>
-        <div className="w-full">
-          <p className="text-xs font-medium text-muted-foreground mb-2">Status</p>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-input bg-background text-sm hover:bg-accent/50 transition-colors">
-                {(() => {
-                  const active = STATUS_OPTIONS.find(
-                    (o) => o.value === status ||
-                      (o.value === "online" && status === "active") ||
-                      (o.value === "away" && status === "idle")
-                  ) ?? STATUS_OPTIONS[0];
-                  return (
-                    <>
-                      <span className="flex items-center gap-2">
-                        <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", active.color)} />
-                        {active.label}
-                      </span>
-                      <svg className="h-4 w-4 text-muted-foreground" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </>
-                  );
-                })()}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-[--radix-dropdown-menu-trigger-width]">
-              {STATUS_OPTIONS.map((opt) => (
-                <DropdownMenuItem
-                  key={opt.value}
-                  onClick={() => setManualStatus(opt.value)}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", opt.color)} />
-                  {opt.label}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-        </>
       ) : (
         <>
         <div className="flex items-center justify-center gap-2">
@@ -681,513 +821,46 @@ export function UserProfileDialog({
             )}
           </div>
         )}
-        </>
-      )}
-
-      {isSelf ? (
-        <div className="w-full space-y-3">
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Custom Status</label>
-            <Input
-              value={statusInput}
-              onChange={(e) => setStatusInput(e.target.value)}
-              placeholder="Set a status..."
-              className="text-sm"
-              maxLength={80}
-            />
-          </div>
-          <div className="space-y-1.5">
+        {customStatus && (
+          <p className="text-sm text-muted-foreground italic">"{customStatus}"</p>
+        )}
+        {presence?.steamGame && status !== "offline" && (
+          <SteamGameCard
+            game={presence.steamGame}
+            appId={presence.steamAppId}
+            sessionStart={presence.gameSessionStart}
+          />
+        )}
+        {about && (
+          <div className="w-full space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">About Me</label>
-            <Textarea
-              value={aboutInput}
-              onChange={(e) => setAboutInput(e.target.value)}
-              placeholder="Tell others about yourself..."
-              className="text-sm resize-none"
-              maxLength={200}
-              rows={3}
-            />
-            <p className="text-3xs text-muted-foreground text-right">{aboutInput.length}/200</p>
+            <p className="text-sm text-foreground">{about}</p>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Profile Colours</label>
-            <p className="text-3xs text-muted-foreground">
-              Everyone who looks at your profile sees these. This card and your
-              tab in the member list are set separately, and your member list
-              colour is also your accent — the ring while you speak, your dot
-              in the typing indicator, the tint under your messages.
-            </p>
-            <ToggleGroup
-              type="single"
-              value={themeSurface}
-              onValueChange={(val) => {
-                if (val) setThemeSurface(val as ProfileSurface);
-              }}
-              className="w-full rounded-md border border-border p-0.5 bg-muted"
-            >
-              {PROFILE_SURFACES.map((surface) => (
-                <ToggleGroupItem
-                  key={surface}
-                  value={surface}
-                  className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-                >
-                  {SURFACE_LABELS[surface]}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
-            {/* The card previews itself; the member-list tab cannot, so it
-                gets a strip painted with exactly what a row would show. */}
-            <div
-              className="h-10 rounded-md border border-border/40 flex items-center px-3"
-              style={surfaceWash}
-            >
-              <span className="text-3xs text-muted-foreground">
-                {themeDraft[themeSurface].color
-                  ? `Preview — ${SURFACE_LABELS[themeSurface]}`
-                  : "No colour set"}
-              </span>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={themeDraft[themeSurface].color || "#7c3aed"}
-                onChange={(e) => editSurface({ color: e.target.value })}
-                className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
-              />
-              <span className="text-sm font-mono flex-1 truncate">
-                {themeDraft[themeSurface].color || "None"}
-              </span>
-              {themeDraft[themeSurface].color && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 text-destructive"
-                  onClick={() => editSurface({ color: "", color2: "" })}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-            {themeDraft[themeSurface].color && (
-              <div className="space-y-3 pt-1">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Second Colour</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={themeDraft[themeSurface].color2 || "#ec4899"}
-                      onChange={(e) => editSurface({ color2: e.target.value })}
-                      className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
-                    />
-                    <span className="text-sm font-mono flex-1 truncate">
-                      {themeDraft[themeSurface].color2 || "None"}
-                    </span>
-                    {themeDraft[themeSurface].color2 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="shrink-0 text-destructive"
-                        onClick={() => editSurface({ color2: "" })}
-                      >
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                  <p className="text-3xs text-muted-foreground">
-                    With a second colour the first fades into it. With none it
-                    fades away into the card instead.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-xs font-medium text-muted-foreground">Fade</label>
-                    <span className="text-3xs text-muted-foreground tabular-nums">
-                      {themeDraft[themeSurface].fade}%
-                    </span>
-                  </div>
-                  <Slider
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={[themeDraft[themeSurface].fade]}
-                    onValueChange={([fade]) => editSurface({ fade })}
-                  />
-                  <p className="text-3xs text-muted-foreground">
-                    How far the first colour travels before it starts to give
-                    way. At 0 it is a solid, even wash.
-                  </p>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">Fade Direction</label>
-                  <ToggleGroup
-                    type="single"
-                    value={themeDraft[themeSurface].direction}
-                    onValueChange={(val) => {
-                      if (val) editSurface({ direction: val as ProfileFadeDirection });
-                    }}
-                    className="w-full rounded-md border border-border p-0.5 bg-muted"
-                  >
-                    {PROFILE_FADE_DIRECTIONS.map((dir) => (
-                      <ToggleGroupItem
-                        key={dir}
-                        value={dir}
-                        className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-                      >
-                        {FADE_DIRECTION_LABELS[dir]}
-                      </ToggleGroupItem>
-                    ))}
-                  </ToggleGroup>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="space-y-1.5">
+        )}
+        {presence?.nameFontUrl && (
+          <div className="w-full space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Name Font</label>
             <div className="flex items-center gap-2">
-              <span className="text-sm text-foreground truncate flex-1">
-                {pendingFontFile
-                  ? pendingFontFile.name
-                  : nameFontUrl
-                    ? decodeURIComponent(nameFontUrl.split("/").pop() || "Custom Font")
-                    : "Default"}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => fontInputRef.current?.click()}
-              >
-                Upload
-              </Button>
-              {(nameFontUrl || pendingFontFile) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 text-destructive"
-                  onClick={() => {
-                    setPendingFontFile(null);
-                    if (nameFontUrl) {
-                      updateProfile({ nameFontUrl: "" });
-                    }
-                  }}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-            <input
-              ref={fontInputRef}
-              type="file"
-              accept=".ttf,.otf,.woff,.woff2"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                e.target.value = "";
-                const ext = file.name.split(".").pop()?.toLowerCase();
-                if (!ext || !["ttf", "otf", "woff", "woff2"].includes(ext)) {
-                  toast.error("Only .ttf, .otf, .woff, and .woff2 font files are allowed");
-                  return;
-                }
-                if (file.size > 2 * 1024 * 1024) {
-                  toast.error("Font file must be under 2 MB");
-                  return;
-                }
-                // Validate magic bytes
-                const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
-                const magic32 = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
-                const isValidFont =
-                  magic32 === 0x00010000 || // TrueType
-                  magic32 === 0x4F54544F || // OpenType (OTTO)
-                  magic32 === 0x774F4646 || // WOFF
-                  magic32 === 0x774F4632;   // WOFF2 (wOF2)
-                if (!isValidFont) {
-                  toast.error("File does not appear to be a valid font");
-                  return;
-                }
-                setPendingFontFile(file);
-              }}
-            />
-            {(pendingFontFile || nameFontUrl) && (
-              <p
-                className="text-sm font-semibold mt-1"
-                style={
-                  pendingFontFile
-                    ? { fontFamily: "pending-font-preview" }
-                    : nameFontUrl
-                      ? { fontFamily: `'user-font-${CSS.escape(userId)}'` }
-                      : undefined
-                }
-                ref={(el) => {
-                  if (el && pendingFontFile) {
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      const url = reader.result as string;
-                      const existing = document.getElementById("font-preview-style");
-                      if (existing) existing.remove();
-                      const style = document.createElement("style");
-                      style.id = "font-preview-style";
-                      style.textContent = `@font-face { font-family: 'pending-font-preview'; src: url('${url}'); }`;
-                      document.head.appendChild(style);
-                    };
-                    reader.readAsDataURL(pendingFontFile);
-                  }
-                }}
+              <span
+                className="text-sm font-semibold flex-1"
+                style={{ fontFamily: `'user-font-${CSS.escape(userId)}'` }}
               >
                 {presence?.displayName || username}
-              </p>
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              Entrance Sound
-            </label>
-            <p className="text-3xs text-muted-foreground">
-              Up to 5 seconds. Plays to everyone in a voice channel when you join,
-              unless the room has entrance sounds turned off.
-            </p>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-foreground truncate flex-1">
-                {entranceSoundUrl
-                  ? decodeURIComponent(entranceSoundUrl.split("/").pop() || "Custom Sound")
-                  : "None"}
               </span>
-              {entranceSoundUrl && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => playSoundUrl(entranceSoundUrl)}
-                >
-                  Play
-                </Button>
-              )}
               <Button
                 variant="outline"
                 size="sm"
                 className="shrink-0"
-                onClick={() => stingInputRef.current?.click()}
-                disabled={uploading}
-              >
-                Upload
-              </Button>
-              {entranceSoundUrl && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0 text-destructive"
-                  onClick={() => {
-                    setEntranceSoundUrl("");
-                    updateProfile({ entranceSoundUrl: "" });
-                  }}
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-            <p className="text-3xs text-muted-foreground">
-              Played to a voice channel when you join it. Up to {MAX_SOUND_SECS} seconds;
-              rooms can turn these off.
-            </p>
-            <input
-              ref={stingInputRef}
-              type="file"
-              accept="audio/*,.mp3,.wav,.ogg,.m4a,.opus"
-              className="hidden"
-              onChange={async (e) => {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                e.target.value = "";
-                if (!file.type.startsWith("audio/")) {
-                  toast.error("Choose an audio file");
-                  return;
-                }
-                // The server measures the real duration and is the authority;
-                // this only saves an obviously-too-big upload from happening
-                // at all. A few seconds of audio is never megabytes.
-                if (file.size > 2 * 1024 * 1024) {
-                  toast.error("Entrance sound must be under 2 MB");
-                  return;
-                }
-                // The server measures it again and refuses anything over the
-                // limit; catching it here means the refusal does not arrive
-                // after an upload, as a toast, about a sound the picker is
-                // already showing as set.
-                const tooLong = await new Promise<number | null>((resolve) => {
-                  const objectUrl = URL.createObjectURL(file);
-                  const probe = new Audio();
-                  const done = (secs: number | null) => {
-                    URL.revokeObjectURL(objectUrl);
-                    resolve(secs);
-                  };
-                  probe.onloadedmetadata = () =>
-                    done(Number.isFinite(probe.duration) ? probe.duration : null);
-                  probe.onerror = () => done(null);
-                  probe.src = objectUrl;
-                });
-                if (tooLong !== null && tooLong > 5) {
-                  toast.error(
-                    `That sound is ${tooLong.toFixed(1)}s; the limit is 5s`,
-                  );
-                  return;
-                }
-                setUploading(true);
-                try {
-                  const uploaded = await apiUploadFile(file);
-                  setEntranceSoundUrl(uploaded.url);
-                  updateProfile({ entranceSoundUrl: uploaded.url });
-                } catch {
-                  toast.error("Failed to upload entrance sound");
-                } finally {
-                  setUploading(false);
-                }
-              }}
-            />
-          </div>
-          <Button
-            className="w-full"
-            onClick={handleSave}
-            disabled={!hasChanges || uploading}
-          >
-            {uploading ? "Saving..." : "Save"}
-          </Button>
-
-          {/* Below the Save button on purpose: these apply the moment they are
-              changed, and are kept on this device rather than on the server. */}
-          <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Sound effects
-                </label>
-                <p className="text-3xs text-muted-foreground">
-                  Mentions, voice joins, and entrance sounds. Rooms can replace
-                  these with their own.
-                </p>
-              </div>
-              <Switch
-                checked={soundSettings.enabled}
-                onCheckedChange={(v) => {
-                  const next = { ...soundSettings, enabled: v };
-                  setSoundSettings(next);
-                  saveSoundSettings(next);
+                onClick={() => {
+                  updateProfile({ nameFontUrl: presence!.nameFontUrl });
+                  onOpenChange(false);
                 }}
-              />
+              >
+                Steal Font
+              </Button>
             </div>
-            {soundSettings.enabled && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-muted-foreground">Volume</label>
-                  <span className="text-3xs text-muted-foreground">
-                    {Math.round(soundSettings.volume * 100)}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={Math.round(soundSettings.volume * 100)}
-                  aria-label="Sound effect volume"
-                  className="w-full accent-primary"
-                  onChange={(e) => {
-                    const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
-                    setSoundSettings(next);
-                    saveSoundSettings(next);
-                  }}
-                  // Play on release rather than on every step, so dragging the
-                  // slider does not fire a burst of overlapping sounds.
-                  onMouseUp={() => playSound("mention")}
-                  onTouchEnd={() => playSound("mention")}
-                />
-              </div>
-            )}
           </div>
-          {clipBufferSupported() && (
-            <div className="space-y-3 rounded-md border border-border/40 bg-muted/20 p-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Clip streams automatically
-                  </label>
-                  <p className="text-3xs text-muted-foreground">
-                    Arm the clip buffer on whichever stream you have focused,
-                    including one already running when you join a call.
-                  </p>
-                </div>
-                <Switch
-                  checked={clipSettings.autoArm}
-                  onCheckedChange={(v) => updateClipSettings({ autoArm: v })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">Clip Length</label>
-                <ToggleGroup
-                  type="single"
-                  value={String(clipSettings.lengthSecs)}
-                  onValueChange={(val) => {
-                    if (val) updateClipSettings({ lengthSecs: Number(val) as ClipLength });
-                  }}
-                  className="w-full rounded-md border border-border p-0.5 bg-muted"
-                >
-                  {CLIP_LENGTH_OPTIONS.map((secs) => (
-                    <ToggleGroupItem
-                      key={secs}
-                      value={String(secs)}
-                      className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
-                    >
-                      {secs} seconds
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </div>
-              <p className="text-3xs text-muted-foreground">
-                Buffering runs a second video encoder, and everyone in the
-                channel is told while it is armed.
-              </p>
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          {customStatus && (
-            <p className="text-sm text-muted-foreground italic">"{customStatus}"</p>
-          )}
-          {presence?.steamGame && status !== "offline" && (
-            <SteamGameCard
-              game={presence.steamGame}
-              appId={presence.steamAppId}
-              sessionStart={presence.gameSessionStart}
-            />
-          )}
-          {about && (
-            <div className="w-full space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">About Me</label>
-              <p className="text-sm text-foreground">{about}</p>
-            </div>
-          )}
-          {presence?.nameFontUrl && (
-            <div className="w-full space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">Name Font</label>
-              <div className="flex items-center gap-2">
-                <span
-                  className="text-sm font-semibold flex-1"
-                  style={{ fontFamily: `'user-font-${CSS.escape(userId)}'` }}
-                >
-                  {presence?.displayName || username}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => {
-                    updateProfile({ nameFontUrl: presence!.nameFontUrl });
-                    onOpenChange(false);
-                  }}
-                >
-                  Steal Font
-                </Button>
-              </div>
-            </div>
-          )}
+        )}
         </>
       )}
 
@@ -1703,354 +1376,765 @@ export function UserProfileDialog({
     }
   };
 
-  const accountContent = (
-    <div className="px-5 py-4 space-y-6">
-      {/* Two-Factor Authentication */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Two-Factor Authentication</h3>
-        {state.totpVerified ? (
-          <div className="flex items-center gap-2 text-sm text-success">
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-            </svg>
-            2FA is enabled
-          </div>
-        ) : totpSetupStep === "idle" ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Your account does not have two-factor authentication enabled. Set it up to add an extra layer of security.
-            </p>
-            {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
-            <Button
-              onClick={handleTotpSetupStart}
-              disabled={totpSetupLoading}
-              variant="outline"
-              className="w-full"
+  /** Everything others see and hear of you, beyond your name. */
+  const appearanceContent = (
+    <div className="px-5 py-4 space-y-3">
+      <SettingsSection
+        title="Profile Colours"
+        hint="This card and your tab in the member list are set separately. Your member list colour is also your accent — the ring while you speak, your dot in the typing indicator, the tint under your messages."
+      >
+        <ToggleGroup
+          type="single"
+          value={themeSurface}
+          onValueChange={(val) => {
+            if (val) setThemeSurface(val as ProfileSurface);
+          }}
+          className="w-full rounded-md border border-border p-0.5 bg-muted"
+        >
+          {PROFILE_SURFACES.map((surface) => (
+            <ToggleGroupItem
+              key={surface}
+              value={surface}
+              className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
             >
-              {totpSetupLoading ? "Setting up..." : "Set Up 2FA"}
+              {SURFACE_LABELS[surface]}
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {/* The card previews itself; the member-list tab cannot, so it
+            gets a strip painted with exactly what a row would show. */}
+        <div
+          className="h-10 rounded-md border border-border/40 flex items-center px-3"
+          style={surfaceWash}
+        >
+          <span className="text-3xs text-muted-foreground">
+            {themeDraft[themeSurface].color
+              ? `Preview — ${SURFACE_LABELS[themeSurface]}`
+              : "No colour set"}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={themeDraft[themeSurface].color || "#7c3aed"}
+            onChange={(e) => editSurface({ color: e.target.value })}
+            className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
+          />
+          <span className="text-sm font-mono flex-1 truncate">
+            {themeDraft[themeSurface].color || "None"}
+          </span>
+          {themeDraft[themeSurface].color && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 text-destructive"
+              onClick={() => editSurface({ color: "", color2: "" })}
+            >
+              Remove
             </Button>
-          </div>
-        ) : totpSetupStep === "qr" && totpSetupData ? (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              Scan this QR code with your authenticator app, then enter the 6-digit code below.
-            </p>
-            <div className="flex justify-center">
-              <img
-                src={`data:image/png;base64,${totpSetupData.totp_qr_base64}`}
-                alt="TOTP QR Code"
-                className="w-40 h-40 rounded border bg-white p-1"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-3xs text-muted-foreground text-center">Or enter this key manually:</p>
-              <p className="text-xs font-mono text-center break-all select-all bg-muted/30 rounded px-2 py-1">
-                {totpSetupData.totp_secret}
+          )}
+        </div>
+        {themeDraft[themeSurface].color && (
+          <div className="space-y-3 pt-1">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Second Colour</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={themeDraft[themeSurface].color2 || "#ec4899"}
+                  onChange={(e) => editSurface({ color2: e.target.value })}
+                  className="h-7 w-7 shrink-0 rounded border-0 bg-transparent cursor-pointer [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded"
+                />
+                <span className="text-sm font-mono flex-1 truncate">
+                  {themeDraft[themeSurface].color2 || "None"}
+                </span>
+                {themeDraft[themeSurface].color2 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 text-destructive"
+                    onClick={() => editSurface({ color2: "" })}
+                  >
+                    Remove
+                  </Button>
+                )}
+              </div>
+              <p className="text-3xs text-muted-foreground">
+                With a second colour the first fades into it. With none it
+                fades away into the card instead.
               </p>
             </div>
-            <Input
-              placeholder="6-digit code"
-              value={totpSetupCode}
-              onChange={(e) => setTotpSetupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              maxLength={6}
-              className="text-sm font-mono tracking-widest text-center"
-            />
-            {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
-            <div className="flex gap-2">
-              <Button
-                onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupError(null); }}
-                variant="outline"
-                className="flex-1"
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground">Fade</label>
+                <span className="text-3xs text-muted-foreground tabular-nums">
+                  {themeDraft[themeSurface].fade}%
+                </span>
+              </div>
+              <Slider
+                min={0}
+                max={100}
+                step={5}
+                value={[themeDraft[themeSurface].fade]}
+                onValueChange={([fade]) => editSurface({ fade })}
+              />
+              <p className="text-3xs text-muted-foreground">
+                How far the first colour travels before it starts to give
+                way. At 0 it is a solid, even wash.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Fade Direction</label>
+              <ToggleGroup
+                type="single"
+                value={themeDraft[themeSurface].direction}
+                onValueChange={(val) => {
+                  if (val) editSurface({ direction: val as ProfileFadeDirection });
+                }}
+                className="w-full rounded-md border border-border p-0.5 bg-muted"
               >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleTotpSetupVerify}
-                disabled={totpSetupLoading}
-                className="flex-1"
-              >
-                {totpSetupLoading ? "Verifying..." : "Verify"}
-              </Button>
+                {PROFILE_FADE_DIRECTIONS.map((dir) => (
+                  <ToggleGroupItem
+                    key={dir}
+                    value={dir}
+                    className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                  >
+                    {FADE_DIRECTION_LABELS[dir]}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
             </div>
           </div>
-        ) : totpSetupStep === "recovery" && totpSetupRecoveryCodes ? (
-          <div className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              2FA is now enabled! Save these recovery codes in a safe place. Each code can only be used once.
-            </p>
-            <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
-              {totpSetupRecoveryCodes.map((code, i) => (
-                <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
-                  {code}
-                </div>
-              ))}
-            </div>
+        )}
+      </SettingsSection>
+      <SettingsSection
+        title="Name Font"
+        hint="Carried with your name wherever it is shown. .ttf, .otf, .woff or .woff2, under 2 MB."
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-foreground truncate flex-1">
+            {pendingFontFile
+              ? pendingFontFile.name
+              : nameFontUrl
+                ? decodeURIComponent(nameFontUrl.split("/").pop() || "Custom Font")
+                : "Default"}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => fontInputRef.current?.click()}
+          >
+            Upload
+          </Button>
+          {(nameFontUrl || pendingFontFile) && (
             <Button
-              onClick={() => navigator.clipboard.writeText(totpSetupRecoveryCodes.join("\n"))}
               variant="outline"
-              className="w-full"
               size="sm"
+              className="shrink-0 text-destructive"
+              onClick={() => {
+                setPendingFontFile(null);
+                if (nameFontUrl) {
+                  updateProfile({ nameFontUrl: "" });
+                }
+              }}
             >
-              Copy All Codes
+              Remove
             </Button>
-            <Button
-              onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupRecoveryCodes(null); }}
-              className="w-full"
-              size="sm"
-            >
-              Done
-            </Button>
-          </div>
-        ) : null}
-      </div>
-
-      {/* Change Password */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-semibold">Change Password</h3>
-        <div className="space-y-2">
-          <Input
-            type="password"
-            placeholder="New password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-            className="text-sm"
-          />
-          <Input
-            type="password"
-            placeholder="Confirm new password"
-            value={confirmNewPassword}
-            onChange={(e) => setConfirmNewPassword(e.target.value)}
-            className="text-sm"
-          />
-          <Input
-            placeholder="Authenticator code"
-            value={passwordTotpCode}
-            onChange={(e) => setPasswordTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-            maxLength={6}
-            className="text-sm font-mono tracking-widest"
-          />
+          )}
         </div>
-        {passwordMessage && (
-          <p className={cn("text-xs", passwordMessage.type === "success" ? "text-success" : "text-destructive")}>
-            {passwordMessage.text}
+        <input
+          ref={fontInputRef}
+          type="file"
+          accept=".ttf,.otf,.woff,.woff2"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            e.target.value = "";
+            const ext = file.name.split(".").pop()?.toLowerCase();
+            if (!ext || !["ttf", "otf", "woff", "woff2"].includes(ext)) {
+              toast.error("Only .ttf, .otf, .woff, and .woff2 font files are allowed");
+              return;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+              toast.error("Font file must be under 2 MB");
+              return;
+            }
+            // Validate magic bytes
+            const header = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+            const magic32 = (header[0] << 24) | (header[1] << 16) | (header[2] << 8) | header[3];
+            const isValidFont =
+              magic32 === 0x00010000 || // TrueType
+              magic32 === 0x4F54544F || // OpenType (OTTO)
+              magic32 === 0x774F4646 || // WOFF
+              magic32 === 0x774F4632;   // WOFF2 (wOF2)
+            if (!isValidFont) {
+              toast.error("File does not appear to be a valid font");
+              return;
+            }
+            setPendingFontFile(file);
+          }}
+        />
+        {(pendingFontFile || nameFontUrl) && (
+          <p
+            className="text-sm font-semibold mt-1"
+            style={
+              pendingFontFile
+                ? { fontFamily: "pending-font-preview" }
+                : nameFontUrl
+                  ? { fontFamily: `'user-font-${CSS.escape(userId)}'` }
+                  : undefined
+            }
+            ref={(el) => {
+              if (el && pendingFontFile) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const url = reader.result as string;
+                  const existing = document.getElementById("font-preview-style");
+                  if (existing) existing.remove();
+                  const style = document.createElement("style");
+                  style.id = "font-preview-style";
+                  style.textContent = `@font-face { font-family: 'pending-font-preview'; src: url('${url}'); }`;
+                  document.head.appendChild(style);
+                };
+                reader.readAsDataURL(pendingFontFile);
+              }
+            }}
+          >
+            {presence?.displayName || username}
           </p>
         )}
-        <Button
-          onClick={handleChangePassword}
-          disabled={changingPassword}
-          className="w-full"
-          variant="outline"
-        >
-          {changingPassword ? "Changing..." : "Change Password"}
-        </Button>
-      </div>
-
-      {/* Recovery Codes */}
-      <div className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-semibold">Recovery Codes</h3>
-        <p className="text-xs text-muted-foreground">
-          Recovery codes let you sign in if you lose access to your authenticator app. Each code can only be used once.
-        </p>
-        {recoveryCodes ? (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
-              {recoveryCodes.map((code, i) => (
-                <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
-                  {code}
-                </div>
-              ))}
-            </div>
+      </SettingsSection>
+      <SettingsSection
+        title="Entrance Sound"
+        hint={`Up to ${MAX_SOUND_SECS} seconds, played to everyone in a voice channel when you join it. Rooms can turn entrance sounds off.`}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-foreground truncate flex-1">
+            {entranceSoundUrl
+              ? decodeURIComponent(entranceSoundUrl.split("/").pop() || "Custom Sound")
+              : "None"}
+          </span>
+          {entranceSoundUrl && (
             <Button
-              onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => playSoundUrl(entranceSoundUrl)}
+            >
+              Play
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => stingInputRef.current?.click()}
+            disabled={uploading}
+          >
+            Upload
+          </Button>
+          {entranceSoundUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 text-destructive"
+              onClick={() => {
+                setEntranceSoundUrl("");
+                updateProfile({ entranceSoundUrl: "" });
+              }}
+            >
+              Remove
+            </Button>
+          )}
+        </div>
+        <input
+          ref={stingInputRef}
+          type="file"
+          accept="audio/*,.mp3,.wav,.ogg,.m4a,.opus"
+          className="hidden"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            e.target.value = "";
+            if (!file.type.startsWith("audio/")) {
+              toast.error("Choose an audio file");
+              return;
+            }
+            // The server measures the real duration and is the authority;
+            // this only saves an obviously-too-big upload from happening
+            // at all. A few seconds of audio is never megabytes.
+            if (file.size > 2 * 1024 * 1024) {
+              toast.error("Entrance sound must be under 2 MB");
+              return;
+            }
+            // The server measures it again and refuses anything over the
+            // limit; catching it here means the refusal does not arrive
+            // after an upload, as a toast, about a sound the picker is
+            // already showing as set.
+            const tooLong = await new Promise<number | null>((resolve) => {
+              const objectUrl = URL.createObjectURL(file);
+              const probe = new Audio();
+              const done = (secs: number | null) => {
+                URL.revokeObjectURL(objectUrl);
+                resolve(secs);
+              };
+              probe.onloadedmetadata = () =>
+                done(Number.isFinite(probe.duration) ? probe.duration : null);
+              probe.onerror = () => done(null);
+              probe.src = objectUrl;
+            });
+            if (tooLong !== null && tooLong > 5) {
+              toast.error(
+                `That sound is ${tooLong.toFixed(1)}s; the limit is 5s`,
+              );
+              return;
+            }
+            setUploading(true);
+            try {
+              const uploaded = await apiUploadFile(file);
+              setEntranceSoundUrl(uploaded.url);
+              updateProfile({ entranceSoundUrl: uploaded.url });
+            } catch {
+              toast.error("Failed to upload entrance sound");
+            } finally {
+              setUploading(false);
+            }
+          }}
+        />
+      </SettingsSection>
+    </div>
+  );
+
+  /** Kept on this device, and applied the moment they change. */
+  const deviceContent = (
+    <div className="px-5 py-4 space-y-3">
+      <p className="ui-hint">
+        These stay on this device rather than on your account, and take effect
+        as soon as you change them.
+      </p>
+      <SettingsSection
+        title="Sound Effects"
+        hint="Mentions, voice joins, and other people's entrance sounds. Rooms can replace these with their own."
+      >
+        <ToggleField
+          label="Play sound effects"
+          checked={soundSettings.enabled}
+          onCheckedChange={(v) => {
+            const next = { ...soundSettings, enabled: v };
+            setSoundSettings(next);
+            saveSoundSettings(next);
+          }}
+        />
+        {soundSettings.enabled && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-foreground">Volume</label>
+              <span className="text-3xs text-muted-foreground">
+                {Math.round(soundSettings.volume * 100)}%
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={Math.round(soundSettings.volume * 100)}
+              aria-label="Sound effect volume"
+              className="w-full accent-primary"
+              onChange={(e) => {
+                const next = { ...soundSettings, volume: Number(e.target.value) / 100 };
+                setSoundSettings(next);
+                saveSoundSettings(next);
+              }}
+              // Play on release rather than on every step, so dragging the
+              // slider does not fire a burst of overlapping sounds.
+              onMouseUp={() => playSound("mention")}
+              onTouchEnd={() => playSound("mention")}
+            />
+          </div>
+        )}
+      </SettingsSection>
+      {clipBufferSupported() && (
+        <SettingsSection
+          title="Stream Clips"
+          hint="Buffering runs a second video encoder, and everyone in the channel is told while it is armed."
+        >
+          <ToggleField
+            label="Clip streams automatically"
+            hint="Arm the clip buffer on whichever stream you have focused, including one already running when you join a call."
+            checked={clipSettings.autoArm}
+            onCheckedChange={(v) => updateClipSettings({ autoArm: v })}
+          />
+          <Field label="Clip Length">
+            <ToggleGroup
+              type="single"
+              value={String(clipSettings.lengthSecs)}
+              onValueChange={(val) => {
+                if (val) updateClipSettings({ lengthSecs: Number(val) as ClipLength });
+              }}
+              className="w-full rounded-md border border-border p-0.5 bg-muted"
+            >
+              {CLIP_LENGTH_OPTIONS.map((secs) => (
+                <ToggleGroupItem
+                  key={secs}
+                  value={String(secs)}
+                  className="flex-1 text-xs h-7 data-[state=on]:bg-background data-[state=on]:shadow-sm rounded-sm"
+                >
+                  {secs} seconds
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+          </Field>
+        </SettingsSection>
+      )}
+    </div>
+  );
+
+  const accountContent = (
+    <div className="px-5 py-4 space-y-6">
+      <SettingsGroup label="Security">
+        <SettingsSection title="Two-Factor Authentication">
+          {state.totpVerified ? (
+            <div className="flex items-center gap-2 text-sm text-success">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              </svg>
+              2FA is enabled
+            </div>
+          ) : totpSetupStep === "idle" ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Your account does not have two-factor authentication enabled. Set it up to add an extra layer of security.
+              </p>
+              {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
+              <Button
+                onClick={handleTotpSetupStart}
+                disabled={totpSetupLoading}
+                variant="outline"
+                className="w-full"
+              >
+                {totpSetupLoading ? "Setting up..." : "Set Up 2FA"}
+              </Button>
+            </div>
+          ) : totpSetupStep === "qr" && totpSetupData ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Scan this QR code with your authenticator app, then enter the 6-digit code below.
+              </p>
+              <div className="flex justify-center">
+                <img
+                  src={`data:image/png;base64,${totpSetupData.totp_qr_base64}`}
+                  alt="TOTP QR Code"
+                  className="w-40 h-40 rounded border bg-white p-1"
+                />
+              </div>
+              <div className="space-y-1">
+                <p className="text-3xs text-muted-foreground text-center">Or enter this key manually:</p>
+                <p className="text-xs font-mono text-center break-all select-all bg-muted/30 rounded px-2 py-1">
+                  {totpSetupData.totp_secret}
+                </p>
+              </div>
+              <Input
+                placeholder="6-digit code"
+                value={totpSetupCode}
+                onChange={(e) => setTotpSetupCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                maxLength={6}
+                className="text-sm font-mono tracking-widest text-center"
+              />
+              {totpSetupError && <p className="text-xs text-destructive">{totpSetupError}</p>}
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupError(null); }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleTotpSetupVerify}
+                  disabled={totpSetupLoading}
+                  className="flex-1"
+                >
+                  {totpSetupLoading ? "Verifying..." : "Verify"}
+                </Button>
+              </div>
+            </div>
+          ) : totpSetupStep === "recovery" && totpSetupRecoveryCodes ? (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                2FA is now enabled! Save these recovery codes in a safe place. Each code can only be used once.
+              </p>
+              <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
+                {totpSetupRecoveryCodes.map((code, i) => (
+                  <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
+                    {code}
+                  </div>
+                ))}
+              </div>
+              <Button
+                onClick={() => navigator.clipboard.writeText(totpSetupRecoveryCodes.join("\n"))}
+                variant="outline"
+                className="w-full"
+                size="sm"
+              >
+                Copy All Codes
+              </Button>
+              <Button
+                onClick={() => { setTotpSetupStep("idle"); setTotpSetupData(null); setTotpSetupRecoveryCodes(null); }}
+                className="w-full"
+                size="sm"
+              >
+                Done
+              </Button>
+            </div>
+          ) : null}
+        </SettingsSection>
+        <SettingsSection
+          title="Recovery Codes"
+          hint="These let you sign in if you lose access to your authenticator app. Each code can only be used once."
+        >
+          {recoveryCodes ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-1 p-3 rounded-md border bg-muted/30">
+                {recoveryCodes.map((code, i) => (
+                  <div key={i} className="text-center text-sm font-mono tracking-[0.3em]">
+                    {code}
+                  </div>
+                ))}
+              </div>
+              <Button
+                onClick={() => navigator.clipboard.writeText(recoveryCodes.join("\n"))}
+                variant="outline"
+                className="w-full"
+                size="sm"
+              >
+                Copy All Codes
+              </Button>
+              <Button
+                onClick={() => {
+                  setRecoveryCodes(null);
+                  setShowRecoveryInput(true);
+                }}
+                variant="outline"
+                className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
+                size="sm"
+              >
+                Regenerate Codes
+              </Button>
+            </div>
+          ) : showRecoveryInput ? (
+            <div className="space-y-2">
+              <Input
+                placeholder="Authenticator code"
+                value={recoveryTotpCode}
+                onChange={(e) => setRecoveryTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                maxLength={6}
+                className="text-sm font-mono tracking-widest"
+              />
+              {recoveryError && (
+                <p className="text-xs text-destructive">{recoveryError}</p>
+              )}
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => {
+                    setShowRecoveryInput(false);
+                    setRecoveryTotpCode("");
+                    setRecoveryError(null);
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleGetRecoveryCodes}
+                  disabled={recoveryLoading}
+                  variant="outline"
+                  className="flex-1"
+                  size="sm"
+                >
+                  {recoveryLoading ? "Loading..." : "Confirm"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              onClick={() => setShowRecoveryInput(true)}
               variant="outline"
               className="w-full"
-              size="sm"
             >
-              Copy All Codes
+              View Recovery Codes
             </Button>
-            <Button
-              onClick={() => {
-                setRecoveryCodes(null);
-                setShowRecoveryInput(true);
-              }}
-              variant="outline"
-              className="w-full text-orange-400 border-orange-400/30 hover:bg-orange-400/10"
-              size="sm"
-            >
-              Regenerate Codes
-            </Button>
-          </div>
-        ) : showRecoveryInput ? (
+          )}
+        </SettingsSection>
+        <SettingsSection title="Change Password">
           <div className="space-y-2">
             <Input
+              type="password"
+              placeholder="New password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="text-sm"
+            />
+            <Input
+              type="password"
+              placeholder="Confirm new password"
+              value={confirmNewPassword}
+              onChange={(e) => setConfirmNewPassword(e.target.value)}
+              className="text-sm"
+            />
+            <Input
               placeholder="Authenticator code"
-              value={recoveryTotpCode}
-              onChange={(e) => setRecoveryTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              value={passwordTotpCode}
+              onChange={(e) => setPasswordTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               maxLength={6}
               className="text-sm font-mono tracking-widest"
             />
-            {recoveryError && (
-              <p className="text-xs text-destructive">{recoveryError}</p>
-            )}
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  setShowRecoveryInput(false);
-                  setRecoveryTotpCode("");
-                  setRecoveryError(null);
-                }}
-                variant="outline"
-                className="flex-1"
-                size="sm"
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleGetRecoveryCodes}
-                disabled={recoveryLoading}
-                variant="outline"
-                className="flex-1"
-                size="sm"
-              >
-                {recoveryLoading ? "Loading..." : "Confirm"}
-              </Button>
-            </div>
           </div>
-        ) : (
-          <Button
-            onClick={() => setShowRecoveryInput(true)}
-            variant="outline"
-            className="w-full"
-          >
-            View Recovery Codes
-          </Button>
-        )}
-      </div>
-
-      {/* Steam Integration */}
-      <div className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-semibold">Steam Account</h3>
-        {steamError && <p className="text-xs text-destructive">{steamError}</p>}
-        {steamId ? (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Linked Steam ID: <span className="font-mono text-foreground">{steamId}</span>
+          {passwordMessage && (
+            <p className={cn("text-xs", passwordMessage.type === "success" ? "text-success" : "text-destructive")}>
+              {passwordMessage.text}
             </p>
-            <label className="flex items-center gap-2 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={steamHideGame}
-                onChange={async (e) => {
-                  const hide = e.target.checked;
-                  setSteamHideGame(hide);
+          )}
+          <Button
+            onClick={handleChangePassword}
+            disabled={changingPassword}
+            className="w-full"
+            variant="outline"
+          >
+            {changingPassword ? "Changing..." : "Change Password"}
+          </Button>
+        </SettingsSection>
+        <SettingsSection
+          title="Active Sessions"
+          hint="Everywhere your account is currently signed in."
+        >
+          {sessionsLoading ? (
+            <p className="text-xs text-muted-foreground">Loading sessions...</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No active sessions found.</p>
+          ) : (
+            <div className="space-y-2">
+              {sessions.map((s, i) => (
+                <div key={s.session_id || i} className="rounded-md border px-3 py-2 text-xs space-y-0.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 space-y-0.5">
+                      <div className="font-medium text-foreground truncate">{s.user_agent || "Unknown browser"}</div>
+                      <div className="text-muted-foreground">{s.ip_address || "Unknown IP"}</div>
+                      <div className="text-muted-foreground">
+                        {s.created_at ? new Date(s.created_at).toLocaleString() : "Unknown time"}
+                      </div>
+                    </div>
+                    {s.session_id && (
+                      <button
+                        onClick={async () => {
+                          try {
+                            await apiRevokeSession(s.session_id);
+                            setSessions((prev) => prev.filter((x) => x.session_id !== s.session_id));
+                          } catch {}
+                        }}
+                        className="shrink-0 text-muted-foreground hover:text-destructive transition-colors mt-0.5"
+                        title="Log out this session"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                          <polyline points="16 17 21 12 16 7"/>
+                          <line x1="21" y1="12" x2="9" y2="12"/>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </SettingsSection>
+      </SettingsGroup>
+
+      <SettingsGroup label="Connections">
+        <SettingsSection
+          title="Steam"
+          hint="Shows what you are playing to other members."
+        >
+          {steamError && <p className="text-xs text-destructive">{steamError}</p>}
+          {steamId ? (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Linked Steam ID: <span className="font-mono text-foreground">{steamId}</span>
+              </p>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={steamHideGame}
+                  onChange={async (e) => {
+                    const hide = e.target.checked;
+                    setSteamHideGame(hide);
+                    try {
+                      await apiSetSteamHideGame(hide);
+                    } catch (err: any) {
+                      setSteamError(err.message || "Failed to update");
+                      setSteamHideGame(!hide);
+                    }
+                  }}
+                  className="h-3.5 w-3.5 accent-blue-500"
+                />
+                <span className="text-xs text-muted-foreground">Hide currently playing game from others</span>
+              </label>
+              <Button
+                onClick={async () => {
+                  setSteamLoading(true);
+                  setSteamError(null);
                   try {
-                    await apiSetSteamHideGame(hide);
+                    await apiUnlinkSteam();
+                    setSteamId(null);
                   } catch (err: any) {
-                    setSteamError(err.message || "Failed to update");
-                    setSteamHideGame(!hide);
+                    setSteamError(err.message || "Failed to unlink Steam");
+                  } finally {
+                    setSteamLoading(false);
                   }
                 }}
-                className="h-3.5 w-3.5 accent-blue-500"
-              />
-              <span className="text-xs text-muted-foreground">Hide currently playing game from others</span>
-            </label>
-            <Button
-              onClick={async () => {
-                setSteamLoading(true);
-                setSteamError(null);
-                try {
-                  await apiUnlinkSteam();
-                  setSteamId(null);
-                } catch (err: any) {
-                  setSteamError(err.message || "Failed to unlink Steam");
-                } finally {
-                  setSteamLoading(false);
-                }
-              }}
-              disabled={steamLoading}
-              variant="outline"
-              className="w-full"
-            >
-              {steamLoading ? "Unlinking..." : "Unlink Steam Account"}
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Link your Steam account to show your currently playing game to other members.
-            </p>
-            <Button
-              onClick={async () => {
-                setSteamLoading(true);
-                setSteamError(null);
-                try {
-                  const { url } = await apiGetSteamLinkUrl();
-                  window.location.href = url;
-                } catch (err: any) {
-                  setSteamError(err.message || "Failed to get Steam link URL");
-                  setSteamLoading(false);
-                }
-              }}
-              disabled={steamLoading}
-              variant="outline"
-              className="w-full"
-            >
-              {steamLoading ? "Redirecting..." : "Link Steam Account"}
-            </Button>
-          </div>
-        )}
-      </div>
+                disabled={steamLoading}
+                variant="outline"
+                className="w-full"
+              >
+                {steamLoading ? "Unlinking..." : "Unlink Steam Account"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Link your Steam account to show your currently playing game to other members.
+              </p>
+              <Button
+                onClick={async () => {
+                  setSteamLoading(true);
+                  setSteamError(null);
+                  try {
+                    const { url } = await apiGetSteamLinkUrl();
+                    window.location.href = url;
+                  } catch (err: any) {
+                    setSteamError(err.message || "Failed to get Steam link URL");
+                    setSteamLoading(false);
+                  }
+                }}
+                disabled={steamLoading}
+                variant="outline"
+                className="w-full"
+              >
+                {steamLoading ? "Redirecting..." : "Link Steam Account"}
+              </Button>
+            </div>
+          )}
+        </SettingsSection>
+      </SettingsGroup>
 
-      {/* Active Sessions */}
-      <div className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-semibold">Active Sessions</h3>
-        {sessionsLoading ? (
-          <p className="text-xs text-muted-foreground">Loading sessions...</p>
-        ) : sessions.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No active sessions found.</p>
-        ) : (
-          <div className="space-y-2">
-            {sessions.map((s, i) => (
-              <div key={s.session_id || i} className="rounded-md border px-3 py-2 text-xs space-y-0.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 space-y-0.5">
-                    <div className="font-medium text-foreground truncate">{s.user_agent || "Unknown browser"}</div>
-                    <div className="text-muted-foreground">{s.ip_address || "Unknown IP"}</div>
-                    <div className="text-muted-foreground">
-                      {s.created_at ? new Date(s.created_at).toLocaleString() : "Unknown time"}
-                    </div>
-                  </div>
-                  {s.session_id && (
-                    <button
-                      onClick={async () => {
-                        try {
-                          await apiRevokeSession(s.session_id);
-                          setSessions((prev) => prev.filter((x) => x.session_id !== s.session_id));
-                        } catch {}
-                      }}
-                      className="shrink-0 text-muted-foreground hover:text-destructive transition-colors mt-0.5"
-                      title="Log out this session"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                        <polyline points="16 17 21 12 16 7"/>
-                        <line x1="21" y1="12" x2="9" y2="12"/>
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Delete Account */}
-      <div className="space-y-3 border-t pt-4">
-        <h3 className="text-sm font-semibold text-destructive">Danger Zone</h3>
-        <p className="text-xs text-muted-foreground">
-          Permanently delete your account. This action cannot be undone.
-        </p>
+      <SettingsSection
+        title="Delete Account"
+        hint="Permanently deletes your account. This cannot be undone."
+        tone="danger"
+      >
         {!confirmDelete ? (
           <Button
             onClick={() => setConfirmDelete(true)}
@@ -2094,29 +2178,51 @@ export function UserProfileDialog({
             </div>
           </div>
         )}
-      </div>
+      </SettingsSection>
     </div>
   );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn(
-        "transition-all duration-200 p-0 overflow-hidden flex flex-col max-h-[90vh]",
-        isSelf && activeTab === "files" ? "sm:max-w-[820px]" : "sm:max-w-[560px]"
-      )}>
+      <DialogContent
+        className={cn(
+          "transition-all duration-200 p-0 overflow-hidden flex flex-col max-h-[90vh]",
+          isSelf && activeTab === "files" ? "sm:max-w-[820px]" : "sm:max-w-[560px]"
+        )}
+        style={profileWashStyle(theme, "modal")}
+      >
         <DialogHeader className="sr-only">
           <DialogTitle>User Profile</DialogTitle>
         </DialogHeader>
         {isSelf ? (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col min-h-0 flex-1">
             <TabsContent value="profile" className="mt-0 overflow-y-auto">{profileContent}</TabsContent>
+            <TabsContent value="appearance" className="mt-0 overflow-y-auto">{appearanceContent}</TabsContent>
+            <TabsContent value="device" className="mt-0 overflow-y-auto">{deviceContent}</TabsContent>
             <TabsContent value="files" className="mt-0 px-5 pb-5 overflow-y-auto">{filesContent}</TabsContent>
             <TabsContent value="account" className="mt-0 overflow-y-auto">{accountContent}</TabsContent>
-            <div className="px-5 pb-4 border-t pt-3 shrink-0">
+            {/* One save bar for the whole dialog rather than a button per tab:
+                the fields that wait on Save are spread over two tabs, and a
+                button on one of them would leave the other's edits looking
+                unsaved. It only appears once there is something to save. */}
+            {hasChanges && (
+              <div className="flex items-center gap-2 border-t px-5 py-3 shrink-0">
+                <p className="ui-hint flex-1">Unsaved changes</p>
+                <Button variant="ghost" size="sm" onClick={handleReset} disabled={uploading}>
+                  Reset
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={uploading}>
+                  {uploading ? "Saving..." : "Save"}
+                </Button>
+              </div>
+            )}
+            <div className={cn("px-5 pb-4 pt-3 shrink-0", !hasChanges && "border-t")}>
               <TabsList className="w-full">
-                <TabsTrigger value="profile" className="flex-1">Profile</TabsTrigger>
-                <TabsTrigger value="files" className="flex-1">My Files</TabsTrigger>
-                <TabsTrigger value="account" className="flex-1">Account</TabsTrigger>
+                <TabsTrigger value="profile" className="flex-1 text-xs">Profile</TabsTrigger>
+                <TabsTrigger value="appearance" className="flex-1 text-xs">Appearance</TabsTrigger>
+                <TabsTrigger value="device" className="flex-1 text-xs">Device</TabsTrigger>
+                <TabsTrigger value="files" className="flex-1 text-xs">Files</TabsTrigger>
+                <TabsTrigger value="account" className="flex-1 text-xs">Account</TabsTrigger>
               </TabsList>
             </div>
           </Tabs>
