@@ -2642,3 +2642,142 @@ async fn a_poll_is_only_as_visible_as_the_channel_it_was_asked_in() {
         .unwrap();
     assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn deleting_a_message_takes_its_upload_only_when_asked() {
+    // Deleting a message used to take the files it carried with it, always.
+    // A file can outlive the message that posted it — it is still the
+    // uploader's, still listed under their files, still theirs to post again —
+    // so the delete asks, and this is the two answers.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "attachalice", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Attachments",
+        None,
+        false,
+    )
+    .await;
+
+    async fn upload(client: &Client, base_url: &str, token: &str, filename: &str) -> String {
+        let form = multipart::Form::new()
+            .text("filename", filename.to_string())
+            .part(
+                "file",
+                multipart::Part::bytes(b"payload".to_vec()).file_name(filename.to_string()),
+            );
+        let response = client
+            .post(format!("{}/api/upload", base_url))
+            .header("authorization", bearer(token))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.unwrap();
+        body["url"].as_str().unwrap().to_string()
+    }
+
+    async fn post(
+        client: &Client,
+        base_url: &str,
+        token: &str,
+        room_id: &str,
+        body: &str,
+        txn: &str,
+    ) -> String {
+        let response = client
+            .put(format!(
+                "{}/_matrix/client/r0/rooms/{}/send/m.room.message/{}",
+                base_url, room_id, txn
+            ))
+            .header("authorization", bearer(token))
+            .json(&json!({"msgtype": "m.text", "body": body}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let sent: Value = response.json().await.unwrap();
+        sent["event_id"].as_str().unwrap().to_string()
+    }
+
+    async fn my_files(client: &Client, base_url: &str, token: &str) -> Vec<String> {
+        let response = client
+            .get(format!("{}/api/uploads", base_url))
+            .header("authorization", bearer(token))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: Value = response.json().await.unwrap();
+        body["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|file| file["url"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    let kept_url = upload(&client, &server.base_url, &alice_token, "kept.bin").await;
+    let purged_url = upload(&client, &server.base_url, &alice_token, "purged.bin").await;
+
+    let kept_event = post(
+        &client,
+        &server.base_url,
+        &alice_token,
+        &room_id,
+        &format!("keep this {kept_url}"),
+        "attach-txn1",
+    )
+    .await;
+    let purged_event = post(
+        &client,
+        &server.base_url,
+        &alice_token,
+        &room_id,
+        &format!("lose this {purged_url}"),
+        "attach-txn2",
+    )
+    .await;
+
+    for (event_id, delete_files, txn) in [
+        (&kept_event, "false", "attach-txn3"),
+        (&purged_event, "true", "attach-txn4"),
+    ] {
+        let redacted = client
+            .delete(format!(
+                "{}/_matrix/client/r0/rooms/{}/redact/{}/{}?delete_files={}",
+                server.base_url, room_id, event_id, txn, delete_files
+            ))
+            .header("authorization", bearer(&alice_token))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(redacted.status(), StatusCode::OK);
+    }
+
+    // The purge runs off the request path, so the file that was asked for is
+    // gone some time after the answer rather than with it.
+    let mut files = my_files(&client, &server.base_url, &alice_token).await;
+    for _ in 0..50 {
+        if !files.contains(&purged_url) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        files = my_files(&client, &server.base_url, &alice_token).await;
+    }
+
+    assert!(
+        !files.contains(&purged_url),
+        "a delete that asked for the file should not leave it behind"
+    );
+    assert!(
+        files.contains(&kept_url),
+        "a delete that declined should leave the file under My Files"
+    );
+}

@@ -463,7 +463,10 @@ export interface AppContextValue {
   sendThreadMessage: (body: string) => Promise<void>;
   setThreadName: (name: string) => Promise<void>;
   deleteThread: () => Promise<void>;
-  deleteMessage: (eventId: string) => Promise<void>;
+  /** `deleteFiles` also removes the files the message carried, when the
+   *  sender uploaded them and nothing else still refers to them. Omitted, the
+   *  server deletes them. */
+  deleteMessage: (eventId: string, deleteFiles?: boolean) => Promise<void>;
   editMessage: (eventId: string, newBody: string) => Promise<void>;
   addReaction: (eventId: string, emoji: string) => Promise<void>;
   /** Refresh the pin list for the room/channel currently open (first page). */

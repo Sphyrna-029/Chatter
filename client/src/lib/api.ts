@@ -620,10 +620,22 @@ function formatWait(secs: number): string {
   return `${Math.ceil(mins / 60)}h`;
 }
 
-export async function apiDeleteMessage(roomId: string, eventId: string) {
+/**
+ * Delete a message.
+ *
+ * `deleteFiles` says whether the files the message carried go with it. Left
+ * undefined the server decides, which is to delete them — the behaviour from
+ * before anyone was asked.
+ */
+export async function apiDeleteMessage(
+  roomId: string,
+  eventId: string,
+  deleteFiles?: boolean
+) {
   const txnId = Date.now();
+  const query = deleteFiles === undefined ? "" : `?delete_files=${deleteFiles}`;
   const res = await authenticatedFetch(
-    `/_matrix/client/r0/rooms/${roomId}/redact/${eventId}/${txnId}`,
+    `/_matrix/client/r0/rooms/${roomId}/redact/${eventId}/${txnId}${query}`,
     {
       method: "DELETE",
     }

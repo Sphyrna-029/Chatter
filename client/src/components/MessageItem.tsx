@@ -22,6 +22,7 @@ import { readProfileAccent } from "@/lib/profileTheme";
 import { IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, AUDIO_EXTENSIONS } from "@/lib/mediaTypes";
 import { reservedBox, thumbnailBox, type MediaDimensions } from "@/lib/mediaBox";
 import { can, canManageMessages } from "@/lib/permissions";
+import { attachmentFolders } from "@/lib/attachments";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -1204,6 +1205,40 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     (myRole === "owner" && senderRole !== "owner") ||
     (myRole === "moderator" && senderRole === "member");
 
+  /** Delete this message, having asked — and, when it carries files, having
+   *  asked whether those go too. The file can be wanted after the message is
+   *  not: it is the uploader's, and it is listed under their files.
+   *
+   *  What it carries is counted here rather than per render: it is a walk over
+   *  the body, and the timeline holds hundreds of these. */
+  const askToDelete = async () => {
+    // Read out of the body because that is where an attachment lives — the
+    // same rule the server applies when it purges them.
+    const attachmentCount = attachmentFolders(message.content.body).length;
+    if (attachmentCount === 0) {
+      if (await confirm({ title: "Delete this message?", confirmLabel: "Delete", destructive: true })) {
+        deleteMessage(message.event_id);
+      }
+      return;
+    }
+    const many = attachmentCount > 1;
+    const { confirmed, checked } = await confirm({
+      title: "Delete this message?",
+      confirmLabel: "Delete",
+      destructive: true,
+      checkbox: {
+        label: many
+          ? `Also delete the ${attachmentCount} uploaded files`
+          : "Also delete the uploaded file",
+        hint: `Left unticked, ${many ? "they stay" : "it stays"} ${
+          isOwn ? "under My Files" : "in the sender's files"
+        } and can be posted again.`,
+        defaultChecked: true,
+      },
+    });
+    if (confirmed) deleteMessage(message.event_id, checked);
+  };
+
   // Role color: first custom role with a color wins as fallback
   const senderRoleIds = state.memberCustomRoles[message.sender] || [];
   const senderTopRoleColor = senderRoleIds.reduce<string | undefined>((acc, rid) => {
@@ -1846,11 +1881,7 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                 size="icon"
                 className="h-7 w-7 text-destructive hover:text-destructive"
                 title="Delete"
-                onClick={async () => {
-                  if (await confirm({ title: "Delete this message?", confirmLabel: "Delete", destructive: true })) {
-                    deleteMessage(message.event_id);
-                  }
-                }}
+                onClick={askToDelete}
               >
                 <Trash2 className="h-4 w-4" />
               </Button>
@@ -1956,17 +1987,9 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
                     icon={Trash2}
                     label="Delete"
                     destructive
-                    onSelect={async () => {
+                    onSelect={() => {
                       setActionsOpen(false);
-                      if (
-                        await confirm({
-                          title: "Delete this message?",
-                          confirmLabel: "Delete",
-                          destructive: true,
-                        })
-                      ) {
-                        deleteMessage(message.event_id);
-                      }
+                      askToDelete();
                     }}
                   />
                 )}

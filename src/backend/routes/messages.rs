@@ -1,8 +1,8 @@
 use super::super::{
     audit,
     dto::{
-        EditMessageRequest, MessagesQuery, SearchQuery, SendMessageRequest, SetThreadNameRequest,
-        ThreadListQuery,
+        EditMessageRequest, MessagesQuery, RedactQuery, SearchQuery, SendMessageRequest,
+        SetThreadNameRequest, ThreadListQuery,
     },
     helpers::{
         broadcast_to_room, can_manage_messages, channel_permissions, effective_permissions,
@@ -883,6 +883,7 @@ pub(crate) async fn get_room_messages(
 pub(crate) async fn redact_message(
     State(state): State<Arc<AppState>>,
     Path((room_id, event_id, txn_id)): Path<(String, String, String)>,
+    Query(query): Query<RedactQuery>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let _ = txn_id;
@@ -949,6 +950,10 @@ pub(crate) async fn redact_message(
 
     // Read before the update below replaces it with "[deleted]" — that is the
     // only record of which files this message referred to.
+    //
+    // Whether they go with it is the caller's to say. A client that does not
+    // ask gets the behaviour that predates the question.
+    let delete_files = query.delete_files.unwrap_or(true);
     let body_before_redaction = msg
         .get_document("content")
         .ok()
@@ -1036,15 +1041,22 @@ pub(crate) async fn redact_message(
     // announces anything, so a poll deleted mid-run posts no results.
     super::polls::purge_poll(&state, &event_id).await;
 
-    // Nor should its attachments stay on disk and served. Only files the
-    // sender uploaded, and only when nothing else still refers to them —
-    // deleting a message must not break someone else's copy of the same link.
+    // Nor should its attachments stay on disk and served, when that is what
+    // was asked for. Only files the sender uploaded, and only when nothing
+    // else still refers to them — deleting a message must not break someone
+    // else's copy of the same link.
+    //
+    // Declining keeps the file: the upload was claimed when the message was
+    // sent, so the sweep for uploads nothing ever referenced passes over it,
+    // and it stays listed under the uploader's files for them to delete or
+    // post again.
     //
     // Off the request path: its result is not part of the answer, and its cost
     // is a scan for every other message that might still name the same file.
     // The body it works from was read before the update above replaced it.
     let attachments = body_before_redaction
         .as_deref()
+        .filter(|_| delete_files)
         .map(super::media::attachment_folders)
         .unwrap_or_default();
     if !attachments.is_empty() {

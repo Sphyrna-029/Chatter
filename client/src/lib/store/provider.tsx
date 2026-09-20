@@ -1200,11 +1200,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteMessage = useCallback(
-    async (eventId: string) => {
+    async (eventId: string, deleteFiles?: boolean) => {
       if (!stateRef.current.currentRoomId) return;
       // Throws unless the server actually deleted it, so what follows only
       // runs on a success.
-      await apiDeleteMessage(stateRef.current.currentRoomId, eventId);
+      await apiDeleteMessage(stateRef.current.currentRoomId, eventId, deleteFiles);
       // The broadcast tells the rest of the room, and it used to be the only
       // thing that told this client too — so the message stayed on the screen
       // of the person who had just deleted it until the socket came back with

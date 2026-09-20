@@ -102,6 +102,15 @@ pub(crate) struct MessagesQuery {
     pub(crate) showcase_pane: Option<String>, // "featured" | "community" for showcase channels
 }
 
+/// Whether deleting a message should take the files it carried with it.
+#[derive(Deserialize)]
+pub(crate) struct RedactQuery {
+    /// Absent means yes: a client that does not ask gets the behaviour that
+    /// predates the question, which is that an attachment nothing else refers
+    /// to goes when its message does.
+    pub(crate) delete_files: Option<bool>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct PinsQuery {
     pub(crate) channel_id: Option<String>,
