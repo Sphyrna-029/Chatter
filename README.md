@@ -2,8 +2,6 @@
 
 A lightweight, performant, self-hosted chat application built with Rust. Chatter implements real-time messaging, voice chat, and screen sharing.
 
-Development is moving fast — features are offered as-is with no guarantee of stability.
-
 ![Chatter screenshot](Screenshot_20260211_110841-1.png)
 
 ---
@@ -14,6 +12,7 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Real-Time Messaging
 - Voice Chat
 - Multi Screen Sharing (requires HTTPS)
+- Stream clipping
 - File Sharing
 - Steam Integration
 - Forums
@@ -35,9 +34,9 @@ Development is moving fast — features are offered as-is with no guarantee of s
 - Synced Drafts and Video Resume Across Devices
 - Per-Room Sound Packs and Entrance Sounds
 - Rate Limiting and Per-Channel Slow Mode
-- Active Threads in the Channel List
+- Chat threads
 - Moderation Audit Log
-- Full Server Backup Export
+- Server backups
 - GIF Search (requires Klipy API key)
 - Server Admin Dashboard
 
@@ -213,10 +212,9 @@ The first registered user is automatically promoted to server admin. Admins have
 
 ## Notes
 
-- Data is persisted in a named Docker volume (`mongo_data`). Deleting the volume deletes all data.
-- If behind Cloudflare's free plan, the maximum file upload size is 100 MB (Chatter does not currently chunk uploads).
+- Data is persisted in a named Docker volume (`mongo_data`).
 - WebRTC (voice, screen share) requires HTTPS — it will not work over plain HTTP.
-
+- Screenshare audio is currently not supported (this is a browser limitation). To be fixed with native clients in the future. 
 ---
 
 ## License
