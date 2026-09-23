@@ -72,6 +72,7 @@ fn format_bytes_short(bytes: u64) -> String {
 
 /// Post-process uploaded video files for browser compatibility:
 /// - MKV/AVI/WMV → remux to MP4 (copies video, transcodes audio to AAC)
+/// - MP4/MOV with a picture no browser decodes → re-encode to MP4
 /// - MP4/MOV → apply faststart (move moov atom to front for instant playback)
 ///
 /// Returns the (possibly new) file path and filename if the file was converted.
@@ -102,6 +103,30 @@ async fn postprocess_video(path: &str, filename: &str) -> (String, String) {
         return (path.to_string(), filename.to_string());
     }
 
+    // An MP4 or MOV is already a container browsers open, which is how these
+    // used to skip every check: a phone or camera file holding 10-bit or
+    // 4:2:2 H.264, or MPEG-4 Part 2, was only ever faststarted, and then drew
+    // nothing. The ladder's copy rungs skip themselves for such a picture, so
+    // this is a re-encode.
+    if matches!(ext.as_str(), "mp4" | "mov" | "m4v") && !video_is_web_playable(path).await {
+        let new_path = format!(
+            "{}.mp4",
+            path.rsplit_once('.').map(|(b, _)| b).unwrap_or(path)
+        );
+        if let Some(tmp_path) = remux_with_subs(path).await {
+            let _ = tokio::fs::rename(&tmp_path, &new_path).await;
+            if new_path != path {
+                let _ = tokio::fs::remove_file(path).await;
+            }
+            let _ = tokio::fs::write(format!("{}.faststarted", new_path), b"").await;
+            mark_video_playable(&new_path).await;
+            let new_filename = new_filename_from_path(&new_path);
+            return (new_path, new_filename);
+        }
+        // The re-encode failed: keep the original, which may still play
+        // somewhere, rather than lose the upload.
+    }
+
     // For MP4/MOV, apply faststart
     if matches!(ext.as_str(), "mp4" | "mov" | "m4v") {
         faststart_in_place(path, &ext).await;
@@ -124,6 +149,34 @@ async fn media_job_lock(path: &str) -> Arc<tokio::sync::Mutex<()>> {
         .entry(path.to_string())
         .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
         .clone()
+}
+
+/// Media work that has already failed on a file, since this process started.
+///
+/// The serving path does its conversions on demand, and a video element opens
+/// a source with several range requests and makes more on every seek. A job
+/// that failed left nothing behind to say so, so every one of those requests
+/// ran it again — a whole conversion ladder, or four ffmpeg passes hunting for
+/// a thumbnail — before a byte went out, and a file ffmpeg could not handle
+/// was one that never started playing.
+///
+/// Held in memory rather than as a marker on disk on purpose: a restart is
+/// when a better ladder arrives, and it should get its chance at the files the
+/// last one could not do.
+static GAVE_UP: LazyLock<std::sync::Mutex<HashSet<String>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
+
+fn gave_up(job: &str, path: &str) -> bool {
+    GAVE_UP
+        .lock()
+        .map(|set| set.contains(&format!("{job}:{path}")))
+        .unwrap_or(false)
+}
+
+fn give_up(job: &str, path: &str) {
+    if let Ok(mut set) = GAVE_UP.lock() {
+        set.insert(format!("{job}:{path}"));
+    }
 }
 
 /// Move the moov atom to the front of an MP4/MOV so the browser can start
@@ -170,6 +223,39 @@ async fn faststart_in_place(path: &str, ext: &str) -> bool {
     let _ = tokio::fs::remove_file(&tmp).await;
     let _ = tokio::fs::write(&marker, b"").await;
     ok
+}
+
+/// Re-encode, in place, an MP4 or MOV already on disk whose picture no
+/// browser can draw — the uploads made before the upload path checked.
+///
+/// Converted under the file's own name, since that name is what every message
+/// holding it links to. For a `.mov` that means MP4 bytes under a MOV name,
+/// which is harmless: they are the same family of container and browsers
+/// sniff the contents. The result is already faststarted, and is marked so
+/// before the lock is released for `faststart_in_place` to find.
+async fn repair_unplayable_in_place(path: &str) {
+    if gave_up("convert", path) || !needs_replayable_mp4(path).await {
+        return;
+    }
+    let job = media_job_lock(path).await;
+    let _guard = job.lock().await;
+    // Re-asked under the lock, so requests that queued behind the conversion
+    // serve its result rather than repeat it.
+    if gave_up("convert", path) || !needs_replayable_mp4(path).await {
+        return;
+    }
+    match remux_with_subs(path).await {
+        Some(tmp_path) => {
+            if tokio::fs::rename(&tmp_path, path).await.is_ok() {
+                let _ = tokio::fs::write(format!("{}.faststarted", path), b"").await;
+                mark_video_playable(path).await;
+            } else {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                give_up("convert", path);
+            }
+        }
+        None => give_up("convert", path),
+    }
 }
 
 fn new_filename_from_path(path: &str) -> String {
@@ -283,8 +369,13 @@ async fn video_codec(path: &str) -> Option<String> {
 /// The check behind it is an ffprobe, and the place that asks runs on every
 /// range request — a video being scrubbed produces dozens. The answer cannot
 /// change without the file being rewritten, so it is worth writing down.
+///
+/// Named `.web-playable` rather than the `.playable` it used to be: that
+/// marker was written by a check that looked only at the codec name, so it
+/// vouches for 10-bit and 4:4:4 H.264 that no browser draws. A new name makes
+/// every file be asked again under the check as it is now.
 fn playable_marker(mp4: &str) -> String {
-    format!("{mp4}.playable")
+    format!("{mp4}.web-playable")
 }
 
 async fn mark_video_playable(mp4: &str) {
@@ -310,6 +401,59 @@ async fn needs_replayable_mp4(mp4: &str) -> bool {
     true
 }
 
+/// The pixel format of a file's first video stream, as ffprobe names it.
+async fn video_pix_fmt(path: &str) -> Option<String> {
+    let output = tokio::process::Command::new("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=pix_fmt",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            path,
+        ])
+        .output()
+        .await
+        .ok()?;
+    let name = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
+}
+
+/// Whether a codec's picture, in this pixel format, is one browsers decode.
+///
+/// The codec name alone does not answer it. `h264` covers High 10 and the
+/// 4:2:2 and 4:4:4 profiles, and browsers decode none of them: Chrome's H.264
+/// support stops at 8-bit 4:2:0, and so does every hardware decoder Safari
+/// and Firefox lean on. 10-bit H.264 is what most anime rips are, and 4:4:4 is
+/// what a screen recorder set to "lossless" writes — both copied straight into
+/// an MP4 and then never played. HEVC is held to 4:2:0 for the same reason
+/// (the range-extension profiles decode nowhere) but keeps 10-bit, since that
+/// is what an iPhone records HDR in. VP9 and AV1 are decoded in software where
+/// they are decoded at all, and take what they are given.
+///
+/// A pixel format ffprobe cannot name is treated as playable, like a codec it
+/// cannot name.
+fn picture_is_web_playable(codec: &str, pix_fmt: Option<&str>) -> bool {
+    if !WEB_PLAYABLE_VIDEO_CODECS.contains(&codec) {
+        return false;
+    }
+    let Some(pix_fmt) = pix_fmt else {
+        return true;
+    };
+    match codec {
+        "h264" => matches!(pix_fmt, "yuv420p" | "yuvj420p" | "nv12"),
+        "hevc" => pix_fmt.contains("420") || pix_fmt.starts_with("nv12") || pix_fmt == "p010le",
+        _ => true,
+    }
+}
+
 /// Whether a converted file's picture will actually draw in a browser.
 ///
 /// A codec ffprobe cannot name is treated as playable: the check exists to
@@ -317,7 +461,7 @@ async fn needs_replayable_mp4(mp4: &str) -> bool {
 /// would re-encode every file whose probe hiccupped.
 async fn video_is_web_playable(path: &str) -> bool {
     match video_codec(path).await {
-        Some(codec) => WEB_PLAYABLE_VIDEO_CODECS.contains(&codec.as_str()),
+        Some(codec) => picture_is_web_playable(&codec, video_pix_fmt(path).await.as_deref()),
         None => true,
     }
 }
@@ -554,6 +698,9 @@ async fn generate_thumbnail(path: &str) {
     if tokio::fs::metadata(&thumb_path).await.is_ok() {
         return; // already exists
     }
+    if gave_up("thumbnail", path) {
+        return;
+    }
     let _job = metrics::media_job();
 
     async fn run_ffmpeg(args: &[String]) -> bool {
@@ -640,6 +787,13 @@ async fn generate_thumbnail(path: &str) {
         .collect();
         let _ = run_ffmpeg(&fallback).await;
     }
+
+    // Audio in a video container, or a picture ffmpeg cannot decode: nothing
+    // to cut a frame from, and asking again on the next request will not
+    // change that.
+    if tokio::fs::metadata(&thumb_path).await.is_err() {
+        give_up("thumbnail", path);
+    }
 }
 
 /// True when the image's mean luma (YAVG) is below ~8/255, i.e. it is
@@ -704,19 +858,23 @@ impl SubtitleStream {
 /// layout in Blu-ray rips — so `-map 0:s:N` then names the wrong stream,
 /// or fails outright and leaves the video with no captions at all.
 async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
-    let Ok(output) = tokio::process::Command::new("ffprobe")
+    probe_subtitles_checked(video).await.unwrap_or_default()
+}
+
+/// `probe_subtitles`, but `None` when the file could not be read at all —
+/// which is a different answer from "it has no subtitles", and only the
+/// second one is worth remembering.
+async fn probe_subtitles_checked(video: &str) -> Option<Vec<SubtitleStream>> {
+    let output = tokio::process::Command::new("ffprobe")
         .args(["-v", "error", "-show_streams", "-of", "json", video])
         .output()
         .await
-    else {
-        return Vec::new();
-    };
-    let Ok(value) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return Vec::new();
-    };
-    let Some(streams) = value.get("streams").and_then(|s| s.as_array()) else {
-        return Vec::new();
-    };
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = serde_json::from_slice::<Value>(&output.stdout).ok()?;
+    let streams = value.get("streams").and_then(|s| s.as_array())?;
     let mut result: Vec<SubtitleStream> = Vec::new();
     let mut subtitle_ordinal = 0usize;
     for s in streams {
@@ -746,7 +904,7 @@ async fn probe_subtitles(video: &str) -> Vec<SubtitleStream> {
                 .to_string(),
         });
     }
-    result
+    Some(result)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -777,7 +935,7 @@ fn track_label(position: usize, language: &str, title: &str) -> String {
 /// frontend can offer a selectable caption list. The `@subs` / `@N` suffix
 /// convention (mirroring `.thumb.jpg` / `.preview.webp`) is a stable suffix
 /// even when filenames contain spaces or extra dots. No-op when the manifest
-/// already exists or the file has no extractable subtitle streams.
+/// already exists; a file with no extractable streams gets an empty one.
 async fn extract_subtitles(video: &str) {
     let manifest_path = format!("{}@subs.json", video);
     if tokio::fs::metadata(&manifest_path).await.is_ok() {
@@ -788,14 +946,13 @@ async fn extract_subtitles(video: &str) {
     // Only the text streams can become WebVTT, and `position` counts this
     // filtered list — it is the track's place in the caption menu, not its
     // ordinal in the file, which skips numbers wherever a bitmap track sits.
-    let streams: Vec<SubtitleStream> = probe_subtitles(video)
-        .await
+    let Some(streams) = probe_subtitles_checked(video).await else {
+        return; // could not read the file; ask again next time
+    };
+    let streams: Vec<SubtitleStream> = streams
         .into_iter()
         .filter(SubtitleStream::is_text)
         .collect();
-    if streams.is_empty() {
-        return;
-    }
 
     let mut tracks: Vec<SubtitleTrack> = Vec::new();
     for (position, stream) in streams.iter().enumerate() {
@@ -832,9 +989,12 @@ async fn extract_subtitles(video: &str) {
         });
     }
 
-    if tracks.is_empty() {
-        return;
-    }
+    // Written even when it lists nothing. This runs on every range request
+    // for a video, and the manifest is what makes it a no-op: when a file
+    // with no captions got none, most videos paid a full ffprobe before
+    // every request they served — every seek, and every thumbnail on screen,
+    // since the player asks for the manifest the moment it mounts. The client
+    // already reads an empty list as "no captions".
     let manifest = json!({ "tracks": tracks });
     if let Ok(text) = serde_json::to_string(&manifest) {
         let _ = tokio::fs::write(&manifest_path, text).await;
@@ -3099,6 +3259,7 @@ async fn remove_upload_record(state: &Arc<AppState>, record: &UploadRecord) {
             "@subs.json",
             ".faststarted",
             ".playable",
+            ".web-playable",
         ] {
             let _ = tokio::fs::remove_file(format!("{}{suffix}", record.disk_path)).await;
         }
@@ -3600,6 +3761,7 @@ pub(crate) async fn upload_guard(
             && matches!(ext.as_str(), "mp4" | "mov" | "m4v")
             && tokio::fs::metadata(&disk_path).await.is_ok()
         {
+            repair_unplayable_in_place(&disk_path).await;
             faststart_in_place(&disk_path, &ext).await;
         }
 
@@ -3642,8 +3804,13 @@ pub(crate) async fn upload_guard(
         // The answer is remembered in a marker beside the MP4, because this
         // runs on every range request and a scrubbed video makes a great many
         // of them — one probe per file, not one per request.
-        let needs_redo = needs_replayable_mp4(&mp4_disk).await;
-        if (tokio::fs::metadata(&mp4_disk).await.is_err() || needs_redo)
+        //
+        // A conversion that failed is not retried until the server restarts:
+        // every range request would otherwise run the whole ladder again,
+        // queued one behind another on the lock, and the video never starts.
+        let needs_redo = !gave_up("convert", &disk_path) && needs_replayable_mp4(&mp4_disk).await;
+        if !gave_up("convert", &disk_path)
+            && (tokio::fs::metadata(&mp4_disk).await.is_err() || needs_redo)
             && tokio::fs::metadata(&disk_path).await.is_ok()
         {
             let job = media_job_lock(&disk_path).await;
@@ -3663,6 +3830,8 @@ pub(crate) async fn upload_guard(
                     // drop its `.preview.webp` and re-record its dimensions,
                     // bookkeeping with nothing to fix at the end of it.
                     mark_video_playable(&mp4_disk).await;
+                } else {
+                    give_up("convert", &disk_path);
                 }
             }
         }
@@ -4038,6 +4207,10 @@ mod tests {
                 "libx264",
                 "-preset",
                 "ultrafast",
+                // libx264 keeps testsrc's RGB as 4:4:4 unless told otherwise,
+                // and that is a picture browsers cannot decode.
+                "-pix_fmt",
+                "yuv420p",
                 "-c:a",
                 "ac3",
                 "-c:s",
@@ -4364,6 +4537,188 @@ mod tests {
         assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"msmpeg4v3"));
         assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"mjpeg"));
         assert!(!WEB_PLAYABLE_VIDEO_CODECS.contains(&"wmv2"));
+    }
+
+    #[test]
+    fn the_codec_name_alone_does_not_make_a_picture_playable() {
+        // What phones and ordinary encoders write.
+        assert!(picture_is_web_playable("h264", Some("yuv420p")));
+        assert!(picture_is_web_playable("hevc", Some("yuv420p10le")));
+        assert!(picture_is_web_playable("vp9", Some("yuv420p10le")));
+        // Called h264, decoded by no browser: anime rips, and screen
+        // recorders set to lossless.
+        assert!(!picture_is_web_playable("h264", Some("yuv420p10le")));
+        assert!(!picture_is_web_playable("h264", Some("yuv422p")));
+        assert!(!picture_is_web_playable("h264", Some("yuv444p")));
+        assert!(!picture_is_web_playable("hevc", Some("yuv422p10le")));
+        // Not knowing is not a reason to re-encode.
+        assert!(picture_is_web_playable("h264", None));
+        assert!(!picture_is_web_playable("mpeg4", None));
+    }
+
+    /// A short video in the given container, codec and pixel format.
+    async fn build_video_fixture(name: &str, codec: &str, pix_fmt: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("chatter_pix_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let path = dir.join(name).to_string_lossy().to_string();
+        for suffix in [
+            "",
+            ".cc.tmp",
+            ".faststarted",
+            ".web-playable",
+            "@subs.json",
+            ".thumb.jpg",
+        ] {
+            let _ = tokio::fs::remove_file(format!("{path}{suffix}")).await;
+        }
+        let status = tokio::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=duration=2:size=160x120:rate=10",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=2",
+                "-c:v",
+                codec,
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                pix_fmt,
+                "-c:a",
+                "aac",
+                "-shortest",
+                &path,
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .expect("ffmpeg should be available");
+        assert!(status.success(), "fixture {name} build failed");
+        path
+    }
+
+    #[tokio::test]
+    async fn a_ten_bit_h264_mkv_is_re_encoded_rather_than_copied() {
+        let mkv = build_video_fixture("hi10.mkv", "libx264", "yuv420p10le").await;
+        assert_eq!(video_codec(&mkv).await.as_deref(), Some("h264"));
+
+        let tmp = remux_with_subs(&mkv).await.expect("the re-encode rung");
+        assert_eq!(video_pix_fmt(&tmp).await.as_deref(), Some("yuv420p"));
+        assert!(has_audio(&tmp).await, "audio lost");
+
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = tokio::fs::remove_file(&mkv).await;
+    }
+
+    #[tokio::test]
+    async fn an_uploaded_mp4_no_browser_can_draw_is_re_encoded() {
+        // MP4 uploads used to be faststarted and nothing else, so one holding
+        // a picture no browser decodes was served as it arrived.
+        let mp4 = build_video_fixture("screen.mp4", "libx264", "yuv444p").await;
+
+        let (path, filename) = postprocess_video(&mp4, "screen.mp4").await;
+        assert_eq!(path, mp4, "an .mp4 keeps its name");
+        assert_eq!(filename, "screen.mp4");
+        assert!(
+            tokio::fs::metadata(&path).await.is_ok(),
+            "the result was deleted"
+        );
+        assert_eq!(video_pix_fmt(&path).await.as_deref(), Some("yuv420p"));
+        assert!(has_audio(&path).await, "audio lost");
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn an_uploaded_mov_no_browser_can_draw_becomes_an_mp4() {
+        let mov = build_video_fixture("camera.mov", "libx264", "yuv422p").await;
+        let mp4 = mov.replace(".mov", ".mp4");
+        let _ = tokio::fs::remove_file(&mp4).await;
+
+        let (path, filename) = postprocess_video(&mov, "camera.mov").await;
+        assert_eq!(path, mp4);
+        assert_eq!(filename, "camera.mp4");
+        assert!(
+            tokio::fs::metadata(&mov).await.is_err(),
+            "original left behind"
+        );
+        assert_eq!(video_pix_fmt(&path).await.as_deref(), Some("yuv420p"));
+
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn a_served_mp4_no_browser_can_draw_is_repaired_once() {
+        // The uploads from before the check: repaired the first time anyone
+        // plays one, then left alone.
+        let mp4 = build_video_fixture("old.mp4", "libx264", "yuv420p10le").await;
+
+        repair_unplayable_in_place(&mp4).await;
+        assert_eq!(video_pix_fmt(&mp4).await.as_deref(), Some("yuv420p"));
+        assert!(tokio::fs::metadata(format!("{mp4}.web-playable"))
+            .await
+            .is_ok());
+        assert!(tokio::fs::metadata(format!("{mp4}.faststarted"))
+            .await
+            .is_ok());
+
+        for suffix in ["", ".web-playable", ".faststarted"] {
+            let _ = tokio::fs::remove_file(format!("{mp4}{suffix}")).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn a_video_with_no_captions_is_only_probed_once() {
+        // Regression: no manifest was written for a file with nothing to
+        // extract, so every range request for it ran an ffprobe first.
+        let mp4 = build_video_fixture("nocc.mp4", "libx264", "yuv420p").await;
+        let manifest = format!("{mp4}@subs.json");
+
+        extract_subtitles(&mp4).await;
+        let value: Value =
+            serde_json::from_slice(&tokio::fs::read(&manifest).await.expect("no manifest"))
+                .unwrap();
+        assert_eq!(value["tracks"].as_array().map(Vec::len), Some(0));
+
+        let _ = tokio::fs::remove_file(&manifest).await;
+        let _ = tokio::fs::remove_file(&mp4).await;
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_file_is_not_recorded_as_having_no_captions() {
+        let dir = std::env::temp_dir().join(format!("chatter_pix_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let junk = dir.join("junk.mp4").to_string_lossy().to_string();
+        tokio::fs::write(&junk, b"not a video").await.unwrap();
+
+        extract_subtitles(&junk).await;
+        assert!(tokio::fs::metadata(format!("{junk}@subs.json"))
+            .await
+            .is_err());
+
+        let _ = tokio::fs::remove_file(&junk).await;
+    }
+
+    #[tokio::test]
+    async fn a_thumbnail_that_cannot_be_cut_is_not_retried() {
+        let dir = std::env::temp_dir().join(format!("chatter_pix_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&dir).await;
+        let junk = dir.join("nothumb.mp4").to_string_lossy().to_string();
+        tokio::fs::write(&junk, b"not a video").await.unwrap();
+
+        assert!(!gave_up("thumbnail", &junk));
+        generate_thumbnail(&junk).await;
+        assert!(
+            gave_up("thumbnail", &junk),
+            "the next request would try again"
+        );
+
+        let _ = tokio::fs::remove_file(&junk).await;
     }
 
     #[tokio::test]
