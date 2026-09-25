@@ -499,7 +499,13 @@ export function createWsMessageHandler(
       // Only track pins for the channel currently on screen; switching channels
       // reloads the list from the server.
       const cur = stateRef.current;
-      if (
+      if (msg.thread_id) {
+        // A thread's pins are its own list, never its channel's. Only the
+        // open thread's list is held; opening another one fetches its own.
+        if (msg.room_id === cur.currentRoomId && msg.message) {
+          dispatch({ type: "ADD_THREAD_PIN", payload: msg.message });
+        }
+      } else if (
         msg.room_id === cur.currentRoomId &&
         (msg.channel_id || "") === (cur.currentChannelId || "") &&
         msg.message

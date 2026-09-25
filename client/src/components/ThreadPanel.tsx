@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2, Smile } from "lucide-react";
+import { ArrowLeft, Pencil, Check, X, Paperclip, Trash2, Smile, Pin, ChevronDown, ChevronRight, Reply } from "lucide-react";
 import { useAppContext } from "@/lib/store";
 import { apiSendThreadMessage } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,8 @@ import { MessageItem } from "./MessageItem";
 import { displayUserId } from "@/lib/utils";
 import { AuthAvatarImage } from "./AuthImage";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { EmojiPicker } from "./EmojiPicker";
+import { EmojiPicker, renderInlineEmojis } from "./EmojiPicker";
+import { canManageMessages } from "@/lib/permissions";
 import {
   Popover,
   PopoverContent,
@@ -23,11 +24,12 @@ import { scrollBehavior } from "@/lib/theme/display";
 
 export function ThreadPanel() {
   const confirm = useConfirm();
-  const { state, closeThread, setThreadName, deleteThread } = useAppContext();
+  const { state, dispatch, closeThread, setThreadName, deleteThread, unpinMessage } = useAppContext();
   const [body, setBody] = useState("");
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
+  const [pinsOpen, setPinsOpen] = useState(false);
   const {
     files: pendingFiles,
     add: addStagedFile,
@@ -40,7 +42,7 @@ export function ThreadPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { threadRootMessage, threadMessages, userPresence, currentRoomId, roomInfoMap } = state;
+  const { threadRootMessage, threadMessages, threadReplyingTo, threadPins, userPresence, currentRoomId, roomInfoMap } = state;
 
   /** What to call this thread when its send is watched from somewhere else. */
   const threadLabel = threadRootMessage?.thread_name
@@ -59,6 +61,15 @@ export function ThreadPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: scrollBehavior() });
   }, [threadMessages.length]);
 
+  // Starting a reply is aiming the composer, so put the cursor there.
+  useEffect(() => {
+    if (threadReplyingTo) inputRef.current?.focus();
+  }, [threadReplyingTo]);
+
+  const cancelReply = useCallback(() => {
+    dispatch({ type: "SET_THREAD_REPLYING_TO", payload: null });
+  }, [dispatch]);
+
   const handleSend = useCallback(async () => {
     const trimmed = body.trim();
     if (!trimmed && pendingFiles.length === 0) return;
@@ -68,7 +79,9 @@ export function ThreadPanel() {
     const roomId = state.currentRoomId;
     const threadEventId = state.activeThreadEventId;
     if (!roomId || !threadEventId) return;
+    const replyTo = state.threadReplyingTo?.event_id;
     setBody("");
+    cancelReply();
 
     // A reply with files is handed to the outgoing queue whole, so closing the
     // thread — or the panel — does not take the upload with it.
@@ -76,7 +89,7 @@ export function ThreadPanel() {
       const files = pendingFiles.map((staged) => staged.file);
       clearPendingFiles();
       enqueueOutgoing({
-        target: { kind: "thread", roomId, threadEventId },
+        target: { kind: "thread", roomId, threadEventId, replyTo },
         label: threadLabel,
         body: trimmed,
         files,
@@ -85,14 +98,19 @@ export function ThreadPanel() {
     }
 
     try {
-      await apiSendThreadMessage(roomId, threadEventId, trimmed);
+      await apiSendThreadMessage(roomId, threadEventId, trimmed, replyTo);
     } catch {
       // Matching the previous behaviour: a refused reply is reported by the
       // request layer, and the thread stays open.
     }
-  }, [body, pendingFiles, clearPendingFiles, state.currentRoomId, state.activeThreadEventId, threadLabel]);
+  }, [body, pendingFiles, clearPendingFiles, state.currentRoomId, state.activeThreadEventId, state.threadReplyingTo, threadLabel, cancelReply]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape" && threadReplyingTo) {
+      e.preventDefault();
+      cancelReply();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -232,6 +250,24 @@ export function ThreadPanel() {
   };
 
   const replyCount = threadMessages.length;
+  const mayUnpin = canManageMessages(state);
+
+  /** Bring a pinned reply into view in the thread, the way a reply quote does. */
+  const jumpToPin = (eventId: string) => {
+    const el = document.querySelector(`[data-thread-panel] [data-event-id="${eventId}"]`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+    el.classList.add("bg-accent");
+    setTimeout(() => el.classList.remove("bg-accent"), 1500);
+  };
+
+  const handleUnpin = async (eventId: string) => {
+    try {
+      await unpinMessage(eventId);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to unpin");
+    }
+  };
 
   return (
     <div
@@ -336,10 +372,65 @@ export function ThreadPanel() {
         </div>
       )}
 
+      {/* Pinned replies — collapsed by default so a thread with pins still
+          opens on the conversation, not on a list about it. */}
+      {threadPins.length > 0 && (
+        <div className="border-b border-border/50 shrink-0">
+          <button
+            type="button"
+            onClick={() => setPinsOpen((open) => !open)}
+            className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left hover:bg-accent/50 transition-colors"
+          >
+            {pinsOpen ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <Pin className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="ui-heading">Pinned</span>
+            <span className="ui-meta">{threadPins.length}</span>
+          </button>
+          {pinsOpen && (
+            <div className="max-h-48 overflow-y-auto pb-1">
+              {threadPins.map((pin) => {
+                const pinSender = userPresence[pin.sender]?.displayName || displayUserId(pin.sender);
+                return (
+                  <div key={pin.event_id} className="group/pin flex items-start gap-2 px-3 py-1 hover:bg-accent/50">
+                    <button
+                      type="button"
+                      onClick={() => jumpToPin(pin.event_id)}
+                      className="min-w-0 flex-1 text-left"
+                      title="Jump to message"
+                    >
+                      <span className="text-xs font-semibold">{pinSender}</span>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {pin.content.spoiler
+                          ? <span className="italic">Spoiler message</span>
+                          : renderInlineEmojis(pin.content.body)}
+                      </p>
+                    </button>
+                    {mayUnpin && (
+                      <button
+                        type="button"
+                        onClick={() => handleUnpin(pin.event_id)}
+                        title="Unpin message"
+                        className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground can-hover:opacity-0 can-hover:group-hover/pin:opacity-100"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Scrollable content */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0" data-thread-panel>
         {/* Root message */}
-        <div className="px-3 pt-3 pb-2 border-b border-border/50">
+        <div className="px-3 pt-3 pb-2 border-b border-border/50" data-event-id={threadRootMessage.event_id}>
           <div className="flex items-start gap-2">
             <Avatar className="h-7 w-7 mt-0.5 shrink-0">
               <AuthAvatarImage src={rootAvatarUrl} />
@@ -356,6 +447,16 @@ export function ThreadPanel() {
                 {threadRootMessage.content.body}
               </p>
             </div>
+            {/* The root is part of the conversation, so it can be answered
+                like any reply. */}
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SET_THREAD_REPLYING_TO", payload: threadRootMessage })}
+              title="Reply"
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              <Reply className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
 
@@ -398,6 +499,27 @@ export function ThreadPanel() {
           )}
           here={here}
         />
+        {threadReplyingTo && (
+          <div className="mb-2 border-l-2 border-l-primary px-3 py-2 bg-accent/30 rounded-sm flex items-center justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-primary">
+                Replying to {userPresence[threadReplyingTo.sender]?.displayName || displayUserId(threadReplyingTo.sender)}
+              </p>
+              <p className="text-xs text-muted-foreground truncate inline-flex items-center gap-0.5">
+                {threadReplyingTo.content.spoiler
+                  ? <span className="italic">Spoiler message</span>
+                  : renderInlineEmojis(threadReplyingTo.content.body)}
+              </p>
+            </div>
+            <button
+              className="text-muted-foreground hover:text-foreground flex-shrink-0 cursor-pointer"
+              onClick={cancelReply}
+              title="Cancel reply"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <PendingAttachments files={pendingFiles} onRemove={removePendingFile} />
         <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
           <input

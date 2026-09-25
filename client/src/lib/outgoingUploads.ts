@@ -34,7 +34,7 @@ export type OutgoingTarget =
       replyTo?: string;
       spoiler?: boolean;
     }
-  | { kind: "thread"; roomId: string; threadEventId: string };
+  | { kind: "thread"; roomId: string; threadEventId: string; replyTo?: string };
 
 export interface OutgoingFile {
   id: string;
@@ -188,7 +188,12 @@ async function deliver(target: OutgoingTarget, body: string, urls: string[]) {
   if (target.kind === "thread") {
     const parts = [body, ...urls].filter(Boolean);
     if (parts.length > 0) {
-      await apiSendThreadMessage(target.roomId, target.threadEventId, parts.join("\n"));
+      await apiSendThreadMessage(
+        target.roomId,
+        target.threadEventId,
+        parts.join("\n"),
+        target.replyTo,
+      );
     }
     return;
   }

@@ -1281,13 +1281,17 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
 
   // Pins are tracked per channel, so only trust the pin state for a message that
   // belongs to the channel currently open (search results can come from others).
+  // A thread reply carries no channel; its pins are the open thread's list.
   const inCurrentChannel = (message.channel_id || "") === (state.currentChannelId || "");
+  const inOpenThread = inThread && message.thread_id === state.activeThreadEventId;
+  const pinList = inThread ? state.threadPins : state.pinnedMessages;
+  const pinScope = inThread ? inOpenThread : inCurrentChannel;
   const isPinned =
     !hidePinControls &&
-    inCurrentChannel &&
-    state.pinnedMessages.some((m) => m.event_id === message.event_id);
+    pinScope &&
+    pinList.some((m) => m.event_id === message.event_id);
   const canPin =
-    !hidePinControls && inCurrentChannel && !inThread && !isSystem && canManageMessages(state);
+    !hidePinControls && pinScope && !isSystem && canManageMessages(state);
   const canReact = !disableReactions && can(state, "add_reactions");
   // Anyone who can see a message can link to it — a link grants nothing, since
   // following one is checked against the follower's own access. What is
@@ -1440,13 +1444,20 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
     }
   };
 
+  // A thread has its own composer, so a reply made in one is aimed there.
   const handleReply = () => {
-    dispatch({ type: "SET_REPLYING_TO", payload: message });
+    dispatch({
+      type: inThread ? "SET_THREAD_REPLYING_TO" : "SET_REPLYING_TO",
+      payload: message,
+    });
   };
 
   const scrollToParent = () => {
     if (!message.content.in_reply_to) return;
-    const el = document.querySelector(`[data-event-id="${message.content.in_reply_to}"]`);
+    // Look in the view this message is drawn in: with a thread open, the
+    // channel's copy of a message can be in the document too, hidden.
+    const scope = (inThread && document.querySelector("[data-thread-panel]")) || document;
+    const el = scope.querySelector(`[data-event-id="${message.content.in_reply_to}"]`);
     if (el) {
       el.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
       el.classList.add("bg-accent");

@@ -15,7 +15,8 @@ use super::super::{
     push::{spawn_message_push, MessageNotification},
     ratelimit,
     state::{
-        AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, RoomRecord, ThreadRecord, UserRecord,
+        AppState, ChannelRecord, DmRoomRecord, DmStreakRecord, PinRecord, RoomRecord, ThreadRecord,
+        UserRecord,
     },
 };
 use axum::{
@@ -39,6 +40,33 @@ fn body_has_attachment(body: &str) -> bool {
 
 /// The name a notification should call this sender, falling back to the user id
 /// when no display name has been set.
+/// Copy what a reply shows of the message it answers — who wrote it and the
+/// start of what they said — onto the reply's content, so the quote draws
+/// without a second fetch. Answers the parent's sender, or `None` when no
+/// message matches `parent_filter`.
+async fn quote_parent(
+    state: &AppState,
+    parent_filter: mongodb::bson::Document,
+    content: &mut Value,
+) -> Option<String> {
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let parent = msg_coll.find_one(parent_filter).await.ok().flatten()?;
+    let sender = parent.get_str("sender").ok().map(String::from);
+    if let Some(ref sender) = sender {
+        content["reply_to_sender"] = json!(sender);
+    }
+    if let Ok(parent_content) = parent.get_document("content") {
+        if let Ok(body) = parent_content.get_str("body") {
+            let preview: String = body.chars().take(100).collect();
+            content["reply_to_body"] = json!(preview);
+        }
+        if parent_content.get_bool("spoiler").unwrap_or(false) {
+            content["reply_to_spoiler"] = json!(true);
+        }
+    }
+    Some(sender.unwrap_or_default())
+}
+
 pub(crate) async fn display_name_for(state: &AppState, user_id: &str) -> String {
     let name = state
         .db
@@ -368,27 +396,8 @@ pub(crate) async fn send_message(
     let mut reply_to_user: Option<String> = None;
     if let Some(ref parent_event_id) = req.in_reply_to {
         content["in_reply_to"] = json!(parent_event_id);
-
-        // Look up parent message from MongoDB
-        let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
-        if let Ok(Some(parent)) = msg_coll
-            .find_one(doc! { "event_id": parent_event_id, "room_id": &room_id })
-            .await
-        {
-            if let Ok(sender) = parent.get_str("sender") {
-                content["reply_to_sender"] = json!(sender);
-                reply_to_user = Some(sender.to_string());
-            }
-            if let Ok(parent_content) = parent.get_document("content") {
-                if let Ok(body) = parent_content.get_str("body") {
-                    let preview: String = body.chars().take(100).collect();
-                    content["reply_to_body"] = json!(preview);
-                }
-                if parent_content.get_bool("spoiler").unwrap_or(false) {
-                    content["reply_to_spoiler"] = json!(true);
-                }
-            }
-        }
+        let parent_filter = doc! { "event_id": parent_event_id, "room_id": &room_id };
+        reply_to_user = quote_parent(&state, parent_filter, &mut content).await;
     }
 
     let mut event = json!({
@@ -1490,10 +1499,31 @@ pub(crate) async fn send_thread_message(
     // Kept before `content` takes ownership: the push payload needs it too.
     let req_body = req.body.clone();
 
-    let content = json!({
+    let mut content = json!({
         "msgtype": req.msgtype.unwrap_or_else(|| "m.text".to_string()),
         "body": req.body
     });
+
+    // A reply inside a thread answers something *in that thread* — its root or
+    // another reply. Anything else is dropped rather than quoted: a quote of a
+    // message from elsewhere would carry its text into a conversation whose
+    // readers were never shown it.
+    let mut reply_to_user: Option<String> = None;
+    if let Some(ref parent_event_id) = req.in_reply_to {
+        let parent_filter = doc! {
+            "event_id": parent_event_id,
+            "room_id": &room_id,
+            "redacted": { "$ne": true },
+            "$or": [
+                { "event_id": &thread_event_id },
+                { "thread_id": &thread_event_id },
+            ],
+        };
+        reply_to_user = quote_parent(&state, parent_filter, &mut content).await;
+        if reply_to_user.is_some() {
+            content["in_reply_to"] = json!(parent_event_id);
+        }
+    }
 
     let event = json!({
         "type": "m.room.message",
@@ -1532,6 +1562,17 @@ pub(crate) async fn send_thread_message(
         .collect();
 
     let mut added_participants: Vec<String> = Vec::new();
+    // Whoever is being answered is in the conversation now, the same as
+    // someone named — it is how the root's author hears a reply to them.
+    if let Some(replied) = reply_to_user.filter(|u| !u.is_empty() && u != &user_id) {
+        let _ = msg_coll
+            .update_one(
+                doc! { "event_id": &thread_event_id, "room_id": &room_id },
+                doc! { "$addToSet": { "thread_participants": &replied } },
+            )
+            .await;
+        added_participants.push(replied);
+    }
     if !mentioned_names.is_empty() {
         // Look up room members and match by username portion of user_id
         let rm = state.room_members.read().await;
@@ -1566,7 +1607,11 @@ pub(crate) async fn send_thread_message(
                 )
                 .await;
 
-            added_participants = new_participant_ids;
+            for id in new_participant_ids {
+                if !added_participants.contains(&id) {
+                    added_participants.push(id);
+                }
+            }
         }
     }
 
@@ -1790,6 +1835,15 @@ pub(crate) async fn delete_thread(
             "Only the thread owner or a moderator/owner can delete this thread",
         ));
     }
+
+    // Pins on the replies go with them; the root's own pin, if it had one,
+    // goes the usual way so open channel pin lists drop it too.
+    let _ = state
+        .db
+        .collection::<PinRecord>("pins")
+        .delete_many(doc! { "room_id": &room_id, "thread_id": &thread_event_id })
+        .await;
+    super::pins::remove_pin_for_event(&state, &room_id, &thread_event_id).await;
 
     // Delete all thread reply messages
     let _ = msg_coll

@@ -704,10 +704,13 @@ export async function apiGetPins(
   roomId: string,
   channelId?: string,
   offset = 0,
-  limit = PAGE_SIZE
+  limit = PAGE_SIZE,
+  /** List this thread's pins instead of the channel's. */
+  threadId?: string,
 ): Promise<Page<PinnedMessage>> {
   const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
-  if (channelId) params.set("channel_id", channelId);
+  if (threadId) params.set("thread_id", threadId);
+  else if (channelId) params.set("channel_id", channelId);
   const res = await authenticatedFetch(
     `/api/rooms/${encodeURIComponent(roomId)}/pins?${params}`
   );
@@ -796,13 +799,20 @@ export async function apiDeleteThread(roomId: string, threadEventId: string) {
   if (!res.ok) throw new Error("Failed to delete thread");
 }
 
-export async function apiSendThreadMessage(roomId: string, threadEventId: string, body: string) {
+export async function apiSendThreadMessage(
+  roomId: string,
+  threadEventId: string,
+  body: string,
+  inReplyTo?: string,
+) {
   const txnId = Date.now();
+  const payload: Record<string, string> = { msgtype: "m.text", body };
+  if (inReplyTo) payload.in_reply_to = inReplyTo;
   const res = await authenticatedFetch(
     `/api/rooms/${roomId}/threads/${threadEventId}/${txnId}`,
     {
       method: "PUT",
-      body: JSON.stringify({ msgtype: "m.text", body }),
+      body: JSON.stringify(payload),
     }
   );
   if (!res.ok) throw new Error("Failed to send thread message");

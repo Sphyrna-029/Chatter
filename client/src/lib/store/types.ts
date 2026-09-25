@@ -154,6 +154,11 @@ export interface AppState {
   activeThreadEventId: string | null;
   threadRootMessage: MatrixMessage | null;
   threadMessages: MatrixMessage[];
+  /** The message the thread composer is answering — separate from
+   *  `replyingTo`, which belongs to the channel composer. */
+  threadReplyingTo: MatrixMessage | null;
+  /** Pinned replies of the open thread, newest pin first. */
+  threadPins: PinnedMessage[];
   // Typing
   typingUsers: string[];
   // Connection
@@ -279,6 +284,9 @@ export type Action =
   | { type: "APPEND_SEARCH_RESULTS"; payload: { results: MatrixMessage[]; hasMore: boolean; nextOffset: number } }
   | { type: "OPEN_THREAD"; payload: { eventId: string; root: MatrixMessage; messages: MatrixMessage[] } }
   | { type: "CLOSE_THREAD" }
+  | { type: "SET_THREAD_REPLYING_TO"; payload: MatrixMessage | null }
+  | { type: "SET_THREAD_PINS"; payload: { threadId: string; pins: PinnedMessage[] } }
+  | { type: "ADD_THREAD_PIN"; payload: PinnedMessage }
   | { type: "ADD_THREAD_MESSAGE"; payload: MatrixMessage }
   | { type: "UPDATE_THREAD_REPLY_COUNT"; payload: { eventId: string; count: number } }
   | { type: "ADD_THREAD_PARTICIPANTS"; payload: { eventId: string; participants: string[] } }
@@ -421,6 +429,8 @@ export const initialState: AppState = {
   activeThreadEventId: null,
   threadRootMessage: null,
   threadMessages: [],
+  threadReplyingTo: null,
+  threadPins: [],
   typingUsers: [],
   wsConnected: false,
   sessionRestore: "pending",

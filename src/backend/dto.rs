@@ -114,6 +114,9 @@ pub(crate) struct RedactQuery {
 #[derive(Deserialize)]
 pub(crate) struct PinsQuery {
     pub(crate) channel_id: Option<String>,
+    /// List one thread's pins instead of a channel's. The thread's channel is
+    /// read from its root, so `channel_id` is ignored alongside it.
+    pub(crate) thread_id: Option<String>,
     pub(crate) limit: Option<i64>,
     pub(crate) offset: Option<u64>,
 }

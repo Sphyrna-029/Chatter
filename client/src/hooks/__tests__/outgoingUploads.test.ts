@@ -74,8 +74,30 @@ describe("a send that carries files", () => {
     });
     await settled();
 
-    expect(apiSendThreadMessage).toHaveBeenCalledWith("!r:x", "$root", "/external/f/one.png");
+    expect(apiSendThreadMessage).toHaveBeenCalledWith(
+      "!r:x",
+      "$root",
+      "/external/f/one.png",
+      undefined,
+    );
     expect(apiSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps the message a thread reply answers", async () => {
+    enqueueOutgoing({
+      target: { kind: "thread", roomId: "!r:x", threadEventId: "$root", replyTo: "$parent" },
+      label: "a thread",
+      body: "this one",
+      files: [fileNamed("clip.mp4")],
+    });
+    await settled();
+
+    expect(apiSendThreadMessage).toHaveBeenCalledWith(
+      "!r:x",
+      "$root",
+      "this one\n/external/f/one.png",
+      "$parent",
+    );
   });
 
   it("sends files with no text as one message each", async () => {

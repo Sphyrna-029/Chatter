@@ -20,10 +20,12 @@ use std::sync::Arc;
 /// scannable and the list query cheap.
 const MAX_PINS_PER_CHANNEL: u64 = 50;
 
-/// GET /api/rooms/{room_id}/pins?channel_id=&limit=&offset=
+/// GET /api/rooms/{room_id}/pins?channel_id=&thread_id=&limit=&offset=
 ///
 /// Returns a page of the pinned messages of one channel (or of the room's
-/// channel-less feed when `channel_id` is omitted), newest pin first.
+/// channel-less feed when `channel_id` is omitted), newest pin first. With
+/// `thread_id` it is that thread's pins instead — a thread's pins are its own
+/// list and never appear in its channel's.
 pub(crate) async fn list_pins(
     State(state): State<Arc<AppState>>,
     Path(room_id): Path<String>,
@@ -37,8 +39,18 @@ pub(crate) async fn list_pins(
 
     require_membership(&state, &room_id, &user_id).await?;
 
-    let channel_id = query.channel_id.unwrap_or_default();
-    require_channel_access(&state, &room_id, &user_id, &channel_id).await?;
+    let filter = match query.thread_id.filter(|t| !t.is_empty()) {
+        Some(thread_id) => {
+            let channel_id = thread_channel(&state, &room_id, &thread_id).await?;
+            require_channel_access(&state, &room_id, &user_id, &channel_id).await?;
+            doc! { "room_id": &room_id, "thread_id": thread_id }
+        }
+        None => {
+            let channel_id = query.channel_id.unwrap_or_default();
+            require_channel_access(&state, &room_id, &user_id, &channel_id).await?;
+            doc! { "room_id": &room_id, "channel_id": channel_id, "thread_id": null }
+        }
+    };
 
     let limit = query
         .limit
@@ -49,7 +61,7 @@ pub(crate) async fn list_pins(
     let pins_coll = state.db.collection::<PinRecord>("pins");
     // One past the page tells us whether another page exists without a count.
     let mut cursor = pins_coll
-        .find(doc! { "room_id": &room_id, "channel_id": &channel_id })
+        .find(filter)
         .sort(doc! { "pinned_at": -1 })
         .skip(offset)
         .limit(limit + 1)
@@ -115,14 +127,13 @@ pub(crate) async fn pin_message(
             "Cannot pin a deleted message",
         ));
     }
-    if message.get_str("thread_id").is_ok() {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
-            "Cannot pin a thread reply",
-        ));
-    }
-
-    let channel_id = message.get_str("channel_id").unwrap_or("").to_string();
+    // A thread reply carries no channel of its own; it is as visible as the
+    // channel its root sits in, and its pin is listed in the thread.
+    let thread_id = message.get_str("thread_id").ok().map(String::from);
+    let channel_id = match thread_id {
+        Some(ref thread_id) => thread_channel(&state, &room_id, thread_id).await?,
+        None => message.get_str("channel_id").unwrap_or("").to_string(),
+    };
     require_channel_access(&state, &room_id, &user_id, &channel_id).await?;
 
     let pins_coll = state.db.collection::<PinRecord>("pins");
@@ -139,15 +150,20 @@ pub(crate) async fn pin_message(
         ));
     }
 
-    let pin_count = pins_coll
-        .count_documents(doc! { "room_id": &room_id, "channel_id": &channel_id })
-        .await
-        .unwrap_or(0);
-    if pin_count >= MAX_PINS_PER_CHANNEL {
-        return Err(error_response(
-            StatusCode::BAD_REQUEST,
+    // A thread's pins and its channel's are separate lists with separate caps.
+    let (count_filter, full_message) = match thread_id {
+        Some(ref thread_id) => (
+            doc! { "room_id": &room_id, "thread_id": thread_id },
+            "This thread already has the maximum of 50 pinned messages",
+        ),
+        None => (
+            doc! { "room_id": &room_id, "channel_id": &channel_id, "thread_id": null },
             "This channel already has the maximum of 50 pinned messages",
-        ));
+        ),
+    };
+    let pin_count = pins_coll.count_documents(count_filter).await.unwrap_or(0);
+    if pin_count >= MAX_PINS_PER_CHANNEL {
+        return Err(error_response(StatusCode::BAD_REQUEST, full_message));
     }
 
     let pinned_at = now_millis();
@@ -157,6 +173,7 @@ pub(crate) async fn pin_message(
         channel_id: channel_id.clone(),
         pinned_by: user_id.clone(),
         pinned_at,
+        thread_id: thread_id.clone(),
     };
     pins_coll
         .insert_one(&record)
@@ -169,6 +186,7 @@ pub(crate) async fn pin_message(
         "type": "m.room.pinned",
         "room_id": room_id,
         "channel_id": channel_id,
+        "thread_id": thread_id,
         "event_id": event_id,
         "pinned_by": user_id,
         "pinned_at": pinned_at,
@@ -215,6 +233,7 @@ pub(crate) async fn unpin_message(
         "type": "m.room.unpinned",
         "room_id": room_id,
         "channel_id": record.channel_id,
+        "thread_id": record.thread_id,
         "event_id": event_id,
         "sender": user_id,
     });
@@ -242,6 +261,7 @@ pub(crate) async fn remove_pin_for_event(state: &AppState, room_id: &str, event_
         "type": "m.room.unpinned",
         "room_id": room_id,
         "channel_id": record.channel_id,
+        "thread_id": record.thread_id,
         "event_id": event_id,
     });
     broadcast_to_room(state, room_id, &event).await;
@@ -275,6 +295,23 @@ async fn require_membership(
         ));
     }
     Ok(())
+}
+
+/// The channel a thread hangs in, read from its root message. A thread whose
+/// root is gone has nowhere to list pins, so it is not found.
+async fn thread_channel(
+    state: &AppState,
+    room_id: &str,
+    thread_id: &str,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
+    let root = msg_coll
+        .find_one(doc! { "event_id": thread_id, "room_id": room_id })
+        .await
+        .ok()
+        .flatten()
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Thread not found"))?;
+    Ok(root.get_str("channel_id").unwrap_or("").to_string())
 }
 
 /// A pin must not leak a message out of a channel the caller cannot see.

@@ -108,6 +108,7 @@ import {
   apiGetAllMemberRoles,
   apiAssignMemberRoles,
   type RoomInfo,
+  PAGE_SIZE,
 } from "../api";
 import { clearMediaBlobs } from "@/lib/mediaBlobs";
 import { clearMessagePreviews } from "@/lib/messageLinks";
@@ -1442,11 +1443,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const openThread = useCallback(async (eventId: string) => {
     if (!stateRef.current.currentRoomId) return;
-    const data = await apiGetThreadMessages(stateRef.current.currentRoomId, eventId);
+    const roomId = stateRef.current.currentRoomId;
+    const data = await apiGetThreadMessages(roomId, eventId);
     dispatch({
       type: "OPEN_THREAD",
       payload: { eventId, root: data.root, messages: data.messages },
     });
+    // Pins are a nicety on top of the thread, so a refusal leaves it open
+    // with none rather than failing the open. SET_THREAD_PINS drops an answer
+    // for a thread that has since been swapped for another.
+    try {
+      const page = await apiGetPins(roomId, undefined, 0, PAGE_SIZE, eventId);
+      dispatch({ type: "SET_THREAD_PINS", payload: { threadId: eventId, pins: page.items } });
+    } catch {
+      // Nothing to show.
+    }
   }, []);
 
   const closeThread = useCallback(() => {
@@ -1456,7 +1467,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendThreadMessage = useCallback(async (body: string) => {
     const cur = stateRef.current;
     if (!cur.currentRoomId || !cur.activeThreadEventId) return;
-    await apiSendThreadMessage(cur.currentRoomId, cur.activeThreadEventId, body);
+    await apiSendThreadMessage(
+      cur.currentRoomId,
+      cur.activeThreadEventId,
+      body,
+      cur.threadReplyingTo?.event_id,
+    );
+    dispatch({ type: "SET_THREAD_REPLYING_TO", payload: null });
   }, []);
 
   const setThreadName = useCallback(async (name: string) => {

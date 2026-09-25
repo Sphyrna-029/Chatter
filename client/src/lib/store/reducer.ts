@@ -159,6 +159,8 @@ export function reducer(state: AppState, action: Action): AppState {
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
+        threadReplyingTo: null,
+        threadPins: [],
       });
     }
     case "SET_MESSAGES":
@@ -211,6 +213,9 @@ export function reducer(state: AppState, action: Action): AppState {
         threadMessages: wasThreadRoot
           ? []
           : state.threadMessages.filter((m) => m.event_id !== goneId),
+        threadPins: wasThreadRoot ? [] : state.threadPins.filter((m) => m.event_id !== goneId),
+        threadReplyingTo:
+          wasThreadRoot || state.threadReplyingTo?.event_id === goneId ? null : state.threadReplyingTo,
       };
     }
     case "SET_ROOM_EVENTS":
@@ -284,9 +289,16 @@ export function reducer(state: AppState, action: Action): AppState {
         pinsNextOffset: state.pinsNextOffset + 1,
       };
     case "REMOVE_PINNED_MESSAGE": {
-      if (!state.pinnedMessages.some((m) => m.event_id === action.payload)) return state;
+      // An unpin names the message, not the list it was in.
+      const threadPins = state.threadPins.some((m) => m.event_id === action.payload)
+        ? state.threadPins.filter((m) => m.event_id !== action.payload)
+        : state.threadPins;
+      if (!state.pinnedMessages.some((m) => m.event_id === action.payload)) {
+        return threadPins === state.threadPins ? state : { ...state, threadPins };
+      }
       return {
         ...state,
+        threadPins,
         pinnedMessages: state.pinnedMessages.filter((m) => m.event_id !== action.payload),
         pinsNextOffset: Math.max(0, state.pinsNextOffset - 1),
       };
@@ -300,6 +312,18 @@ export function reducer(state: AppState, action: Action): AppState {
             : m
         ),
         pinnedMessages: state.pinnedMessages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
+            : m
+        ),
+        // A thread reply is edited like any message, and is on screen in the
+        // thread and possibly its pin list.
+        threadMessages: state.threadMessages.map((m) =>
+          m.event_id === action.payload.eventId
+            ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
+            : m
+        ),
+        threadPins: state.threadPins.map((m) =>
           m.event_id === action.payload.eventId
             ? { ...m, edited: true, content: { ...m.content, body: action.payload.newBody, ...(action.payload.newEmbeds !== undefined ? { embeds: action.payload.newEmbeds } : {}) } }
             : m
@@ -501,19 +525,37 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "SET_REPLYING_TO":
       return { ...state, replyingTo: action.payload };
+    // A thread has its own composer, so it has its own reply target. Sharing
+    // `replyingTo` put the quote on the channel's composer instead, and sent a
+    // thread message's quote into the channel.
+    case "SET_THREAD_REPLYING_TO":
+      return { ...state, threadReplyingTo: action.payload };
     case "OPEN_THREAD":
       return {
         ...state,
         activeThreadEventId: action.payload.eventId,
         threadRootMessage: action.payload.root,
         threadMessages: action.payload.messages,
+        threadReplyingTo: null,
+        // Filled by the pin fetch that follows; a previous thread's pins must
+        // not show under this one while it is in flight.
+        threadPins: [],
       };
+    case "SET_THREAD_PINS":
+      if (state.activeThreadEventId !== action.payload.threadId) return state;
+      return { ...state, threadPins: action.payload.pins };
+    case "ADD_THREAD_PIN":
+      if (state.activeThreadEventId !== action.payload.thread_id) return state;
+      if (state.threadPins.some((m) => m.event_id === action.payload.event_id)) return state;
+      return { ...state, threadPins: [action.payload, ...state.threadPins] };
     case "CLOSE_THREAD":
       return {
         ...state,
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
+        threadReplyingTo: null,
+        threadPins: [],
       };
     case "ADD_THREAD_MESSAGE":
       if (state.activeThreadEventId !== action.payload.thread_id) return state;
@@ -568,6 +610,8 @@ export function reducer(state: AppState, action: Action): AppState {
         activeThreadEventId: state.activeThreadEventId === action.payload ? null : state.activeThreadEventId,
         threadRootMessage: state.threadRootMessage?.event_id === action.payload ? null : state.threadRootMessage,
         threadMessages: state.activeThreadEventId === action.payload ? [] : state.threadMessages,
+        threadPins: state.activeThreadEventId === action.payload ? [] : state.threadPins,
+        threadReplyingTo: state.activeThreadEventId === action.payload ? null : state.threadReplyingTo,
       };
     case "SET_THREAD_NAME":
       return {
@@ -830,6 +874,8 @@ export function reducer(state: AppState, action: Action): AppState {
         activeThreadEventId: null,
         threadRootMessage: null,
         threadMessages: [],
+        threadReplyingTo: null,
+        threadPins: [],
       };
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;

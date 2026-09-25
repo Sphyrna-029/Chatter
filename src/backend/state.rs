@@ -462,6 +462,12 @@ pub(crate) struct PinRecord {
     pub(crate) channel_id: String,
     pub(crate) pinned_by: String,
     pub(crate) pinned_at: i64,
+    /// Set when the pinned message is a thread reply: the pin belongs to that
+    /// thread's list, not its channel's. `channel_id` still names the thread's
+    /// channel, so deleting the channel takes the pin with it. Absent on every
+    /// channel pin, which is what `thread_id: null` in a query matches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) thread_id: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

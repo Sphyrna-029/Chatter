@@ -79,3 +79,86 @@ describe("leaving a thread", () => {
     expect(opened.threadMessages).toHaveLength(1);
   });
 });
+
+describe("replying inside a thread", () => {
+  it("aims the thread's composer, not the channel's", () => {
+    const next = reducer(inAThread(), {
+      type: "SET_THREAD_REPLYING_TO",
+      payload: message("$reply"),
+    });
+
+    expect(next.threadReplyingTo?.event_id).toBe("$reply");
+    expect(next.replyingTo).toBeNull();
+  });
+
+  it("forgets the target when the thread closes", () => {
+    const replying = reducer(inAThread(), {
+      type: "SET_THREAD_REPLYING_TO",
+      payload: message("$reply"),
+    });
+    const closed = reducer(replying, { type: "CLOSE_THREAD" });
+
+    expect(closed.threadReplyingTo).toBeNull();
+  });
+
+  it("drops the target when the message it answers is deleted", () => {
+    const replying = reducer(inAThread(), {
+      type: "SET_THREAD_REPLYING_TO",
+      payload: message("$reply"),
+    });
+    const next = reducer(replying, { type: "REDACT_MESSAGE", payload: "$reply" });
+
+    expect(next.threadReplyingTo).toBeNull();
+  });
+});
+
+describe("a thread's pins", () => {
+  const pin = (eventId: string, threadId = "$root") => ({
+    ...message(eventId),
+    thread_id: threadId,
+    pinned_by: "@mod:localhost",
+    pinned_at: 2,
+  });
+
+  it("lands in the thread, never in the channel's list", () => {
+    const next = reducer(inAThread(), { type: "ADD_THREAD_PIN", payload: pin("$reply") });
+
+    expect(next.threadPins.map((m) => m.event_id)).toEqual(["$reply"]);
+    expect(next.pinnedMessages).toEqual([]);
+  });
+
+  it("ignores a pin from a thread that is not open", () => {
+    const next = reducer(inAThread(), {
+      type: "ADD_THREAD_PIN",
+      payload: pin("$elsewhere", "$otherroot"),
+    });
+
+    expect(next.threadPins).toEqual([]);
+  });
+
+  it("ignores a late answer for a thread that was swapped out", () => {
+    const next = reducer(inAThread(), {
+      type: "SET_THREAD_PINS",
+      payload: { threadId: "$otherroot", pins: [pin("$x", "$otherroot")] },
+    });
+
+    expect(next.threadPins).toEqual([]);
+  });
+
+  it("is unpinned by the same event as a channel pin", () => {
+    const pinned = reducer(inAThread(), { type: "ADD_THREAD_PIN", payload: pin("$reply") });
+    const next = reducer(pinned, { type: "REMOVE_PINNED_MESSAGE", payload: "$reply" });
+
+    expect(next.threadPins).toEqual([]);
+  });
+
+  it("starts empty for each thread opened", () => {
+    const pinned = reducer(inAThread(), { type: "ADD_THREAD_PIN", payload: pin("$reply") });
+    const next = reducer(pinned, {
+      type: "OPEN_THREAD",
+      payload: { eventId: "$newroot", root: message("$newroot"), messages: [] },
+    });
+
+    expect(next.threadPins).toEqual([]);
+  });
+});
