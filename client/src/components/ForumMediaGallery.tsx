@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import * as VisuallyHidden from "@radix-ui/react-visually-hidden";
 import { AuthImage } from "@/components/AuthImage";
 import { cn } from "@/lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, File as FileIcon } from "lucide-react";
+import { FileAttachmentCard } from "@/components/FileAttachmentCard";
+import { forumAttachmentKind } from "@/lib/mediaTypes";
 
 /**
  * The pictures and clips on a forum post or comment, laid out by how many there
@@ -18,15 +20,20 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
  * grid: a thumbnail that plays when you tap it is a different thing from one
  * that opens a lightbox, and putting both behind the same square makes neither
  * obvious.
+ *
+ * Any other file comes last, as a download card — the same one the chat draws —
+ * since there is nothing to look at until it is opened.
  */
 export function ForumMediaGallery({
   images,
   videos = [],
+  files = [],
   className,
   compact,
 }: {
   images: string[];
   videos?: string[];
+  files?: string[];
   className?: string;
   /** Sized for a comment rather than the body of a post. */
   compact?: boolean;
@@ -52,7 +59,7 @@ export function ForumMediaGallery({
     return () => window.removeEventListener("keydown", onKey);
   }, [lightboxAt, step]);
 
-  if (images.length === 0 && videos.length === 0) return null;
+  if (images.length === 0 && videos.length === 0 && files.length === 0) return null;
 
   const single = images.length === 1;
 
@@ -101,6 +108,10 @@ export function ForumMediaGallery({
 
       {videos.map((url) => (
         <ForumVideo key={url} url={url} compact={compact} />
+      ))}
+
+      {files.map((url) => (
+        <FileAttachmentCard key={url} url={url} />
       ))}
 
       <Dialog
@@ -167,5 +178,54 @@ function ForumVideo({ url, compact }: { url: string; compact?: boolean }) {
         compact ? "max-w-xs max-h-48" : "max-w-3xl max-h-[28rem]",
       )}
     />
+  );
+}
+
+/**
+ * A file staged on a forum composer, before it is sent: a still for a picture,
+ * a muted frame for a clip, and the file's name for anything else. The box is
+ * the caller's, since the post dialog and the comment bar size them apart.
+ */
+export function StagedForumFile({
+  file,
+  previewUrl,
+  className,
+}: {
+  file: File;
+  previewUrl: string | null;
+  className: string;
+}) {
+  const kind = forumAttachmentKind(file);
+  if (kind === "video" && previewUrl) {
+    return (
+      <video
+        src={previewUrl}
+        muted
+        playsInline
+        preload="metadata"
+        className={cn(className, "rounded-md border border-border bg-black object-cover")}
+      />
+    );
+  }
+  if (kind === "image" && previewUrl) {
+    return (
+      <img
+        src={previewUrl}
+        alt={file.name}
+        className={cn(className, "rounded-md border border-border object-cover")}
+      />
+    );
+  }
+  return (
+    <div
+      title={file.name}
+      className={cn(
+        className,
+        "flex flex-col items-center justify-center gap-1 overflow-hidden rounded-md border border-border bg-secondary/30 p-1",
+      )}
+    >
+      <FileIcon className="h-5 w-5 shrink-0 text-muted-foreground" />
+      <span className="w-full truncate text-center text-3xs text-muted-foreground">{file.name}</span>
+    </div>
   );
 }

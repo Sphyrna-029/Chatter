@@ -2110,6 +2110,8 @@ export interface ForumPost {
   /** Absent on posts written before one could carry more than a single image. */
   image_urls?: string[];
   video_urls?: string[];
+  /** Attachments that are neither pictures nor clips. */
+  file_urls?: string[];
   created_at: number;
   comment_count: number;
   last_activity: number;
@@ -2128,6 +2130,7 @@ export interface ForumComment {
   image_url: string;
   image_urls?: string[];
   video_urls?: string[];
+  file_urls?: string[];
   /** The comment this replies to; empty or absent means it answers the post. */
   parent_id?: string;
   /** A comment that was deleted but still holds replies under it. Its author
@@ -2154,12 +2157,18 @@ export function forumVideos(item: { video_urls?: string[] }): string[] {
   return item.video_urls ?? [];
 }
 
+/** The other attachments on a post or comment, drawn as downloads. */
+export function forumFiles(item: { file_urls?: string[] }): string[] {
+  return item.file_urls ?? [];
+}
+
 export async function apiCreateForumPost(
   roomId: string,
   title: string,
   body: string,
   imageUrls: string[] = [],
   videoUrls: string[] = [],
+  fileUrls: string[] = [],
 ) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts`, {
     method: "POST",
@@ -2171,6 +2180,7 @@ export async function apiCreateForumPost(
       image_url: imageUrls[0],
       image_urls: imageUrls,
       video_urls: videoUrls,
+      file_urls: fileUrls,
     }),
   });
   if (!res.ok) {
@@ -2213,6 +2223,7 @@ export async function apiCreateForumComment(
   imageUrls: string[] = [],
   videoUrls: string[] = [],
   parentId?: string,
+  fileUrls: string[] = [],
 ) {
   const res = await authenticatedFetch(`/api/forum/${roomId}/posts/${postId}/comments`, {
     method: "POST",
@@ -2221,6 +2232,7 @@ export async function apiCreateForumComment(
       image_url: imageUrls[0],
       image_urls: imageUrls,
       video_urls: videoUrls,
+      file_urls: fileUrls,
       parent_id: parentId,
     }),
   });

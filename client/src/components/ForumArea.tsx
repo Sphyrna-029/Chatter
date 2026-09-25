@@ -29,9 +29,10 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, ImagePlus, X, Search, ArrowUpDown } from "lucide-react";
+import { Plus, Paperclip, X, Search, ArrowUpDown } from "lucide-react";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
-import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
+import { sortForumAttachments } from "@/lib/mediaTypes";
+import { StagedForumFile } from "@/components/ForumMediaGallery";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { UploadProgressOverlay } from "./UploadProgressOverlay";
 import { cn } from "@/lib/utils";
@@ -431,10 +432,9 @@ function CreatePostDialog({
   } = usePendingFiles();
 
   const stageImages = useCallback((incoming: File[]) => {
-    const pictures = incoming.filter(isImageOrVideoFile);
-    if (pictures.length < incoming.length) {
-      toast.error("A post takes images and videos only");
-    }
+    // Any file goes: pictures and clips land in the gallery, the rest are
+    // downloads.
+    const pictures = incoming;
     // Checked here rather than on submit: uploads run one after another, so an
     // image the server will refuse would otherwise be found out only after the
     // ones before it had already been sent.
@@ -480,12 +480,10 @@ function CreatePostDialog({
         );
         return;
       }
-      const imageUrls: string[] = [];
-      const videoUrls: string[] = [];
-      for (const outcome of outcomes) {
-        (outcome.file.file.type.startsWith("video/") ? videoUrls : imageUrls).push(outcome.url!);
-      }
-      await apiCreateForumPost(roomId, title.trim(), body, imageUrls, videoUrls);
+      const { imageUrls, videoUrls, fileUrls } = sortForumAttachments(
+        outcomes.map((o) => ({ file: o.file.file, url: o.url! })),
+      );
+      await apiCreateForumPost(roomId, title.trim(), body, imageUrls, videoUrls, fileUrls);
       setTitle("");
       setBody("");
       clearImages();
@@ -574,7 +572,7 @@ function CreatePostDialog({
           </div>
           <div className="space-y-2">
             <Label>
-              Images and videos (Optional)
+              Attachments (Optional)
               {images.length > 0 && (
                 <span className="ml-1.5 font-normal text-muted-foreground">
                   {images.length} of {MAX_ATTACHMENTS}
@@ -584,7 +582,6 @@ function CreatePostDialog({
             <input
               ref={fileInputRef}
               type="file"
-              accept={IMAGE_AND_VIDEO_ACCEPT}
               multiple
               className="hidden"
               onChange={handleImageSelect}
@@ -593,21 +590,11 @@ function CreatePostDialog({
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
                 {images.map((pending, i) => (
                   <div key={pending.id} className="group relative">
-                    {pending.file.type.startsWith("video/") ? (
-                      <video
-                        src={pending.previewUrl ?? ""}
-                        muted
-                        playsInline
-                        preload="metadata"
-                        className="aspect-square w-full rounded-md border border-border bg-black object-cover"
-                      />
-                    ) : (
-                      <img
-                        src={pending.previewUrl ?? ""}
-                        alt={pending.file.name}
-                        className="aspect-square w-full rounded-md border border-border object-cover"
-                      />
-                    )}
+                    <StagedForumFile
+                      file={pending.file}
+                      previewUrl={pending.previewUrl}
+                      className="aspect-square w-full"
+                    />
                     <UploadProgressOverlay progress={uploadProgress[pending.id]} />
                     {!submitting && (
                       <button
@@ -629,9 +616,9 @@ function CreatePostDialog({
               disabled={imagesRemaining === 0}
               className="gap-1.5"
             >
-              <ImagePlus className="w-4 h-4" />
+              <Paperclip className="w-4 h-4" />
               {images.length === 0
-                ? "Add Images or Videos"
+                ? "Add Files"
                 : imagesRemaining === 0
                   ? `${MAX_ATTACHMENTS} files is the limit`
                   : `Add more (${imagesRemaining} left)`}

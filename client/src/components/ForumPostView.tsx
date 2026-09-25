@@ -10,6 +10,7 @@ import {
   apiAddReaction,
   forumImages,
   forumVideos,
+  forumFiles,
   type ForumPost,
   type ForumComment,
 } from "@/lib/api";
@@ -19,7 +20,7 @@ import { cn, displayUserId } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  ArrowLeft, Trash2, ImagePlus, X, Send, Pencil, Check,
+  ArrowLeft, Trash2, Paperclip, X, Send, Pencil, Check,
   CornerUpLeft, ChevronDown, ChevronRight, MessageSquare, ArrowUpDown,
 } from "lucide-react";
 import {
@@ -30,13 +31,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmojiPicker } from "@/components/EmojiPicker";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
-import { ForumMediaGallery } from "@/components/ForumMediaGallery";
+import { ForumMediaGallery, StagedForumFile } from "@/components/ForumMediaGallery";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import {
   buildCommentThread, countReplies, loadThreadOrder, storeThreadOrder,
   MAX_THREAD_INDENT, type ForumCommentNode, type ThreadOrder,
 } from "@/lib/forumThread";
-import { IMAGE_AND_VIDEO_ACCEPT, isImageOrVideoFile } from "@/lib/mediaTypes";
+import { sortForumAttachments } from "@/lib/mediaTypes";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { UploadProgressOverlay } from "@/components/UploadProgressOverlay";
 import { toast } from "sonner";
@@ -103,10 +104,9 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const { progress: uploadProgress, uploadAll, reset: resetUploadProgress } = useUploadQueue();
 
   const stageCommentImages = useCallback((incoming: File[]) => {
-    const pictures = incoming.filter(isImageOrVideoFile);
-    if (pictures.length < incoming.length) {
-      toast.error("A comment takes images and videos only");
-    }
+    // Any file goes: pictures and clips land in the gallery, the rest are
+    // downloads.
+    const pictures = incoming;
     // Checked here rather than on submit: uploads run one after another, so an
     // image the server will refuse would otherwise be found out only after the
     // ones before it had already been sent.
@@ -117,8 +117,8 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
       const mb = Math.round(limit / 1024 / 1024);
       toast.error(
         tooBig === 1
-          ? `That image is over the ${mb} MB limit`
-          : `${tooBig} images are over the ${mb} MB limit`,
+          ? `That file is over the ${mb} MB limit`
+          : `${tooBig} files are over the ${mb} MB limit`,
       );
     }
     if (small.length === 0) return;
@@ -176,7 +176,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
           }
           return prev.map((c) =>
             c.comment_id === detail.comment_id
-              ? { ...c, deleted: true, author: "", body: "", image_url: "", image_urls: [], video_urls: [] }
+              ? { ...c, deleted: true, author: "", body: "", image_url: "", image_urls: [], video_urls: [], file_urls: [] }
               : c,
           );
         });
@@ -284,13 +284,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
         );
         return;
       }
-      const imageUrls: string[] = [];
-      const videoUrls: string[] = [];
-      for (const outcome of outcomes) {
-        (outcome.file.file.type.startsWith("video/") ? videoUrls : imageUrls).push(outcome.url!);
-      }
+      const { imageUrls, videoUrls, fileUrls } = sortForumAttachments(
+        outcomes.map((o) => ({ file: o.file.file, url: o.url! })),
+      );
       // The server wants a body; a comment that is only media says so.
-      const count = imageUrls.length + videoUrls.length;
+      const count = imageUrls.length + videoUrls.length + fileUrls.length;
       const body =
         commentBody.trim() ||
         (count > 1 ? `(${count} attachments)` : count === 1 ? "(attachment)" : "");
@@ -301,6 +299,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
         imageUrls,
         videoUrls,
         replyingTo?.comment_id,
+        fileUrls,
       );
       setCommentBody("");
       clearCommentImages();
@@ -542,6 +541,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               <ForumMediaGallery
                 images={forumImages(comment)}
                 videos={forumVideos(comment)}
+                files={forumFiles(comment)}
                 className="mt-2"
                 compact
               />
@@ -657,7 +657,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             <ForumMarkdown content={post.body} className="text-base leading-relaxed" />
           )}
           {!editingPost && (
-            <ForumMediaGallery images={forumImages(post)} videos={forumVideos(post)} />
+            <ForumMediaGallery
+              images={forumImages(post)}
+              videos={forumVideos(post)}
+              files={forumFiles(post)}
+            />
           )}
 
           {/* Reactions */}
@@ -799,21 +803,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             <div className="mb-2 flex flex-wrap gap-2">
               {commentImages.map((pending, i) => (
                 <div key={pending.id} className="relative">
-                  {pending.file.type.startsWith("video/") ? (
-                    <video
-                      src={pending.previewUrl ?? ""}
-                      muted
-                      playsInline
-                      preload="metadata"
-                      className="h-16 w-16 rounded-md border border-border bg-black object-cover"
-                    />
-                  ) : (
-                    <img
-                      src={pending.previewUrl ?? ""}
-                      alt={pending.file.name}
-                      className="h-16 w-16 rounded-md border border-border object-cover"
-                    />
-                  )}
+                  <StagedForumFile
+                    file={pending.file}
+                    previewUrl={pending.previewUrl}
+                    className="h-16 w-16"
+                  />
                   <UploadProgressOverlay progress={uploadProgress[pending.id]} />
                   {!submitting && (
                     <button
@@ -832,7 +826,6 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept={IMAGE_AND_VIDEO_ACCEPT}
               multiple
               className="hidden"
               onChange={handleCommentImageSelect}
@@ -845,11 +838,11 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
               onClick={() => fileInputRef.current?.click()}
               title={
                 commentImagesRemaining > 0
-                  ? `Add images or videos (${commentImagesRemaining} of ${MAX_ATTACHMENTS} left)`
+                  ? `Add files (${commentImagesRemaining} of ${MAX_ATTACHMENTS} left)`
                   : `${MAX_ATTACHMENTS} files is the limit`
               }
             >
-              <ImagePlus className="w-4 h-4" />
+              <Paperclip className="w-4 h-4" />
             </Button>
             <Textarea
               ref={commentInputRef}

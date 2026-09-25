@@ -1,6 +1,6 @@
 import { useAppContext } from "@/lib/store";
-import { forumImages, forumVideos, type ForumPost } from "@/lib/api";
-import { MessageSquare, Trash2, Play } from "lucide-react";
+import { forumFiles, forumImages, forumVideos, type ForumPost } from "@/lib/api";
+import { MessageSquare, Trash2, Play, Paperclip } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -35,6 +35,7 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
   const reactionEntries = Object.entries(post.reactions || {});
   const images = forumImages(post);
   const videos = forumVideos(post);
+  const files = forumFiles(post);
   // The row shows one thing: a picture if there is one, otherwise a clip's
   // poster, which the server writes beside every upload.
   const thumbnail = images[0] ?? (videos[0] ? `${videos[0]}.thumb.jpg` : null);
@@ -138,8 +139,19 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete }: ForumPostC
             </div>
           )}
 
+          {/* Downloads have no thumbnail to stand for them, so the row says
+              they are there. */}
+          {files.length > 0 && (
+            <span
+              className="flex items-center gap-1 text-3xs text-muted-foreground ml-auto"
+              title={files.length === 1 ? "1 file" : `${files.length} files`}
+            >
+              <Paperclip className="w-3 h-3" />
+              {files.length}
+            </span>
+          )}
           {/* Comment count */}
-          <span className="flex items-center gap-1 text-3xs text-muted-foreground ml-auto">
+          <span className={`flex items-center gap-1 text-3xs text-muted-foreground ${files.length > 0 ? "" : "ml-auto"}`}>
             <MessageSquare className="w-3 h-3" />
             {post.comment_count}
           </span>

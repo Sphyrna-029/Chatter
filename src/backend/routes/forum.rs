@@ -74,7 +74,7 @@ async fn validate_forum_member(
     Ok(user_id)
 }
 
-/// How many images and videos one post or comment may carry between them.
+/// How many attachments one post or comment may carry between them, of any kind.
 /// Matches the composer's attachment limit, so the two surfaces say the same
 /// thing.
 const MAX_FORUM_MEDIA: usize = 10;
@@ -127,6 +127,7 @@ fn post_to_json(post: &ForumPostRecord, reactions: &HashMap<String, Vec<String>>
         "image_url": images.first().cloned().unwrap_or_default(),
         "image_urls": images,
         "video_urls": videos,
+        "file_urls": post.file_urls,
         "created_at": post.created_at,
         "comment_count": post.comment_count,
         "last_activity": if post.last_activity > 0 { post.last_activity } else { post.created_at },
@@ -150,6 +151,7 @@ fn comment_to_json(comment: &ForumCommentRecord) -> Value {
             "image_url": "",
             "image_urls": [],
             "video_urls": [],
+            "file_urls": [],
             "created_at": comment.created_at,
             "deleted": true,
         });
@@ -165,6 +167,7 @@ fn comment_to_json(comment: &ForumCommentRecord) -> Value {
         "image_url": images.first().cloned().unwrap_or_default(),
         "image_urls": images,
         "video_urls": comment.video_urls.clone(),
+        "file_urls": comment.file_urls,
         "created_at": comment.created_at,
         "deleted": false,
         "edited": comment.edited,
@@ -242,10 +245,11 @@ pub(crate) async fn create_post(
 
     let images = requested_images(&req.image_url, &req.image_urls);
     let videos = requested_media(&req.video_urls);
-    if images.len() + videos.len() > MAX_FORUM_MEDIA {
+    let files = requested_media(&req.file_urls);
+    if images.len() + videos.len() + files.len() > MAX_FORUM_MEDIA {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            &format!("A post may have at most {MAX_FORUM_MEDIA} images and videos"),
+            &format!("A post may have at most {MAX_FORUM_MEDIA} attachments"),
         ));
     }
 
@@ -260,6 +264,7 @@ pub(crate) async fn create_post(
         image_url: images.first().cloned().unwrap_or_default(),
         image_urls: images,
         video_urls: videos,
+        file_urls: files,
         created_at: now,
         comment_count: 0,
         last_activity: now,
@@ -450,10 +455,11 @@ pub(crate) async fn create_comment(
 
     let images = requested_images(&req.image_url, &req.image_urls);
     let videos = requested_media(&req.video_urls);
-    if images.len() + videos.len() > MAX_FORUM_MEDIA {
+    let files = requested_media(&req.file_urls);
+    if images.len() + videos.len() + files.len() > MAX_FORUM_MEDIA {
         return Err(error_response(
             StatusCode::BAD_REQUEST,
-            &format!("A comment may have at most {MAX_FORUM_MEDIA} images and videos"),
+            &format!("A comment may have at most {MAX_FORUM_MEDIA} attachments"),
         ));
     }
 
@@ -489,6 +495,7 @@ pub(crate) async fn create_comment(
         image_url: images.first().cloned().unwrap_or_default(),
         image_urls: images,
         video_urls: videos,
+        file_urls: files,
         parent_id,
         created_at: now,
         deleted: false,
@@ -830,6 +837,7 @@ mod tests {
             image_url: String::new(),
             image_urls: Vec::new(),
             video_urls: Vec::new(),
+            file_urls: Vec::new(),
             parent_id: parent.to_string(),
             created_at: 0,
             deleted,

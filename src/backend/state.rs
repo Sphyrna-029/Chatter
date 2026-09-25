@@ -269,6 +269,10 @@ pub(crate) struct ForumPostRecord {
     pub(crate) image_urls: Vec<String>,
     #[serde(default)]
     pub(crate) video_urls: Vec<String>,
+    /// Attachments that are neither pictures nor clips — an archive, a PDF, a
+    /// save file. Absent on rows written before a post could carry them.
+    #[serde(default)]
+    pub(crate) file_urls: Vec<String>,
     pub(crate) created_at: i64,
     #[serde(default)]
     pub(crate) comment_count: i64,
@@ -297,6 +301,10 @@ pub(crate) struct ForumCommentRecord {
     pub(crate) image_urls: Vec<String>,
     #[serde(default)]
     pub(crate) video_urls: Vec<String>,
+    /// Attachments that are neither pictures nor clips — an archive, a PDF, a
+    /// save file. Absent on rows written before a post could carry them.
+    #[serde(default)]
+    pub(crate) file_urls: Vec<String>,
     /// The comment this one answers, or empty when it answers the post itself.
     /// Empty on every row written before replies could nest, which is exactly
     /// right: those are all top-level.

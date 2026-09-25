@@ -215,6 +215,8 @@ pub(crate) struct CreateForumPostRequest {
     pub(crate) image_url: Option<String>,
     pub(crate) image_urls: Option<Vec<String>>,
     pub(crate) video_urls: Option<Vec<String>>,
+    /// Attachments of any other kind, drawn as downloads rather than media.
+    pub(crate) file_urls: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -223,6 +225,8 @@ pub(crate) struct CreateForumCommentRequest {
     pub(crate) image_url: Option<String>,
     pub(crate) image_urls: Option<Vec<String>>,
     pub(crate) video_urls: Option<Vec<String>>,
+    /// Attachments of any other kind, drawn as downloads rather than media.
+    pub(crate) file_urls: Option<Vec<String>>,
     /// The comment being replied to. Absent or empty answers the post itself.
     pub(crate) parent_id: Option<String>,
 }
