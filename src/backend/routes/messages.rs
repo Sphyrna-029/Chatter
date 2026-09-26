@@ -1459,12 +1459,23 @@ pub(crate) async fn send_thread_message(
     // gets. See the note in get_thread_messages about the legacy arrays this
     // replaces.
     let msg_coll = state.db.collection::<mongodb::bson::Document>("messages");
-    let root_channel_id = msg_coll
+    let root = msg_coll
         .find_one(doc! { "event_id": &thread_event_id, "room_id": &room_id })
         .await
         .ok()
-        .flatten()
+        .flatten();
+    let root_channel_id = root
+        .as_ref()
         .and_then(|root| root.get_str("channel_id").ok().map(String::from))
+        .unwrap_or_default();
+    // What the channel list calls an unnamed thread: the message that started
+    // it, never the reply that just arrived. Carried on the broadcast because a
+    // thread's first reply is also the first the list hears of it.
+    let root_body: String = root
+        .as_ref()
+        .and_then(|root| root.get_document("content").ok())
+        .and_then(|content| content.get_str("body").ok())
+        .map(|body| body.chars().take(100).collect())
         .unwrap_or_default();
 
     if !root_channel_id.is_empty() {
@@ -1675,6 +1686,7 @@ pub(crate) async fn send_thread_message(
         "channel_id": root_channel_id,
         "thread_id": thread_event_id,
         "thread_name": thread_name,
+        "thread_root_body": root_body,
         "content": content,
         "thread_reply_count": reply_count,
         "thread_participants": participants,

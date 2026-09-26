@@ -584,7 +584,15 @@ export function createWsMessageHandler(
           payload: {
             threadId: msg.thread_id,
             channelId: msg.channel_id ?? "",
-            name: msg.thread_name || msg.content?.body || "Thread",
+            // Named for the message that started it, the same as on load —
+            // `content` is the reply, which is not what the thread is about.
+            name:
+              msg.thread_name ||
+              msg.thread_root_body ||
+              stateRef.current.channelThreads[msg.channel_id ?? ""]?.find(
+                (t) => t.threadId === msg.thread_id,
+              )?.name ||
+              "Thread",
             replyCount: msg.thread_reply_count ?? 0,
             lastActivityTs: msg.origin_server_ts,
           },
