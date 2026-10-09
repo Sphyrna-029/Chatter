@@ -289,6 +289,10 @@ pub(crate) struct MessageNotification {
     /// quietest. So a thread reply names its participants here, and a channel
     /// message leaves it `None` and reaches the room.
     pub(crate) audience: Option<Vec<String>>,
+    /// Reach only the members it mentions, whatever their level. Forum
+    /// activity sets this: a new post or reply is not a conversation anyone
+    /// is waiting on, so it wakes nobody unless it names them.
+    pub(crate) mentions_only: bool,
 }
 
 /// Queue push delivery for a message without making the sender wait on it.
@@ -380,6 +384,9 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
             role_names.get(&user_id).map(Vec::as_slice).unwrap_or(&[]),
             n.suppress_role_mentions,
         );
+        if n.mentions_only && !is_mention {
+            continue;
+        }
         let decision = PushDecision {
             level: resolve_level(
                 overrides.get(&user_id).unwrap_or(&HashMap::new()),

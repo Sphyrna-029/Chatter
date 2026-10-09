@@ -449,6 +449,7 @@ pub(crate) async fn execute_webhook(
             // Nothing here holds mention_everyone, so a role mention in a
             // webhook body must not ping.
             audience: None,
+            mentions_only: false,
             suppress_role_mentions: true,
         },
     );

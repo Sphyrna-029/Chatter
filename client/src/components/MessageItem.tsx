@@ -52,6 +52,7 @@ import { CodeBlock } from "./CodeBlock";
 import { ensureFontFace } from "@/lib/fontFace";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { scrollBehavior } from "@/lib/theme/display";
+import { mentionRoleColors } from "@/lib/mentions";
 
 const urlRegex = /(https?:\/\/[^\s]+)/g;
 const imageExtensions = IMAGE_EXTENSIONS;
@@ -1200,15 +1201,11 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
         : senderTopRoleColor;
 
   // Map of lowercase role name -> color (or "") for role mention rendering
-  const roleNamesMap = useMemo(() => {
-    const map = new Map<string, string>();
-    map.set("owner", roomInfo?.owner_name_color || "");
-    map.set("moderator", roomInfo?.mod_name_color || "");
-    for (const role of state.customRoles) {
-      map.set(role.name.toLowerCase(), role.color || "");
-    }
-    return map;
-  }, [state.customRoles, roomInfo?.owner_name_color, roomInfo?.mod_name_color]);
+  const roleNamesMap = useMemo(
+    () => mentionRoleColors(state.customRoles, roomInfo),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.customRoles, roomInfo?.owner_name_color, roomInfo?.mod_name_color],
+  );
 
   const nameFontUrl = !isExternal ? state.userPresence[message.sender]?.nameFontUrl : undefined;
   if (nameFontUrl) {

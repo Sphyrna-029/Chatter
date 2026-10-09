@@ -41,6 +41,8 @@ import { UploadProgressOverlay } from "./UploadProgressOverlay";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { MentionMenu } from "./MentionMenu";
+import { useTextareaMentions } from "@/hooks/useTextareaMentions";
 
 type SortMode = "activity" | "newest" | "oldest" | "popular";
 
@@ -505,6 +507,7 @@ function CreatePostDialog({
   const [title, setTitle] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [body, setBody] = useState("");
+  const bodyMentions = useTextareaMentions(setBody);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { progress: uploadProgress, uploadAll, reset: resetUploadProgress } = useUploadQueue();
@@ -648,20 +651,31 @@ function CreatePostDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="post-body">Body (Optional)</Label>
-            <Textarea
-              id="post-body"
-              placeholder="Write your post content..."
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              onPaste={(e) => {
-                const files = clipboardFiles(e);
-                if (files.length === 0) return;
-                e.preventDefault();
-                stageImages(files);
-              }}
-              maxLength={4000}
-              rows={4}
-            />
+            <div className="relative">
+              {bodyMentions.open && (
+                <MentionMenu
+                  matches={bodyMentions.matches}
+                  selectedIdx={bodyMentions.selectedIdx}
+                  onSelect={bodyMentions.complete}
+                />
+              )}
+              <Textarea
+                id="post-body"
+                placeholder="Write your post content..."
+                value={body}
+                onChange={bodyMentions.onChange}
+                onKeyDown={bodyMentions.onKeyDown}
+                onBlur={bodyMentions.close}
+                onPaste={(e) => {
+                  const files = clipboardFiles(e);
+                  if (files.length === 0) return;
+                  e.preventDefault();
+                  stageImages(files);
+                }}
+                maxLength={4000}
+                rows={4}
+              />
+            </div>
           </div>
           <ForumTagPicker tags={tags} value={selectedTags} onChange={setSelectedTags} />
           <div className="space-y-2">

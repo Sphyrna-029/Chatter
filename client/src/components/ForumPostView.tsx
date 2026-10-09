@@ -30,6 +30,8 @@ import {
 import { ForumReactions } from "@/components/ForumReactions";
 import { ForumTagList, ForumTagPicker } from "@/components/ForumTags";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
+import { MentionMenu } from "@/components/MentionMenu";
+import { useTextareaMentions } from "@/hooks/useTextareaMentions";
 import { ForumMediaGallery, StagedForumFile } from "@/components/ForumMediaGallery";
 import { usePendingFiles, MAX_ATTACHMENTS } from "@/hooks/usePendingFiles";
 import {
@@ -64,6 +66,7 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
     state.channels.find((c) => c.channel_id === post?.channel_id)?.forum_tags ?? [];
   const [comments, setComments] = useState<ForumComment[]>([]);
   const [commentBody, setCommentBody] = useState("");
+  const commentMentions = useTextareaMentions(setCommentBody);
   const [submitting, setSubmitting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
@@ -85,12 +88,14 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
   const [editingPost, setEditingPost] = useState(false);
   const [editPostTitle, setEditPostTitle] = useState("");
   const [editPostBody, setEditPostBody] = useState("");
+  const editPostMentions = useTextareaMentions(setEditPostBody);
   const [editPostTags, setEditPostTags] = useState<string[]>([]);
   const [savingPost, setSavingPost] = useState(false);
 
   // Edit state for comments (keyed by comment_id)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editCommentBody, setEditCommentBody] = useState("");
+  const editCommentMentions = useTextareaMentions(setEditCommentBody);
   const [savingComment, setSavingComment] = useState(false);
 
   const {
@@ -497,20 +502,31 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
 
               {isEditing ? (
                 <div className="mt-1 space-y-2">
-                  <Textarea
-                    value={editCommentBody}
-                    onChange={(e) => setEditCommentBody(e.target.value)}
-                    maxLength={2000}
-                    rows={2}
-                    className="min-h-[40px] max-h-[120px] resize-none text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        saveEditComment(comment.comment_id);
-                      }
-                      if (e.key === "Escape") cancelEditingComment();
-                    }}
-                  />
+                  <div className="relative">
+                    {editCommentMentions.open && (
+                      <MentionMenu
+                        matches={editCommentMentions.matches}
+                        selectedIdx={editCommentMentions.selectedIdx}
+                        onSelect={editCommentMentions.complete}
+                      />
+                    )}
+                    <Textarea
+                      value={editCommentBody}
+                      onChange={editCommentMentions.onChange}
+                      onBlur={editCommentMentions.close}
+                      maxLength={2000}
+                      rows={2}
+                      className="min-h-[40px] max-h-[120px] resize-none text-sm"
+                      onKeyDown={(e) => {
+                        if (editCommentMentions.onKeyDown(e)) return;
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          saveEditComment(comment.comment_id);
+                        }
+                        if (e.key === "Escape") cancelEditingComment();
+                      }}
+                    />
+                  </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => saveEditComment(comment.comment_id)} disabled={savingComment || !editCommentBody.trim()} className="h-7 text-xs gap-1">
                       <Check className="w-3 h-3" />
@@ -604,13 +620,24 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
                 maxLength={200}
                 placeholder="Post title"
               />
-              <Textarea
-                value={editPostBody}
-                onChange={(e) => setEditPostBody(e.target.value)}
-                maxLength={4000}
-                rows={4}
-                placeholder="Post body..."
-              />
+              <div className="relative">
+                {editPostMentions.open && (
+                  <MentionMenu
+                    matches={editPostMentions.matches}
+                    selectedIdx={editPostMentions.selectedIdx}
+                    onSelect={editPostMentions.complete}
+                  />
+                )}
+                <Textarea
+                  value={editPostBody}
+                  onChange={editPostMentions.onChange}
+                  onKeyDown={editPostMentions.onKeyDown}
+                  onBlur={editPostMentions.close}
+                  maxLength={4000}
+                  rows={4}
+                  placeholder="Post body..."
+                />
+              </div>
               <ForumTagPicker tags={channelTags} value={editPostTags} onChange={setEditPostTags} />
               <div className="flex gap-2">
                 <Button size="sm" onClick={saveEditPost} disabled={savingPost || !editPostTitle.trim()} className="gap-1.5">
@@ -795,28 +822,39 @@ export function ForumPostView({ roomId, postId, onBack }: ForumPostViewProps) {
             >
               <Paperclip className="w-4 h-4" />
             </Button>
-            <Textarea
-              ref={commentInputRef}
-              placeholder={replyingTo ? `Reply to ${displayUserId(replyingTo.author)}…` : "Write a comment..."}
-              value={commentBody}
-              onChange={(e) => setCommentBody(e.target.value)}
-              onPaste={(e) => {
-                // A pasted screenshot is staged like a picked file; text
-                // pastes as usual.
-                const files = clipboardFiles(e);
-                if (files.length === 0) return;
-                e.preventDefault();
-                stageCommentImages(files);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
+            <div className="relative flex-1 min-w-0">
+              {commentMentions.open && (
+                <MentionMenu
+                  matches={commentMentions.matches}
+                  selectedIdx={commentMentions.selectedIdx}
+                  onSelect={commentMentions.complete}
+                />
+              )}
+              <Textarea
+                ref={commentInputRef}
+                placeholder={replyingTo ? `Reply to ${displayUserId(replyingTo.author)}…` : "Write a comment..."}
+                value={commentBody}
+                onChange={commentMentions.onChange}
+                onBlur={commentMentions.close}
+                onPaste={(e) => {
+                  // A pasted screenshot is staged like a picked file; text
+                  // pastes as usual.
+                  const files = clipboardFiles(e);
+                  if (files.length === 0) return;
                   e.preventDefault();
-                  handleSubmitComment();
-                }
-              }}
-              className="min-h-[40px] max-h-[120px] resize-none"
-              rows={1}
-            />
+                  stageCommentImages(files);
+                }}
+                onKeyDown={(e) => {
+                  if (commentMentions.onKeyDown(e)) return;
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSubmitComment();
+                  }
+                }}
+                className="min-h-[40px] max-h-[120px] resize-none"
+                rows={1}
+              />
+            </div>
             <Button
               size="icon"
               className="shrink-0"

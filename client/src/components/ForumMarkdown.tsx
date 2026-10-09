@@ -1,7 +1,12 @@
+import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { AuthImage } from "@/components/AuthImage";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
+import { useAppContext } from "@/lib/store";
+import { mentionRoleColors } from "@/lib/mentions";
+import { remarkMentions } from "@/lib/remarkMentions";
+import { cn, displayUserId } from "@/lib/utils";
 
 interface ForumMarkdownProps {
   content: string;
@@ -9,12 +14,53 @@ interface ForumMarkdownProps {
 }
 
 export function ForumMarkdown({ content, className }: ForumMarkdownProps) {
+  const { state } = useAppContext();
+  const roomInfo = state.currentRoomId ? state.roomInfoMap[state.currentRoomId] : null;
+  const roleColors = useMemo(
+    () => mentionRoleColors(state.customRoles, roomInfo),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.customRoles, roomInfo?.owner_name_color, roomInfo?.mod_name_color],
+  );
+  const myName = state.userId ? displayUserId(state.userId).toLowerCase() : "";
+
   return (
     <div className={`max-w-none break-words ${className ?? ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMentions]}
         children={content}
         components={{
+          span(props) {
+            const { children } = props;
+            // Raw HTML is not enabled, so the only spans are remarkMentions'.
+            const name = (props as Record<string, unknown>)["data-mention"];
+            if (typeof name !== "string") return <span>{children}</span>;
+            // Drawn the way the timeline draws them (MessageItem).
+            const roleColor = roleColors.get(name.toLowerCase());
+            if (roleColor !== undefined) {
+              const safeColor = /^#?[a-zA-Z0-9]+$/.test(roleColor) ? roleColor : "";
+              return (
+                <span
+                  className={cn(
+                    "rounded px-1 py-0.5 font-semibold text-xs",
+                    !safeColor && "bg-primary/20 text-primary",
+                  )}
+                  style={safeColor ? { backgroundColor: `${safeColor}33`, color: safeColor } : undefined}
+                >
+                  {children}
+                </span>
+              );
+            }
+            return (
+              <span
+                className={cn(
+                  "rounded px-1 py-0.5 font-semibold text-xs",
+                  name.toLowerCase() === myName ? "bg-blue-500/20 text-blue-400" : "bg-primary/20 text-primary",
+                )}
+              >
+                {children}
+              </span>
+            );
+          },
           code({ className: codeClassName, children, ...props }) {
             const match = /language-(\w+)/.exec(codeClassName || "");
             const codeString = String(children).replace(/\n$/, "");

@@ -474,6 +474,7 @@ pub(crate) async fn send_message(
                 icon: room.icon_url.clone(),
                 is_dm: room.is_dm,
                 audience: None,
+                mentions_only: false,
                 suppress_role_mentions: event
                     .get("content")
                     .and_then(|c| c.get("suppress_role_mentions"))
@@ -1720,6 +1721,7 @@ pub(crate) async fn send_thread_message(
             icon: room.icon_url.clone(),
             is_dm: room.is_dm,
             audience: Some(participants),
+            mentions_only: false,
             // Nobody holds mention_everyone inside a thread reply.
             suppress_role_mentions: true,
         },

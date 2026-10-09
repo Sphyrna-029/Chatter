@@ -30,3 +30,19 @@ export function findMentionMatches(state: AppState, search: string): MentionMatc
       .map((r): MentionMatch => ({ kind: "role", id: r.role_id, name: r.name, color: r.color || undefined })),
   ].slice(0, 8);
 }
+
+/** Lowercase role name → its colour ("" for none): what an `@role` in a body
+ *  is drawn in. Shared by the timeline and the forum so a role reads the same
+ *  in both. */
+export function mentionRoleColors(
+  customRoles: AppState["customRoles"],
+  roomInfo: { owner_name_color?: string; mod_name_color?: string } | null | undefined,
+): Map<string, string> {
+  const map = new Map<string, string>();
+  map.set("owner", roomInfo?.owner_name_color || "");
+  map.set("moderator", roomInfo?.mod_name_color || "");
+  for (const role of customRoles) {
+    map.set(role.name.toLowerCase(), role.color || "");
+  }
+  return map;
+}

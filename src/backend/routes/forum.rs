@@ -5,9 +5,11 @@ use super::super::{
         EditForumPostRequest, ForumPostsQuery, ForumSearchQuery, SetForumTagsRequest,
     },
     helpers::{
-        broadcast_to_room, channel_permissions, error_response, extract_token, generate_id,
-        get_user_from_token, is_moderator_or_owner, now_millis, valid_profile_color,
+        broadcast_to_room, channel_permissions, effective_permissions, error_response,
+        extract_token, generate_id, get_user_from_token, is_moderator_or_owner, now_millis,
+        valid_profile_color,
     },
+    push::{spawn_message_push, MessageNotification},
     state::{
         AppState, ChannelRecord, ForumCommentRecord, ForumPostRecord, ForumTag, ReactionRecord,
         RoomRecord,
@@ -153,6 +155,78 @@ async fn require_post_visible(
     } else {
         Err(error_response(StatusCode::NOT_FOUND, "Post not found"))
     }
+}
+
+/// Whether an `@role` in this body must not ping anyone — the same rule chat
+/// applies: without `mention_everyone` it still renders, it just wakes nobody.
+/// A body with no `@` in it has nothing to judge, so skips the lookup.
+async fn role_mentions_suppressed(
+    state: &AppState,
+    room_id: &str,
+    user_id: &str,
+    body: &str,
+) -> bool {
+    body.contains('@')
+        && !effective_permissions(state, room_id, user_id)
+            .await
+            .mention_everyone
+}
+
+/// Push a new post or reply to the members it names who hold no socket; a
+/// connected client notices the mention in the broadcast itself. Mentions
+/// only — forum activity wakes nobody it does not name.
+async fn push_forum_mentions(
+    state: &Arc<AppState>,
+    post: &ForumPostRecord,
+    item_id: &str,
+    author: &str,
+    body: &str,
+    suppress_role_mentions: bool,
+) {
+    if !body.contains('@') {
+        return;
+    }
+    let Some(room) = state
+        .db
+        .collection::<RoomRecord>("rooms")
+        .find_one(doc! { "_id": &post.room_id })
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let channel_name = if post.channel_id.is_empty() {
+        String::new()
+    } else {
+        state
+            .db
+            .collection::<ChannelRecord>("channels")
+            .find_one(doc! { "_id": &post.channel_id })
+            .await
+            .ok()
+            .flatten()
+            .map(|ch| ch.name)
+            .unwrap_or_default()
+    };
+    spawn_message_push(
+        state.clone(),
+        MessageNotification {
+            room_id: post.room_id.clone(),
+            channel_id: post.channel_id.clone(),
+            event_id: item_id.to_string(),
+            sender_id: author.to_string(),
+            sender_name: super::messages::display_name_for(state, author).await,
+            room_name: room.name,
+            channel_name,
+            body: format!("{}: {}", post.title, body),
+            icon: room.icon_url,
+            is_dm: false,
+            audience: None,
+            mentions_only: true,
+            suppress_role_mentions,
+        },
+    );
 }
 
 /// How many tags a forum channel may offer, and how many one post may wear.
@@ -444,14 +518,26 @@ pub(crate) async fn create_post(
     let coll = state.db.collection::<ForumPostRecord>("forum_posts");
     let _ = coll.insert_one(&post).await;
 
+    let suppress_role_mentions =
+        role_mentions_suppressed(&state, &room_id, &user_id, &post.body).await;
     let post_json = post_to_json(&post, &HashMap::new());
     let broadcast_msg = json!({
         "type": "forum.post.created",
         "room_id": room_id,
         "channel_id": channel_id,
         "post": post_json,
+        "suppress_role_mentions": suppress_role_mentions,
     });
     broadcast_to_room(&state, &room_id, &broadcast_msg).await;
+    push_forum_mentions(
+        &state,
+        &post,
+        &post_id,
+        &user_id,
+        &post.body,
+        suppress_role_mentions,
+    )
+    .await;
 
     Ok(Json(json!({ "post_id": post_id })))
 }
@@ -709,6 +795,8 @@ pub(crate) async fn create_comment(
         )
         .await;
 
+    let suppress_role_mentions =
+        role_mentions_suppressed(&state, &room_id, &user_id, &comment.body).await;
     let comment_json = comment_to_json(&comment, &HashMap::new());
     let broadcast_msg = json!({
         "type": "forum.comment.created",
@@ -716,8 +804,18 @@ pub(crate) async fn create_comment(
         "channel_id": post.channel_id,
         "post_id": post_id,
         "comment": comment_json,
+        "suppress_role_mentions": suppress_role_mentions,
     });
     broadcast_to_room(&state, &room_id, &broadcast_msg).await;
+    push_forum_mentions(
+        &state,
+        &post,
+        &comment_id,
+        &user_id,
+        &comment.body,
+        suppress_role_mentions,
+    )
+    .await;
 
     Ok(Json(json!({ "comment_id": comment_id })))
 }
