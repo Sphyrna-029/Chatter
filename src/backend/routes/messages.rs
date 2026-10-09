@@ -475,6 +475,8 @@ pub(crate) async fn send_message(
                 is_dm: room.is_dm,
                 audience: None,
                 mentions_only: false,
+                mention_text: None,
+                post_id: None,
                 suppress_role_mentions: event
                     .get("content")
                     .and_then(|c| c.get("suppress_role_mentions"))
@@ -1722,6 +1724,8 @@ pub(crate) async fn send_thread_message(
             is_dm: room.is_dm,
             audience: Some(participants),
             mentions_only: false,
+            mention_text: None,
+            post_id: None,
             // Nobody holds mention_everyone inside a thread reply.
             suppress_role_mentions: true,
         },

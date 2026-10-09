@@ -9,7 +9,7 @@ use super::super::{
         extract_token, generate_id, get_user_from_token, is_moderator_or_owner, now_millis,
         valid_profile_color,
     },
-    push::{spawn_message_push, MessageNotification},
+    push::{added_mentions, spawn_message_push, MessageNotification},
     state::{
         AppState, ChannelRecord, ForumCommentRecord, ForumPostRecord, ForumTag, ReactionRecord,
         RoomRecord,
@@ -174,16 +174,19 @@ async fn role_mentions_suppressed(
 
 /// Push a new post or reply to the members it names who hold no socket; a
 /// connected client notices the mention in the broadcast itself. Mentions
-/// only — forum activity wakes nobody it does not name.
+/// only — forum activity wakes nobody it does not name. An edit passes
+/// `mention_text`, the names it added, so only they are woken.
+#[allow(clippy::too_many_arguments)]
 async fn push_forum_mentions(
     state: &Arc<AppState>,
     post: &ForumPostRecord,
     item_id: &str,
     author: &str,
     body: &str,
+    mention_text: Option<String>,
     suppress_role_mentions: bool,
 ) {
-    if !body.contains('@') {
+    if !mention_text.as_deref().unwrap_or(body).contains('@') {
         return;
     }
     let Some(room) = state
@@ -224,6 +227,8 @@ async fn push_forum_mentions(
             is_dm: false,
             audience: None,
             mentions_only: true,
+            mention_text,
+            post_id: Some(post.post_id.clone()),
             suppress_role_mentions,
         },
     );
@@ -535,6 +540,7 @@ pub(crate) async fn create_post(
         &post_id,
         &user_id,
         &post.body,
+        None,
         suppress_role_mentions,
     )
     .await;
@@ -803,6 +809,7 @@ pub(crate) async fn create_comment(
         "room_id": room_id,
         "channel_id": post.channel_id,
         "post_id": post_id,
+        "post_title": post.title,
         "comment": comment_json,
         "suppress_role_mentions": suppress_role_mentions,
     });
@@ -813,6 +820,7 @@ pub(crate) async fn create_comment(
         &comment_id,
         &user_id,
         &comment.body,
+        None,
         suppress_role_mentions,
     )
     .await;
@@ -953,17 +961,39 @@ pub(crate) async fn edit_post(
         .update_one(doc! { "_id": &post_id }, doc! { "$set": set_doc })
         .await;
 
+    // Only who the edit added is told: the rest were told when it was posted.
+    let added = added_mentions(&post.body, &new_body);
+    let suppress_role_mentions = role_mentions_suppressed(&state, &room_id, &user_id, &added).await;
     let broadcast_msg = json!({
         "type": "forum.post.edited",
         "room_id": room_id,
         "channel_id": post.channel_id,
         "post_id": post_id,
+        "author": user_id,
         "title": new_title,
         "body": new_body,
         "tags": new_tags,
         "edited_at": now,
+        "added_mentions": added,
+        "suppress_role_mentions": suppress_role_mentions,
     });
     broadcast_to_room(&state, &room_id, &broadcast_msg).await;
+    if !added.is_empty() {
+        let edited = ForumPostRecord {
+            title: new_title.clone(),
+            ..post.clone()
+        };
+        push_forum_mentions(
+            &state,
+            &edited,
+            &post_id,
+            &user_id,
+            &new_body,
+            Some(added),
+            suppress_role_mentions,
+        )
+        .await;
+    }
 
     Ok(Json(json!({ "edited": true })))
 }
@@ -1008,15 +1038,47 @@ pub(crate) async fn edit_comment(
         )
         .await;
 
+    // Only who the edit added is told: the rest were told when it was posted.
+    let added = added_mentions(&comment.body, &req.body);
+    let suppress_role_mentions = role_mentions_suppressed(&state, &room_id, &user_id, &added).await;
+    // The post supplies the channel and title the notification names.
+    let post = if added.is_empty() {
+        None
+    } else {
+        state
+            .db
+            .collection::<ForumPostRecord>("forum_posts")
+            .find_one(doc! { "_id": &post_id, "room_id": &room_id, "deleted": false })
+            .await
+            .ok()
+            .flatten()
+    };
     let broadcast_msg = json!({
         "type": "forum.comment.edited",
         "room_id": room_id,
+        "channel_id": post.as_ref().map(|p| p.channel_id.clone()),
         "post_id": post_id,
         "comment_id": comment_id,
+        "author": user_id,
+        "post_title": post.as_ref().map(|p| p.title.clone()),
         "body": req.body,
         "edited_at": now,
+        "added_mentions": added,
+        "suppress_role_mentions": suppress_role_mentions,
     });
     broadcast_to_room(&state, &room_id, &broadcast_msg).await;
+    if let Some(post) = post {
+        push_forum_mentions(
+            &state,
+            &post,
+            &comment_id,
+            &user_id,
+            &req.body,
+            Some(added),
+            suppress_role_mentions,
+        )
+        .await;
+    }
 
     Ok(Json(json!({ "edited": true })))
 }

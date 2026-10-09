@@ -631,6 +631,13 @@ function CreatePostDialog({
         onDragLeave={onDragLeave}
         onDragOver={onDragOver}
         onDrop={onDrop}
+        // The dialog hears Escape before the textarea does, so with the
+        // mention menu open it would close the whole post instead of the menu.
+        onEscapeKeyDown={(e) => {
+          if (!bodyMentions.open) return;
+          e.preventDefault();
+          bodyMentions.close();
+        }}
       >
         <DialogHeader>
           <DialogTitle>Create New Post</DialogTitle>

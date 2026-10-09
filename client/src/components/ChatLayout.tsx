@@ -58,6 +58,7 @@ import { syncPushSubscription } from "@/lib/push";
 import { decideVoiceRejoin, parseStoredVoiceSession } from "@/lib/voiceRejoin";
 import type { VoiceRestoreState } from "@/lib/voiceRejoin";
 import { toast } from "sonner";
+import { requestForumPost } from "@/lib/pendingForumPost";
 
 // ─── PiP helpers (bulletproof against Firefox / Safari quirks) ──────────────
 function pipEnabled(): boolean {
@@ -217,8 +218,11 @@ export function ChatLayout() {
   // The WS handler cannot navigate on its own, so it raises this event.
   useEffect(() => {
     const handler = async (e: Event) => {
-      const { roomId, channelId, threadId, panel } = (e as CustomEvent).detail ?? {};
+      const { roomId, channelId, threadId, panel, postId } = (e as CustomEvent).detail ?? {};
       if (!roomId) return;
+      // Parked before navigating: the forum that collects it may only mount
+      // once the room is selected.
+      if (postId) requestForumPost(roomId, postId, channelId || null);
       if (roomId !== state.currentRoomId) await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);
       // A thread notification should land in the thread, not merely the
@@ -258,9 +262,11 @@ export function ChatLayout() {
     const roomId = params.get("room");
     const channelId = params.get("channel");
     const panel = params.get("panel");
+    const postId = params.get("post");
     if (!roomId) return;
 
     window.history.replaceState({}, "", window.location.pathname);
+    if (postId) requestForumPost(roomId, postId, channelId || null);
     void (async () => {
       await selectRoom(roomId);
       if (channelId) await selectChannel(channelId);

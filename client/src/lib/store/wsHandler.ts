@@ -4,7 +4,6 @@ import { apiGetRoomMembers } from "../api";
 import { displayUserId } from "@/lib/utils";
 import { forgetMessagePreview } from "@/lib/messageLinks";
 import { adoptGifFavorites } from "@/hooks/useFavoriteGifs";
-import { requestForumPost } from "@/lib/pendingForumPost";
 import { toast } from "sonner";
 import {
   notificationBody,
@@ -233,14 +232,21 @@ function notifyThreadReply(
  * A forum post or reply that names the user. Forum activity notifies nobody
  * otherwise — it is not a conversation anyone is waiting on — so this is the
  * mention path alone, the counterpart of the push the server sends to members
- * with no socket (`mentions_only` in `backend/push.rs`).
+ * with no socket (`mentions_only` in `backend/push.rs`). An edit is judged
+ * only on the names it added (`added_mentions`), so it never re-notifies
+ * anyone the original already named.
  */
 function notifyForumMention(
   msg: {
     type: string;
     room_id: string;
-    channel_id?: string;
+    channel_id?: string | null;
     post_id?: string;
+    author?: string;
+    body?: string;
+    title?: string;
+    post_title?: string | null;
+    added_mentions?: string;
     suppress_role_mentions?: boolean;
     post?: { post_id: string; author: string; title?: string; body?: string };
     comment?: { author: string; body?: string };
@@ -249,15 +255,38 @@ function notifyForumMention(
   dispatch: Dispatch<Action>,
 ) {
   const me = stateRef.current.userId;
-  const item = msg.type === "forum.post.created" ? msg.post : msg.comment;
   const postId = msg.post?.post_id || msg.post_id;
-  if (!me || !item || !postId || item.author === me) return;
+  let author: string | undefined;
+  let body: string;
+  let mentionText: string;
+  let postTitle: string | undefined;
+  switch (msg.type) {
+    case "forum.post.created":
+      author = msg.post?.author;
+      body = mentionText = msg.post?.body || "";
+      postTitle = msg.post?.title;
+      break;
+    case "forum.comment.created":
+      author = msg.comment?.author;
+      body = mentionText = msg.comment?.body || "";
+      postTitle = msg.post_title || undefined;
+      break;
+    case "forum.post.edited":
+    case "forum.comment.edited":
+      author = msg.author;
+      body = msg.body || "";
+      mentionText = msg.added_mentions || "";
+      postTitle = (msg.type === "forum.post.edited" ? msg.title : msg.post_title) || undefined;
+      break;
+    default:
+      return;
+  }
+  if (!me || !author || !postId || author === me || !mentionText.includes("@")) return;
 
-  const body = item.body || "";
   const myUsername = displayUserId(me);
   const isMention =
-    (myUsername !== "" && body.includes(`@${myUsername}`)) ||
-    (msg.suppress_role_mentions !== true && hasRoleMention(body, stateRef));
+    (myUsername !== "" && mentionText.includes(`@${myUsername}`)) ||
+    (msg.suppress_role_mentions !== true && hasRoleMention(mentionText, stateRef));
   if (!isMention) return;
 
   const roomId = msg.room_id;
@@ -278,21 +307,17 @@ function notifyForumMention(
 
   const roomInfo = stateRef.current.roomInfoMap[roomId];
   const senderName =
-    stateRef.current.userPresence[item.author]?.displayName || displayUserId(item.author);
-  const where = msg.post?.title ? `“${msg.post.title}”` : roomInfo?.name || "the forum";
+    stateRef.current.userPresence[author]?.displayName || displayUserId(author);
+  const where = postTitle ? `“${postTitle}”` : roomInfo?.name || "the forum";
   showDesktopNotification({
     title: `${senderName} · ${where}`,
     body: notificationBody(body),
     icon: roomInfo?.icon_url || undefined,
     tag: `${roomId}|forum|${postId}`,
-    onClick: () => {
-      // Parked before navigating: the forum that collects it may only mount
-      // once the room is selected.
-      requestForumPost(roomId, postId, channelId || null);
+    onClick: () =>
       window.dispatchEvent(
-        new CustomEvent("notification-navigate", { detail: { roomId, channelId } }),
-      );
-    },
+        new CustomEvent("notification-navigate", { detail: { roomId, channelId, postId } }),
+      ),
   });
 }
 
@@ -1033,9 +1058,7 @@ export function createWsMessageHandler(
           payload: { roomId: msg.room_id, hasMention: true },
         });
       }
-      if (msg.type === "forum.post.created" || msg.type === "forum.comment.created") {
-        notifyForumMention(msg, stateRef, dispatch);
-      }
+      notifyForumMention(msg, stateRef, dispatch);
     }
     // Whiteboard real-time events — dispatch as custom events for WhiteboardArea to handle
     else if (msg.type === "whiteboard_stroke" || msg.type === "whiteboard_cursor" ||

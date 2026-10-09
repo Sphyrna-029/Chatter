@@ -293,6 +293,12 @@ pub(crate) struct MessageNotification {
     /// activity sets this: a new post or reply is not a conversation anyone
     /// is waiting on, so it wakes nobody unless it names them.
     pub(crate) mentions_only: bool,
+    /// What mentions are judged against, when that is not the whole body: an
+    /// edit names only the people it added (`added_mentions`), so the people
+    /// the original already named are not woken a second time.
+    pub(crate) mention_text: Option<String>,
+    /// The forum post to open when the notification is clicked.
+    pub(crate) post_id: Option<String>,
 }
 
 /// Queue push delivery for a message without making the sender wait on it.
@@ -363,6 +369,7 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
             "room_id": n.room_id,
             "channel_id": n.channel_id,
             "event_id": n.event_id,
+            "post_id": n.post_id,
         })
         .to_string()
     };
@@ -379,7 +386,7 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
         }
 
         let is_mention = mentions_user(
-            &n.body,
+            n.mention_text.as_deref().unwrap_or(&n.body),
             &user_id,
             role_names.get(&user_id).map(Vec::as_slice).unwrap_or(&[]),
             n.suppress_role_mentions,
@@ -774,8 +781,34 @@ fn mentions_user(
         .any(|name| role_names.iter().any(|role| role == name))
 }
 
+/// The `@word` tokens `new` has that `old` did not, as text a mention check
+/// can be run against ("@a @b"), or empty when an edit named nobody new.
+/// Case is kept, since a direct mention is matched case-sensitively.
+pub(crate) fn added_mentions(old: &str, new: &str) -> String {
+    let before = mentioned_names(old);
+    let mut seen: Vec<String> = Vec::new();
+    for token in mention_tokens(new) {
+        let lower = token.to_lowercase();
+        if !before.contains(&lower) && !seen.iter().any(|t| t.to_lowercase() == lower) {
+            seen.push(token);
+        }
+    }
+    seen.iter()
+        .map(|t| format!("@{t}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The lowercased `@word` tokens in a body, matching the client's `/@(\w+)/g`.
 fn mentioned_names(body: &str) -> Vec<String> {
+    mention_tokens(body)
+        .into_iter()
+        .map(|t| t.to_lowercase())
+        .collect()
+}
+
+/// The `@word` tokens in a body, without the `@` and as written.
+fn mention_tokens(body: &str) -> Vec<String> {
     let mut out = Vec::new();
     let chars: Vec<char> = body.chars().collect();
     let mut i = 0;
@@ -787,7 +820,7 @@ fn mentioned_names(body: &str) -> Vec<String> {
                 end += 1;
             }
             if end > start {
-                out.push(chars[start..end].iter().collect::<String>().to_lowercase());
+                out.push(chars[start..end].iter().collect::<String>());
             }
             i = end;
         } else {
@@ -907,6 +940,13 @@ mod tests {
         // An email-looking token still yields its word; the client's regex does
         // the same, and a role or user has to match it for anything to happen.
         assert_eq!(mentioned_names("no mentions here"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn added_mentions_names_only_who_an_edit_added() {
+        assert_eq!(added_mentions("hi @Buck", "hi @buck and @ann"), "@ann");
+        assert_eq!(added_mentions("", "@ann @ann @Bo"), "@ann @Bo");
+        assert_eq!(added_mentions("@ann", "@ann again"), "");
     }
 
     #[test]

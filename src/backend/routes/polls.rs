@@ -340,6 +340,8 @@ pub(crate) async fn create_poll(
             is_dm: room.is_dm,
             audience: None,
             mentions_only: false,
+            mention_text: None,
+            post_id: None,
             // A poll never role-pings. The question is a question, not a
             // place to reach @everyone from — and unlike a message body,
             // nobody writing one expects it to.
