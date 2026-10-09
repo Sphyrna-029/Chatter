@@ -39,6 +39,8 @@ import {
   messageLinkFor,
   parseMessageLink,
 } from "@/lib/messageLinks";
+import { ForumLinkEmbed } from "./ForumLinkEmbed";
+import { findForumLinks, parseForumLink } from "@/lib/forumLinks";
 import { useFavoriteGifs } from "@/hooks/useFavoriteGifs";
 import { useChromecast } from "@/hooks/useChromecast";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -129,6 +131,11 @@ function processMessageBody(body: string, currentUserId: string | null, urlToAli
     if (parseMessageLink(url)) {
       return "";
     }
+    // A forum post or reply link draws its own card too, resolved against this
+    // viewer's access — same reason as a message link.
+    if (parseForumLink(url)) {
+      return "";
+    }
     const displayUrl = url.length > 60 ? url.slice(0, 57) + "..." : url;
     return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" class="text-primary hover:underline break-all">${displayUrl}</a>`;
   });
@@ -215,6 +222,9 @@ function extractMediaUrls(body: string): { images: string[]; videos: string[]; a
       // index.html and answers with its <title> — so every shared message
       // came with a second, contentless "Chatter" card under the real one.
       if (parseMessageLink(url)) continue;
+      // A forum post or reply link is the same: it draws its own card, and
+      // left to fall through it would get the same contentless OG card.
+      if (parseForumLink(url)) continue;
       const ytId = getYouTubeVideoId(url);
       if (ytId) youtubeIds.push(ytId);
       else if (imageExtensions.test(url)) images.push(url);
@@ -1366,10 +1376,11 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
   // One memo for both passes over the body. `linkedEventIds` names the
   // messages this one links to, each of which draws a card below — or draws
   // nothing, for a viewer the server will not resolve the link for.
-  const { segments, linkedEventIds } = useMemo(
+  const { segments, linkedEventIds, linkedForumRefs } = useMemo(
     () => ({
       segments: parseMessageSegments(message.content.body),
       linkedEventIds: findMessageLinks(message.content.body),
+      linkedForumRefs: findForumLinks(message.content.body),
     }),
     [message.content.body]
   );
@@ -1602,6 +1613,20 @@ function MessageItemInner({ message, grouped, inThread, triggerEdit, onEditDone,
           {!isDeleted &&
             linkedEventIds.map((linkedId) => (
               <MessageLinkEmbed key={linkedId} eventId={linkedId} />
+            ))}
+
+          {/* Cards for forum posts and replies this message links to. Each draws
+              a card only if the server resolves the link for this viewer, and an
+              inert "Post unavailable" otherwise — so a post shared out of a
+              private forum reaches the whole room, and its contents reach only
+              the people already allowed to read them. */}
+          {!isDeleted &&
+            linkedForumRefs.map((ref) => (
+              <ForumLinkEmbed
+                key={ref.commentId ? `${ref.postId}:${ref.commentId}` : ref.postId}
+                postId={ref.postId}
+                commentId={ref.commentId}
+              />
             ))}
 
           {/* Thread reply count indicator */}

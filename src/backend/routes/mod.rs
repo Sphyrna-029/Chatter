@@ -8,6 +8,7 @@ pub(crate) mod channels;
 pub(crate) mod continuity;
 pub(crate) mod events;
 pub(crate) mod forum;
+pub(crate) mod forum_links;
 pub(crate) mod friends;
 pub(crate) mod gif_favorites;
 pub(crate) mod invites;

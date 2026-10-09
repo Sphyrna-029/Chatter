@@ -3,6 +3,7 @@ import type { Action, AppState, VoiceChannelMember } from "./types";
 import { apiGetRoomMembers } from "../api";
 import { displayUserId } from "@/lib/utils";
 import { forgetMessagePreview } from "@/lib/messageLinks";
+import { forgetForumPreview } from "@/lib/forumLinks";
 import { adoptGifFavorites } from "@/hooks/useFavoriteGifs";
 import { toast } from "sonner";
 import {
@@ -1051,6 +1052,14 @@ export function createWsMessageHandler(
       window.dispatchEvent(
         new CustomEvent(msg.type, { detail: msg })
       );
+      // A shared card of an edited or deleted post/reply is now stale, so drop
+      // its cached resolution and let the next look re-resolve it. A created
+      // one needs nothing: nobody could have linked it before it existed.
+      if (msg.type === "forum.post.edited" || msg.type === "forum.post.deleted") {
+        if (msg.post_id) forgetForumPreview(msg.post_id);
+      } else if (msg.type === "forum.comment.edited" || msg.type === "forum.comment.deleted") {
+        if (msg.post_id) forgetForumPreview(msg.post_id, msg.comment_id ?? null);
+      }
       // Set mention badge for forum posts from other rooms
       if (msg.type === "forum.post.created" && msg.room_id !== stateRef.current.currentRoomId && msg.post?.author !== stateRef.current.userId) {
         dispatch({

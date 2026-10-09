@@ -1,11 +1,13 @@
 import { forumFiles, forumImages, forumVideos, type ForumPost, type ForumTag } from "@/lib/api";
-import { MessageSquare, Trash2, Play, Paperclip } from "lucide-react";
+import { MessageSquare, Trash2, Play, Paperclip, Link } from "lucide-react";
 import { ForumMarkdown } from "@/components/ForumMarkdown";
 import { AuthImage } from "@/components/AuthImage";
 import { ForumReactions } from "@/components/ForumReactions";
 import { ForumTagList } from "@/components/ForumTags";
 import { displayUserId } from "@/lib/utils";
 import { clickable } from "@/lib/a11y";
+import { forumLinkFor } from "@/lib/forumLinks";
+import { toast } from "sonner";
 
 function formatTime(ts: number) {
   const d = new Date(ts);
@@ -82,6 +84,26 @@ export function ForumPostCard({ post, onClick, onDelete, canDelete, tags }: Foru
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
+          {/* Copy the post's share link. Pasted back into chat it draws a card
+              named by this title, resolved per viewer — so a link to a private
+              forum reaches the room but its contents reach only those allowed to
+              read it. */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              try {
+                navigator.clipboard.writeText(forumLinkFor(post.post_id));
+                toast.success("Post link copied");
+              } catch {
+                toast.error("Could not copy — clipboard needs HTTPS");
+              }
+            }}
+            aria-label="Copy post link"
+            title="Copy post link"
+            className="can-hover:opacity-0 can-hover:group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity shrink-0 cursor-pointer"
+          >
+            <Link className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         <ForumTagList tagIds={post.tags} tags={tags} size="xs" />

@@ -11,6 +11,7 @@ import { ThemeSync } from "@/components/ThemeSync";
 import { GifFavoritesSync } from "@/components/GifFavoritesSync";
 import { ThemeInvite } from "@/components/ThemeInvite";
 import { MessageLinkOpener } from "@/components/MessageLinkOpener";
+import { ForumLinkOpener } from "@/components/ForumLinkOpener";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { lazyRetry } from "@/lib/lazyRetry";
 
@@ -88,6 +89,7 @@ function App() {
               <GifFavoritesSync />
               <ThemeInvite />
               <MessageLinkOpener />
+              <ForumLinkOpener />
               <AppContent />
             </ConfirmProvider>
           </TooltipProvider>

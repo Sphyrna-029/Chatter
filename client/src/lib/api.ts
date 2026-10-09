@@ -3249,6 +3249,54 @@ export async function apiGetMessagePreview(
   return res.json() as Promise<MessagePreview>;
 }
 
+/** What a shared forum post or reply link resolves to, for this viewer. */
+export interface ForumPreview {
+  /** "reply" when the link named a reply under the post; otherwise "post". */
+  kind: "post" | "reply";
+  post_id: string;
+  /** Set only for a reply link. */
+  comment_id: string | null;
+  room_id: string;
+  room_name: string;
+  /** Null for a room that is a forum itself with no forum channels. */
+  channel_id: string | null;
+  channel_name: string | null;
+  /** Always the post's title — the name a post link unfurls to. */
+  title: string;
+  /** The post's author for a post link, the reply's author for a reply link. */
+  author: string;
+  author_display_name: string;
+  author_avatar_url: string;
+  /** A snippet of the post body, or of the reply body for a reply link. */
+  body: string;
+  created_at: number;
+  edited: boolean;
+  comment_count: number;
+}
+
+/**
+ * Resolve a shared forum post or reply link, or `null` when it is not available
+ * to this viewer.
+ *
+ * `null` covers every refusal without distinguishing them, exactly as a message
+ * preview does: a post that does not exist, one in a room the caller is not in,
+ * one in a forum channel they cannot see, and a reply that does not belong to
+ * the post all answer 404, so holding a link reveals nothing. Anything else — a
+ * network failure, a rate limit — throws, so a caller can tell "not for you"
+ * from "ask again".
+ */
+export async function apiGetForumPreview(
+  postId: string,
+  commentId?: string,
+): Promise<ForumPreview | null> {
+  let url = `/api/forum/posts/${encodeURIComponent(postId)}/preview`;
+  if (commentId) url += `?comment_id=${encodeURIComponent(commentId)}`;
+  const res = await authenticatedFetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load forum preview");
+  return res.json() as Promise<ForumPreview>;
+}
+
 /** Record that the user has read a channel up to now. Markers only move forward. */
 export async function apiMarkRead(roomId: string, channelId?: string) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/read`, {

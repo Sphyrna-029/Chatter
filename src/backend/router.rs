@@ -25,6 +25,7 @@ use super::{
             create_comment, create_post, delete_comment, delete_post, edit_comment, edit_post,
             get_post, list_posts, search_posts, set_tags,
         },
+        forum_links::get_forum_preview,
         friends::{
             accept_friend_request, block_user, get_friend_status, get_friends,
             get_friends_presence, get_mutual_friends, reject_friend_request, remove_friend,
@@ -231,6 +232,9 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // instance, and which room it is in is one of the things the caller is
         // asking. See `routes/message_links.rs`.
         .route("/api/messages/{event_id}/preview", get(get_message_preview))
+        // A shared forum post or reply link, resolved per viewer the same way a
+        // message link is. `?comment_id=` asks for a reply under the post.
+        .route("/api/forum/posts/{post_id}/preview", get(get_forum_preview))
         .route(
             "/_matrix/client/r0/rooms/{room_id}/edit/{event_id}/{txn_id}",
             put(edit_message),
@@ -511,6 +515,12 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // is the exact thing the per-viewer preview exists to prevent. A
         // message link has no preview outside Chatter on purpose.
         .route("/m/{event_id}", get(serve_client))
+        // A shared forum post or reply link. Serves the client and nothing else,
+        // exactly as a message link does: the ids are read from the path by
+        // `ForumLinkOpener`, which resolves them against the viewer's own access
+        // once there is a session. No OG tags, for the same reason.
+        .route("/f/{post_id}", get(serve_client))
+        .route("/f/{post_id}/{comment_id}", get(serve_client))
         // Everything above is text the wire should not be carrying whole: the
         // client bundle is over a megabyte of JavaScript, and a sync response
         // is one JSON document listing every room with its members. Both were
