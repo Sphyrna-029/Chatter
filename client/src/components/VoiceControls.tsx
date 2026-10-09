@@ -151,7 +151,7 @@ export function VoiceControls({ joinVoiceRef, leaveVoiceRef, releaseVoiceRef, to
   const speakingUsers = useSpeakingDetection(
     state.inVoiceChannel,
     state.userId,
-    voice.localStreamRef,
+    voice.micRef,
   );
   // Expose to parent (e.g. ChannelList speaking indicator)
   if (speakingUsersRef) speakingUsersRef.current = speakingUsers;

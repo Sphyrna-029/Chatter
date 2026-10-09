@@ -12,6 +12,7 @@
  */
 
 import { apiGetPushPublicKey, apiPushSubscribe, apiPushUnsubscribe } from "./api";
+import { desktop } from "@/lib/desktop/bridge";
 
 /** Where the enrolled state is remembered between loads, per browser. */
 const ENABLED_KEY = "chatter_push_enabled";
@@ -21,10 +22,14 @@ export type PushSupport =
   /** No service worker or PushManager — an older browser, or a non-secure origin. */
   | "unsupported"
   /** iOS only exposes push to an app added to the home screen. */
-  | "needs-install";
+  | "needs-install"
+  /** The desktop app: Electron has a PushManager, but no push service behind
+   *  it, so subscribing fails. The app notifies from the tray instead. */
+  | "desktop";
 
 export function pushSupport(): PushSupport {
   if (typeof window === "undefined") return "unsupported";
+  if (desktop) return "desktop";
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     // Safari on iOS hides both until the app is installed, so the distinction
     // is worth drawing: one is "never", the other is "not yet".

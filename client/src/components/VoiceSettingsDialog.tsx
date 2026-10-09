@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Dialog,
   DialogContent,
@@ -10,154 +10,139 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
-import { useVoiceSettings } from "@/hooks/useVoiceSettings";
+import { micGain, useVoiceSettings, type NoiseSuppressionMode } from "@/hooks/useVoiceSettings";
+import {
+  nativeVoiceAvailable,
+  nativeVoicePreferred,
+  selectVoiceBackend,
+  setNativeVoicePreferred,
+  type AudioDevice,
+  type MicTest,
+} from "@/lib/media";
+import { desktop, hasDesktopFeature, type PttBinding } from "@/lib/desktop/bridge";
 
 interface VoiceSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
+const NOISE_LABELS: Record<NoiseSuppressionMode, string> = {
+  none: "Off",
+  browser: "Standard (fan, AC noise)",
+  rnnoise: "Enhanced (keyboard, voices in the room)",
+};
+
 export function VoiceSettingsDialog({
   open,
   onOpenChange,
 }: VoiceSettingsDialogProps) {
   const { settings, updateSettings } = useVoiceSettings();
-  const [inputDevices, setInputDevices] = useState<MediaDeviceInfo[]>([]);
-  const [outputDevices, setOutputDevices] = useState<MediaDeviceInfo[]>([]);
+  const [nativeVoice, setNativeVoice] = useState(() => nativeVoicePreferred());
+  // The stack the next call will use: devices and the mic test come from it,
+  // since the desktop app's native engine names devices its own way.
+  const backend = useMemo(() => selectVoiceBackend(), [nativeVoice]);
+  const [inputDevices, setInputDevices] = useState<AudioDevice[]>([]);
+  const [outputDevices, setOutputDevices] = useState<AudioDevice[]>([]);
   const [micLevel, setMicLevel] = useState(0);
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [pttBinding, setPttBinding] = useState<PttBinding | null>(null);
+  const [capturingKey, setCapturingKey] = useState(false);
+  const desktopDucking = hasDesktopFeature("ducking") ? desktop?.ducking : undefined;
+  const [ducking, setDucking] = useState<number | null>(null);
 
-  const micTestRef = useRef<MediaStream | null>(null);
-  const animFrameRef = useRef<number>(0);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const monitorAudioRef = useRef<HTMLAudioElement | null>(null);
+  const micTestRef = useRef<MicTest | null>(null);
+  const desktopPtt = hasDesktopFeature("ptt") ? desktop?.pushToTalk : undefined;
 
   const loadDevices = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-      const allDevices = await navigator.mediaDevices.enumerateDevices();
-      setInputDevices(allDevices.filter((d) => d.kind === "audioinput"));
-      setOutputDevices(allDevices.filter((d) => d.kind === "audiooutput"));
+      const devices = await backend.listDevices();
+      setInputDevices(devices.inputs);
+      setOutputDevices(devices.outputs);
     } catch (err) {
       console.error("Could not load devices:", err);
     }
   };
 
   const stopMonitoring = () => {
-    if (monitorAudioRef.current) {
-      monitorAudioRef.current.pause();
-      monitorAudioRef.current.srcObject = null;
-      monitorAudioRef.current = null;
-    }
+    void micTestRef.current?.setMonitoring(false);
     setIsMonitoring(false);
   };
 
   const startMonitoring = async () => {
     if (!micTestRef.current) return;
-    stopMonitoring();
-    const el = new Audio();
-    el.srcObject = micTestRef.current;
-    if ("setSinkId" in el && settings.outputDeviceId !== "default") {
-      await (
-        el as HTMLAudioElement & { setSinkId(id: string): Promise<void> }
-      ).setSinkId(settings.outputDeviceId);
-    }
-    el.play();
-    monitorAudioRef.current = el;
+    await micTestRef.current.setMonitoring(true);
     setIsMonitoring(true);
   };
 
   const stopMicTest = () => {
-    stopMonitoring();
-    if (micTestRef.current) {
-      micTestRef.current.getTracks().forEach((t) => t.stop());
-      micTestRef.current = null;
-    }
-    cancelAnimationFrame(animFrameRef.current);
-    analyserRef.current = null;
-    gainNodeRef.current = null;
-    if (audioCtxRef.current) {
-      audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
+    micTestRef.current?.stop();
+    micTestRef.current = null;
+    setTesting(false);
     setMicLevel(0);
     setIsMonitoring(false);
   };
 
   const startMicTest = async () => {
     stopMicTest();
-
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          deviceId:
-            settings.inputDeviceId !== "default"
-              ? { exact: settings.inputDeviceId }
-              : undefined,
+      micTestRef.current = await backend.startMicTest(
+        {
+          deviceId: settings.inputDeviceId,
           echoCancellation: settings.echoCancellation,
-          noiseSuppression: settings.noiseSuppressionMode === "browser",
+          noiseSuppression: settings.noiseSuppressionMode,
           autoGainControl: settings.autoGainControl,
-          sampleRate: 48000,
+          gain: micGain(settings),
+          outputDeviceId: settings.outputDeviceId,
         },
-      });
-      micTestRef.current = stream;
-
-      const ctx = new AudioContext({ sampleRate: 48000 });
-      audioCtxRef.current = ctx;
-      await ctx.resume();
-
-      const source = ctx.createMediaStreamSource(stream);
-
-      const gainNode = ctx.createGain();
-      gainNode.gain.value = settings.autoGainControl
-        ? 1
-        : Math.pow(10, settings.inputGainDb / 20);
-      gainNodeRef.current = gainNode;
-
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-
-      source.connect(gainNode);
-      gainNode.connect(analyser);
-
-      const tick = () => {
-        const data = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteTimeDomainData(data);
-        const rms = Math.sqrt(
-          data.reduce((sum, v) => sum + (v - 128) ** 2, 0) / data.length,
-        );
-        setMicLevel(Math.min(100, rms * 5));
-        animFrameRef.current = requestAnimationFrame(tick);
-      };
-      tick();
+        setMicLevel,
+      );
+      setTesting(true);
     } catch (err) {
       console.error("Mic test failed:", err);
     }
   };
 
-  // Restart test when device changes mid-test
+  // Restart test when device or processing changes mid-test
   useEffect(() => {
     if (micTestRef.current) startMicTest();
-  }, [settings.inputDeviceId]);
+  }, [settings.inputDeviceId, settings.noiseSuppressionMode, settings.echoCancellation, backend]);
 
-  // Update gain node live without restarting
+  // Update gain live without restarting
   useEffect(() => {
-    if (gainNodeRef.current && !settings.autoGainControl) {
-      gainNodeRef.current.gain.value = Math.pow(10, settings.inputGainDb / 20);
-    }
-  }, [settings.inputGainDb, settings.autoGainControl]);
+    micTestRef.current?.setGain(micGain(settings));
+  }, [settings.inputGainDb, settings.autoGainControl, settings.inputVolume]);
 
   useEffect(() => {
-    if (open) {
-      loadDevices();
-    } else {
+    if (!open) {
       stopMicTest();
+      return;
     }
-  }, [open]);
+    loadDevices();
+    void desktopPtt?.getBinding().then(setPttBinding).catch(() => {});
+    void desktopDucking?.get().then(setDucking).catch(() => {});
+    return backend.onDevicesChanged(() => void loadDevices());
+  }, [open, backend]);
+
+  // A mode this stack can't run (enhanced suppression after switching native
+  // voice off) falls back to the standard one.
+  const noiseModes = backend.noiseSuppressionModes;
+  useEffect(() => {
+    if (!noiseModes.includes(settings.noiseSuppressionMode)) {
+      updateSettings({ noiseSuppressionMode: noiseModes.includes("browser") ? "browser" : noiseModes[0] });
+    }
+  }, [noiseModes, settings.noiseSuppressionMode]);
+
+  const captureKey = async () => {
+    if (!desktopPtt) return;
+    setCapturingKey(true);
+    try {
+      const binding = await desktopPtt.captureBinding();
+      if (binding) setPttBinding(binding);
+    } finally {
+      setCapturingKey(false);
+    }
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -190,12 +175,12 @@ export function VoiceSettingsDialog({
                   updateSettings({ inputDeviceId: e.target.value })
                 }
               >
-                {inputDevices.length === 0 && (
-                  <option value="default">Default</option>
+                {!inputDevices.some((d) => d.id === settings.inputDeviceId) && (
+                  <option value={settings.inputDeviceId}>Default</option>
                 )}
                 {inputDevices.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Microphone (${d.deviceId.slice(0, 8)})`}
+                  <option key={d.id} value={d.id}>
+                    {d.label}
                   </option>
                 ))}
               </select>
@@ -213,11 +198,11 @@ export function VoiceSettingsDialog({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={micTestRef.current ? stopMicTest : startMicTest}
+                  onClick={testing ? stopMicTest : startMicTest}
                 >
-                  {micTestRef.current ? "Stop" : "Test Mic"}
+                  {testing ? "Stop" : "Test Mic"}
                 </Button>
-                {micTestRef.current && (
+                {testing && (
                   <Button
                     variant={isMonitoring ? "default" : "outline"}
                     size="sm"
@@ -272,12 +257,15 @@ export function VoiceSettingsDialog({
                 value={settings.noiseSuppressionMode}
                 onChange={(e) =>
                   updateSettings({
-                    noiseSuppressionMode: e.target.value as "none" | "browser",
+                    noiseSuppressionMode: e.target.value as NoiseSuppressionMode,
                   })
                 }
               >
-                <option value="none">Off</option>
-                <option value="browser">Browser built-in (fan, AC noise)</option>
+                {noiseModes.map((mode) => (
+                  <option key={mode} value={mode}>
+                    {NOISE_LABELS[mode]}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -330,18 +318,15 @@ export function VoiceSettingsDialog({
                   updateSettings({ outputDeviceId: e.target.value })
                 }
               >
-                {outputDevices.length === 0 && (
-                  <option value="default">Default</option>
+                {!outputDevices.some((d) => d.id === settings.outputDeviceId) && (
+                  <option value={settings.outputDeviceId}>Default</option>
                 )}
                 {outputDevices.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Speaker (${d.deviceId.slice(0, 8)})`}
+                  <option key={d.id} value={d.id}>
+                    {d.label}
                   </option>
                 ))}
               </select>
-              <p className="text-xs text-muted-foreground">
-                Changing output may require rejoining voice.
-              </p>
             </div>
 
             <div className="space-y-2">
@@ -360,6 +345,31 @@ export function VoiceSettingsDialog({
                 </span>
               </div>
             </div>
+
+            {desktopDucking && ducking !== null && (
+              <div className="space-y-2">
+                <Label>Lower Other Apps</Label>
+                <p className="text-xs text-muted-foreground">
+                  Turns down games and music while people in the call are talking.
+                </p>
+                <div className="flex items-center gap-3">
+                  <Slider
+                    className="flex-1"
+                    min={0}
+                    max={100}
+                    step={5}
+                    value={[Math.round(ducking * 100)]}
+                    onValueChange={([v]) => {
+                      setDucking(v / 100);
+                      void desktopDucking.set(v / 100);
+                    }}
+                  />
+                  <span className="w-10 text-right text-xs text-muted-foreground">
+                    {ducking === 0 ? "Off" : `${Math.round(ducking * 100)}%`}
+                  </span>
+                </div>
+              </div>
+            )}
           </TabsContent>
 
           {/* ── Advanced Tab ── */}
@@ -368,7 +378,9 @@ export function VoiceSettingsDialog({
               <div className="min-w-0">
                 <Label>Push to Talk</Label>
                 <p className="text-xs text-muted-foreground">
-                  Hold backtick (`) to speak
+                  {desktopPtt
+                    ? `Hold ${pttBinding?.label ?? "your key"} to speak, even while Chatter isn't focused`
+                    : "Hold backtick (`) to speak"}
                 </p>
               </div>
               <Switch
@@ -378,6 +390,52 @@ export function VoiceSettingsDialog({
                 }
               />
             </div>
+
+            {desktopPtt && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label>Push to Talk Key</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {capturingKey ? "Press the key or mouse button to use…" : (pttBinding?.label ?? "Not set")}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={captureKey} disabled={capturingKey}>
+                    Change
+                  </Button>
+                  {pttBinding && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={async () => {
+                        await desktopPtt.clearBinding();
+                        setPttBinding(await desktopPtt.getBinding());
+                      }}
+                    >
+                      Reset
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {nativeVoiceAvailable() && (
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label>Native Voice Engine</Label>
+                  <p className="text-xs text-muted-foreground">
+                    The desktop app's own audio engine: enhanced noise suppression and lower latency. Applies from your next call.
+                  </p>
+                </div>
+                <Switch
+                  checked={nativeVoice}
+                  onCheckedChange={(v) => {
+                    setNativeVoicePreferred(v);
+                    setNativeVoice(v);
+                  }}
+                />
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </DialogContent>

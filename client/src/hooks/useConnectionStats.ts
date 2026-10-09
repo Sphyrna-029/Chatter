@@ -1,9 +1,13 @@
 import { useEffect, useState, useRef } from "react";
 import type { PeerStats } from "@/lib/webrtc";
+import type { VoicePeer } from "@/lib/media";
+
+/** What stats are read from: a browser RTCPeerConnection or a voice peer. */
+type StatsSource = Pick<VoicePeer, "getStats" | "connectionState">;
 
 interface PeerConnectionSource {
-  voicePublisherPcRef: React.MutableRefObject<RTCPeerConnection | null>;
-  voiceSubscriberPcRef: React.MutableRefObject<RTCPeerConnection | null>;
+  voicePublisherPcRef: React.MutableRefObject<VoicePeer | null>;
+  voiceSubscriberPcRef: React.MutableRefObject<VoicePeer | null>;
   screenPubPcRef: React.MutableRefObject<RTCPeerConnection | null>;
   screenSubPcsRef: React.MutableRefObject<Map<string, RTCPeerConnection>>;
 }
@@ -25,7 +29,7 @@ export function useConnectionStats(
     }
 
     const pollStats = async () => {
-      const pcs: [string, RTCPeerConnection | null][] = [
+      const pcs: [string, StatsSource | null][] = [
         ["voice-pub", sources.voicePublisherPcRef.current],
       ];
       pcs.push(["voice-sub", sources.voiceSubscriberPcRef.current]);

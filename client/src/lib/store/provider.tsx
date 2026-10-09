@@ -10,6 +10,7 @@ import { decideResumeAction } from "@/lib/wsResume";
 import { useVersionCheck } from "@/hooks/useVersionCheck";
 import { displayUserId } from "@/lib/utils";
 import { settingsKey, type NotificationLevel, type NotificationSettings } from "@/lib/notifications";
+import { desktop, hasDesktopFeature } from "@/lib/desktop/bridge";
 import {
   setAccessToken,
   setRefreshToken,
@@ -465,7 +466,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ws.onopen = () => {
       // Use getAccessToken() in case another refresh happened between now and above
       const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      ws.send(JSON.stringify({ access_token: getAccessToken() ?? token, is_mobile: isMobileDevice }));
+      ws.send(JSON.stringify({
+        access_token: getAccessToken() ?? token,
+        is_mobile: isMobileDevice,
+        // The desktop app says so: it keeps its socket open from the tray, so
+        // the server only lets it stand in for a phone push while it's in use.
+        ...(desktop && { client: { kind: "desktop", version: desktop.appVersion } }),
+      }));
+      // The server forgets activity with the connection; tell it again.
+      if (hasDesktopFeature("game-activity")) {
+        void desktop!.gameActivity!.current().then((game) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "game_activity", game }));
+        }).catch(() => {});
+      }
       dispatch({ type: "SET_WS_CONNECTED", payload: true });
 
       // Live events only exist while the socket does. Anything sent while it
@@ -495,6 +508,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setTimeout(connectWebSocket, WS_RECONNECT_MS);
     };
   }, []); // getAccessToken / apiRefreshToken are module-level, no deps needed
+
+  // The desktop app reports the game being played as "Playing …".
+  useEffect(() => {
+    if (!hasDesktopFeature("game-activity")) return;
+    return desktop!.gameActivity!.subscribe((game) => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "game_activity", game }));
+    });
+  }, []);
 
   // Update document title with total unread notification count
   useEffect(() => {

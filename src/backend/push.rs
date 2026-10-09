@@ -12,7 +12,7 @@
 //! channel stays muted on a phone; the two must be changed together.
 
 use super::{
-    helpers::{get_allowed_channel_ids, mention_token, now_secs},
+    helpers::{get_allowed_channel_ids, mention_token, now_secs, IDLE_AFTER_SECS},
     state::{AppState, CustomRoleRecord, MemberCustomRoleRecord, UserRecord},
     webpush,
 };
@@ -315,14 +315,38 @@ pub(crate) fn spawn_message_push(state: Arc<AppState>, notification: MessageNoti
     });
 }
 
+/// Users whose own client will raise this notification, so a push would only
+/// double it. A browser tab or a phone with the app open does. The desktop app
+/// sits in the tray all day with its socket open, so it only counts while its
+/// user has been active lately — an idle desk shouldn't swallow the phone's
+/// notification. The desktop still shows its own, as the browser always has.
+async fn attended_users(state: &AppState) -> std::collections::HashSet<String> {
+    let ws = state.active_websockets.read().await;
+    let desktop = state.desktop_connections.read().await;
+    let presence = state.user_presence.read().await;
+    let now = now_secs();
+    ws.iter()
+        .filter(|(uid, conns)| {
+            let active = presence
+                .get(*uid)
+                .is_some_and(|p| now - p.last_active < IDLE_AFTER_SECS);
+            let desktop_conns = desktop.get(*uid);
+            conns
+                .keys()
+                .any(|id| active || !desktop_conns.is_some_and(|d| d.contains(id)))
+        })
+        .map(|(uid, _)| uid.clone())
+        .collect()
+}
+
 /// Who, of a room's members, should be woken for this message.
 async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
     let Some(vapid) = state.vapid.as_ref() else {
         return;
     };
 
-    // Members who are not the sender and hold no connection. Anyone connected
-    // is notified by their own client off the WebSocket event.
+    // Members who are not the sender and whose own client won't raise it (see
+    // `attended_users`).
     let candidates: Vec<String> = {
         let members = {
             let rm = state.room_members.read().await;
@@ -331,7 +355,7 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
                 None => return,
             }
         };
-        let ws = state.active_websockets.read().await;
+        let attended = attended_users(state).await;
         members
             .into_iter()
             .filter(|uid| *uid != n.sender_id)
@@ -340,7 +364,7 @@ async fn deliver_message(state: &Arc<AppState>, n: &MessageNotification) {
                     .as_ref()
                     .is_none_or(|audience| audience.contains(uid))
             })
-            .filter(|uid| ws.get(uid).is_none_or(|conns| conns.is_empty()))
+            .filter(|uid| !attended.contains(uid))
             .collect()
     };
     if candidates.is_empty() {
@@ -453,13 +477,13 @@ async fn deliver_event_reminder(state: &Arc<AppState>, n: &EventReminderNotifica
         return;
     };
 
-    // Anyone connected is told by their own client off the WebSocket event, the
+    // Anyone attended is told by their own client off the WebSocket event, the
     // same split the message path makes.
     let candidates: Vec<String> = {
-        let ws = state.active_websockets.read().await;
+        let attended = attended_users(state).await;
         n.audience
             .iter()
-            .filter(|uid| ws.get(*uid).is_none_or(|conns| conns.is_empty()))
+            .filter(|uid| !attended.contains(*uid))
             .cloned()
             .collect()
     };

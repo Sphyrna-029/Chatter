@@ -104,6 +104,8 @@ pub(crate) async fn build_webrtc_api() -> Arc<API> {
         .unwrap_or(DEFAULT_WEBRTC_UDP_PORT);
     match tokio::net::UdpSocket::bind(("0.0.0.0", udp_port)).await {
         Ok(socket) => {
+            #[cfg(windows)]
+            disable_udp_connreset(&socket);
             println!("WebRTC: multiplexing peer connections over UDP port {udp_port}");
             setting_engine.set_udp_network(UDPNetwork::Muxed(UDPMuxDefault::new(
                 UDPMuxParams::new(socket),
@@ -142,6 +144,43 @@ pub(crate) async fn build_webrtc_api() -> Arc<API> {
             .with_setting_engine(setting_engine)
             .build(),
     )
+}
+
+/// Windows reports an ICMP "port unreachable" from an earlier send as
+/// WSAECONNRESET on the socket's next receive. webrtc-ice's mux treats any
+/// receive error but a timeout as fatal and stops reading, so one connectivity
+/// check sent to a candidate nobody listens on (a peer that left, an address
+/// that only exists on the other machine) silently ends all WebRTC on the
+/// server. Linux doesn't report these on unconnected sockets; turn it off here.
+#[cfg(windows)]
+fn disable_udp_connreset(socket: &tokio::net::UdpSocket) {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{WSAIoctl, SIO_UDP_CONNRESET, SOCKET};
+
+    let report: u32 = 0; // FALSE
+    let mut returned: u32 = 0;
+    // SAFETY: a valid socket handle for the call's duration, an in-buffer of
+    // the size given, no out-buffer, and a synchronous (non-overlapped) call.
+    let rc = unsafe {
+        WSAIoctl(
+            socket.as_raw_socket() as SOCKET,
+            SIO_UDP_CONNRESET,
+            (&report as *const u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+            std::ptr::null_mut(),
+            0,
+            &mut returned,
+            std::ptr::null_mut(),
+            None,
+        )
+    };
+    if rc != 0 {
+        eprintln!(
+            "WebRTC: could not disable UDP connection-reset reports ({}); \
+             an unreachable peer may stop all calls on this host",
+            std::io::Error::last_os_error()
+        );
+    }
 }
 
 fn default_webrtc_config() -> RTCConfiguration {

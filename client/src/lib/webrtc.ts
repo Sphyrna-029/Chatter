@@ -1,3 +1,4 @@
+import type { VoicePeer } from "@/lib/media/types";
 import { getAccessToken } from "./api";
 
 // Fallback config used until the server responds
@@ -166,7 +167,7 @@ function withVoicePtime(sdp: string, afterLine: string): string {
 // Cap the publisher's outgoing audio bitrate. Unlike SDP munging this takes
 // effect live, so a mid-call bitrate change needs no renegotiation.
 export async function applyVoiceSenderBitrate(
-  pc: RTCPeerConnection,
+  pc: Pick<VoicePeer, "getSenders">,
   bitrateBps: number,
 ): Promise<void> {
   const sender = pc.getSenders().find((s) => s.track?.kind === "audio");

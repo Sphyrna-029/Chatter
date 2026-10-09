@@ -197,6 +197,10 @@ fn marks_user_active(msg_type: &str) -> bool {
             // Housekeeping after a reconnect or a room switch.
             | "voice_state_request"
             | "watchparty_request_sync"
+            // The desktop app noticing a game, not the person doing anything:
+            // it reports on every reconnect, and a launcher can start a game
+            // on an empty desk.
+            | "game_activity"
     ) && !msg_type.contains("_webrtc_")
 }
 
@@ -317,6 +321,15 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
+    // `{"client": {"kind": "desktop", "version": "…"}}` from the desktop app.
+    // Browsers send no `client`, so its absence means "web".
+    let is_desktop = auth_msg
+        .as_ref()
+        .and_then(|m| m.get("client"))
+        .and_then(|c| c.get("kind"))
+        .and_then(|k| k.as_str())
+        == Some("desktop");
+
     // JWT decode — no DB call; fall back to bot token if JWT fails
     let user_id_opt = match token {
         Some(ref t) => get_user_from_token(&state, t),
@@ -389,6 +402,15 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                 .or_default()
                 .insert(conn_id);
         }
+        if is_desktop {
+            state
+                .desktop_connections
+                .write()
+                .await
+                .entry(user_id.clone())
+                .or_default()
+                .insert(conn_id);
+        }
         let mobile_now = current_is_mobile(&state, &user_id).await;
 
         // Update presence – preserve custom_status and manual_status on reconnect
@@ -421,6 +443,7 @@ pub(crate) async fn handle_websocket(state: Arc<AppState>, socket: WebSocket) {
                         steam_game: None,
                         steam_appid: None,
                         game_session_start: None,
+                        desktop_game: None,
                     },
                 );
             }
@@ -2417,6 +2440,26 @@ pub(crate) async fn handle_ws_text(state: Arc<AppState>, user_id: &str, conn_id:
         // unlike the keepalive it means something.
         "activity" => {}
         "heartbeat" => {}
+        // The desktop app saw a game running (or stop): `{"game": "Name" | null}`.
+        "game_activity" => {
+            // Only the desktop app reports games; anything else could set one
+            // that nothing would ever clear.
+            let from_desktop = state
+                .desktop_connections
+                .read()
+                .await
+                .get(user_id)
+                .is_some_and(|conns| conns.contains(&conn_id));
+            if !from_desktop {
+                return;
+            }
+            let game = msg
+                .get("game")
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().chars().take(128).collect::<String>())
+                .filter(|s| !s.is_empty());
+            set_desktop_game(&state, user_id, game).await;
+        }
         "embed_interaction" => {
             // User clicked a button or used a select on a bot embed.
             // Validate the user is in the room, then broadcast to room so the bot receives it.
@@ -2558,16 +2601,106 @@ async fn current_is_mobile(state: &AppState, user_id: &str) -> bool {
     is_mobile_only(&live, mobile.get(user_id).unwrap_or(&empty))
 }
 
+/// Record the game the desktop app reports, and show it unless Steam is
+/// reporting one (Steam knows the exact title) or the user hides their game.
+pub(crate) async fn set_desktop_game(state: &AppState, user_id: &str, game: Option<String>) {
+    let hidden = state
+        .db
+        .collection::<UserRecord>("users")
+        .find_one(doc! { "_id": user_id })
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|u| u.hide_steam_game);
+    let game = if hidden { None } else { game };
+
+    let changed = {
+        let mut up = state.user_presence.write().await;
+        let Some(p) = up.get_mut(user_id) else { return };
+        p.desktop_game = game.clone();
+        if p.steam_appid.is_some() || p.steam_game == game {
+            None
+        } else {
+            p.game_session_start = game.as_ref().map(|_| now_secs());
+            p.steam_game = game.clone();
+            Some((
+                presence_status(p, now_secs()).to_string(),
+                p.custom_status.clone(),
+                p.is_mobile,
+                p.game_session_start,
+            ))
+        }
+    };
+    let Some((status, custom_status, is_mobile, game_session_start)) = changed else {
+        return;
+    };
+
+    let user_rooms: Vec<String> = {
+        let rm = state.room_members.read().await;
+        rm.iter()
+            .filter(|(_, members)| members.iter().any(|m| m == user_id))
+            .map(|(rid, _)| rid.clone())
+            .collect()
+    };
+    let event = json!({
+        "type": "presence_update",
+        "user_id": user_id,
+        "status": status,
+        "custom_status": custom_status,
+        "is_mobile": is_mobile,
+        "steam_game": game,
+        "steam_appid": Value::Null,
+        "game_session_start": game_session_start,
+    });
+    for rid in user_rooms {
+        broadcast_to_room(state, &rid, &event).await;
+    }
+}
+
 pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id: u64) {
-    // Teardown voice WebRTC
-    teardown_voice_listener(state, user_id).await;
-    let _ = teardown_voice_publisher(state, user_id).await;
+    // Media is keyed by user, not by connection, so it belongs to whichever
+    // connection holds the voice session. Tearing it down for any closing
+    // socket meant shutting a spare tab — or a desktop app's window reload
+    // racing a browser tab — cut the audio of a call running elsewhere while
+    // the membership stayed up. Only the session holder, or the user's last
+    // connection, takes the media down with it.
+    let holds_session = {
+        let vc = state.voice_channels.read().await;
+        vc.values()
+            .any(|members| holds_voice_session(members, user_id, conn_id))
+    };
+    // Remove this specific connection first and see whether any remain: of
+    // two connections closing together, exactly one then sees itself as the
+    // last and takes the media down.
+    let still_connected = {
+        let mut ws_map = state.active_websockets.write().await;
+        if let Some(conns) = ws_map.get_mut(user_id) {
+            conns.remove(&conn_id);
+            if conns.is_empty() {
+                ws_map.remove(user_id);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
+    };
+    let owns_media = holds_session || !still_connected;
 
-    teardown_screen_subscriptions_for_viewer(state, user_id).await;
-    let publisher_room = teardown_screen_publisher(state, user_id).await;
+    let (publisher_room, webcam_publisher_room) = if owns_media {
+        teardown_voice_listener(state, user_id).await;
+        let _ = teardown_voice_publisher(state, user_id).await;
 
-    teardown_webcam_subscriptions_for_viewer(state, user_id).await;
-    let webcam_publisher_room = teardown_webcam_publisher(state, user_id).await;
+        teardown_screen_subscriptions_for_viewer(state, user_id).await;
+        let publisher_room = teardown_screen_publisher(state, user_id).await;
+
+        teardown_webcam_subscriptions_for_viewer(state, user_id).await;
+        let webcam_publisher_room = teardown_webcam_publisher(state, user_id).await;
+        (publisher_room, webcam_publisher_room)
+    } else {
+        (None, None)
+    };
 
     // Remove from voice channels and broadcast leaves
     // (room, channel, was_sharing, who is left). The map is keyed by channel, so
@@ -2697,30 +2830,35 @@ pub(crate) async fn cleanup_disconnect(state: &AppState, user_id: &str, conn_id:
         broadcast_to_room(state, &room_id, &event).await;
     }
 
-    // Remove this specific connection; check whether any remain.
-    let still_connected = {
-        let mut ws_map = state.active_websockets.write().await;
-        if let Some(conns) = ws_map.get_mut(user_id) {
-            conns.remove(&conn_id);
-            if conns.is_empty() {
-                ws_map.remove(user_id);
-                false
-            } else {
-                true
-            }
-        } else {
-            false
-        }
-    };
-
     // Only mark offline and broadcast when the last connection closes.
     // Whether or not the session survives, this connection is gone.
-    {
-        let mut mobile = state.mobile_connections.write().await;
-        if let Some(conns) = mobile.get_mut(user_id) {
+    let mut last_desktop_closed = false;
+    for kind in [&state.mobile_connections, &state.desktop_connections] {
+        let mut map = kind.write().await;
+        if let Some(conns) = map.get_mut(user_id) {
+            let was_desktop =
+                std::ptr::eq(kind, &state.desktop_connections) && conns.contains(&conn_id);
             conns.remove(&conn_id);
             if conns.is_empty() {
-                mobile.remove(user_id);
+                map.remove(user_id);
+                last_desktop_closed |= was_desktop;
+            }
+        }
+    }
+    // The app that saw the game is gone; nobody is left to say it stopped.
+    // Cleared even when this was the last connection: presence outlives the
+    // socket, and the next connect would announce the old game again.
+    if last_desktop_closed {
+        if still_connected {
+            set_desktop_game(state, user_id, None).await;
+        } else {
+            let mut up = state.user_presence.write().await;
+            if let Some(p) = up.get_mut(user_id) {
+                p.desktop_game = None;
+                if p.steam_appid.is_none() {
+                    p.steam_game = None;
+                    p.game_session_start = None;
+                }
             }
         }
     }

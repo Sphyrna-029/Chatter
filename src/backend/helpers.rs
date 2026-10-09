@@ -1560,6 +1560,7 @@ mod tests {
             manual_status: manual.map(|m| m.to_string()),
             is_mobile: false,
             steam_game: None,
+            desktop_game: None,
             steam_appid: None,
             game_session_start: None,
         }

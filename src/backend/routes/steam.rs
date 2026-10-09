@@ -335,6 +335,7 @@ pub(crate) async fn steam_set_hide_game(
         let mut up = state.user_presence.write().await;
         if let Some(p) = up.get_mut(&user_id) {
             p.steam_game = None;
+            p.desktop_game = None;
         }
     }
 
@@ -364,7 +365,9 @@ pub(crate) async fn steam_unlink(
     {
         let mut up = state.user_presence.write().await;
         if let Some(p) = up.get_mut(&user_id) {
-            p.steam_game = None;
+            // The desktop app's report stands without Steam.
+            p.steam_game = p.desktop_game.clone();
+            p.steam_appid = None;
         }
     }
 

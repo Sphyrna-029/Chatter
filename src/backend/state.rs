@@ -70,6 +70,11 @@ pub struct AppState {
     /// record — alive. A single flag could only ever record whichever device
     /// connected last, and nothing revised it until every device had gone.
     pub(crate) mobile_connections: RwLock<HashMap<String, HashSet<u64>>>,
+    /// Connections from the Chatter desktop app, which says so in its first
+    /// frame. A desktop app sits in the tray all day with its socket open, so
+    /// unlike a browser tab an open connection doesn't mean anyone is there to
+    /// see a notification; push decides with this.
+    pub(crate) desktop_connections: RwLock<HashMap<String, HashSet<u64>>>,
     pub(crate) voice_channels: RwLock<HashMap<String, HashMap<String, VoiceMemberState>>>,
     // Server-muted users per room. Held outside VoiceMemberState so a moderator's
     // mute survives the user leaving and rejoining the channel.
@@ -1114,9 +1119,14 @@ pub(crate) struct PresenceRecord {
     pub(crate) custom_status: String,
     pub(crate) manual_status: Option<String>,
     pub(crate) is_mobile: bool,
+    /// The game being played, as shown ("Playing …"). Steam's report when
+    /// it has one (then `steam_appid` is set), otherwise the desktop app's.
     pub(crate) steam_game: Option<String>,
     pub(crate) steam_appid: Option<String>,
     pub(crate) game_session_start: Option<f64>,
+    /// What the desktop app reports the user playing, kept apart so the Steam
+    /// poller can fall back to it when Steam reports nothing.
+    pub(crate) desktop_game: Option<String>,
 }
 
 #[derive(Clone, Serialize)]

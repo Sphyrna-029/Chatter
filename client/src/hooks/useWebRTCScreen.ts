@@ -16,6 +16,7 @@ import { useScreenShareFps } from "./useScreenShareFps";
 import { useScreenShareBitrate } from "./useScreenShareBitrate";
 import { useScreenContentMode } from "./useScreenContentMode";
 import { toast } from "sonner";
+import { selectDisplayCapture } from "@/lib/media";
 
 function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
@@ -535,7 +536,7 @@ export function useWebRTCScreen() {
     try {
       const videoConstraints = buildDisplayVideoConstraints(profile);
       const audioConstraints = buildDisplayAudioConstraints();
-      const stream = await navigator.mediaDevices.getDisplayMedia({
+      const stream = await selectDisplayCapture().getDisplayMedia({
         video: videoConstraints,
         audio: audioConstraints,
       });

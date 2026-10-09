@@ -157,6 +157,11 @@ export function NotificationSettingsPopover({
               Add Chatter to your home screen to get notifications when it's closed.
             </div>
           )}
+          {support === "desktop" && (
+            <div className="px-2 py-1.5 ui-meta">
+              The desktop app keeps notifying while it's in the tray.
+            </div>
+          )}
         </div>
       </PopoverContent>
     </Popover>

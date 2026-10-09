@@ -49,3 +49,8 @@ tokio-tungstenite = "0.24"
 [profile.release]
 opt-level = 3
 lto = "thin"
+
+# Windows only: switch off SIO_UDP_CONNRESET on the WebRTC mux socket
+# (see backend/webrtc.rs). Already in the tree through tokio/mio.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock", "Win32_System_IO"] }

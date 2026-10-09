@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import type { LocalMic } from "@/lib/media";
 
 /// Who is currently talking.
 ///
@@ -9,37 +10,25 @@ import { useEffect, useState, useRef } from "react";
 /// point of slots is that most of a large call is outside them.
 ///
 /// The local mic is still measured here, so your own indicator responds
-/// immediately rather than after a round trip.
+/// immediately rather than after a round trip. How it is measured belongs to
+/// the media backend (lib/media) that opened the mic.
 export function useSpeakingDetection(
   inVoiceChannel: boolean,
   userId: string | null,
-  localStreamRef: React.MutableRefObject<MediaStream | null>,
+  micRef: React.MutableRefObject<LocalMic | null>,
 ) {
   const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
   const remoteSpeakingRef = useRef<Set<string>>(new Set());
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const localAnalyserRef = useRef<AnalyserNode | null>(null);
-  const localStreamIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!inVoiceChannel) {
       remoteSpeakingRef.current = new Set();
-      localAnalyserRef.current = null;
-      localStreamIdRef.current = null;
-      if (audioContextRef.current) {
-        audioContextRef.current.close().catch(() => {});
-        audioContextRef.current = null;
-      }
       setSpeakingUsers(new Set());
       return;
     }
 
-    const SPEAKING_THRESHOLD = 15; // RMS threshold (0-255 range)
-    const ctx = new AudioContext();
-    audioContextRef.current = ctx;
-
-    const dataArray = new Uint8Array(128);
     let rafId: number;
+    let stopped = false;
 
     const onWsMessage = (e: Event) => {
       const msg = (e as CustomEvent).detail;
@@ -49,35 +38,12 @@ export function useSpeakingDetection(
     window.addEventListener("ws-message", onWsMessage);
 
     const detect = () => {
-      if (ctx.state === "closed") return;
+      if (stopped) return;
       const next = new Set<string>(remoteSpeakingRef.current);
       // The server hears our published audio too, so drop its view of us in
       // favour of the local mic — otherwise the indicator lags our own voice.
       if (userId) next.delete(userId);
-
-      // Lazily attach local mic analyser when the stream becomes available
-      // (or re-attach if the stream changed, e.g. after rejoin)
-      const localStream = localStreamRef.current;
-      if (localStream && userId) {
-        if (localStream.id !== localStreamIdRef.current) {
-          try {
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 256;
-            const source = ctx.createMediaStreamSource(localStream);
-            source.connect(analyser);
-            localAnalyserRef.current = analyser;
-            localStreamIdRef.current = localStream.id;
-          } catch {}
-        }
-        if (localAnalyserRef.current) {
-          localAnalyserRef.current.getByteFrequencyData(dataArray);
-          let sum = 0;
-          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-          if (sum / dataArray.length > SPEAKING_THRESHOLD) {
-            next.add(userId);
-          }
-        }
-      }
+      if (userId && micRef.current?.isSpeaking()) next.add(userId);
 
       setSpeakingUsers((prev) => {
         // Only update if changed to avoid re-renders
@@ -91,14 +57,11 @@ export function useSpeakingDetection(
     rafId = requestAnimationFrame(detect);
 
     return () => {
+      stopped = true;
       cancelAnimationFrame(rafId);
       window.removeEventListener("ws-message", onWsMessage);
-      localAnalyserRef.current = null;
-      localStreamIdRef.current = null;
-      ctx.close().catch(() => {});
-      audioContextRef.current = null;
     };
-  }, [inVoiceChannel, userId, localStreamRef]);
+  }, [inVoiceChannel, userId, micRef]);
 
   return speakingUsers;
 }
