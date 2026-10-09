@@ -1060,7 +1060,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           dispatch({ type: "SET_CHANNEL_CATEGORIES", payload: channelsData.categories || [] });
           const textChannels = (channelsData.channels || []).filter((c: any) => c.channel_type === "text");
           if (textChannels.length > 0) {
-            selectedChannelId = textChannels[0].channel_id;
+            // Land where the reader last was in this room, not on whichever
+            // channel the room happens to list first. A remembered channel that
+            // is gone, or no longer a text channel, falls back to the first one.
+            const remembered = stateRef.current.lastChannelByRoom[roomId];
+            const match = remembered ? textChannels.find((c: any) => c.channel_id === remembered) : undefined;
+            selectedChannelId = (match ?? textChannels[0]).channel_id;
             dispatch({ type: "SELECT_CHANNEL", payload: selectedChannelId! });
           }
         } catch {

@@ -72,6 +72,10 @@ export interface AppState {
   channels: Channel[];
   channelCategories: ChannelCategory[];
   currentChannelId: string | null;
+  /** The channel a user last opened in each room, so returning to a room lands
+   *  where they were reading rather than on its first channel. Text channels
+   *  only; a stale or deleted id falls back to the room's first text channel. */
+  lastChannelByRoom: Record<string, string>;
   // Voice channels: channel_id -> the members of that voice channel.
   //
   // Global, not scoped to the room on screen: a call in another room still has
@@ -390,6 +394,7 @@ export const initialState: AppState = {
   channels: [],
   channelCategories: [],
   currentChannelId: null,
+  lastChannelByRoom: {},
   voiceChannelMembers: {},
   voiceChannelRooms: {},
   voiceChannelId: null,

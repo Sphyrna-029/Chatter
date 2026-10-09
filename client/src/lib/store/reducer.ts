@@ -851,9 +851,15 @@ export function reducer(state: AppState, action: Action): AppState {
           ch.category_id === action.payload ? { ...ch, category_id: "" } : ch
         ),
       };
-    case "SELECT_CHANNEL":
+    case "SELECT_CHANNEL": {
+      const channelId = action.payload;
+      const remembered =
+        channelId && state.currentRoomId
+          ? { ...state.lastChannelByRoom, [state.currentRoomId]: channelId }
+          : state.lastChannelByRoom;
       return {
         ...state,
+        lastChannelByRoom: remembered,
         currentChannelId: action.payload,
         messages: [],
         hasMoreMessages: false,
@@ -877,6 +883,7 @@ export function reducer(state: AppState, action: Action): AppState {
         threadReplyingTo: null,
         threadPins: [],
       };
+    }
     case "ADD_CHANNEL":
       if (state.channels.some((c) => c.channel_id === action.payload.channel_id)) return state;
       return { ...state, channels: [...state.channels, action.payload] };
