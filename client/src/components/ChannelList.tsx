@@ -1174,13 +1174,6 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   <Volume2 className="h-3.5 w-3.5 mr-1" /> Voice
                 </Button>
                 <Button
-                  variant={channelType === "spatial" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setChannelType("spatial")}
-                >
-                  <Move3d className="h-3.5 w-3.5 mr-1" /> Spatial
-                </Button>
-                <Button
                   variant={channelType === "theater" ? "default" : "outline"}
                   size="sm"
                   onClick={() => setChannelType("theater")}
@@ -1200,13 +1193,6 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
                   onClick={() => setChannelType("whiteboard")}
                 >
                   <PenTool className="h-3.5 w-3.5 mr-1" /> Whiteboard
-                </Button>
-                <Button
-                  variant={channelType === "showcase" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setChannelType("showcase")}
-                >
-                  <Sparkles className="h-3.5 w-3.5 mr-1" /> Showcase
                 </Button>
               </div>
             </div>
