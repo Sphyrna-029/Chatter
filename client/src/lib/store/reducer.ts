@@ -998,14 +998,22 @@ export function reducer(state: AppState, action: Action): AppState {
             : 0,
         },
       };
-    case "INCREMENT_CHANNEL_UNREAD":
+    case "INCREMENT_CHANNEL_UNREAD": {
+      const channelId = action.payload.channelId;
+      const ts = action.payload.ts;
+      const latest = state.channelLatestUnreadTs;
       return {
         ...state,
         channelUnreadCounts: {
           ...state.channelUnreadCounts,
-          [action.payload]: (state.channelUnreadCounts[action.payload] || 0) + 1,
+          [channelId]: (state.channelUnreadCounts[channelId] || 0) + 1,
         },
+        channelLatestUnreadTs:
+          ts === undefined
+            ? latest
+            : { ...latest, [channelId]: Math.max(latest[channelId] || 0, ts) },
       };
+    }
     case "SET_NOTIFICATION_SETTINGS":
       return { ...state, notificationSettings: action.payload };
     case "SET_CHANNEL_THREADS":
@@ -1047,25 +1055,35 @@ export function reducer(state: AppState, action: Action): AppState {
     case "SET_UNREADS": {
       const channelUnreadCounts: Record<string, number> = {};
       const channelMentions: Record<string, number> = {};
+      const channelLatestUnreadTs: Record<string, number> = {};
       const roomUnreadCounts: Record<string, number> = {};
       const roomMentions: Record<string, number> = {};
       for (const entry of action.payload) {
         if (entry.channel_id) {
           channelUnreadCounts[entry.channel_id] = entry.count;
           if (entry.mentions > 0) channelMentions[entry.channel_id] = entry.mentions;
+          if (entry.latest_ts) channelLatestUnreadTs[entry.channel_id] = entry.latest_ts;
         }
         roomUnreadCounts[entry.room_id] = (roomUnreadCounts[entry.room_id] || 0) + entry.count;
         if (entry.mentions > 0) {
           roomMentions[entry.room_id] = (roomMentions[entry.room_id] || 0) + entry.mentions;
         }
       }
-      return { ...state, channelUnreadCounts, channelMentions, roomUnreadCounts, roomMentions };
+      return {
+        ...state,
+        channelUnreadCounts,
+        channelMentions,
+        channelLatestUnreadTs,
+        roomUnreadCounts,
+        roomMentions,
+      };
     }
     case "CLEAR_CHANNEL_UNREAD":
       return {
         ...state,
         channelUnreadCounts: { ...state.channelUnreadCounts, [action.payload]: 0 },
         channelMentions: { ...state.channelMentions, [action.payload]: 0 },
+        channelLatestUnreadTs: { ...state.channelLatestUnreadTs, [action.payload]: 0 },
       };
     case "INCREMENT_ROOM_UNREAD":
       return {

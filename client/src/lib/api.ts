@@ -3158,6 +3158,9 @@ export interface UnreadEntry {
   channel_id: string;
   count: number;
   mentions: number;
+  /** Newest unread message's timestamp in this channel; lets a client jump to
+   *  the channel that saw the most recent unread rather than only counting. */
+  latest_ts?: number;
 }
 
 /** Unread + mention counts for every joined room, derived from stored read markers. */

@@ -186,6 +186,10 @@ pub(crate) async fn get_unreads(
                             0,
                         ]
                     }},
+                    // Newest unread message in this channel, so a client can
+                    // answer "which channel saw the most recent unread" and
+                    // land on it rather than only counting how many.
+                    "latest_ts": { "$max": "$origin_server_ts" },
                 }},
             ];
 
@@ -201,6 +205,7 @@ pub(crate) async fn get_unreads(
                         "channel_id": channel_id,
                         "count": count,
                         "mentions": mentions,
+                        "latest_ts": row.get_i64("latest_ts").unwrap_or(0),
                     }));
                 }
             }

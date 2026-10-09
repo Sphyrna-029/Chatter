@@ -1325,6 +1325,44 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
     setScrollToEventId(msg.event_id);
   };
 
+  /** Dismiss the room's unread banner. */
+  const dismissUnreadBanner = () => {
+    roomUnreadBannerRef.current = 0;
+    setRoomUnreadBannerCount(0);
+  };
+
+  /** Jump to the channel whose newest unread message is the most recent, so
+   *  opening a room lands where the last conversation actually happened rather
+   *  than on whichever channel the room lists first. Falls back to simply
+   *  dismissing the banner when no such channel is known — a DM, or unread
+   *  only in the channel already open. */
+  const jumpToMostRecentUnread = () => {
+    const roomId = state.currentRoomId;
+    if (!roomId) {
+      dismissUnreadBanner();
+      return;
+    }
+    let bestChannelId: string | null = null;
+    let bestTs = -1;
+    for (const ch of state.channels) {
+      if (ch.channel_type !== "text") continue;
+      if ((state.channelUnreadCounts[ch.channel_id] || 0) <= 0) continue;
+      const ts = state.channelLatestUnreadTs[ch.channel_id] || 0;
+      if (ts > bestTs) {
+        bestTs = ts;
+        bestChannelId = ch.channel_id;
+      }
+    }
+    if (bestChannelId && bestChannelId !== state.currentChannelId) {
+      void (async () => {
+        await selectChannel(bestChannelId);
+        dismissUnreadBanner();
+      })();
+    } else {
+      dismissUnreadBanner();
+    }
+  };
+
   // The target itself rather than its id: a row clicked twice hands over two
   // targets naming the same message, and both have to land. Identity is what
   // separates "this effect already ran" from "asked again".
@@ -1662,12 +1700,15 @@ export function ChatArea({ onJoinVoice, dmCall }: ChatAreaProps) {
       {/* Unread messages banner */}
       {roomUnreadBannerCount > 0 && (
         <div className="flex items-center justify-between px-4 py-2 bg-info text-background text-sm font-medium shrink-0">
-          <span>{roomUnreadBannerCount} unread message{roomUnreadBannerCount !== 1 ? "s" : ""} since your last visit</span>
+          <span
+            onClick={jumpToMostRecentUnread}
+            title="Go to the most recent unread message"
+            className="cursor-pointer"
+          >
+            {roomUnreadBannerCount} unread message{roomUnreadBannerCount !== 1 ? "s" : ""} since your last visit
+          </span>
           <button
-            onClick={() => {
-              roomUnreadBannerRef.current = 0;
-              setRoomUnreadBannerCount(0);
-            }}
+            onClick={dismissUnreadBanner}
             className="ml-4 rounded px-2 py-0.5 text-xs text-background/90 hover:text-background border border-background/30 hover:border-background/60 transition-colors cursor-pointer"
           >
             Read

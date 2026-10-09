@@ -467,7 +467,7 @@ export function createWsMessageHandler(
             msgChannelId ||
             stateRef.current.channels.find((c) => c.channel_type === "text" || !c.channel_type)?.channel_id;
           if (unreadChannelId) {
-            dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: unreadChannelId });
+            dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: { channelId: unreadChannelId, ts: msg.origin_server_ts } });
           }
           const myUsername = stateRef.current.userId ? displayUserId(stateRef.current.userId) : "";
           const bodyText = msg.content?.body || "";
@@ -496,7 +496,7 @@ export function createWsMessageHandler(
         // the user switches to that room. Channels of other rooms aren't loaded,
         // so this is keyed off the event's own channel_id with no fallback.
         if (msgChannelId) {
-          dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: msgChannelId });
+          dispatch({ type: "INCREMENT_CHANNEL_UNREAD", payload: { channelId: msgChannelId, ts: msg.origin_server_ts } });
         }
         if (isDm || hasMention) {
           if (ownStatus !== "dnd") playSound("mention", packFor(stateRef, msg.room_id));
