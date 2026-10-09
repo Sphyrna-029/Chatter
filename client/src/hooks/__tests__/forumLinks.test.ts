@@ -146,7 +146,7 @@ describe("resolveForumPreview", () => {
   });
 
   it("keeps a post link and a reply link as separate requests", async () => {
-    const reply = { ...preview, kind: "reply", comment_id: COMMENT };
+    const reply: api.ForumPreview = { ...preview, kind: "reply", comment_id: COMMENT };
     const spy = vi.spyOn(api, "apiGetForumPreview").mockResolvedValue(reply);
 
     await resolveForumPreview(POST);
