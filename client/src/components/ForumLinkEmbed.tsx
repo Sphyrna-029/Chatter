@@ -15,6 +15,7 @@ import {
   peekForumPreview,
   resolveForumPreview,
 } from "@/lib/forumLinks";
+import { useAppContext } from "@/lib/store";
 import { requestForumPost } from "@/lib/pendingForumPost";
 import type { ForumPreview } from "@/lib/api";
 import { AuthAvatarImage } from "@/components/AuthImage";
@@ -66,6 +67,7 @@ export function ForumLinkEmbed({
   postId,
   commentId,
 }: { postId: string; commentId: string | null }) {
+  const { state, selectRoom, selectChannel } = useAppContext();
   // Answered during render when this link has been resolved before, so a card
   // that scrolls out of the timeline and back does not flicker.
   const cached = peekForumPreview(postId, commentId);
@@ -128,6 +130,19 @@ export function ForumLinkEmbed({
   const where = preview.channel_name ? preview.channel_name : preview.room_name;
   const isReply = preview.kind === "reply";
 
+  // A click has to *navigate*, not merely park the post: which post is open is
+  // local state inside ForumArea, and that component only mounts once the room
+  // and its forum channel are showing. Parking alone left a card in chat that
+  // did nothing when clicked. Same order as the activity page's openDiscussion:
+  // select the room, then the forum channel, then announce the post so the
+  // freshly mounted view collects it.
+  const openPost = async () => {
+    const channelId = preview.channel_id || null;
+    if (preview.room_id !== state.currentRoomId) await selectRoom(preview.room_id);
+    if (channelId && channelId !== state.currentChannelId) await selectChannel(channelId);
+    requestForumPost(preview.room_id, preview.post_id, channelId);
+  };
+
   return (
     // A div wrapping two buttons rather than one button containing another:
     // nesting them is invalid, and it makes the copy click ambiguous with the
@@ -136,7 +151,9 @@ export function ForumLinkEmbed({
     <div className="group/forum relative mt-1 w-full max-w-[min(520px,100%)]">
       <button
         type="button"
-        onClick={() => requestForumPost(preview.room_id, preview.post_id, preview.channel_id)}
+        onClick={() => {
+          void openPost();
+        }}
         className="flex w-full flex-col gap-1 rounded-md border border-border bg-secondary/40 p-2.5 pr-9 text-left transition-colors hover:bg-secondary/70 cursor-pointer"
       >
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
