@@ -1149,6 +1149,14 @@ pub(crate) struct ScreenPublisherState {
     pub(crate) audio_ssrc: Option<u32>,
     pub(crate) audio_codec: Option<RTCRtpCodecCapability>,
     pub(crate) audio_rtp_sender: Option<broadcast::Sender<rtp::packet::Packet>>,
+    /// A downscaled JPEG of the shared screen, as a `data:` URL, kept so a
+    /// member who is *not* in the call can peek at what is on screen by
+    /// hovering a name. The server never decodes the stream it forwards, so
+    /// this is written by the sharer's own client (the only place a frame is
+    /// cheap to grab) and read back verbatim. `None` until the first capture
+    /// arrives, which is what keeps a share that has not been snapshotted yet
+    /// from showing a stale or empty box.
+    pub(crate) thumbnail: Option<String>,
 }
 
 pub(crate) struct ScreenSubscriberState {

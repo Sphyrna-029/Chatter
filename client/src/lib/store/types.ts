@@ -232,6 +232,16 @@ export const THREAD_ACTIVE_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
 export const screenStreamsMap = new Map<string, MediaStream>();
 export const webcamStreamsMap = new Map<string, MediaStream>();
 
+/** Latest still of each live screen share in the room on screen, keyed by
+ *  sharer, as a `data:` JPEG URL.
+ *
+ *  A module map rather than reducer state because it is refreshed on a slow
+ *  poll and nothing in the timeline renders it — only a hover on a member's
+ *  row. It exists so a member who is *not* in the call (and so has no stream
+ *  of their own) can still see what is on screen; the voice member list keeps
+ *  its own "Watch" button and never reads this. */
+export const screenThumbnailsMap = new Map<string, string>();
+
 /** How far through a video this user got, keyed by its URL.
  *
  *  Kept out of reducer state deliberately: a playing video reports its

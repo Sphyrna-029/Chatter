@@ -4,6 +4,7 @@ import { WifiOff, Menu, Users, Hash, Mic, MicOff, Headphones, HeadphoneOff, Moni
 import { useAppContext, screenStreamsMap } from "@/lib/store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useScreenShareThumbnails } from "@/hooks/useScreenShareThumbnails";
 import { AppSidebar } from "./AppSidebar";
 import { ChatArea } from "./ChatArea";
 import { MembersPanel } from "./MembersPanel";
@@ -138,6 +139,9 @@ function MobileHeader({
 export function ChatLayout() {
   const { state, dispatch, loadRooms, loadFriends, loadRoomGroups, loadUnreads, loadNotificationSettings, loadContinuity, selectRoom, selectChannel, openThread, closeThread } = useAppContext();
   const isMobile = useIsMobile();
+  // Keeps the members list able to show what a sharer has on screen for a
+  // viewer who is not in the call (see MembersPanel's hover thumbnail).
+  useScreenShareThumbnails();
   const [createOpen, setCreateOpen] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
   const [membersCollapsed, setMembersCollapsed] = useState(false);

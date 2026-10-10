@@ -17,6 +17,14 @@ import { useScreenShareBitrate } from "./useScreenShareBitrate";
 import { useScreenContentMode } from "./useScreenContentMode";
 import { toast } from "sonner";
 import { selectDisplayCapture } from "@/lib/media";
+import { apiPutScreenThumbnail } from "@/lib/api";
+import { captureScreenThumbnail } from "@/lib/screenThumbnail";
+
+/** How often the sharer posts a still of its own screen, so a member outside
+ *  the call can hover a name and see what is on screen. Slow on purpose: it is
+ *  a peek, not a stream, and every still is a JPEG re-uploaded from the one
+ *  tab already paying to encode the share. */
+const SCREEN_THUMBNAIL_INTERVAL_MS = 2000;
 
 function buildDisplayVideoConstraints(
   profile: ScreenSharePublishProfile,
@@ -440,6 +448,23 @@ export function useWebRTCScreen() {
 
     return () => clearInterval(id);
   }, [state.inVoiceChannel]);
+
+  // A still of the share, posted from the sharer's own capture so a member who
+  // is *not* in the call can hover their name and see what is on screen. The
+  // server never decodes the forwarded stream, so this is the only place a
+  // frame can be grabbed cheaply — and it runs only while sharing.
+  useEffect(() => {
+    if (!state.isScreenSharing || !state.currentRoomId || !state.userId) return;
+    const roomId = state.currentRoomId;
+    const userId = state.userId;
+    const timer = setInterval(() => {
+      const stream = screenStreamRef.current;
+      if (!stream) return;
+      const thumbnail = captureScreenThumbnail(stream);
+      if (thumbnail) void apiPutScreenThumbnail(roomId, userId, thumbnail);
+    }, SCREEN_THUMBNAIL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [state.isScreenSharing, state.currentRoomId, state.userId]);
 
   // Method to update external stats for frozen detection
   const updateConnStats = useCallback((stats: Record<string, PeerStats>) => {

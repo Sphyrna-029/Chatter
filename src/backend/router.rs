@@ -63,6 +63,7 @@ use super::{
             leave_room, list_all_rooms, list_banned_users, list_room_members, set_member_role,
             set_name_colors, unban_member, update_room_settings, update_room_topic,
         },
+        screenshare::{get_screen_thumbnails, put_screen_thumbnail},
         static_content::{
             build_version, serve_client, serve_dist_file, serve_invite_page, versions,
         },
@@ -343,6 +344,17 @@ pub(crate) fn build_router() -> Router<Arc<AppState>> {
         // Voice & Presence
         .route("/api/rooms/{room_id}/voice", get(get_voice_channel_status))
         .route("/api/rooms/{room_id}/presence", get(get_room_presence))
+        // A still of a live screen share, so a member outside the call can
+        // hover a name and see what is on screen. The sharer writes its own
+        // (see `routes/screenshare.rs`); any room member reads the room's set.
+        .route(
+            "/api/rooms/{room_id}/screenshare/thumbnail/{user_id}",
+            put(put_screen_thumbnail),
+        )
+        .route(
+            "/api/rooms/{room_id}/screenshare/thumbnails",
+            get(get_screen_thumbnails),
+        )
         .route("/api/gifs", get(gif_search))
         .route("/api/link-preview", get(link_preview))
         .route("/api/uploads", get(list_uploads).delete(delete_upload))

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, Crown, Shield, Smartphone, Gamepad2 } from "lucide-react";
-import { useAppContext } from "@/lib/store";
+import { useAppContext, screenThumbnailsMap } from "@/lib/store";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { AuthAvatarImage } from "./AuthImage";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -98,6 +98,16 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
     // dozens of others wants something quieter than a card usually does.
     const wash = profileWashStyle(readProfileTheme(presence), "tab");
 
+    // A still of a live screen share, shown on hover for a member who is
+    // sharing but is not the viewer's own call. Only outside a voice channel:
+    // inside one the member list has a real "Watch" button and a live stream,
+    // so a still would only ever lag it. Gated on a hover-capable pointer, so
+    // a touch user never chases a thumbnail that never reveals.
+    const thumbnail =
+      !state.inVoiceChannel && state.activeScreenSharers.includes(member.userId)
+        ? screenThumbnailsMap.get(member.userId)
+        : null;
+
     return (
       <div
         key={member.userId}
@@ -106,7 +116,7 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
           setProfileOpen(true);
         }}
         className={cn(
-          "flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer hover:bg-accent/50",
+          "group relative flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors cursor-pointer hover:bg-accent/50",
           status === "offline" && "opacity-50"
         )}
         style={wash}
@@ -171,6 +181,13 @@ export function MembersPanel({ collapsed, onToggle }: MembersPanelProps) {
             </span>
           )}
         </div>
+        {thumbnail && (
+          <img
+            src={thumbnail}
+            alt={`${effectiveName}'s screen`}
+            className="pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 h-9 w-16 rounded-md border border-border shadow-lg object-cover can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity duration-150"
+          />
+        )}
       </div>
     );
   };

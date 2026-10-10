@@ -271,6 +271,7 @@ pub(crate) async fn handle_screen_webrtc_publish_offer(
                 audio_ssrc: None,
                 audio_codec: None,
                 audio_rtp_sender: None,
+                thumbnail: None,
             },
         );
     }

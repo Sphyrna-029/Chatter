@@ -884,6 +884,32 @@ export async function apiGetPresence(roomId: string) {
   }>;
 }
 
+/** The sharer records a still of its own screen. Fire-and-forget: a share that
+ *  has just stopped has no more reason to post than one that has not begun, so
+ *  the server answers quietly and the capture loop ignores the result. */
+export async function apiPutScreenThumbnail(
+  roomId: string,
+  userId: string,
+  thumbnail: string,
+) {
+  const res = await authenticatedFetch(
+    `/api/rooms/${roomId}/screenshare/thumbnail/${userId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ thumbnail }),
+    },
+  );
+  return res.ok;
+}
+
+/** Every still the room's live shares have, keyed by sharer. Read by a member
+ *  outside the call so the members list can show what is on screen on hover. */
+export async function apiGetScreenThumbnails(roomId: string) {
+  const res = await authenticatedFetch(`/api/rooms/${roomId}/screenshare/thumbnails`);
+  if (!res.ok) throw new Error("Failed to load screen share thumbnails");
+  return res.json() as Promise<{ thumbnails: Record<string, string> }>;
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface EmbedField {
