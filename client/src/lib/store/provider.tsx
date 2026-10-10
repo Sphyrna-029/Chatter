@@ -857,6 +857,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const data = await apiGetUnreads();
       dispatch({ type: "SET_UNREADS", payload: data.unreads || [] });
+      dispatch({ type: "SET_THREAD_MENTIONS", payload: data.thread_mentions || [] });
     } catch {
       // Leave whatever the session has accumulated.
     }
@@ -1476,6 +1477,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       type: "OPEN_THREAD",
       payload: { eventId, root: data.root, messages: data.messages },
     });
+    // Opening a thread is reading it, so its unread mention badge is dismissed
+    // on the server too — the reducer drops it for this session, the marker is
+    // what keeps it dropped after a reload. A thread has its own marker because
+    // its replies are not in the channel's timeline, so reading that channel
+    // never showed anyone a reply and must not dismiss one.
+    void apiMarkRead(roomId, undefined, eventId).catch(() => {});
     // Pins are a nicety on top of the thread, so a refusal leaves it open
     // with none rather than failing the open. SET_THREAD_PINS drops an answer
     // for a thread that has since been swapped for another.

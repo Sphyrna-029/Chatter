@@ -671,6 +671,20 @@ export function createWsMessageHandler(
       // the event was dropped entirely.
       notifyThreadReply(msg, stateRef, dispatch);
 
+      // A reply naming this user raises the badge on that thread's row in the
+      // channel list. Outside the room guard below on the same grounds as the
+      // notification above: the tally is keyed by thread rather than by room,
+      // so a mention in a room the reader is not looking at still has to be
+      // there once they switch to it. Not gated on the notification level — a
+      // muted channel still shows what is unread, and this is the same question.
+      const me = stateRef.current.userId;
+      const myUsername = me ? displayUserId(me) : "";
+      const mentionsMe =
+        me !== msg.sender && myUsername !== "" && (msg.content?.body || "").includes(`@${myUsername}`);
+      if (mentionsMe && stateRef.current.activeThreadEventId !== msg.thread_id) {
+        dispatch({ type: "SET_THREAD_MENTION", payload: { threadId: msg.thread_id, hasMention: true } });
+      }
+
       // Keep the channel list's preview live. The broadcast already carries
       // everything a row needs, so this costs no request.
       if (msg.room_id === stateRef.current.currentRoomId) {

@@ -3189,6 +3189,14 @@ export interface UnreadEntry {
   latest_ts?: number;
 }
 
+/** A thread's unread mentions, which the channel list raises a badge for beside
+ *  the thread's own row. Keyed by thread rather than channel because reading a
+ *  channel never put a reply on screen. */
+export interface ThreadMentionEntry {
+  thread_id: string;
+  mentions: number;
+}
+
 /** Unread + mention counts for every joined room, derived from stored read markers. */
 // ─── Activity page ──────────────────────────────────────────────────────────
 
@@ -3232,7 +3240,7 @@ export async function apiGetActivityFeed(limit = 25): Promise<ActivityEvent[]> {
 export async function apiGetUnreads() {
   const res = await authenticatedFetch("/api/unreads");
   if (!res.ok) throw new Error("Failed to load unread counts");
-  return res.json() as Promise<{ unreads: UnreadEntry[] }>;
+  return res.json() as Promise<{ unreads: UnreadEntry[]; thread_mentions?: ThreadMentionEntry[] }>;
 }
 
 /** What a shared message link resolves to, for this viewer. */
@@ -3323,11 +3331,18 @@ export async function apiGetForumPreview(
   return res.json() as Promise<ForumPreview>;
 }
 
-/** Record that the user has read a channel up to now. Markers only move forward. */
-export async function apiMarkRead(roomId: string, channelId?: string) {
+/**
+ * Record that the user has read a channel up to now. Markers only move forward.
+ *
+ * Pass `threadId` instead of a `channelId` to mark one thread read. A thread's
+ * replies are not in its channel's timeline, so scrolling that channel to its
+ * bottom says nothing about having read them — and a mention inside a thread
+ * would stay dismissed forever.
+ */
+export async function apiMarkRead(roomId: string, channelId?: string, threadId?: string) {
   const res = await authenticatedFetch(`/api/rooms/${encodeURIComponent(roomId)}/read`, {
     method: "POST",
-    body: JSON.stringify({ channel_id: channelId ?? "" }),
+    body: JSON.stringify(threadId ? { thread_id: threadId } : { channel_id: channelId ?? "" }),
   });
   if (!res.ok) throw new Error("Failed to save read marker");
   return res.json() as Promise<{ last_read_ts: number }>;

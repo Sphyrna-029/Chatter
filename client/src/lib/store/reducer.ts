@@ -540,6 +540,10 @@ export function reducer(state: AppState, action: Action): AppState {
         // Filled by the pin fetch that follows; a previous thread's pins must
         // not show under this one while it is in flight.
         threadPins: [],
+        // Opening a thread is reading it, so its badge goes with it. The
+        // provider moves the server's marker for the same reason, which is what
+        // keeps the badge gone after a reload rather than only in this session.
+        threadMentions: { ...state.threadMentions, [action.payload.eventId]: 0 },
       };
     case "SET_THREAD_PINS":
       if (state.activeThreadEventId !== action.payload.threadId) return state;
@@ -612,6 +616,7 @@ export function reducer(state: AppState, action: Action): AppState {
         threadMessages: state.activeThreadEventId === action.payload ? [] : state.threadMessages,
         threadPins: state.activeThreadEventId === action.payload ? [] : state.threadPins,
         threadReplyingTo: state.activeThreadEventId === action.payload ? null : state.threadReplyingTo,
+        threadMentions: { ...state.threadMentions, [action.payload]: 0 },
       };
     case "SET_THREAD_NAME":
       return {
@@ -1005,6 +1010,16 @@ export function reducer(state: AppState, action: Action): AppState {
             : 0,
         },
       };
+    case "SET_THREAD_MENTION":
+      return {
+        ...state,
+        threadMentions: {
+          ...state.threadMentions,
+          [action.payload.threadId]: action.payload.hasMention
+            ? (state.threadMentions[action.payload.threadId] || 0) + 1
+            : 0,
+        },
+      };
     case "INCREMENT_CHANNEL_UNREAD": {
       const channelId = action.payload.channelId;
       const ts = action.payload.ts;
@@ -1084,6 +1099,16 @@ export function reducer(state: AppState, action: Action): AppState {
         roomUnreadCounts,
         roomMentions,
       };
+    }
+    // Server-computed unread mentions replace the session's tallies wholesale,
+    // same as the counts above: they are authoritative and a merge would
+    // double-count whatever this client already saw.
+    case "SET_THREAD_MENTIONS": {
+      const threadMentions: Record<string, number> = {};
+      for (const entry of action.payload) {
+        if (entry.mentions > 0) threadMentions[entry.thread_id] = entry.mentions;
+      }
+      return { ...state, threadMentions };
     }
     case "CLEAR_CHANNEL_UNREAD":
       return {

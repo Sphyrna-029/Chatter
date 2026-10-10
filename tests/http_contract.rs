@@ -2035,6 +2035,131 @@ async fn a_deleted_thread_reply_stops_being_counted() {
 }
 
 #[tokio::test]
+async fn a_thread_mention_stays_unread_until_the_thread_itself_is_read() {
+    // A thread reply is not in its channel's timeline, so the channel's unread
+    // tally never saw it — and reading that channel must not dismiss it either,
+    // or a mention inside a thread would be invisible forever. The thread keeps
+    // its own marker, and the channel list wears the badge on the thread's own
+    // row rather than on the channel it hangs in.
+    let server = spawn_server().await;
+    let client = Client::new();
+
+    let (_alice_user_id, alice_token) =
+        register_user(&client, &server.base_url, "alice", "pw").await;
+    let (_bob_user_id, bob_token) = register_user(&client, &server.base_url, "bob", "pw").await;
+    let room_id = create_room(
+        &client,
+        &server.base_url,
+        &alice_token,
+        "Mentions",
+        None,
+        false,
+    )
+    .await;
+    let join = client
+        .post(format!(
+            "{}/_matrix/client/r0/rooms/{room_id}/join",
+            server.base_url
+        ))
+        .header("authorization", bearer(&bob_token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(join.status(), StatusCode::OK);
+
+    let rooted = client
+        .put(format!(
+            "{}/_matrix/client/r0/rooms/{}/send/m.room.message/r0",
+            server.base_url, room_id,
+        ))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({ "msgtype": "m.text", "body": "the root" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rooted.status(), StatusCode::OK);
+    let rooted_body: Value = rooted.json().await.unwrap();
+    let root_id = rooted_body["event_id"].as_str().unwrap().to_string();
+
+    let reply = client
+        .put(format!(
+            "{}/api/rooms/{}/threads/{}/{}",
+            server.base_url, room_id, root_id, "r0",
+        ))
+        .header("authorization", bearer(&bob_token))
+        .json(&json!({ "msgtype": "m.text", "body": "@alice you are named here" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.status(), StatusCode::OK);
+
+    let thread_mentions = |token: String| {
+        let client = client.clone();
+        let base = server.base_url.clone();
+        async move {
+            let res = client
+                .get(format!("{base}/api/unreads"))
+                .header("authorization", bearer(&token))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            let body: Value = res.json().await.unwrap();
+            body["thread_mentions"].as_array().unwrap().clone()
+        }
+    };
+
+    let named = thread_mentions(alice_token.clone()).await;
+    let entry = named
+        .iter()
+        .find(|row| row["thread_id"] == root_id.as_str())
+        .expect("the mention is unread in that thread");
+    assert_eq!(entry["mentions"], 1);
+
+    // The channel's own tally never counted the reply, so the channel list's
+    // badge belongs to the thread's row and not to the channel above it.
+    let unreads_body: Value = client
+        .get(format!("{}/api/unreads", server.base_url))
+        .header("authorization", bearer(&alice_token))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let channel_unreads = unreads_body["unreads"].as_array().unwrap();
+    assert!(channel_unreads
+        .iter()
+        .all(|row| row["count"].as_i64().unwrap_or(0) == 0));
+
+    // Reading the channel says nothing about the thread: the marker moved is a
+    // channel's, and the mention is still unread.
+    let channel_read = client
+        .post(format!("{}/api/rooms/{}/read", server.base_url, room_id))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({ "channel_id": "" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(channel_read.status(), StatusCode::OK);
+    assert_eq!(thread_mentions(alice_token.clone()).await, named);
+
+    // Reading the thread is what dismisses it.
+    let thread_read = client
+        .post(format!("{}/api/rooms/{}/read", server.base_url, room_id))
+        .header("authorization", bearer(&alice_token))
+        .json(&json!({ "thread_id": root_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(thread_read.status(), StatusCode::OK);
+    assert!(thread_mentions(alice_token.clone())
+        .await
+        .iter()
+        .all(|row| row["thread_id"] != root_id.as_str()));
+}
+
+#[tokio::test]
 async fn chunked_upload_reports_what_it_holds_and_can_be_abandoned_on_purpose() {
     // An interrupted upload used to be unfinishable: the chunks it had already
     // sent sat in a staging dir addressed by an id nothing could ask about, so

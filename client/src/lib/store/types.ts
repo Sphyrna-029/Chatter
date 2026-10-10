@@ -135,6 +135,11 @@ export interface AppState {
   /** Newest unread message's timestamp per channel, so a room's unread banner
    *  can name which channel saw the most recent unread and jump to it. */
   channelLatestUnreadTs: Record<string, number>;
+  /** Unread mentions keyed by thread_id — what the channel list raises a badge
+   *  for beside a previewed thread. Kept apart from `channelMentions` because a
+   *  thread's unread is not its channel's: reading a channel never put a reply
+   *  on screen, so it must not dismiss what was said in one. */
+  threadMentions: Record<string, number>;
   currentView: "chat" | "voice";
   /** Which companion panel is open beside the timeline, if any. Lives here so
    *  the layout can give it room on a narrow screen. */
@@ -375,6 +380,7 @@ export type Action =
   | { type: "UPDATE_VOICE_CHANNEL_OCCUPIED_SINCE"; payload: { channelId: string; since: number | null } }
   | { type: "SET_WATCH_VIEWERS"; payload: { roomId: string; users: string[] } }
   | { type: "SET_CHANNEL_MENTION"; payload: { channelId: string; hasMention: boolean } }
+  | { type: "SET_THREAD_MENTION"; payload: { threadId: string; hasMention: boolean } }
   | { type: "INCREMENT_CHANNEL_UNREAD"; payload: { channelId: string; ts?: number } }
   | { type: "SET_NOTIFICATION_SETTINGS"; payload: NotificationSettings }
   | { type: "SET_CONTINUITY"; payload: { drafts: Record<string, string> } }
@@ -383,6 +389,7 @@ export type Action =
   | { type: "THREAD_ACTIVITY"; payload: ThreadPreview }
   | { type: "SET_NOTIFICATION_LEVEL"; payload: { roomId: string; channelId: string; level: NotificationLevel | "default" } }
   | { type: "SET_UNREADS"; payload: { room_id: string; channel_id: string; count: number; mentions: number; latest_ts?: number }[] }
+  | { type: "SET_THREAD_MENTIONS"; payload: { thread_id: string; mentions: number }[] }
   | { type: "CLEAR_CHANNEL_UNREAD"; payload: string }
   | { type: "UPDATE_DM_STREAK"; payload: { roomId: string; streakCount: number; lastMessageTs: number } }
   | { type: "INCREMENT_ROOM_UNREAD"; payload: string }
@@ -435,6 +442,7 @@ export const initialState: AppState = {
   channelUnreadCounts: {},
   channelMentions: {},
   channelLatestUnreadTs: {},
+  threadMentions: {},
   currentView: "chat",
   companionPanel: null,
   roomEvents: [],

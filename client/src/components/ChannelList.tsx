@@ -582,29 +582,37 @@ export function ChannelList({ asDrawer = false, onChannelSelected, onJoinVoiceCh
         </div>
         {!isVoice && ch.channel_type === "text" && (state.channelThreads[ch.channel_id]?.length ?? 0) > 0 && (
           <div className="ml-7 space-y-0.5 pb-1">
-            {state.channelThreads[ch.channel_id].map((thread) => (
-              <button
-                key={thread.threadId}
-                onClick={() => {
-                  // Threads live in their channel, so land there first.
-                  if (state.currentChannelId !== ch.channel_id) selectChannel(ch.channel_id);
-                  void openThread(thread.threadId);
-                  onChannelSelected?.();
-                }}
-                title={thread.name}
-                className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/50 ${
-                  state.activeThreadEventId === thread.threadId
-                    ? "text-foreground"
-                    : "text-muted-foreground"
-                }`}
-              >
-                <MessagesSquare className="h-3 w-3 shrink-0" />
-                <span className="flex-1 truncate">{thread.name}</span>
-                {thread.replyCount > 0 && (
-                  <span className="shrink-0 tabular-nums opacity-70">{thread.replyCount}</span>
-                )}
-              </button>
-            ))}
+            {state.channelThreads[ch.channel_id].map((thread) => {
+              const unreadMentions = state.threadMentions[thread.threadId] ?? 0;
+              return (
+                <button
+                  key={thread.threadId}
+                  onClick={() => {
+                    // Threads live in their channel, so land there first.
+                    if (state.currentChannelId !== ch.channel_id) selectChannel(ch.channel_id);
+                    void openThread(thread.threadId);
+                    onChannelSelected?.();
+                  }}
+                  title={thread.name}
+                  className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs transition-colors hover:bg-accent/50 ${
+                    state.activeThreadEventId === thread.threadId
+                      ? "text-foreground"
+                      : "text-muted-foreground"
+                  }`}
+                >
+                  <MessagesSquare className="h-3 w-3 shrink-0" />
+                  <span className="flex-1 truncate">{thread.name}</span>
+                  {thread.replyCount > 0 && (
+                    <span className="shrink-0 tabular-nums opacity-70">{thread.replyCount}</span>
+                  )}
+                  {unreadMentions > 0 && (
+                    <span className="ml-auto flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-destructive px-1 text-3xs font-bold leading-none text-white shrink-0">
+                      {unreadMentions > 99 ? "99+" : unreadMentions}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
         {isVoice && members.length > 0 && (

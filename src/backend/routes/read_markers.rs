@@ -9,7 +9,7 @@ use super::super::{
         error_response, extract_token, get_allowed_channel_ids, get_user_from_token, mention_token,
         now_millis, regex_escape,
     },
-    state::{AppState, ChannelRecord},
+    state::{AppState, ChannelRecord, ThreadRecord},
 };
 use axum::{
     extract::{Path, State},
@@ -26,12 +26,20 @@ use std::sync::Arc;
 pub(crate) struct MarkReadRequest {
     /// Empty or absent for rooms whose messages carry no channel_id (DMs).
     pub(crate) channel_id: Option<String>,
+    /// Set instead of `channel_id` to mark one thread read rather than the
+    /// channel it hangs in. A thread's replies are not in the channel's
+    /// timeline, so scrolling the channel to its bottom says nothing about
+    /// having read them — and a mention in a thread would stay dismissed.
+    pub(crate) thread_id: Option<String>,
     /// Marker position; defaults to now. Clamped so a marker never moves backwards.
     pub(crate) ts: Option<i64>,
 }
 
-fn marker_id(user_id: &str, channel_id: &str) -> String {
-    format!("{user_id}|{channel_id}")
+/// A marker's key: the channel it covers, or the thread it covers when one is
+/// named. One collection holds both because both answer the same question —
+/// whatever carries this key and arrived after this timestamp is still unseen.
+fn marker_id(user_id: &str, scope: &str) -> String {
+    format!("{user_id}|{scope}")
 }
 
 /// Record that `user_id` has read `channel_id` up to a point in time.
@@ -63,9 +71,18 @@ pub(crate) async fn mark_read(
         }
     }
 
-    let channel_id = req.channel_id.unwrap_or_default();
+    let thread_id = req.thread_id.unwrap_or_default();
+    let channel_id = if thread_id.is_empty() {
+        req.channel_id.unwrap_or_default()
+    } else {
+        String::new()
+    };
     let ts = req.ts.unwrap_or_else(now_millis);
-    let id = marker_id(&user_id, &channel_id);
+    let id = if thread_id.is_empty() {
+        marker_id(&user_id, &channel_id)
+    } else {
+        marker_id(&user_id, &thread_id)
+    };
 
     let coll = state.db.collection::<Document>("read_markers");
     let existing = coll
@@ -79,16 +96,22 @@ pub(crate) async fn mark_read(
         return Ok(Json(json!({ "last_read_ts": existing })));
     }
 
+    let mut sets = doc! {
+        "user_id": &user_id,
+        "room_id": &room_id,
+        "last_read_ts": ts,
+    };
+    // Which kind of marker this is has to be stated rather than implied by the
+    // key: the unread scan reads every marker a user owns in one pass and
+    // cannot tell a thread id from a channel id by looking at it.
+    if thread_id.is_empty() {
+        sets.insert("channel_id", &channel_id);
+    } else {
+        sets.insert("thread_id", &thread_id);
+    }
+
     let _ = coll
-        .update_one(
-            doc! { "_id": &id },
-            doc! { "$set": {
-                "user_id": &user_id,
-                "room_id": &room_id,
-                "channel_id": &channel_id,
-                "last_read_ts": ts,
-            }},
-        )
+        .update_one(doc! { "_id": &id }, doc! { "$set": sets })
         .upsert(true)
         .await;
 
@@ -98,7 +121,9 @@ pub(crate) async fn mark_read(
 /// Unread and mention counts for every room the caller has joined.
 ///
 /// One aggregation per visible channel; both counts come back together so a
-/// mention scan costs no extra round trip.
+/// mention scan costs no extra round trip. `thread_mentions` answers alongside
+/// them, keyed by thread rather than channel, because a thread's unread is not
+/// its channel's unread.
 pub(crate) async fn get_unreads(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -116,21 +141,32 @@ pub(crate) async fn get_unreads(
             .collect()
     };
 
-    // Markers for this user, keyed by channel_id ("" for channel-less rooms).
+    // Markers for this user. A thread's marker is kept apart from its channel's
+    // because the two answer different questions: reading a channel never put a
+    // thread's replies on screen, so it must not dismiss what was said in one.
     let markers_coll = state.db.collection::<Document>("read_markers");
     let mut markers: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    let mut thread_markers: std::collections::HashMap<String, i64> =
+        std::collections::HashMap::new();
     if let Ok(mut cursor) = markers_coll.find(doc! { "user_id": &user_id }).await {
         while let Ok(Some(d)) = cursor.try_next().await {
-            let channel_id = d.get_str("channel_id").unwrap_or("").to_string();
-            markers.insert(channel_id, d.get_i64("last_read_ts").unwrap_or(0));
+            let last_read_ts = d.get_i64("last_read_ts").unwrap_or(0);
+            if let Some(thread_id) = d.get_str("thread_id").ok().map(String::from) {
+                thread_markers.insert(thread_id, last_read_ts);
+            } else {
+                let channel_id = d.get_str("channel_id").unwrap_or("").to_string();
+                markers.insert(channel_id, last_read_ts);
+            }
         }
     }
 
     let channels_coll = state.db.collection::<ChannelRecord>("channels");
+    let threads_coll = state.db.collection::<ThreadRecord>("threads");
     let messages_coll = state.db.collection::<Document>("messages");
     let mention = mention_token(&user_id);
 
     let mut unreads: Vec<Value> = Vec::new();
+    let mut thread_mentions: Vec<Value> = Vec::new();
     for room_id in &joined_rooms {
         let allowed = get_allowed_channel_ids(&state, room_id, &user_id).await;
 
@@ -210,9 +246,80 @@ pub(crate) async fn get_unreads(
                 }
             }
         }
+
+        // Unread mentions inside threads, which the channel tally above
+        // deliberately leaves out. A reply carries no channel_id, so the thread
+        // record is what says a thread has something new in it — and it is
+        // measured against the thread's own marker, since reading a channel
+        // never showed anyone a reply. Threads are grouped by the marker they
+        // share so the scan is one aggregation per distinct marker rather than
+        // one per thread.
+        let mut by_since: std::collections::HashMap<i64, Vec<String>> =
+            std::collections::HashMap::new();
+        if let Ok(mut cursor) = threads_coll.find(doc! { "room_id": room_id }).await {
+            while let Ok(Some(record)) = cursor.try_next().await {
+                // A thread is exactly as private as the channel it hangs in, so
+                // a hidden one has no row to wear a badge.
+                if let Some(ref allowed) = allowed {
+                    if !record.channel_id.is_empty() && !allowed.contains(&record.channel_id) {
+                        continue;
+                    }
+                }
+                let since = thread_markers.get(&record.thread_id).copied().unwrap_or(0);
+                // Nothing has landed since this thread was last read.
+                if record.last_activity_ts <= since {
+                    continue;
+                }
+                by_since.entry(since).or_default().push(record.thread_id);
+            }
+        }
+
+        for (since, thread_ids) in &by_since {
+            let pipeline = vec![
+                doc! { "$match": doc! {
+                    "room_id": room_id,
+                    "type": "m.room.message",
+                    "thread_id": { "$in": &thread_ids },
+                    "origin_server_ts": { "$gt": since },
+                    "sender": { "$ne": &user_id },
+                    "content.msgtype": { "$ne": "m.system" },
+                    "redacted": { "$ne": true },
+                }},
+                doc! { "$group": {
+                    "_id": "$thread_id",
+                    "mentions": { "$sum": {
+                        "$cond": [
+                            { "$regexMatch": {
+                                "input": { "$ifNull": ["$content.body", ""] },
+                                "regex": regex_escape(&mention),
+                            }},
+                            1,
+                            0,
+                        ]
+                    }},
+                }},
+            ];
+
+            let Ok(mut cursor) = messages_coll.aggregate(pipeline).await else {
+                continue;
+            };
+            while let Ok(Some(row)) = cursor.try_next().await {
+                let mentions = row.get_i32("mentions").unwrap_or(0);
+                if mentions == 0 {
+                    continue;
+                }
+                let thread_id = row.get_str("_id").unwrap_or("").to_string();
+                thread_mentions.push(json!({
+                    "thread_id": thread_id,
+                    "mentions": mentions,
+                }));
+            }
+        }
     }
 
-    Ok(Json(json!({ "unreads": unreads })))
+    Ok(Json(
+        json!({ "unreads": unreads, "thread_mentions": thread_mentions }),
+    ))
 }
 
 #[cfg(test)]
@@ -223,5 +330,20 @@ mod tests {
     fn marker_id_is_scoped_per_user_and_channel() {
         assert_eq!(marker_id("@a:h", "#c"), "@a:h|#c");
         assert_ne!(marker_id("@a:h", "#c"), marker_id("@b:h", "#c"));
+    }
+
+    #[test]
+    fn a_thread_marker_never_shadows_a_channels() {
+        // Both kinds live in one collection and are read in a single pass, so a
+        // thread id must be incapable of naming a channel. Thread ids are minted
+        // with a leading `$`, channel ids with `!`, `#` or `@`.
+        assert_ne!(
+            marker_id("@a:h", "$event"),
+            marker_id("@a:h", "!channel:localhost")
+        );
+        assert_ne!(
+            marker_id("@a:h", "$event"),
+            marker_id("@a:h", "#channel:localhost")
+        );
     }
 }
