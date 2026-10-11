@@ -20,10 +20,15 @@ import {
   type MicTest,
 } from "@/lib/media";
 import { desktop, hasDesktopFeature, type PttBinding } from "@/lib/desktop/bridge";
+import { DesktopSettingsTab } from "@/components/DesktopSettingsTab";
+
+export type SettingsTab = "input" | "output" | "advanced" | "desktop";
 
 interface VoiceSettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The tab to open on; Input when unset. */
+  tab?: SettingsTab;
 }
 
 const NOISE_LABELS: Record<NoiseSuppressionMode, string> = {
@@ -35,6 +40,7 @@ const NOISE_LABELS: Record<NoiseSuppressionMode, string> = {
 export function VoiceSettingsDialog({
   open,
   onOpenChange,
+  tab,
 }: VoiceSettingsDialogProps) {
   const { settings, updateSettings } = useVoiceSettings();
   const [nativeVoice, setNativeVoice] = useState(() => nativeVoicePreferred());
@@ -53,6 +59,7 @@ export function VoiceSettingsDialog({
 
   const micTestRef = useRef<MicTest | null>(null);
   const desktopPtt = hasDesktopFeature("ptt") ? desktop?.pushToTalk : undefined;
+  const desktopSettings = hasDesktopFeature("desktop-settings") ? desktop?.settings : undefined;
 
   const loadDevices = async () => {
     try {
@@ -148,10 +155,11 @@ export function VoiceSettingsDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[85dvh] grid-rows-[auto_minmax(0,1fr)]">
         <DialogHeader>
-          <DialogTitle>Voice &amp; Audio</DialogTitle>
+          <DialogTitle>{desktopSettings ? "Settings" : <>Voice &amp; Audio</>}</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="input" className="min-h-0">
+        {/* The content remounts on every open, so this picks the tab each time. */}
+        <Tabs defaultValue={tab === "desktop" && !desktopSettings ? "input" : (tab ?? "input")} className="min-h-0">
           <TabsList className="w-full">
             <TabsTrigger value="input" className="flex-1">
               Input
@@ -162,6 +170,11 @@ export function VoiceSettingsDialog({
             <TabsTrigger value="advanced" className="flex-1">
               Advanced
             </TabsTrigger>
+            {desktopSettings && (
+              <TabsTrigger value="desktop" className="flex-1">
+                Desktop
+              </TabsTrigger>
+            )}
           </TabsList>
 
           {/* ── Input Tab ── */}
@@ -437,6 +450,12 @@ export function VoiceSettingsDialog({
               </div>
             )}
           </TabsContent>
+
+          {desktopSettings && (
+            <TabsContent value="desktop" className="space-y-5 mt-4 min-h-0 overflow-y-auto pr-1">
+              <DesktopSettingsTab api={desktopSettings} />
+            </TabsContent>
+          )}
         </Tabs>
       </DialogContent>
     </Dialog>
