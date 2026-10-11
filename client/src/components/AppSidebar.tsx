@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo, type CSSProperties } from "react";
 import { useAppContext } from "@/lib/store";
 import { apiGetAllRooms, type RoomSummary } from "@/lib/api";
-import { VoiceSettingsDialog } from "@/components/VoiceSettingsDialog";
+import { VoiceSettingsDialog, type SettingsTab } from "@/components/VoiceSettingsDialog";
+import { desktop, hasDesktopFeature } from "@/lib/desktop/bridge";
 import { AppearanceDialog } from "@/components/AppearanceDialog";
 import { RoomSettingsDialog } from "@/components/RoomDialogs";
 import { resolveNotificationLevel, type NotificationLevel } from "@/lib/notifications";
@@ -64,6 +65,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
   // that is either open or gone.
   const railed = !isMobile && sidebarState === "collapsed";
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab | undefined>();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [settingsRoomId, setSettingsRoomId] = useState<string | null>(null);
@@ -108,6 +110,16 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
     } catch {
       // silent
     }
+  }, []);
+
+  // The desktop app's tray "Settings…" lands on the Desktop tab here, rather
+  // than in a window of the app's own.
+  useEffect(() => {
+    const api = hasDesktopFeature("desktop-settings") ? desktop?.settings : undefined;
+    return api?.onOpenRequest(() => {
+      setSettingsTab("desktop");
+      setSettingsOpen(true);
+    });
   }, []);
 
   // Poll room summaries every 5s
@@ -1468,7 +1480,10 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
             variant="ghost"
             size="sm"
             className="px-2 text-muted-foreground"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => {
+              setSettingsTab(undefined);
+              setSettingsOpen(true);
+            }}
             title="Voice & Audio Settings"
             aria-label="Voice and audio settings"
           >
@@ -1484,7 +1499,7 @@ export function AppSidebar({ onCreateRoom, onJoinRoom }: AppSidebarProps) {
 
       {/* Outside the branch: the rail opens some of these too, and a dialog
           that unmounts when the sidebar collapses cannot be opened at all. */}
-      <VoiceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <VoiceSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} tab={settingsTab} />
       <AppearanceDialog open={appearanceOpen} onOpenChange={setAppearanceOpen} />
       {state.userId && (
         <UserProfileDialog

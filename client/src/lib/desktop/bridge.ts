@@ -43,6 +43,40 @@ export interface DesktopDucking {
   set(amount: number): Promise<void>;
 }
 
+/** The desktop app's own preferences. They belong to this computer, not the
+ *  account, so they are kept by the app rather than the server. */
+export interface DesktopAppSettings {
+  /** Open Chatter when the person signs in to their computer. */
+  startWithSystem: boolean;
+  /** Opened that way, stay in the tray instead of showing the window. */
+  startMinimized: boolean;
+  /** Show the game being played next to their name. */
+  shareGameActivity: boolean;
+  /** Programs added as games, beyond the ones the app recognises itself. */
+  extraGames: { exe: string; name: string }[];
+  /** Download and install updates automatically. */
+  autoUpdate: boolean;
+}
+
+/** feature "desktop-settings": the desktop app's settings, drawn in the
+ *  client's own UI rather than in a window of the app's. */
+export interface DesktopSettings {
+  get(): Promise<DesktopAppSettings>;
+  /** Saves the fields given and returns the settings as they now stand. */
+  set(update: Partial<DesktopAppSettings>): Promise<DesktopAppSettings>;
+  /** Programs running now, to offer as games to add. */
+  runningApps(): Promise<{ exe: string; name: string }[]>;
+  /** Leave this server for the app's server picker. */
+  changeServer(): void;
+  /** Check for an update now; the app reports the result itself. */
+  checkForUpdates(): void;
+  /** Show the app's log files, for a bug report. */
+  openLogs(): void;
+  /** The app wants these settings shown (its tray menu's "Settings…").
+   *  Returns an unsubscribe; while nothing listens the app opens its own. */
+  onOpenRequest(listener: () => void): () => void;
+}
+
 export interface ChatterDesktopBridge {
   bridgeVersion: number;
   appVersion: string;
@@ -57,6 +91,7 @@ export interface ChatterDesktopBridge {
   displayCapture?: (apiVersion: 1) => unknown;
   gameActivity?: DesktopGameActivity;
   ducking?: DesktopDucking;
+  settings?: DesktopSettings;
 }
 
 declare global {
